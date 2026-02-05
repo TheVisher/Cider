@@ -4,6 +4,7 @@ import AppKit
 struct PaletteAppsRow: View {
     let apps: [AppInfo]
     let folders: [AppFolder]
+    var searchText: String = ""
     let focusedIndex: Int?
     let onAppClick: (AppInfo) -> Void
     let onFolderClick: (AppFolder) -> Void
@@ -26,6 +27,7 @@ struct PaletteAppsRow: View {
                     ForEach(Array(apps.enumerated()), id: \.element.id) { index, app in
                         PaletteAppIcon(
                             app: app,
+                            searchText: searchText,
                             isRunning: isRunning(app),
                             isKeyboardFocused: focusedIndex == index,
                             onTap: { onAppClick(app) },
@@ -77,6 +79,7 @@ struct PaletteAppsRow: View {
 
 struct PaletteAppIcon: View {
     let app: AppInfo
+    var searchText: String = ""
     let isRunning: Bool
     var isKeyboardFocused: Bool = false
     let onTap: () -> Void
@@ -123,7 +126,7 @@ struct PaletteAppIcon: View {
 
                 // App name with running indicator bar underneath
                 VStack(spacing: 2) {
-                    Text(app.name)
+                    HighlightedText(app.name, highlight: searchText)
                         .font(.system(size: 10 * textScale))
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)

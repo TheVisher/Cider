@@ -19,6 +19,8 @@ struct PaletteContentArea: View {
     let activeTab: PaletteTab
     let windowGroups: [WindowAppGroup]
     let monitors: [MonitorInfo]
+    var searchText: String = ""
+    var isSearching: Bool = false
     let focusedTabIndex: Int?
     let focusedContentIndex: Int?
     let onWindowClick: (WindowInfo) -> Void
@@ -45,28 +47,35 @@ struct PaletteContentArea: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Tab bar
-            HStack(spacing: Spacing.md) {
-                ForEach(Array(PaletteTab.allCases.enumerated()), id: \.element) { index, tab in
-                    TabButton(
-                        tab: tab,
-                        isActive: activeTab == tab,
-                        isKeyboardFocused: focusedTabIndex == index,
-                        onTap: { onTabChange(tab) }
-                    )
+            // Tab bar - hide when searching
+            if !isSearching {
+                HStack(spacing: Spacing.md) {
+                    ForEach(Array(PaletteTab.allCases.enumerated()), id: \.element) { index, tab in
+                        TabButton(
+                            tab: tab,
+                            isActive: activeTab == tab,
+                            isKeyboardFocused: focusedTabIndex == index,
+                            onTap: { onTabChange(tab) }
+                        )
+                    }
+                    Spacer()
                 }
-                Spacer()
             }
 
             // Content
             ScrollView {
-                switch activeTab {
-                case .windows:
+                if isSearching {
+                    // When searching, show filtered windows directly (no tabs)
                     windowsContent
-                case .notes:
-                    comingSoonContent("Notes")
-                case .bookmarks:
-                    comingSoonContent("Bookmarks")
+                } else {
+                    switch activeTab {
+                    case .windows:
+                        windowsContent
+                    case .notes:
+                        comingSoonContent("Notes")
+                    case .bookmarks:
+                        comingSoonContent("Bookmarks")
+                    }
                 }
             }
         }
@@ -75,7 +84,11 @@ struct PaletteContentArea: View {
     @ViewBuilder
     private var windowsContent: some View {
         if windowGroups.isEmpty {
-            emptyState("No windows open", icon: "macwindow")
+            if isSearching {
+                emptyState("No matching windows", icon: "magnifyingglass")
+            } else {
+                emptyState("No windows open", icon: "macwindow")
+            }
         } else {
             LazyVStack(alignment: .leading, spacing: Spacing.md) {
                 ForEach(windowGroups) { group in
@@ -85,7 +98,7 @@ struct PaletteContentArea: View {
                             Image(nsImage: appIcon(for: group))
                                 .resizable()
                                 .frame(width: 20 * textScale, height: 20 * textScale)
-                            Text(group.appName)
+                            HighlightedText(group.appName, highlight: searchText)
                                 .font(.system(size: 13 * textScale, weight: .medium))
                                 .foregroundColor(CiderColors.primary)
 
@@ -110,6 +123,7 @@ struct PaletteContentArea: View {
                                 window: window,
                                 monitors: monitors,
                                 windowCount: group.windows.count,
+                                searchText: searchText,
                                 isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
                                 onTap: { onWindowClick(window) },
                                 onClose: { onCloseWindow(window) },
@@ -197,6 +211,7 @@ struct PaletteWindowRow: View {
     let window: WindowInfo
     let monitors: [MonitorInfo]
     let windowCount: Int  // Number of windows in parent group
+    var searchText: String = ""
     var isKeyboardFocused: Bool = false
     let onTap: () -> Void
     let onClose: () -> Void
@@ -218,7 +233,7 @@ struct PaletteWindowRow: View {
                     .foregroundColor(CiderColors.tertiary)
                     .frame(width: 16 * textScale)
 
-                Text(window.displayTitle)
+                HighlightedText(window.displayTitle, highlight: searchText)
                     .font(.system(size: 13 * textScale))
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)

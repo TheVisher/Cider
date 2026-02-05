@@ -16,7 +16,6 @@ extension EnvironmentValues {
 
 struct CommandPaletteView: View {
     @ObservedObject var viewModel: CommandPaletteViewModel
-    @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
     @State private var keyMonitor: Any?
 
@@ -83,7 +82,10 @@ struct CommandPaletteView: View {
             return event
 
         case 53: // Escape
-            viewModel.dismiss()
+            // First Escape clears search, second dismisses
+            if !viewModel.handleEscape() {
+                viewModel.dismiss()
+            }
             return nil
 
         default:
@@ -113,37 +115,42 @@ struct CommandPaletteView: View {
             // Content (clipped to rounded rect)
             VStack(spacing: 0) {
                 // Search bar
-                PaletteSearchBar(text: $searchText, isFocused: $isSearchFocused)
+                PaletteSearchBar(text: $viewModel.searchText, isFocused: $isSearchFocused)
                     .padding(.horizontal, Spacing.lg)
                     .padding(.top, Spacing.lg)
                     .padding(.bottom, Spacing.md)
 
+                // Pinned apps row (filtered) - hide section completely if no apps match
+                if !viewModel.isSearching || viewModel.totalAppsCount > 0 {
+                    Divider()
+                        .padding(.horizontal, 1.5)
+                        .opacity(0.3)
+
+                    PaletteAppsRow(
+                        apps: viewModel.filteredApps,
+                        folders: viewModel.filteredFolders,
+                        searchText: viewModel.searchText,
+                        focusedIndex: viewModel.focusState.section == .apps ? viewModel.focusState.appsIndex : nil,
+                        onAppClick: { viewModel.launchApp($0) },
+                        onFolderClick: { viewModel.toggleFolder($0) },
+                        isRunning: { viewModel.isRunning($0) },
+                        onQuitApp: { viewModel.quitApp($0) }
+                    )
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.md)
+                }
+
                 Divider()
                     .padding(.horizontal, 1.5)
                     .opacity(0.3)
 
-                // Pinned apps row
-                PaletteAppsRow(
-                    apps: viewModel.pinnedApps,
-                    folders: viewModel.folders,
-                    focusedIndex: viewModel.focusState.section == .apps ? viewModel.focusState.appsIndex : nil,
-                    onAppClick: { viewModel.launchApp($0) },
-                    onFolderClick: { viewModel.toggleFolder($0) },
-                    isRunning: { viewModel.isRunning($0) },
-                    onQuitApp: { viewModel.quitApp($0) }
-                )
-                .padding(.horizontal, Spacing.lg)
-                .padding(.vertical, Spacing.md)
-
-                Divider()
-                    .padding(.horizontal, 1.5)
-                    .opacity(0.3)
-
-                // Flexible content area (windows for now)
+                // Flexible content area (filtered windows)
                 PaletteContentArea(
                     activeTab: viewModel.activeTab,
-                    windowGroups: viewModel.windowGroups,
+                    windowGroups: viewModel.filteredWindowGroups,
                     monitors: viewModel.monitors,
+                    searchText: viewModel.searchText,
+                    isSearching: viewModel.isSearching,
                     focusedTabIndex: viewModel.focusState.section == .tabs ? viewModel.focusState.tabsIndex : nil,
                     focusedContentIndex: viewModel.focusState.section == .content ? viewModel.focusState.contentIndex : nil,
                     onWindowClick: { viewModel.focusWindow($0) },

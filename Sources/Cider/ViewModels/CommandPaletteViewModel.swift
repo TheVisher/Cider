@@ -11,6 +11,7 @@ final class CommandPaletteViewModel: ObservableObject {
     @Published var isVisible = false
     @Published var monitors: [MonitorInfo] = []
     @Published var focusState: PaletteFocusState = .initial
+    @Published var searchText: String = ""
 
     private let windowListViewModel: WindowListViewModel
     private let pinnedAppsViewModel: PinnedAppsViewModel
@@ -108,22 +109,91 @@ final class CommandPaletteViewModel: ObservableObject {
 
     func show() {
         isVisible = true
+        // Clear any previous search
+        searchText = ""
         // Refresh data when shown
         windowListViewModel.refresh()
         // Reset focus to search
         resetFocus()
     }
 
-    // MARK: - Keyboard Navigation
+    // MARK: - Search Filtering
 
-    /// All windows flattened across groups for sequential navigation
-    var flattenedWindows: [WindowInfo] {
-        windowGroups.flatMap { $0.windows }
+    /// Whether search is active (has text)
+    var isSearching: Bool {
+        !searchText.isEmpty
     }
 
-    /// Total count of navigable apps (pinned apps + folders)
+    /// Normalized search query (lowercase, trimmed)
+    private var searchQuery: String {
+        searchText.lowercased().trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Filtered pinned apps based on search text
+    var filteredApps: [AppInfo] {
+        guard isSearching else { return pinnedApps }
+        return pinnedApps.filter { app in
+            app.name.lowercased().contains(searchQuery)
+        }
+    }
+
+    /// Filtered folders based on search text
+    var filteredFolders: [AppFolder] {
+        guard isSearching else { return folders }
+        return folders.filter { folder in
+            folder.name.lowercased().contains(searchQuery)
+        }
+    }
+
+    /// Filtered window groups - keeps groups that have matching windows
+    var filteredWindowGroups: [WindowAppGroup] {
+        guard isSearching else { return windowGroups }
+
+        return windowGroups.compactMap { group -> WindowAppGroup? in
+            // Filter windows by title or app name
+            let matchingWindows = group.windows.filter { window in
+                window.title.lowercased().contains(searchQuery) ||
+                window.ownerName.lowercased().contains(searchQuery)
+            }
+
+            // Also include if app name matches (show all windows)
+            if group.appName.lowercased().contains(searchQuery) {
+                return group
+            }
+
+            // Return group with filtered windows, or nil if no matches
+            guard !matchingWindows.isEmpty else { return nil }
+            return WindowAppGroup(
+                id: group.id,
+                appName: group.appName,
+                bundleIdentifier: group.bundleIdentifier,
+                windows: matchingWindows
+            )
+        }
+    }
+
+    /// Clear search text
+    func clearSearch() {
+        searchText = ""
+        // Reset focus to search when clearing
+        focusState.section = .search
+    }
+
+    /// Check if search has results
+    var hasSearchResults: Bool {
+        !filteredApps.isEmpty || !filteredFolders.isEmpty || !filteredWindowGroups.isEmpty
+    }
+
+    // MARK: - Keyboard Navigation
+
+    /// All windows flattened across filtered groups for sequential navigation
+    var flattenedWindows: [WindowInfo] {
+        filteredWindowGroups.flatMap { $0.windows }
+    }
+
+    /// Total count of navigable apps (filtered pinned apps + filtered folders)
     var totalAppsCount: Int {
-        pinnedApps.count + folders.count
+        filteredApps.count + filteredFolders.count
     }
 
     /// Number of tabs
@@ -139,21 +209,39 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
+    /// Handle Escape key - returns true if search was cleared, false if should dismiss
+    func handleEscape() -> Bool {
+        if isSearching {
+            clearSearch()
+            return true  // Search was cleared, don't dismiss
+        }
+        return false  // No search to clear, should dismiss
+    }
+
     // MARK: - Arrow Key Navigation (fine movement)
 
     func moveFocusDown() {
         switch focusState.section {
         case .search:
-            // Search → Apps (if any) or Tabs
+            // Search → Apps (if any) or Tabs or Content
             if totalAppsCount > 0 {
                 focusState.section = .apps
                 focusState.appsIndex = 0
+            } else if !flattenedWindows.isEmpty {
+                // Skip tabs when searching - go directly to results
+                focusState.section = .content
+                focusState.contentIndex = 0
             } else {
                 focusState.section = .tabs
             }
         case .apps:
-            // Apps → Tabs
-            focusState.section = .tabs
+            // Apps → Tabs or Content (skip tabs when searching with results)
+            if isSearching && !flattenedWindows.isEmpty {
+                focusState.section = .content
+                focusState.contentIndex = 0
+            } else {
+                focusState.section = .tabs
+            }
         case .tabs:
             // Tabs → Content (first item)
             if !flattenedWindows.isEmpty {
@@ -163,7 +251,7 @@ final class CommandPaletteViewModel: ObservableObject {
         case .content:
             // Move down within window list
             let maxIndex = flattenedWindows.count - 1
-            if focusState.contentIndex < maxIndex {
+            if maxIndex >= 0 && focusState.contentIndex < maxIndex {
                 focusState.contentIndex += 1
             }
         }
@@ -181,15 +269,25 @@ final class CommandPaletteViewModel: ObservableObject {
             // Tabs → Apps (if any) or Search
             if totalAppsCount > 0 {
                 focusState.section = .apps
+                focusState.appsIndex = min(focusState.appsIndex, max(0, totalAppsCount - 1))
             } else {
                 focusState.section = .search
             }
         case .content:
-            // Move up within window list, or go to Tabs
+            // Move up within window list, or go to Apps/Tabs/Search
             if focusState.contentIndex > 0 {
                 focusState.contentIndex -= 1
-            } else {
+            } else if isSearching && totalAppsCount > 0 {
+                // When searching, go back to apps (skip tabs)
+                focusState.section = .apps
+                focusState.appsIndex = min(focusState.appsIndex, max(0, totalAppsCount - 1))
+            } else if totalAppsCount > 0 {
+                focusState.section = .apps
+                focusState.appsIndex = min(focusState.appsIndex, max(0, totalAppsCount - 1))
+            } else if !isSearching {
                 focusState.section = .tabs
+            } else {
+                focusState.section = .search
             }
         }
     }
@@ -219,7 +317,7 @@ final class CommandPaletteViewModel: ObservableObject {
             break
         case .apps:
             let maxIndex = totalAppsCount - 1
-            if focusState.appsIndex < maxIndex {
+            if maxIndex >= 0 && focusState.appsIndex < maxIndex {
                 focusState.appsIndex += 1
             }
         case .tabs:
@@ -237,17 +335,30 @@ final class CommandPaletteViewModel: ObservableObject {
     // MARK: - Tab Key Navigation (jump between groups)
 
     func cycleSection(forward: Bool) {
-        let sections = PaletteSection.allCases
-        guard let currentIndex = sections.firstIndex(of: focusState.section) else { return }
+        // When searching, only cycle between sections that have content
+        let availableSections: [PaletteSection]
+        if isSearching {
+            var sections: [PaletteSection] = [.search]
+            if totalAppsCount > 0 { sections.append(.apps) }
+            if !flattenedWindows.isEmpty { sections.append(.content) }
+            availableSections = sections
+        } else {
+            availableSections = PaletteSection.allCases
+        }
+
+        guard availableSections.count > 1,
+              let currentIndex = availableSections.firstIndex(of: focusState.section) else {
+            return
+        }
 
         let nextIndex: Int
         if forward {
-            nextIndex = (currentIndex + 1) % sections.count
+            nextIndex = (currentIndex + 1) % availableSections.count
         } else {
-            nextIndex = (currentIndex - 1 + sections.count) % sections.count
+            nextIndex = (currentIndex - 1 + availableSections.count) % availableSections.count
         }
 
-        focusState.section = sections[nextIndex]
+        focusState.section = availableSections[nextIndex]
 
         // Clamp indices for new section
         switch focusState.section {
@@ -267,16 +378,22 @@ final class CommandPaletteViewModel: ObservableObject {
     func activateFocusedItem() {
         switch focusState.section {
         case .search:
-            // Nothing to activate in search (could trigger search later)
-            break
+            // If searching and there are results, activate first result
+            if isSearching && hasSearchResults {
+                if !filteredApps.isEmpty {
+                    launchApp(filteredApps[0])
+                } else if !flattenedWindows.isEmpty {
+                    focusWindow(flattenedWindows[0])
+                }
+            }
         case .apps:
-            // Launch the focused app or open folder
-            if focusState.appsIndex < pinnedApps.count {
-                launchApp(pinnedApps[focusState.appsIndex])
+            // Launch the focused app or open folder (use filtered data)
+            if focusState.appsIndex < filteredApps.count {
+                launchApp(filteredApps[focusState.appsIndex])
             } else {
-                let folderIndex = focusState.appsIndex - pinnedApps.count
-                if folderIndex < folders.count {
-                    toggleFolder(folders[folderIndex])
+                let folderIndex = focusState.appsIndex - filteredApps.count
+                if folderIndex < filteredFolders.count {
+                    toggleFolder(filteredFolders[folderIndex])
                 }
             }
         case .tabs:
@@ -284,7 +401,7 @@ final class CommandPaletteViewModel: ObservableObject {
             // The tab is already active, so this is a no-op
             break
         case .content:
-            // Focus the selected window
+            // Focus the selected window (use filtered data)
             if focusState.contentIndex < flattenedWindows.count {
                 focusWindow(flattenedWindows[focusState.contentIndex])
             }
