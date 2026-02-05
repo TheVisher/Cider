@@ -17,7 +17,7 @@ enum PaletteTab: String, CaseIterable {
 
 struct PaletteContentArea: View {
     let activeTab: PaletteTab
-    let windowGroups: [WindowAppGroup]
+    let monitorGroups: [MonitorWindowGroup]
     let monitors: [MonitorInfo]
     var searchText: String = ""
     var isSearching: Bool = false
@@ -28,18 +28,32 @@ struct PaletteContentArea: View {
     let onMinimizeWindow: (WindowInfo) -> Void
     let onQuitApp: (WindowInfo) -> Void
     let onMoveWindow: (WindowInfo, MonitorInfo) -> Void
+    let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void
     let onTabChange: (PaletteTab) -> Void
     @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Calculate the flat index for a window within all groups
-    private func flatIndex(for window: WindowInfo, in groups: [WindowAppGroup]) -> Int? {
+    /// Flattened window groups for single-monitor or search view
+    private var flatWindowGroups: [WindowAppGroup] {
+        monitorGroups.flatMap { $0.windowGroups }
+    }
+
+    /// Whether to show multi-monitor view
+    private var showMultiMonitorView: Bool {
+        monitors.count > 1 && !isSearching
+    }
+
+    /// Calculate the flat index for a window across all monitor groups
+    private func flatIndex(for window: WindowInfo) -> Int? {
         var index = 0
-        for group in groups {
-            for w in group.windows {
-                if w.id == window.id {
-                    return index
+        for monitorGroup in monitorGroups {
+            for group in monitorGroup.windowGroups {
+                for w in group.windows {
+                    if w.id == window.id {
+                        return index
+                    }
+                    index += 1
                 }
-                index += 1
             }
         }
         return nil
@@ -83,54 +97,88 @@ struct PaletteContentArea: View {
 
     @ViewBuilder
     private var windowsContent: some View {
-        if windowGroups.isEmpty {
+        let allWindows = monitorGroups.flatMap { $0.windowGroups.flatMap { $0.windows } }
+
+        if allWindows.isEmpty {
             if isSearching {
                 emptyState("No matching windows", icon: "magnifyingglass")
             } else {
                 emptyState("No windows open", icon: "macwindow")
             }
+        } else if showMultiMonitorView {
+            // Multi-monitor view with sections
+            multiMonitorContent
         } else {
-            LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                ForEach(windowGroups) { group in
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        // App header with quit button
-                        HStack(spacing: Spacing.sm) {
-                            Image(nsImage: appIcon(for: group))
-                                .resizable()
-                                .frame(width: 20 * textScale, height: 20 * textScale)
-                            HighlightedText(group.appName, highlight: searchText)
-                                .font(.system(size: 13 * textScale, weight: .medium))
-                                .foregroundColor(CiderColors.primary)
+            // Flat view (single monitor or searching)
+            flatWindowsContent
+        }
+    }
 
-                            Spacer()
+    @ViewBuilder
+    private var multiMonitorContent: some View {
+        LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+            ForEach(monitorGroups) { monitorGroup in
+                PaletteMonitorSection(
+                    monitorGroup: monitorGroup,
+                    monitors: monitors,
+                    searchText: searchText,
+                    reduceMotion: reduceMotion,
+                    focusedContentIndex: focusedContentIndex,
+                    flatIndexForWindow: flatIndex,
+                    appIconProvider: appIcon,
+                    onWindowClick: onWindowClick,
+                    onCloseWindow: onCloseWindow,
+                    onMinimizeWindow: onMinimizeWindow,
+                    onQuitApp: onQuitApp,
+                    onMoveWindow: onMoveWindow,
+                    onMoveWindowByID: onMoveWindowByID
+                )
+            }
+        }
+    }
 
-                            // Quit app button
-                            if let firstWindow = group.windows.first {
-                                Button(action: { onQuitApp(firstWindow) }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 14 * textScale))
-                                        .foregroundColor(CiderColors.tertiary)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Quit \(group.appName)")
+    @ViewBuilder
+    private var flatWindowsContent: some View {
+        LazyVStack(alignment: .leading, spacing: Spacing.md) {
+            ForEach(flatWindowGroups) { group in
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    // App header with quit button
+                    HStack(spacing: Spacing.sm) {
+                        Image(nsImage: appIcon(for: group))
+                            .resizable()
+                            .frame(width: 20 * textScale, height: 20 * textScale)
+                        HighlightedText(group.appName, highlight: searchText)
+                            .font(.system(size: 13 * textScale, weight: .medium))
+                            .foregroundColor(CiderColors.primary)
+
+                        Spacer()
+
+                        // Quit app button
+                        if let firstWindow = group.windows.first {
+                            Button(action: { onQuitApp(firstWindow) }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 14 * textScale))
+                                    .foregroundColor(CiderColors.tertiary)
                             }
+                            .buttonStyle(.plain)
+                            .help("Quit \(group.appName)")
                         }
+                    }
 
-                        // Windows
-                        ForEach(group.windows) { window in
-                            let windowFlatIndex = flatIndex(for: window, in: windowGroups)
-                            PaletteWindowRow(
-                                window: window,
-                                monitors: monitors,
-                                windowCount: group.windows.count,
-                                searchText: searchText,
-                                isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
-                                onTap: { onWindowClick(window) },
-                                onClose: { onCloseWindow(window) },
-                                onMinimize: { onMinimizeWindow(window) },
-                                onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
-                            )
-                        }
+                    // Windows
+                    ForEach(group.windows) { window in
+                        let windowFlatIndex = flatIndex(for: window)
+                        PaletteWindowRow(
+                            window: window,
+                            monitors: monitors,
+                            windowCount: group.windows.count,
+                            searchText: searchText,
+                            isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
+                            onTap: { onWindowClick(window) },
+                            onClose: { onCloseWindow(window) },
+                            onMinimize: { onMinimizeWindow(window) },
+                            onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
+                        )
                     }
                 }
             }
@@ -213,6 +261,7 @@ struct PaletteWindowRow: View {
     let windowCount: Int  // Number of windows in parent group
     var searchText: String = ""
     var isKeyboardFocused: Bool = false
+    var isDraggable: Bool = false  // Enable drag for multi-monitor view
     let onTap: () -> Void
     let onClose: () -> Void
     let onMinimize: () -> Void
@@ -220,6 +269,7 @@ struct PaletteWindowRow: View {
     @Environment(\.textScale) private var textScale
 
     @State private var isHovering = false
+    @State private var isDragging = false
 
     private var isFocused: Bool {
         isHovering || isKeyboardFocused
@@ -240,7 +290,7 @@ struct PaletteWindowRow: View {
 
                 Spacer()
 
-                if isFocused {
+                if isFocused && !isDragging {
                     HStack(spacing: Spacing.xs) {
                         // Minimize button
                         Button(action: onMinimize) {
@@ -280,6 +330,12 @@ struct PaletteWindowRow: View {
             )
         }
         .buttonStyle(.plain)
+        .opacity(isDragging ? 0.5 : 1.0)
+        .onDrag {
+            isDragging = true
+            // Use window ID as drag data
+            return NSItemProvider(object: String(window.id) as NSString)
+        }
         .onHover { hovering in
             withAnimation(.snappy) {
                 isHovering = hovering
@@ -306,5 +362,127 @@ struct PaletteWindowRow: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Monitor Section
+
+struct PaletteMonitorSection: View {
+    let monitorGroup: MonitorWindowGroup
+    let monitors: [MonitorInfo]
+    var searchText: String = ""
+    let reduceMotion: Bool
+    let focusedContentIndex: Int?
+    let flatIndexForWindow: (WindowInfo) -> Int?
+    let appIconProvider: (WindowAppGroup) -> NSImage
+    let onWindowClick: (WindowInfo) -> Void
+    let onCloseWindow: (WindowInfo) -> Void
+    let onMinimizeWindow: (WindowInfo) -> Void
+    let onQuitApp: (WindowInfo) -> Void
+    let onMoveWindow: (WindowInfo, MonitorInfo) -> Void
+    let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void  // For drag-drop from other monitors
+    @Environment(\.textScale) private var textScale
+
+    @State private var isDropTargeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            // Monitor header
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: monitorGroup.monitor.isPrimary ? "display" : monitorGroup.monitor.relativePosition.icon)
+                    .font(.system(size: 12 * textScale))
+                    .foregroundColor(isDropTargeted ? CiderColors.controlAccent : CiderColors.secondary)
+
+                Text(monitorGroup.monitor.displayName)
+                    .font(.system(size: 12 * textScale, weight: .medium))
+                    .foregroundColor(isDropTargeted ? CiderColors.controlAccent : CiderColors.primary)
+
+                Text("(\(monitorGroup.windowCount))")
+                    .font(.system(size: 11 * textScale))
+                    .foregroundColor(CiderColors.tertiary)
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isDropTargeted ? CiderColors.controlAccent.opacity(0.15) : Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(isDropTargeted ? CiderColors.controlAccent.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+
+            // Window groups for this monitor
+            if !monitorGroup.windowGroups.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    ForEach(monitorGroup.windowGroups) { group in
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            // App header
+                            HStack(spacing: Spacing.sm) {
+                                Image(nsImage: appIconProvider(group))
+                                    .resizable()
+                                    .frame(width: 18 * textScale, height: 18 * textScale)
+                                Text(group.appName)
+                                    .font(.system(size: 12 * textScale, weight: .medium))
+                                    .foregroundColor(CiderColors.primary)
+
+                                Spacer()
+
+                                if let firstWindow = group.windows.first {
+                                    Button(action: { onQuitApp(firstWindow) }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 13 * textScale))
+                                            .foregroundColor(CiderColors.tertiary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Quit \(group.appName)")
+                                }
+                            }
+                            .padding(.leading, Spacing.sm)
+
+                            // Windows
+                            ForEach(group.windows) { window in
+                                let windowFlatIndex = flatIndexForWindow(window)
+                                PaletteWindowRow(
+                                    window: window,
+                                    monitors: monitors,
+                                    windowCount: group.windows.count,
+                                    searchText: searchText,
+                                    isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
+                                    isDraggable: true,
+                                    onTap: { onWindowClick(window) },
+                                    onClose: { onCloseWindow(window) },
+                                    onMinimize: { onMinimizeWindow(window) },
+                                    onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
+                                )
+                                .padding(.leading, Spacing.sm)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onDrop(of: [.text, .plainText], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers: providers)
+        }
+        .animation(reduceMotion ? .none : .smooth, value: isDropTargeted)
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+
+        provider.loadObject(ofClass: NSString.self) { item, _ in
+            guard let windowIDString = item as? String,
+                  let windowID = CGWindowID(windowIDString) else { return }
+
+            DispatchQueue.main.async {
+                // Use the callback that handles finding the window by ID
+                onMoveWindowByID(windowID, monitorGroup.monitor)
+            }
+        }
+        return true
     }
 }

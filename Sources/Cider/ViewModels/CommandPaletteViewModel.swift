@@ -94,6 +94,21 @@ final class CommandPaletteViewModel: ObservableObject {
         windowListViewModel.moveWindow(window, to: monitor)
     }
 
+    func moveWindowByID(_ windowID: CGWindowID, to monitor: MonitorInfo) {
+        // Find the window across all monitor groups
+        for monitorGroup in windowListViewModel.monitorGroups {
+            for group in monitorGroup.windowGroups {
+                if let window = group.windows.first(where: { $0.id == windowID }) {
+                    // Don't move if already on the target monitor
+                    if window.screenID != monitor.id {
+                        windowListViewModel.moveWindow(window, to: monitor)
+                    }
+                    return
+                }
+            }
+        }
+    }
+
     // MARK: - Folder Actions
 
     func toggleFolder(_ folder: AppFolder) {
@@ -176,6 +191,37 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
+    /// Filtered monitor groups - keeps monitors that have matching windows
+    var filteredMonitorGroups: [MonitorWindowGroup] {
+        let monitorGroups = windowListViewModel.monitorGroups
+
+        guard isSearching else { return monitorGroups }
+
+        return monitorGroups.compactMap { monitorGroup -> MonitorWindowGroup? in
+            let filteredAppGroups = monitorGroup.windowGroups.compactMap { group -> WindowAppGroup? in
+                let matchingWindows = group.windows.filter { window in
+                    window.title.lowercased().contains(searchQuery) ||
+                    window.ownerName.lowercased().contains(searchQuery)
+                }
+
+                if group.appName.lowercased().contains(searchQuery) {
+                    return group
+                }
+
+                guard !matchingWindows.isEmpty else { return nil }
+                return WindowAppGroup(
+                    id: group.id,
+                    appName: group.appName,
+                    bundleIdentifier: group.bundleIdentifier,
+                    windows: matchingWindows
+                )
+            }
+
+            guard !filteredAppGroups.isEmpty else { return nil }
+            return MonitorWindowGroup(monitor: monitorGroup.monitor, windowGroups: filteredAppGroups)
+        }
+    }
+
     /// Clear search text
     func clearSearch() {
         searchText = ""
@@ -185,14 +231,16 @@ final class CommandPaletteViewModel: ObservableObject {
 
     /// Check if search has results
     var hasSearchResults: Bool {
-        !filteredApps.isEmpty || !filteredFolders.isEmpty || !filteredWindowGroups.isEmpty
+        !filteredApps.isEmpty || !filteredFolders.isEmpty || !flattenedWindows.isEmpty
     }
 
     // MARK: - Keyboard Navigation
 
-    /// All windows flattened across filtered groups for sequential navigation
+    /// All windows flattened across filtered monitor groups for sequential navigation
     var flattenedWindows: [WindowInfo] {
-        filteredWindowGroups.flatMap { $0.windows }
+        filteredMonitorGroups.flatMap { monitorGroup in
+            monitorGroup.windowGroups.flatMap { $0.windows }
+        }
     }
 
     /// Total count of navigable apps (filtered pinned apps + filtered folders)

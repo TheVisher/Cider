@@ -148,7 +148,7 @@ struct CommandPaletteView: View {
                 // Flexible content area (filtered windows)
                 PaletteContentArea(
                     activeTab: viewModel.activeTab,
-                    windowGroups: viewModel.filteredWindowGroups,
+                    monitorGroups: viewModel.filteredMonitorGroups,
                     monitors: viewModel.monitors,
                     searchText: viewModel.searchText,
                     isSearching: viewModel.isSearching,
@@ -159,6 +159,7 @@ struct CommandPaletteView: View {
                     onMinimizeWindow: { viewModel.minimizeWindow($0) },
                     onQuitApp: { viewModel.quitWindowApp($0) },
                     onMoveWindow: { window, monitor in viewModel.moveWindow(window, to: monitor) },
+                    onMoveWindowByID: { windowID, monitor in viewModel.moveWindowByID(windowID, to: monitor) },
                     onTabChange: { viewModel.activeTab = $0 }
                 )
                 .padding(.horizontal, Spacing.lg)
