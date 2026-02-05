@@ -19,7 +19,8 @@ struct PaletteContentArea: View {
     let activeTab: PaletteTab
     let windowGroups: [WindowAppGroup]
     let monitors: [MonitorInfo]
-    let focusedIndex: Int?
+    let focusedTabIndex: Int?
+    let focusedContentIndex: Int?
     let onWindowClick: (WindowInfo) -> Void
     let onCloseWindow: (WindowInfo) -> Void
     let onMinimizeWindow: (WindowInfo) -> Void
@@ -46,10 +47,11 @@ struct PaletteContentArea: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             // Tab bar
             HStack(spacing: Spacing.md) {
-                ForEach(PaletteTab.allCases, id: \.self) { tab in
+                ForEach(Array(PaletteTab.allCases.enumerated()), id: \.element) { index, tab in
                     TabButton(
                         tab: tab,
                         isActive: activeTab == tab,
+                        isKeyboardFocused: focusedTabIndex == index,
                         onTap: { onTabChange(tab) }
                     )
                 }
@@ -108,7 +110,7 @@ struct PaletteContentArea: View {
                                 window: window,
                                 monitors: monitors,
                                 windowCount: group.windows.count,
-                                isKeyboardFocused: focusedIndex != nil && windowFlatIndex == focusedIndex,
+                                isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
                                 onTap: { onWindowClick(window) },
                                 onClose: { onCloseWindow(window) },
                                 onMinimize: { onMinimizeWindow(window) },
@@ -157,6 +159,7 @@ struct PaletteContentArea: View {
 private struct TabButton: View {
     let tab: PaletteTab
     let isActive: Bool
+    var isKeyboardFocused: Bool = false
     let onTap: () -> Void
     @Environment(\.textScale) private var textScale
 
@@ -174,6 +177,14 @@ private struct TabButton: View {
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(isActive ? Color.white.opacity(0.1) : Color.clear)
+            )
+            .overlay(
+                Group {
+                    if isKeyboardFocused {
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .strokeBorder(CiderColors.controlAccent.opacity(0.8), lineWidth: 1.5)
+                    }
+                }
             )
         }
         .buttonStyle(.plain)

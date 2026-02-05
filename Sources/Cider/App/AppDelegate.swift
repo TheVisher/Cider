@@ -446,8 +446,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard config.enableOptionTabCycling else { return }
 
         optionTabDetector = OptionTabDetector(
-            onCycleStart: { [weak self] in
-                self?.handleCycleStart()
+            onCycleStart: { [weak self] direction in
+                self?.handleCycleStart(direction: direction)
             },
             onCycleNext: { [weak self] in
                 self?.handleCycleNext()
@@ -462,13 +462,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         optionTabDetector?.start()
     }
 
-    private func handleCycleStart() {
+    private func handleCycleStart(direction: Int) {
         // Don't start cycling if command palette is open
         if commandPalettePanel?.isVisible == true {
             return
         }
 
-        windowCyclingManager?.startCycling()
+        windowCyclingManager?.startCycling(initialDirection: direction)
         showWindowCyclingPanel()
     }
 
@@ -506,13 +506,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let itemSpacing: CGFloat = Spacing.md
         let padding: CGFloat = Spacing.lg * 2
         let shadowPadding: CGFloat = 40 * 2
+        let maxVisibleItems: CGFloat = 7
 
-        let windowCount = CGFloat(max(1, manager.windows.count))
+        let windowCount = CGFloat(min(CGFloat(max(1, manager.windows.count)), maxVisibleItems))
         let contentWidth = windowCount * itemWidth + (windowCount - 1) * itemSpacing + padding
-        let maxWidth: CGFloat = 800
-        let width = min(contentWidth, maxWidth) + shadowPadding
+        let width = contentWidth + shadowPadding
 
-        let height: CGFloat = 120 + shadowPadding
+        // Match the itemHeight from WindowCyclingOverlayView
+        let itemHeight: CGFloat = 100
+        let verticalPadding: CGFloat = Spacing.md * 2
+        let height = itemHeight + verticalPadding + shadowPadding
 
         panel.setContentSize(NSSize(width: width, height: height))
     }

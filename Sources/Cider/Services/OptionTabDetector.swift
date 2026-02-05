@@ -6,7 +6,8 @@ import Carbon.HIToolbox
 final class OptionTabDetector: @unchecked Sendable {
 
     // Callbacks
-    private let onCycleStart: @MainActor @Sendable () -> Void
+    // onCycleStart receives direction: 1 for forward (Tab), -1 for backward (Shift+Tab)
+    private let onCycleStart: @MainActor @Sendable (Int) -> Void
     private let onCycleNext: @MainActor @Sendable () -> Void
     private let onCyclePrevious: @MainActor @Sendable () -> Void
     private let onCycleEnd: @MainActor @Sendable (Bool) -> Void  // Bool = committed (vs cancelled)
@@ -19,7 +20,7 @@ final class OptionTabDetector: @unchecked Sendable {
     private var isEnabled = true
 
     init(
-        onCycleStart: @escaping @MainActor @Sendable () -> Void,
+        onCycleStart: @escaping @MainActor @Sendable (Int) -> Void,
         onCycleNext: @escaping @MainActor @Sendable () -> Void,
         onCyclePrevious: @escaping @MainActor @Sendable () -> Void,
         onCycleEnd: @escaping @MainActor @Sendable (Bool) -> Void
@@ -147,26 +148,28 @@ final class OptionTabDetector: @unchecked Sendable {
 
         // Option+Tab detected!
         let isShiftHeld = flags.contains(.maskShift)
+        let direction = isShiftHeld ? -1 : 1
 
         if !isCycling {
-            // Start cycling
+            // Start cycling - the direction is passed so startCycling can
+            // immediately select the right item (no separate next/prev call needed)
             isCycling = true
             let startCallback = onCycleStart
             Task { @MainActor in
-                startCallback()
-            }
-        }
-
-        // Cycle next or previous
-        if isShiftHeld {
-            let prevCallback = onCyclePrevious
-            Task { @MainActor in
-                prevCallback()
+                startCallback(direction)
             }
         } else {
-            let nextCallback = onCycleNext
-            Task { @MainActor in
-                nextCallback()
+            // Already cycling, move next or previous
+            if isShiftHeld {
+                let prevCallback = onCyclePrevious
+                Task { @MainActor in
+                    prevCallback()
+                }
+            } else {
+                let nextCallback = onCycleNext
+                Task { @MainActor in
+                    nextCallback()
+                }
             }
         }
 

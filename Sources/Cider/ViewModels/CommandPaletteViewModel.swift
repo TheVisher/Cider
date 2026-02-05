@@ -126,30 +126,42 @@ final class CommandPaletteViewModel: ObservableObject {
         pinnedApps.count + folders.count
     }
 
+    /// Number of tabs
+    var tabsCount: Int {
+        PaletteTab.allCases.count
+    }
+
     func resetFocus() {
         focusState = .initial
+        // Sync tabsIndex with activeTab
+        if let idx = PaletteTab.allCases.firstIndex(of: activeTab) {
+            focusState.tabsIndex = idx
+        }
     }
+
+    // MARK: - Arrow Key Navigation (fine movement)
 
     func moveFocusDown() {
         switch focusState.section {
         case .search:
-            // From search, jump directly to first window in content
-            if !flattenedWindows.isEmpty {
-                focusState.section = .content
-                focusState.contentIndex = 0
-            } else if totalAppsCount > 0 {
-                // Fallback to apps if no windows
+            // Search → Apps (if any) or Tabs
+            if totalAppsCount > 0 {
                 focusState.section = .apps
                 focusState.appsIndex = 0
+            } else {
+                focusState.section = .tabs
             }
         case .apps:
-            // From apps, move to content
+            // Apps → Tabs
+            focusState.section = .tabs
+        case .tabs:
+            // Tabs → Content (first item)
             if !flattenedWindows.isEmpty {
                 focusState.section = .content
                 focusState.contentIndex = 0
             }
         case .content:
-            // Move down in window list
+            // Move down within window list
             let maxIndex = flattenedWindows.count - 1
             if focusState.contentIndex < maxIndex {
                 focusState.contentIndex += 1
@@ -160,39 +172,69 @@ final class CommandPaletteViewModel: ObservableObject {
     func moveFocusUp() {
         switch focusState.section {
         case .search:
-            // Already at top, do nothing
+            // Already at top
             break
         case .apps:
-            // From apps, go back to search
+            // Apps → Search
             focusState.section = .search
-        case .content:
-            // Move up in window list, or go to apps/search
-            if focusState.contentIndex > 0 {
-                focusState.contentIndex -= 1
-            } else if totalAppsCount > 0 {
-                // Go to apps section
+        case .tabs:
+            // Tabs → Apps (if any) or Search
+            if totalAppsCount > 0 {
                 focusState.section = .apps
             } else {
-                // Go to search
                 focusState.section = .search
+            }
+        case .content:
+            // Move up within window list, or go to Tabs
+            if focusState.contentIndex > 0 {
+                focusState.contentIndex -= 1
+            } else {
+                focusState.section = .tabs
             }
         }
     }
 
     func moveFocusLeft() {
-        guard focusState.section == .apps else { return }
-        if focusState.appsIndex > 0 {
-            focusState.appsIndex -= 1
+        switch focusState.section {
+        case .search:
+            break
+        case .apps:
+            if focusState.appsIndex > 0 {
+                focusState.appsIndex -= 1
+            }
+        case .tabs:
+            if focusState.tabsIndex > 0 {
+                focusState.tabsIndex -= 1
+                // Sync activeTab with focus
+                activeTab = PaletteTab.allCases[focusState.tabsIndex]
+            }
+        case .content:
+            break
         }
     }
 
     func moveFocusRight() {
-        guard focusState.section == .apps else { return }
-        let maxIndex = totalAppsCount - 1
-        if focusState.appsIndex < maxIndex {
-            focusState.appsIndex += 1
+        switch focusState.section {
+        case .search:
+            break
+        case .apps:
+            let maxIndex = totalAppsCount - 1
+            if focusState.appsIndex < maxIndex {
+                focusState.appsIndex += 1
+            }
+        case .tabs:
+            let maxIndex = tabsCount - 1
+            if focusState.tabsIndex < maxIndex {
+                focusState.tabsIndex += 1
+                // Sync activeTab with focus
+                activeTab = PaletteTab.allCases[focusState.tabsIndex]
+            }
+        case .content:
+            break
         }
     }
+
+    // MARK: - Tab Key Navigation (jump between groups)
 
     func cycleSection(forward: Bool) {
         let sections = PaletteSection.allCases
@@ -207,24 +249,28 @@ final class CommandPaletteViewModel: ObservableObject {
 
         focusState.section = sections[nextIndex]
 
-        // Reset index for the new section
+        // Clamp indices for new section
         switch focusState.section {
         case .search:
             break
         case .apps:
             focusState.appsIndex = min(focusState.appsIndex, max(0, totalAppsCount - 1))
+        case .tabs:
+            focusState.tabsIndex = min(focusState.tabsIndex, max(0, tabsCount - 1))
         case .content:
             focusState.contentIndex = min(focusState.contentIndex, max(0, flattenedWindows.count - 1))
         }
     }
 
+    // MARK: - Activation
+
     func activateFocusedItem() {
         switch focusState.section {
         case .search:
-            // Nothing to activate in search
+            // Nothing to activate in search (could trigger search later)
             break
         case .apps:
-            // Activate the focused app or folder
+            // Launch the focused app or open folder
             if focusState.appsIndex < pinnedApps.count {
                 launchApp(pinnedApps[focusState.appsIndex])
             } else {
@@ -233,6 +279,10 @@ final class CommandPaletteViewModel: ObservableObject {
                     toggleFolder(folders[folderIndex])
                 }
             }
+        case .tabs:
+            // Tab is already selected via left/right, Enter could confirm or do nothing
+            // The tab is already active, so this is a no-op
+            break
         case .content:
             // Focus the selected window
             if focusState.contentIndex < flattenedWindows.count {

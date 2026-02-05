@@ -4,8 +4,9 @@ import Foundation
 
 enum PaletteSection: Hashable, CaseIterable {
     case search
-    case apps
-    case content
+    case apps      // Pinned apps row
+    case tabs      // Windows/Notes/Bookmarks tab bar
+    case content   // Window list (or other tab content)
 }
 
 // MARK: - Palette Focus State
@@ -13,6 +14,7 @@ enum PaletteSection: Hashable, CaseIterable {
 struct PaletteFocusState: Equatable {
     var section: PaletteSection = .search
     var appsIndex: Int = 0
+    var tabsIndex: Int = 0
     var contentIndex: Int = 0
 
     static let initial = PaletteFocusState()

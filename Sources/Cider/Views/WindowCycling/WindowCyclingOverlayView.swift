@@ -6,9 +6,10 @@ struct WindowCyclingOverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let itemWidth: CGFloat = 100
-    private let itemHeight: CGFloat = 80
+    private let itemHeight: CGFloat = 100
     private let iconSize: CGFloat = 48
     private let cornerRadius: CGFloat = Radius.lg
+    private let maxVisibleItems: Int = 7
 
     var body: some View {
         if cyclingManager.isActive && !cyclingManager.windows.isEmpty {
@@ -16,38 +17,44 @@ struct WindowCyclingOverlayView: View {
                 // Background
                 CyclingBackgroundView(cornerRadius: cornerRadius)
 
-                // Window items
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: Spacing.md) {
-                            ForEach(Array(cyclingManager.windows.enumerated()), id: \.element.id) { index, window in
-                                WindowCyclingItem(
-                                    window: window,
-                                    isSelected: index == cyclingManager.selectedIndex
-                                )
-                                .id(index)
+                // Window items - use ScrollView only if needed
+                if cyclingManager.windows.count > maxVisibleItems {
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            windowItemsStack
+                        }
+                        .onChange(of: cyclingManager.selectedIndex) { _, newIndex in
+                            withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
+                                proxy.scrollTo(newIndex, anchor: .center)
                             }
                         }
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.vertical, Spacing.md)
                     }
-                    .onChange(of: cyclingManager.selectedIndex) { _, newIndex in
-                        withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
-                            proxy.scrollTo(newIndex, anchor: .center)
-                        }
-                    }
+                } else {
+                    windowItemsStack
                 }
             }
-            .frame(maxWidth: calculateWidth())
-            .fixedSize(horizontal: true, vertical: true)
+            .frame(width: calculateWidth(), height: itemHeight + Spacing.md * 2)
         }
     }
 
+    private var windowItemsStack: some View {
+        HStack(spacing: Spacing.md) {
+            ForEach(Array(cyclingManager.windows.enumerated()), id: \.element.id) { index, window in
+                WindowCyclingItem(
+                    window: window,
+                    isSelected: index == cyclingManager.selectedIndex
+                )
+                .id(index)
+            }
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+    }
+
     private func calculateWidth() -> CGFloat {
-        let count = CGFloat(cyclingManager.windows.count)
+        let count = CGFloat(min(cyclingManager.windows.count, maxVisibleItems))
         let contentWidth = count * itemWidth + (count - 1) * Spacing.md + Spacing.lg * 2
-        let maxWidth: CGFloat = 800
-        return min(contentWidth, maxWidth)
+        return contentWidth
     }
 }
 

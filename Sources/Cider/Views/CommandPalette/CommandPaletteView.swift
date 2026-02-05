@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Text Scale Environment
 
@@ -17,6 +18,7 @@ struct CommandPaletteView: View {
     @ObservedObject var viewModel: CommandPaletteViewModel
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
+    @State private var keyMonitor: Any?
 
     let paletteSize: PaletteSize
     let textSize: TextSize
@@ -30,6 +32,77 @@ struct CommandPaletteView: View {
     /// Sync SwiftUI focus state with our section focus
     private func syncSearchFocus() {
         isSearchFocused = viewModel.focusState.section == .search
+    }
+
+    /// Handle keyboard navigation via NSEvent monitor
+    private func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
+        // Only handle key down events
+        guard event.type == .keyDown else { return event }
+
+        let dominated = viewModel.focusState.section != .search
+
+        switch Int(event.keyCode) {
+        case 125: // Down arrow
+            viewModel.moveFocusDown()
+            syncSearchFocus()
+            return nil // Consume event
+
+        case 126: // Up arrow
+            if dominated || viewModel.focusState.section != .search {
+                viewModel.moveFocusUp()
+                syncSearchFocus()
+                return nil
+            }
+            return event
+
+        case 123: // Left arrow
+            if dominated {
+                viewModel.moveFocusLeft()
+                return nil
+            }
+            return event // Let TextField handle it
+
+        case 124: // Right arrow
+            if dominated {
+                viewModel.moveFocusRight()
+                return nil
+            }
+            return event // Let TextField handle it
+
+        case 48: // Tab
+            let forward = !event.modifierFlags.contains(.shift)
+            viewModel.cycleSection(forward: forward)
+            syncSearchFocus()
+            return nil
+
+        case 36: // Return/Enter
+            if dominated {
+                viewModel.activateFocusedItem()
+                return nil
+            }
+            return event
+
+        case 53: // Escape
+            viewModel.dismiss()
+            return nil
+
+        default:
+            return event
+        }
+    }
+
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            return handleKeyEvent(event)
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
     }
 
     var body: some View {
@@ -71,7 +144,8 @@ struct CommandPaletteView: View {
                     activeTab: viewModel.activeTab,
                     windowGroups: viewModel.windowGroups,
                     monitors: viewModel.monitors,
-                    focusedIndex: viewModel.focusState.section == .content ? viewModel.focusState.contentIndex : nil,
+                    focusedTabIndex: viewModel.focusState.section == .tabs ? viewModel.focusState.tabsIndex : nil,
+                    focusedContentIndex: viewModel.focusState.section == .content ? viewModel.focusState.contentIndex : nil,
                     onWindowClick: { viewModel.focusWindow($0) },
                     onCloseWindow: { viewModel.closeWindow($0) },
                     onMinimizeWindow: { viewModel.minimizeWindow($0) },
@@ -100,37 +174,10 @@ struct CommandPaletteView: View {
         .environment(\.textScale, textSize.scale)
         .onAppear {
             isSearchFocused = true
+            installKeyMonitor()
         }
-        .onExitCommand {
-            viewModel.dismiss()
-        }
-        .onKeyPress(.downArrow) {
-            viewModel.moveFocusDown()
-            syncSearchFocus()
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            viewModel.moveFocusUp()
-            syncSearchFocus()
-            return .handled
-        }
-        .onKeyPress(.leftArrow) {
-            viewModel.moveFocusLeft()
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            viewModel.moveFocusRight()
-            return .handled
-        }
-        .onKeyPress(.tab, phases: .down) { keyPress in
-            let forward = !keyPress.modifiers.contains(.shift)
-            viewModel.cycleSection(forward: forward)
-            syncSearchFocus()
-            return .handled
-        }
-        .onKeyPress(.return) {
-            viewModel.activateFocusedItem()
-            return .handled
+        .onDisappear {
+            removeKeyMonitor()
         }
     }
 }

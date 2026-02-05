@@ -39,7 +39,7 @@ This roadmap is optimized for a **native macOS command palette experience**. It 
 **Deliverables**
 - Window preview thumbnails (requires Screen Recording permission).
 - Drag to reorder pinned apps.
-- Keyboard navigation (↑↓ to select, Enter to focus).
+- ✅ Keyboard navigation (↑↓←→ to navigate, Tab to jump sections, Enter to activate).
 - App folders in pinned apps row.
 - Search filtering of windows.
 
@@ -79,6 +79,39 @@ This roadmap is optimized for a **native macOS command palette experience**. It 
 - Companion windows float above fullscreen apps.
 - Notes persist locally.
 - Clipboard respects privacy settings.
+
+---
+
+## v0.5 — Universal Search (Raycast Lite)
+
+**Goal:** Transform the search bar into a powerful launcher that searches everything.
+
+**Deliverables (Phase 1 - Cider Search)**
+- Search pinned apps by name.
+- Search open windows by title.
+- Search notes and bookmarks (from v0.4).
+- Fuzzy matching with highlighted results.
+
+**Deliverables (Phase 2 - System Search)**
+- Application launcher (all installed apps via Spotlight API).
+- Recent files search (NSMetadataQuery).
+- Unified results list with type indicators.
+
+**Deliverables (Phase 3 - Quick Actions)**
+- Calculator (evaluate math expressions inline).
+- System commands (sleep, lock, empty trash, restart).
+- Web search shortcuts (e.g., "g query" → Google).
+
+**Technical Approach**
+- Use `NSMetadataQuery` for Spotlight integration (no custom indexing needed).
+- Debounced search with async results.
+- Result categories: Apps, Windows, Files, Actions.
+
+**Exit Criteria**
+- Search results appear within 100ms of typing.
+- Apps launch correctly from search.
+- Files open in default app.
+- No duplicate results across categories.
 
 ---
 
