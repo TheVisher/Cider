@@ -10,10 +10,21 @@ struct PaletteAppsRow: View {
     let onFolderClick: (AppFolder) -> Void
     let isRunning: (AppInfo) -> Bool
     let onQuitApp: (AppInfo) -> Void
+    let onReorderApps: ([AppInfo]) -> Void  // Called with new order when drag ends
     @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var expandedFolder: AppFolder?
     @State private var folderAnchor: CGRect = .zero
+    @State private var draggedApp: AppInfo?
+    @State private var orderedApps: [AppInfo] = []
+
+    /// Sync local ordered apps with incoming apps prop
+    private func syncApps() {
+        if orderedApps.map(\.id) != apps.map(\.id) {
+            orderedApps = apps
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -23,16 +34,32 @@ struct PaletteAppsRow: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: CommandPaletteDesign.appGridSpacing) {
-                    // Regular pinned apps
-                    ForEach(Array(apps.enumerated()), id: \.element.id) { index, app in
+                    // Regular pinned apps - use local orderedApps for drag animation
+                    ForEach(orderedApps) { app in
+                        let isDragging = draggedApp?.id == app.id
+
                         PaletteAppIcon(
                             app: app,
                             searchText: searchText,
                             isRunning: isRunning(app),
-                            isKeyboardFocused: focusedIndex == index,
+                            isKeyboardFocused: focusedIndex == orderedApps.firstIndex(of: app),
                             onTap: { onAppClick(app) },
                             onQuit: { onQuitApp(app) }
                         )
+                        .opacity(isDragging ? 0.0 : 1.0)
+                        .scaleEffect(isDragging ? 0.8 : 1.0)
+                        .animation(reduceMotion ? .none : .smooth, value: isDragging)
+                        .onDrag {
+                            draggedApp = app
+                            return NSItemProvider(object: app.id.uuidString as NSString)
+                        }
+                        .onDrop(of: [.text], delegate: AppReorderDropDelegate(
+                            app: app,
+                            apps: $orderedApps,
+                            draggedApp: $draggedApp,
+                            reduceMotion: reduceMotion,
+                            onDrop: { onReorderApps(orderedApps) }
+                        ))
                     }
 
                     // Folders
@@ -72,6 +99,8 @@ struct PaletteAppsRow: View {
                 }
             }
         )
+        .onAppear { syncApps() }
+        .onChange(of: apps) { _, _ in syncApps() }
     }
 }
 
@@ -300,5 +329,47 @@ struct FolderPopupView: View {
                     .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
             )
         }
+    }
+}
+
+// MARK: - Drag and Drop
+
+/// Custom drop delegate for iOS-style reordering (items slide out of the way)
+private struct AppReorderDropDelegate: DropDelegate {
+    let app: AppInfo
+    @Binding var apps: [AppInfo]
+    @Binding var draggedApp: AppInfo?
+    let reduceMotion: Bool
+    let onDrop: () -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = draggedApp,
+              dragged.id != app.id,
+              let fromIndex = apps.firstIndex(of: dragged),
+              let toIndex = apps.firstIndex(of: app) else { return }
+
+        // Animate items sliding out of the way
+        withAnimation(reduceMotion ? .none : .smooth) {
+            apps.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        // Persist the new order
+        onDrop()
+        draggedApp = nil
+        return true
+    }
+
+    func dropExited(info: DropInfo) {
+        // No action needed
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedApp != nil
     }
 }

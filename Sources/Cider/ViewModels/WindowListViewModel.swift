@@ -104,18 +104,15 @@ final class WindowListViewModel: ObservableObject {
         }
         knownMonitorIDs = newMonitorIDs
 
-        // Update preview service with current window IDs
-        // Only request captures for visible (non-minimized) windows - hidden windows can't be captured
-        let visibleWindows = windows.filter { !$0.isMinimized }
-        let visibleWindowIDs = visibleWindows.map { $0.id }
-        let allWindowIDs = Set(windows.map { $0.id })
-
-        Task { @MainActor in
-            await WindowPreviewService.shared.startCapturing(windowIDs: visibleWindowIDs)
-            // Don't aggressively clean up previews - keep them for windows that might be hidden
-            // Only clean up previews for windows that are truly gone (not in our list at all)
-            WindowPreviewService.shared.cleanupPreviews(keepingWindowIDs: allWindowIDs)
-        }
+        // NOTE: Screen capture disabled - not using live thumbnails in command palette
+        // Uncomment when sidebar/thumbnails are re-enabled
+        // let visibleWindows = windows.filter { !$0.isMinimized }
+        // let visibleWindowIDs = visibleWindows.map { $0.id }
+        // let allWindowIDs = Set(windows.map { $0.id })
+        // Task { @MainActor in
+        //     await WindowPreviewService.shared.startCapturing(windowIDs: visibleWindowIDs)
+        //     WindowPreviewService.shared.cleanupPreviews(keepingWindowIDs: allWindowIDs)
+        // }
     }
 
     func focus(window: WindowInfo) {

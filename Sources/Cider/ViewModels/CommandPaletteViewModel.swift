@@ -67,6 +67,10 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
+    func reorderApps(_ newOrder: [AppInfo]) {
+        pinnedAppsViewModel.reorder(newOrder)
+    }
+
     // MARK: - Window Actions
 
     func focusWindow(_ window: WindowInfo) {

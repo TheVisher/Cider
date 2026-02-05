@@ -134,7 +134,8 @@ struct CommandPaletteView: View {
                         onAppClick: { viewModel.launchApp($0) },
                         onFolderClick: { viewModel.toggleFolder($0) },
                         isRunning: { viewModel.isRunning($0) },
-                        onQuitApp: { viewModel.quitApp($0) }
+                        onQuitApp: { viewModel.quitApp($0) },
+                        onReorderApps: { viewModel.reorderApps($0) }
                     )
                     .padding(.horizontal, Spacing.lg)
                     .padding(.vertical, Spacing.md)

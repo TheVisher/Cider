@@ -37,6 +37,13 @@ final class PinnedAppsViewModel: ObservableObject {
         save()
     }
 
+    func reorder(_ newOrder: [AppInfo]) {
+        // Only update if the order actually changed
+        guard newOrder.map(\.id) != apps.map(\.id) else { return }
+        apps = newOrder
+        save()
+    }
+
     func importDockApps() {
         let path = ("~/Library/Preferences/com.apple.dock.plist" as NSString).expandingTildeInPath
         guard let dict = NSDictionary(contentsOfFile: path) as? [String: Any],

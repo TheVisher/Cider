@@ -38,17 +38,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (Apps may have been hidden by a previous Cider session)
         WindowManager().unhideAllAppsOnStartup()
 
-        configurePanel()
+        // NOTE: Sidebar disabled for now - using command palette as primary interface
+        // configurePanel()
         configureCommandPalette()
         configureWindowCycling()
         configureSettings()
         configureStatusItem()
         observeScreenChanges()
-        observeSidebarState()
+        // observeSidebarState()
         observeCommandPaletteNotifications()
         observeSettingsNotifications()
         observeConfigChanges()
-        startEdgeDetection()
+        // startEdgeDetection()
         startDoubleTapDetection()
         startOptionTabDetection()
     }
