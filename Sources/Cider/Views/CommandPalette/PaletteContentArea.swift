@@ -33,6 +33,10 @@ struct PaletteContentArea: View {
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Shared drag state across monitor sections
+    @State private var draggedWindow: WindowInfo?  // For phantom insertion (single window drag only)
+    @State private var allDraggedIDs: Set<CGWindowID> = []  // All dragged window IDs (single or group)
+
     /// Flattened window groups for single-monitor or search view
     private var flatWindowGroups: [WindowAppGroup] {
         monitorGroups.flatMap { $0.windowGroups }
@@ -126,6 +130,8 @@ struct PaletteContentArea: View {
                     focusedContentIndex: focusedContentIndex,
                     flatIndexForWindow: flatIndex,
                     appIconProvider: appIcon,
+                    draggedWindow: $draggedWindow,
+                    allDraggedIDs: $allDraggedIDs,
                     onWindowClick: onWindowClick,
                     onCloseWindow: onCloseWindow,
                     onMinimizeWindow: onMinimizeWindow,
@@ -261,18 +267,20 @@ struct PaletteWindowRow: View {
     let windowCount: Int  // Number of windows in parent group
     var searchText: String = ""
     var isKeyboardFocused: Bool = false
-    var isDraggable: Bool = false  // Enable drag for multi-monitor view
+    var isDraggedItem: Bool = false  // Set by parent when this item is being dragged
+    var isDragActive: Bool = false  // True when any drag is in progress (suppress hover)
     let onTap: () -> Void
     let onClose: () -> Void
     let onMinimize: () -> Void
     let onMoveToMonitor: (MonitorInfo) -> Void
+    var onDragStarted: (() -> Void)? = nil  // Callback when drag begins
     @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isHovering = false
-    @State private var isDragging = false
 
     private var isFocused: Bool {
-        isHovering || isKeyboardFocused
+        (isHovering && !isDragActive) || isKeyboardFocused
     }
 
     var body: some View {
@@ -290,7 +298,7 @@ struct PaletteWindowRow: View {
 
                 Spacer()
 
-                if isFocused && !isDragging {
+                if isFocused && !isDraggedItem {
                     HStack(spacing: Spacing.xs) {
                         // Minimize button
                         Button(action: onMinimize) {
@@ -330,13 +338,19 @@ struct PaletteWindowRow: View {
             )
         }
         .buttonStyle(.plain)
-        .opacity(isDragging ? 0.5 : 1.0)
+        .opacity(isDraggedItem ? 0.0 : 1.0)
+        .scaleEffect(isDraggedItem ? 0.8 : 1.0)
+        .animation(reduceMotion ? .none : .smooth, value: isDraggedItem)
         .onDrag {
-            isDragging = true
-            // Use window ID as drag data
+            onDragStarted?()
             return NSItemProvider(object: String(window.id) as NSString)
         }
         .onHover { hovering in
+            // Don't show hover highlight during drag operations
+            if isDragActive {
+                if isHovering { isHovering = false }
+                return
+            }
             withAnimation(.snappy) {
                 isHovering = hovering
             }
@@ -375,12 +389,14 @@ struct PaletteMonitorSection: View {
     let focusedContentIndex: Int?
     let flatIndexForWindow: (WindowInfo) -> Int?
     let appIconProvider: (WindowAppGroup) -> NSImage
+    @Binding var draggedWindow: WindowInfo?
+    @Binding var allDraggedIDs: Set<CGWindowID>
     let onWindowClick: (WindowInfo) -> Void
     let onCloseWindow: (WindowInfo) -> Void
     let onMinimizeWindow: (WindowInfo) -> Void
     let onQuitApp: (WindowInfo) -> Void
     let onMoveWindow: (WindowInfo, MonitorInfo) -> Void
-    let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void  // For drag-drop from other monitors
+    let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void
     @Environment(\.textScale) private var textScale
 
     @State private var isDropTargeted = false
@@ -414,52 +430,64 @@ struct PaletteMonitorSection: View {
                     .strokeBorder(isDropTargeted ? CiderColors.controlAccent.opacity(0.5) : Color.clear, lineWidth: 1)
             )
 
-            // Window groups for this monitor
-            if !monitorGroup.windowGroups.isEmpty {
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    ForEach(monitorGroup.windowGroups) { group in
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            // App header
-                            HStack(spacing: Spacing.sm) {
-                                Image(nsImage: appIconProvider(group))
-                                    .resizable()
-                                    .frame(width: 18 * textScale, height: 18 * textScale)
-                                Text(group.appName)
-                                    .font(.system(size: 12 * textScale, weight: .medium))
-                                    .foregroundColor(CiderColors.primary)
+            // Window rows grouped by app — renders directly from ViewModel data
+            ForEach(monitorGroup.windowGroups) { group in
+                let isGroupDragged = !group.windows.isEmpty && group.windows.allSatisfy { allDraggedIDs.contains($0.id) }
 
-                                Spacer()
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    // App group header
+                    HStack(spacing: Spacing.sm) {
+                        Image(nsImage: appIconProvider(group))
+                            .resizable()
+                            .frame(width: 18 * textScale, height: 18 * textScale)
+                        Text(group.appName)
+                            .font(.system(size: 12 * textScale, weight: .medium))
+                            .foregroundColor(CiderColors.primary)
 
-                                if let firstWindow = group.windows.first {
-                                    Button(action: { onQuitApp(firstWindow) }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 13 * textScale))
-                                            .foregroundColor(CiderColors.tertiary)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Quit \(group.appName)")
-                                }
-                            }
-                            .padding(.leading, Spacing.sm)
+                        Spacer()
 
-                            // Windows
-                            ForEach(group.windows) { window in
-                                let windowFlatIndex = flatIndexForWindow(window)
-                                PaletteWindowRow(
-                                    window: window,
-                                    monitors: monitors,
-                                    windowCount: group.windows.count,
-                                    searchText: searchText,
-                                    isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
-                                    isDraggable: true,
-                                    onTap: { onWindowClick(window) },
-                                    onClose: { onCloseWindow(window) },
-                                    onMinimize: { onMinimizeWindow(window) },
-                                    onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
-                                )
-                                .padding(.leading, Spacing.sm)
-                            }
+                        Button(action: { onQuitApp(group.windows[0]) }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 13 * textScale))
+                                .foregroundColor(CiderColors.tertiary)
                         }
+                        .buttonStyle(.plain)
+                        .help("Quit \(group.appName)")
+                    }
+                    .padding(.leading, Spacing.sm)
+                    .opacity(isGroupDragged ? 0.0 : 1.0)
+                    .scaleEffect(isGroupDragged ? 0.8 : 1.0)
+                    .animation(reduceMotion ? .none : .smooth, value: isGroupDragged)
+                    .onDrag {
+                        let ids = group.windows.map { String($0.id) }.joined(separator: ",")
+                        allDraggedIDs = Set(group.windows.map(\.id))
+                        draggedWindow = nil
+                        return NSItemProvider(object: ids as NSString)
+                    }
+
+                    // Individual window rows
+                    ForEach(group.windows) { window in
+                        let isDraggedItem = allDraggedIDs.contains(window.id)
+                        let windowFlatIndex = flatIndexForWindow(window)
+
+                        PaletteWindowRow(
+                            window: window,
+                            monitors: monitors,
+                            windowCount: group.windows.count,
+                            searchText: searchText,
+                            isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
+                            isDraggedItem: isDraggedItem,
+                            isDragActive: !allDraggedIDs.isEmpty,
+                            onTap: { onWindowClick(window) },
+                            onClose: { onCloseWindow(window) },
+                            onMinimize: { onMinimizeWindow(window) },
+                            onMoveToMonitor: { monitor in onMoveWindow(window, monitor) },
+                            onDragStarted: {
+                                draggedWindow = window
+                                allDraggedIDs = [window.id]
+                            }
+                        )
+                        .padding(.leading, Spacing.sm)
                     }
                 }
             }
@@ -475,12 +503,16 @@ struct PaletteMonitorSection: View {
         guard let provider = providers.first else { return false }
 
         provider.loadObject(ofClass: NSString.self) { item, _ in
-            guard let windowIDString = item as? String,
-                  let windowID = CGWindowID(windowIDString) else { return }
+            guard let idString = item as? String else { return }
+            let windowIDs = idString.split(separator: ",").compactMap { CGWindowID($0) }
+            guard !windowIDs.isEmpty else { return }
 
             DispatchQueue.main.async {
-                // Use the callback that handles finding the window by ID
-                onMoveWindowByID(windowID, monitorGroup.monitor)
+                for windowID in windowIDs {
+                    onMoveWindowByID(windowID, monitorGroup.monitor)
+                }
+                draggedWindow = nil
+                allDraggedIDs = []
             }
         }
         return true

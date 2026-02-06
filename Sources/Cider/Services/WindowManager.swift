@@ -770,6 +770,9 @@ struct WindowManager {
         return nil
     }
 
+    /// Padding around windows when moved to a new monitor (like Rectangle's "almost maximize")
+    private static let windowPadding: CGFloat = 20
+
     func moveWindow(_ window: WindowInfo, to screen: MonitorInfo, stageOthers: Bool = false) {
         guard let axWindow = findAXWindow(for: window) else {
             print("[Cider] moveWindow: could not find AX window")
@@ -777,48 +780,42 @@ struct WindowManager {
         }
 
         let targetFrame = screen.visibleFrame
-        var windowSize = window.bounds.size
+        let padding = Self.windowPadding
 
-        // Resize window if it's larger than the destination monitor
-        let maxWidth = targetFrame.width * 0.95  // Leave some margin
-        let maxHeight = targetFrame.height * 0.95
-        var needsResize = false
+        // Fit window to destination monitor with padding on all sides
+        let newSize = CGSize(
+            width: targetFrame.width - padding * 2,
+            height: targetFrame.height - padding * 2
+        )
+        let newOrigin = CGPoint(
+            x: targetFrame.minX + padding,
+            y: targetFrame.minY + padding
+        )
 
-        if windowSize.width > maxWidth {
-            let scale = maxWidth / windowSize.width
-            windowSize.width = maxWidth
-            windowSize.height *= scale
-            needsResize = true
-        }
-        if windowSize.height > maxHeight {
-            let scale = maxHeight / windowSize.height
-            windowSize.height = maxHeight
-            windowSize.width *= scale
-            needsResize = true
-        }
+        let axPoint = convertToAXPosition(newOrigin, windowHeight: newSize.height)
 
-        // Calculate center position on target screen's visible frame
-        let newX = targetFrame.midX - windowSize.width / 2
-        let newY = targetFrame.midY - windowSize.height / 2
+        // Resize first, then move (avoids macOS constraining large windows to current monitor)
+        AccessibilityHelpers.setWindowSize(axWindow, to: newSize)
+        AccessibilityHelpers.setWindowPosition(axWindow, to: axPoint)
 
-        // Ensure window fits within screen bounds
-        let clampedX = max(targetFrame.minX, min(newX, targetFrame.maxX - windowSize.width))
-        let clampedY = max(targetFrame.minY, min(newY, targetFrame.maxY - windowSize.height))
-
-        // Convert from screen coordinates (bottom-left origin) to AX coordinates (top-left origin)
-        let axPoint = convertToAXPosition(CGPoint(x: clampedX, y: clampedY), windowHeight: windowSize.height)
-
-        print("[Cider] moveWindow: moving to screen '\(screen.name)' at AX position \(axPoint)")
-
-        // Resize if needed, then move
-        if needsResize {
-            print("[Cider] moveWindow: resizing window to fit destination monitor: \(windowSize)")
-            AccessibilityHelpers.setWindowFrame(axWindow, position: axPoint, size: windowSize)
-        } else {
-            let success = AccessibilityHelpers.setWindowPosition(axWindow, to: axPoint)
-            if !success {
-                print("[Cider] moveWindow: setWindowPosition failed")
-            }
+        // Verify the resize took effect. Some apps (Firefox/Zen) ignore AX size changes.
+        // Fall back to AppleScript which handles these apps correctly.
+        let tolerance: CGFloat = 20
+        if let actual = AccessibilityHelpers.getWindowSize(axWindow),
+           abs(actual.width - newSize.width) > tolerance || abs(actual.height - newSize.height) > tolerance {
+            let script = """
+            tell application "System Events"
+                tell (first process whose unix id is \(window.ownerPID))
+                    set size of window 1 to {\(Int(newSize.width)), \(Int(newSize.height))}
+                    set position of window 1 to {\(Int(axPoint.x)), \(Int(axPoint.y))}
+                end tell
+            end tell
+            """
+            let task = Process()
+            task.launchPath = "/usr/bin/osascript"
+            task.arguments = ["-e", script]
+            try? task.run()
+            task.waitUntilExit()
         }
 
         // Stage other apps on the destination monitor if requested
