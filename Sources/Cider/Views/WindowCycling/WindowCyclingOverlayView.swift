@@ -71,7 +71,7 @@ private struct WindowCyclingItem: View {
     var body: some View {
         VStack(spacing: Spacing.xs) {
             // App icon
-            AppIconView(bundleIdentifier: window.bundleIdentifier, size: iconSize)
+            AppIconView(bundleIdentifier: window.bundleIdentifier, pid: window.ownerPID, size: iconSize)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
 
             // Window title
@@ -87,11 +87,11 @@ private struct WindowCyclingItem: View {
         .padding(.horizontal, Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.3) : Color.clear)
+                .fill(isSelected ? CiderColors.controlAccent.opacity(0.3) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                .stroke(isSelected ? CiderColors.controlAccent : Color.clear, lineWidth: 2)
         )
     }
 }
@@ -100,6 +100,7 @@ private struct WindowCyclingItem: View {
 
 private struct AppIconView: View {
     let bundleIdentifier: String
+    let pid: pid_t
     let size: CGFloat
 
     var body: some View {
@@ -118,11 +119,33 @@ private struct AppIconView: View {
     }
 
     private var appIcon: NSImage? {
-        guard !bundleIdentifier.isEmpty else { return nil }
+        // Try bundle ID lookup via Launch Services
+        if !bundleIdentifier.isEmpty,
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            let path = appURL.path
+            // If embedded inside another .app (helper process), prefer parent app's icon
+            if let outerRange = path.range(of: ".app/", options: []),
+               path[outerRange.upperBound...].contains(".app") {
+                let parentID = bundleIdentifier.components(separatedBy: ".").dropLast().joined(separator: ".")
+                if let parentURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: parentID) {
+                    return NSWorkspace.shared.icon(forFile: parentURL.path)
+                }
+            }
+            return NSWorkspace.shared.icon(forFile: path)
+        }
 
-        // Try to get the app's icon
-        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
-            return NSWorkspace.shared.icon(forFile: appURL.path)
+        // Try parent bundle ID directly
+        if !bundleIdentifier.isEmpty {
+            let parentID = bundleIdentifier.components(separatedBy: ".").dropLast().joined(separator: ".")
+            if parentID.contains("."),
+               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: parentID) {
+                return NSWorkspace.shared.icon(forFile: appURL.path)
+            }
+        }
+
+        // Fallback: process icon directly
+        if let running = NSRunningApplication(processIdentifier: pid) {
+            return running.icon
         }
 
         return nil
@@ -161,9 +184,9 @@ private struct CyclingBackgroundView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: 1.5)
-                    .padding(0.75)
+                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                    .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
+                    .padding(CiderBorder.innerStrokeInset)
             )
         }
     }
@@ -173,9 +196,9 @@ private struct CyclingBackgroundView: View {
         Color(nsColor: NSColor.windowBackgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
-                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: 1.5)
-                    .padding(0.75)
+                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: CiderBorder.innerStrokeWidth)
+                    .padding(CiderBorder.innerStrokeInset)
             )
     }
 }

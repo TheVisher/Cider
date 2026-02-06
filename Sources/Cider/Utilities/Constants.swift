@@ -3,6 +3,16 @@ import Foundation
 
 extension Notification.Name {
     static let ciderMinimizedStateChanged = Notification.Name("ciderMinimizedStateChanged")
+    static let dismissCommandPalette = Notification.Name("cider.dismissCommandPalette")
+    static let toggleCommandPalette = Notification.Name("cider.toggleCommandPalette")
+    static let openCiderSettings = Notification.Name("cider.openCiderSettings")
+    static let dismissSettings = Notification.Name("cider.dismissSettings")
+    static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
+}
+
+enum CiderBorder {
+    static let innerStrokeWidth: CGFloat = 1.5
+    static let innerStrokeInset: CGFloat = 0.75
 }
 
 // MARK: - Spacing Tokens

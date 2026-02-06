@@ -40,39 +40,6 @@ struct AppearanceSettingsView: View {
                     .foregroundColor(CiderColors.tertiary)
             }
 
-            // Sidebar
-            SettingsSection(title: "Sidebar") {
-                SettingsToggleRow(
-                    title: "Enable sidebar",
-                    subtitle: "Show the sidebar when hovering near screen edge",
-                    isOn: $viewModel.sidebarEnabled
-                )
-
-                if viewModel.sidebarEnabled {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        Text("Position")
-                            .font(.body)
-                            .foregroundColor(CiderColors.primary)
-
-                        HStack(spacing: Spacing.md) {
-                            EdgeOptionButton(
-                                title: "Left",
-                                icon: "sidebar.left",
-                                isSelected: viewModel.sidebarEdge == .left,
-                                action: { viewModel.sidebarEdge = .left }
-                            )
-
-                            EdgeOptionButton(
-                                title: "Right",
-                                icon: "sidebar.right",
-                                isSelected: viewModel.sidebarEdge == .right,
-                                action: { viewModel.sidebarEdge = .right }
-                            )
-                        }
-                    }
-                }
-            }
-
             // Menu Bar
             SettingsSection(title: "Menu Bar") {
                 SettingsToggleRow(
@@ -138,37 +105,3 @@ private struct SizeOptionButton: View {
     }
 }
 
-// MARK: - Edge Option Button
-
-private struct EdgeOptionButton: View {
-    let title: String
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: Spacing.xs) {
-                Image(systemName: icon)
-                    .font(.system(size: 22))
-                    .frame(width: 50, height: 32)
-
-                Text(title)
-                    .font(.caption)
-            }
-            .foregroundColor(isSelected ? CiderColors.primary : CiderColors.secondary)
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Color.white.opacity(isSelected ? 0.08 : 0.03))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(isSelected ? CiderColors.controlAccent : Color.white.opacity(0.1), lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}

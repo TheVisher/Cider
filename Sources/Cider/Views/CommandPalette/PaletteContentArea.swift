@@ -37,6 +37,10 @@ struct PaletteContentArea: View {
     @State private var draggedWindow: WindowInfo?  // For phantom insertion (single window drag only)
     @State private var allDraggedIDs: Set<CGWindowID> = []  // All dragged window IDs (single or group)
 
+    /// Collapse state for sections
+    @State private var collapsedMonitorIDs: Set<UInt32> = []
+    @State private var collapsedAppGroupIDs: Set<String> = []
+
     /// Flattened window groups for single-monitor or search view
     private var flatWindowGroups: [WindowAppGroup] {
         monitorGroups.flatMap { $0.windowGroups }
@@ -81,7 +85,7 @@ struct PaletteContentArea: View {
             }
 
             // Content
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 if isSearching {
                     // When searching, show filtered windows directly (no tabs)
                     windowsContent
@@ -122,40 +126,82 @@ struct PaletteContentArea: View {
     private var multiMonitorContent: some View {
         LazyVStack(alignment: .leading, spacing: Spacing.lg) {
             ForEach(monitorGroups) { monitorGroup in
-                PaletteMonitorSection(
-                    monitorGroup: monitorGroup,
-                    monitors: monitors,
-                    searchText: searchText,
-                    reduceMotion: reduceMotion,
-                    focusedContentIndex: focusedContentIndex,
-                    flatIndexForWindow: flatIndex,
-                    appIconProvider: appIcon,
-                    draggedWindow: $draggedWindow,
-                    allDraggedIDs: $allDraggedIDs,
-                    onWindowClick: onWindowClick,
-                    onCloseWindow: onCloseWindow,
-                    onMinimizeWindow: onMinimizeWindow,
-                    onQuitApp: onQuitApp,
-                    onMoveWindow: onMoveWindow,
-                    onMoveWindowByID: onMoveWindowByID
-                )
+                monitorSection(for: monitorGroup)
             }
         }
+    }
+
+    @ViewBuilder
+    private func monitorSection(for monitorGroup: MonitorWindowGroup) -> some View {
+        let displayID = monitorGroup.monitor.id
+        PaletteMonitorSection(
+            monitorGroup: monitorGroup,
+            monitors: monitors,
+            searchText: searchText,
+            reduceMotion: reduceMotion,
+            isMonitorCollapsed: collapsedMonitorIDs.contains(displayID),
+            collapsedAppGroupIDs: collapsedAppGroupIDs,
+            focusedContentIndex: focusedContentIndex,
+            flatIndexForWindow: flatIndex,
+            appIconProvider: appIcon,
+            draggedWindow: $draggedWindow,
+            allDraggedIDs: $allDraggedIDs,
+            onWindowClick: onWindowClick,
+            onCloseWindow: onCloseWindow,
+            onMinimizeWindow: onMinimizeWindow,
+            onQuitApp: onQuitApp,
+            onMoveWindow: onMoveWindow,
+            onMoveWindowByID: onMoveWindowByID,
+            onToggleMonitor: {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    if collapsedMonitorIDs.contains(displayID) {
+                        collapsedMonitorIDs.remove(displayID)
+                    } else {
+                        collapsedMonitorIDs.insert(displayID)
+                    }
+                }
+            },
+            onToggleAppGroup: { groupID in
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    if collapsedAppGroupIDs.contains(groupID) {
+                        collapsedAppGroupIDs.remove(groupID)
+                    } else {
+                        collapsedAppGroupIDs.insert(groupID)
+                    }
+                }
+            }
+        )
     }
 
     @ViewBuilder
     private var flatWindowsContent: some View {
         LazyVStack(alignment: .leading, spacing: Spacing.md) {
             ForEach(flatWindowGroups) { group in
+                let isAppCollapsed = !isSearching && group.windows.count >= 2 && collapsedAppGroupIDs.contains(group.id)
+                let canCollapse = !isSearching && group.windows.count >= 2
+
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     // App header with quit button
                     HStack(spacing: Spacing.sm) {
+                        if canCollapse {
+                            Image(systemName: isAppCollapsed ? "chevron.right" : "chevron.down")
+                                .font(.system(size: 10 * textScale, weight: .semibold))
+                                .foregroundColor(CiderColors.tertiary)
+                                .frame(width: 10 * textScale)
+                        }
+
                         Image(nsImage: appIcon(for: group))
                             .resizable()
                             .frame(width: 20 * textScale, height: 20 * textScale)
                         HighlightedText(group.appName, highlight: searchText)
                             .font(.system(size: 13 * textScale, weight: .medium))
                             .foregroundColor(CiderColors.primary)
+
+                        if isAppCollapsed {
+                            Text("\(group.windows.count)")
+                                .font(.system(size: 11 * textScale))
+                                .foregroundColor(CiderColors.tertiary)
+                        }
 
                         Spacer()
 
@@ -168,23 +214,37 @@ struct PaletteContentArea: View {
                             }
                             .buttonStyle(.plain)
                             .help("Quit \(group.appName)")
+                            .accessibilityLabel("Quit \(group.appName)")
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard canCollapse else { return }
+                        withAnimation(reduceMotion ? .none : .snappy) {
+                            if collapsedAppGroupIDs.contains(group.id) {
+                                collapsedAppGroupIDs.remove(group.id)
+                            } else {
+                                collapsedAppGroupIDs.insert(group.id)
+                            }
                         }
                     }
 
-                    // Windows
-                    ForEach(group.windows) { window in
-                        let windowFlatIndex = flatIndex(for: window)
-                        PaletteWindowRow(
-                            window: window,
-                            monitors: monitors,
-                            windowCount: group.windows.count,
-                            searchText: searchText,
-                            isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
-                            onTap: { onWindowClick(window) },
-                            onClose: { onCloseWindow(window) },
-                            onMinimize: { onMinimizeWindow(window) },
-                            onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
-                        )
+                    // Windows (hidden when collapsed)
+                    if !isAppCollapsed {
+                        ForEach(group.windows) { window in
+                            let windowFlatIndex = flatIndex(for: window)
+                            PaletteWindowRow(
+                                window: window,
+                                monitors: monitors,
+                                windowCount: group.windows.count,
+                                searchText: searchText,
+                                isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
+                                onTap: { onWindowClick(window) },
+                                onClose: { onCloseWindow(window) },
+                                onMinimize: { onMinimizeWindow(window) },
+                                onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
+                            )
+                        }
                     }
                 }
             }
@@ -211,13 +271,58 @@ struct PaletteContentArea: View {
     }
 
     private func appIcon(for group: WindowAppGroup) -> NSImage {
-        if !group.bundleIdentifier.isEmpty,
-           let running = NSRunningApplication.runningApplications(withBundleIdentifier: group.bundleIdentifier).first,
-           let bundleURL = running.bundleURL {
-            let icon = NSWorkspace.shared.icon(forFile: bundleURL.path)
-            icon.size = NSSize(width: 20, height: 20)
+        let iconSize = NSSize(width: 20, height: 20)
+        let bundleID = group.bundleIdentifier
+
+        // 1. Ask Launch Services — but if the resolved app is embedded inside another .app
+        //    (e.g., Steam Helper.app inside Steam.app/Contents/Frameworks/), prefer the parent.
+        if !bundleID.isEmpty,
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let path = appURL.path
+            // Check if this app lives inside another .app bundle (helper/framework process)
+            if let outerAppRange = path.range(of: ".app/", options: []),
+               path[outerAppRange.upperBound...].contains(".app") {
+                // Embedded helper — try parent bundle ID first
+                let parentID = bundleID.components(separatedBy: ".").dropLast().joined(separator: ".")
+                if let parentURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: parentID) {
+                    let icon = NSWorkspace.shared.icon(forFile: parentURL.path)
+                    icon.size = iconSize
+                    return icon
+                }
+            }
+            let icon = NSWorkspace.shared.icon(forFile: path)
+            icon.size = iconSize
             return icon
         }
+
+        // 2. Try parent bundle ID (e.g., com.valvesoftware.steam.helper → com.valvesoftware.steam)
+        if !bundleID.isEmpty {
+            let parentID = bundleID.components(separatedBy: ".").dropLast().joined(separator: ".")
+            if parentID.contains("."),
+               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: parentID) {
+                let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+                icon.size = iconSize
+                return icon
+            }
+        }
+
+        // 3. Try running process's bundle URL directly
+        if !bundleID.isEmpty,
+           let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
+           let bundleURL = running.bundleURL {
+            let icon = NSWorkspace.shared.icon(forFile: bundleURL.path)
+            icon.size = iconSize
+            return icon
+        }
+
+        // 4. Try process icon directly via PID
+        if let pid = group.windows.first?.ownerPID,
+           let running = NSRunningApplication(processIdentifier: pid),
+           let icon = running.icon {
+            icon.size = iconSize
+            return icon
+        }
+
         return NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
     }
 }
@@ -308,6 +413,7 @@ struct PaletteWindowRow: View {
                         }
                         .buttonStyle(.plain)
                         .help("Minimize")
+                        .accessibilityLabel("Minimize window")
 
                         // Close button - only show if app has multiple windows
                         if windowCount > 1 {
@@ -318,6 +424,7 @@ struct PaletteWindowRow: View {
                             }
                             .buttonStyle(.plain)
                             .help("Close window")
+                            .accessibilityLabel("Close window")
                         }
                     }
                 }
@@ -351,7 +458,7 @@ struct PaletteWindowRow: View {
                 if isHovering { isHovering = false }
                 return
             }
-            withAnimation(.snappy) {
+            withAnimation(reduceMotion ? .none : .snappy) {
                 isHovering = hovering
             }
         }
@@ -386,6 +493,8 @@ struct PaletteMonitorSection: View {
     let monitors: [MonitorInfo]
     var searchText: String = ""
     let reduceMotion: Bool
+    var isMonitorCollapsed: Bool = false
+    var collapsedAppGroupIDs: Set<String> = []
     let focusedContentIndex: Int?
     let flatIndexForWindow: (WindowInfo) -> Int?
     let appIconProvider: (WindowAppGroup) -> NSImage
@@ -397,14 +506,21 @@ struct PaletteMonitorSection: View {
     let onQuitApp: (WindowInfo) -> Void
     let onMoveWindow: (WindowInfo, MonitorInfo) -> Void
     let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void
+    var onToggleMonitor: (() -> Void)? = nil
+    var onToggleAppGroup: ((String) -> Void)? = nil
     @Environment(\.textScale) private var textScale
 
     @State private var isDropTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Monitor header
+            // Monitor header (clickable to collapse)
             HStack(spacing: Spacing.sm) {
+                Image(systemName: isMonitorCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10 * textScale, weight: .semibold))
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 10 * textScale)
+
                 Image(systemName: monitorGroup.monitor.isPrimary ? "display" : monitorGroup.monitor.relativePosition.icon)
                     .font(.system(size: 12 * textScale))
                     .foregroundColor(isDropTargeted ? CiderColors.controlAccent : CiderColors.secondary)
@@ -429,65 +545,94 @@ struct PaletteMonitorSection: View {
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .strokeBorder(isDropTargeted ? CiderColors.controlAccent.opacity(0.5) : Color.clear, lineWidth: 1)
             )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onToggleMonitor?()
+            }
 
-            // Window rows grouped by app — renders directly from ViewModel data
-            ForEach(monitorGroup.windowGroups) { group in
-                let isGroupDragged = !group.windows.isEmpty && group.windows.allSatisfy { allDraggedIDs.contains($0.id) }
+            // Window rows grouped by app (hidden when monitor is collapsed)
+            if !isMonitorCollapsed {
+                ForEach(monitorGroup.windowGroups) { group in
+                    let isGroupDragged = !group.windows.isEmpty && group.windows.allSatisfy { allDraggedIDs.contains($0.id) }
+                    let canCollapseApp = group.windows.count >= 2
+                    let isAppCollapsed = canCollapseApp && collapsedAppGroupIDs.contains(group.id)
 
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    // App group header
-                    HStack(spacing: Spacing.sm) {
-                        Image(nsImage: appIconProvider(group))
-                            .resizable()
-                            .frame(width: 18 * textScale, height: 18 * textScale)
-                        Text(group.appName)
-                            .font(.system(size: 12 * textScale, weight: .medium))
-                            .foregroundColor(CiderColors.primary)
-
-                        Spacer()
-
-                        Button(action: { onQuitApp(group.windows[0]) }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 13 * textScale))
-                                .foregroundColor(CiderColors.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Quit \(group.appName)")
-                    }
-                    .padding(.leading, Spacing.sm)
-                    .opacity(isGroupDragged ? 0.0 : 1.0)
-                    .scaleEffect(isGroupDragged ? 0.8 : 1.0)
-                    .animation(reduceMotion ? .none : .smooth, value: isGroupDragged)
-                    .onDrag {
-                        let ids = group.windows.map { String($0.id) }.joined(separator: ",")
-                        allDraggedIDs = Set(group.windows.map(\.id))
-                        draggedWindow = nil
-                        return NSItemProvider(object: ids as NSString)
-                    }
-
-                    // Individual window rows
-                    ForEach(group.windows) { window in
-                        let isDraggedItem = allDraggedIDs.contains(window.id)
-                        let windowFlatIndex = flatIndexForWindow(window)
-
-                        PaletteWindowRow(
-                            window: window,
-                            monitors: monitors,
-                            windowCount: group.windows.count,
-                            searchText: searchText,
-                            isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
-                            isDraggedItem: isDraggedItem,
-                            isDragActive: !allDraggedIDs.isEmpty,
-                            onTap: { onWindowClick(window) },
-                            onClose: { onCloseWindow(window) },
-                            onMinimize: { onMinimizeWindow(window) },
-                            onMoveToMonitor: { monitor in onMoveWindow(window, monitor) },
-                            onDragStarted: {
-                                draggedWindow = window
-                                allDraggedIDs = [window.id]
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        // App group header
+                        HStack(spacing: Spacing.sm) {
+                            if canCollapseApp {
+                                Image(systemName: isAppCollapsed ? "chevron.right" : "chevron.down")
+                                    .font(.system(size: 10 * textScale, weight: .semibold))
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .frame(width: 10 * textScale)
                             }
-                        )
+
+                            Image(nsImage: appIconProvider(group))
+                                .resizable()
+                                .frame(width: 18 * textScale, height: 18 * textScale)
+                            Text(group.appName)
+                                .font(.system(size: 12 * textScale, weight: .medium))
+                                .foregroundColor(CiderColors.primary)
+
+                            if isAppCollapsed {
+                                Text("\(group.windows.count)")
+                                    .font(.system(size: 11 * textScale))
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+
+                            Spacer()
+
+                            Button(action: { onQuitApp(group.windows[0]) }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13 * textScale))
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Quit \(group.appName)")
+                            .accessibilityLabel("Quit \(group.appName)")
+                        }
                         .padding(.leading, Spacing.sm)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard canCollapseApp else { return }
+                            onToggleAppGroup?(group.id)
+                        }
+                        .opacity(isGroupDragged ? 0.0 : 1.0)
+                        .scaleEffect(isGroupDragged ? 0.8 : 1.0)
+                        .animation(reduceMotion ? .none : .smooth, value: isGroupDragged)
+                        .onDrag {
+                            let ids = group.windows.map { String($0.id) }.joined(separator: ",")
+                            allDraggedIDs = Set(group.windows.map(\.id))
+                            draggedWindow = nil
+                            return NSItemProvider(object: ids as NSString)
+                        }
+
+                        // Individual window rows (hidden when app group is collapsed)
+                        if !isAppCollapsed {
+                            ForEach(group.windows) { window in
+                                let isDraggedItem = allDraggedIDs.contains(window.id)
+                                let windowFlatIndex = flatIndexForWindow(window)
+
+                                PaletteWindowRow(
+                                    window: window,
+                                    monitors: monitors,
+                                    windowCount: group.windows.count,
+                                    searchText: searchText,
+                                    isKeyboardFocused: focusedContentIndex != nil && windowFlatIndex == focusedContentIndex,
+                                    isDraggedItem: isDraggedItem,
+                                    isDragActive: !allDraggedIDs.isEmpty,
+                                    onTap: { onWindowClick(window) },
+                                    onClose: { onCloseWindow(window) },
+                                    onMinimize: { onMinimizeWindow(window) },
+                                    onMoveToMonitor: { monitor in onMoveWindow(window, monitor) },
+                                    onDragStarted: {
+                                        draggedWindow = window
+                                        allDraggedIDs = [window.id]
+                                    }
+                                )
+                                .padding(.leading, Spacing.sm)
+                            }
+                        }
                     }
                 }
             }

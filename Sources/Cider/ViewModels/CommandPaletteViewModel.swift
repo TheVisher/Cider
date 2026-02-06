@@ -12,6 +12,10 @@ final class CommandPaletteViewModel: ObservableObject {
     @Published var monitors: [MonitorInfo] = []
     @Published var focusState: PaletteFocusState = .initial
     @Published var searchText: String = ""
+    @Published var expandedFolderID: UUID?
+    /// The screen ID where the palette is currently shown
+    var paletteScreenID: UInt32?
+    @Published var focusedFolderAppIndex: Int? = nil
 
     private let windowListViewModel: WindowListViewModel
     private let pinnedAppsViewModel: PinnedAppsViewModel
@@ -53,8 +57,55 @@ final class CommandPaletteViewModel: ObservableObject {
     // MARK: - App Actions
 
     func launchApp(_ app: AppInfo) {
+        let config = CiderConfig.load()
+        let shouldStage = config.autoHideApps
+        let targetScreenID = paletteScreenID
+        let isAlreadyRunning = !app.bundleIdentifier.isEmpty &&
+            NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleIdentifier).first != nil
+
         appLauncher.launchOrFocus(app)
         dismiss()
+
+        guard let targetScreenID else { return }
+        let bundleID = app.bundleIdentifier
+        guard !bundleID.isEmpty else { return }
+
+        Task.detached { [weak self] in
+            // Poll for app launch off the main actor
+            if isAlreadyRunning {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            } else {
+                for _ in 0..<25 {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first(where: { !$0.isTerminated }) != nil {
+                        break
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+
+            // Back to main actor for UI updates
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { return }
+                let pid = running.processIdentifier
+
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    var moved = false
+                    for attempt in 0..<5 {
+                        if attempt > 0 { try? await Task.sleep(nanoseconds: 300_000_000) }
+                        moved = self.windowListViewModel.moveAppToScreen(pid: pid, screenID: targetScreenID)
+                        if moved { break }
+                    }
+
+                    if shouldStage {
+                        if !moved { try? await Task.sleep(nanoseconds: 200_000_000) }
+                        self.windowListViewModel.stageOtherApps(exceptPID: pid, onScreenID: targetScreenID)
+                    }
+                }
+            }
+        }
     }
 
     func isRunning(_ app: AppInfo) -> Bool {
@@ -112,13 +163,25 @@ final class CommandPaletteViewModel: ObservableObject {
     // MARK: - Folder Actions
 
     func toggleFolder(_ folder: AppFolder) {
-        // Handled in the view for now
+        if expandedFolderID == folder.id {
+            expandedFolderID = nil
+        } else {
+            expandedFolderID = folder.id
+        }
+        focusedFolderAppIndex = nil
+    }
+
+    func reorderFolders(_ newOrder: [AppFolder]) {
+        guard newOrder.map(\.id) != folders.map(\.id) else { return }
+        folders = newOrder
+        saveFolders()
     }
 
     // MARK: - Navigation
 
     func dismiss() {
         isVisible = false
+        windowListViewModel.pauseTimer()
         NotificationCenter.default.post(name: .dismissCommandPalette, object: nil)
     }
 
@@ -130,7 +193,22 @@ final class CommandPaletteViewModel: ObservableObject {
         isVisible = true
         // Clear any previous search
         searchText = ""
-        // Refresh data when shown
+
+        let config = CiderConfig.load()
+        if !config.rememberPaletteState {
+            expandedFolderID = nil
+        }
+        focusedFolderAppIndex = nil
+
+        // Track which screen the palette is on (mouse location at show time)
+        let mouseLocation = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }),
+           let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            paletteScreenID = screenNumber.uint32Value
+        }
+
+        // Resume timer and refresh data when shown
+        windowListViewModel.resumeTimer()
         windowListViewModel.refresh()
         // Reset focus to search
         resetFocus()
@@ -148,20 +226,18 @@ final class CommandPaletteViewModel: ObservableObject {
         searchText.lowercased().trimmingCharacters(in: .whitespaces)
     }
 
-    /// Filtered pinned apps based on search text
+    /// Filtered pinned apps based on search text (preserving unified order)
     var filteredApps: [AppInfo] {
-        guard isSearching else { return pinnedApps }
-        return pinnedApps.filter { app in
-            app.name.lowercased().contains(searchQuery)
-        }
+        let apps = pinnedItems.compactMap { $0.appInfo }
+        guard isSearching else { return apps }
+        return apps.filter { $0.name.lowercased().contains(searchQuery) }
     }
 
-    /// Filtered folders based on search text
+    /// Filtered folders based on search text (preserving unified order)
     var filteredFolders: [AppFolder] {
-        guard isSearching else { return folders }
-        return folders.filter { folder in
-            folder.name.lowercased().contains(searchQuery)
-        }
+        let flds = pinnedItems.compactMap { $0.appFolder }
+        guard isSearching else { return flds }
+        return flds.filter { $0.name.lowercased().contains(searchQuery) }
     }
 
     /// Filtered window groups - keeps groups that have matching windows
@@ -231,7 +307,7 @@ final class CommandPaletteViewModel: ObservableObject {
 
     /// Check if search has results
     var hasSearchResults: Bool {
-        !filteredApps.isEmpty || !filteredFolders.isEmpty || !flattenedWindows.isEmpty
+        !filteredPinnedItems.isEmpty || !flattenedWindows.isEmpty
     }
 
     // MARK: - Keyboard Navigation
@@ -243,9 +319,9 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
-    /// Total count of navigable apps (filtered pinned apps + filtered folders)
+    /// Total count of navigable pinned items (apps + folders)
     var totalAppsCount: Int {
-        filteredApps.count + filteredFolders.count
+        filteredPinnedItems.count
     }
 
     /// Number of tabs
@@ -261,13 +337,58 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
-    /// Handle Escape key - returns true if search was cleared, false if should dismiss
+    /// Handle Escape key - returns true if handled (folder closed or search cleared), false if should dismiss
     func handleEscape() -> Bool {
+        // First: close folder popup if open
+        if expandedFolderID != nil {
+            expandedFolderID = nil
+            focusedFolderAppIndex = nil
+            return true
+        }
+        // Second: clear search if active
         if isSearching {
             clearSearch()
-            return true  // Search was cleared, don't dismiss
+            return true
         }
-        return false  // No search to clear, should dismiss
+        return false  // Nothing to clear, should dismiss
+    }
+
+    // MARK: - Folder Popup Navigation
+
+    /// Apps in the currently expanded folder
+    private var expandedFolderApps: [AppInfo] {
+        guard let id = expandedFolderID,
+              let folder = folders.first(where: { $0.id == id }) else { return [] }
+        return folder.apps
+    }
+
+    func moveFolderFocusLeft() {
+        guard let index = focusedFolderAppIndex else {
+            focusedFolderAppIndex = 0
+            return
+        }
+        if index > 0 {
+            focusedFolderAppIndex = index - 1
+        }
+    }
+
+    func moveFolderFocusRight() {
+        guard let index = focusedFolderAppIndex else {
+            focusedFolderAppIndex = 0
+            return
+        }
+        let maxIndex = expandedFolderApps.count - 1
+        if maxIndex >= 0 && index < maxIndex {
+            focusedFolderAppIndex = index + 1
+        }
+    }
+
+    func activateFocusedFolderApp() {
+        let apps = expandedFolderApps
+        // If no keyboard focus yet, activate first app
+        let index = focusedFolderAppIndex ?? 0
+        guard index < apps.count else { return }
+        launchApp(apps[index])
     }
 
     // MARK: - Arrow Key Navigation (fine movement)
@@ -432,20 +553,19 @@ final class CommandPaletteViewModel: ObservableObject {
         case .search:
             // If searching and there are results, activate first result
             if isSearching && hasSearchResults {
-                if !filteredApps.isEmpty {
-                    launchApp(filteredApps[0])
+                if let firstItem = filteredPinnedItems.first {
+                    if case .app(let app) = firstItem { launchApp(app) }
                 } else if !flattenedWindows.isEmpty {
                     focusWindow(flattenedWindows[0])
                 }
             }
         case .apps:
             // Launch the focused app or open folder (use filtered data)
-            if focusState.appsIndex < filteredApps.count {
-                launchApp(filteredApps[focusState.appsIndex])
-            } else {
-                let folderIndex = focusState.appsIndex - filteredApps.count
-                if folderIndex < filteredFolders.count {
-                    toggleFolder(filteredFolders[folderIndex])
+            let items = filteredPinnedItems
+            if focusState.appsIndex < items.count {
+                switch items[focusState.appsIndex] {
+                case .app(let app): launchApp(app)
+                case .folder(let folder): toggleFolder(folder)
                 }
             }
         case .tabs:
@@ -460,37 +580,337 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Cap Enforcement
+
+    static let maxPinnedItems = 10
+    private let foldersStorageKey = "AppFolders"
+    private let itemOrderStorageKey = "PinnedItemOrder"
+
+    /// Total top-level items (pinned apps + folders)
+    var totalPinnedItemCount: Int {
+        pinnedApps.count + folders.count
+    }
+
+    /// Whether more items can be added to the palette row
+    var canAddMoreItems: Bool {
+        totalPinnedItemCount < Self.maxPinnedItems
+    }
+
+    /// Unified ordered list of pinned items (apps + folders) for display
+    var pinnedItems: [PinnedItem] {
+        let order = loadItemOrder()
+        var result: [PinnedItem] = []
+        var usedAppIDs = Set<UUID>()
+        var usedFolderIDs = Set<UUID>()
+
+        // First, add items in stored order
+        for id in order {
+            if let app = pinnedApps.first(where: { $0.id == id }) {
+                result.append(.app(app))
+                usedAppIDs.insert(id)
+            } else if let folder = folders.first(where: { $0.id == id }) {
+                result.append(.folder(folder))
+                usedFolderIDs.insert(id)
+            }
+        }
+
+        // Then append any items not in the order (newly added)
+        for app in pinnedApps where !usedAppIDs.contains(app.id) {
+            result.append(.app(app))
+        }
+        for folder in folders where !usedFolderIDs.contains(folder.id) {
+            result.append(.folder(folder))
+        }
+
+        return result
+    }
+
+    /// Filtered pinned items for search — also surfaces matching apps from inside folders
+    var filteredPinnedItems: [PinnedItem] {
+        guard isSearching else { return pinnedItems }
+        var results: [PinnedItem] = []
+        for item in pinnedItems {
+            switch item {
+            case .app(let app):
+                if app.name.lowercased().contains(searchQuery) {
+                    results.append(item)
+                }
+            case .folder(let folder):
+                if folder.name.lowercased().contains(searchQuery) {
+                    // Folder name matches — show the whole folder
+                    results.append(item)
+                } else {
+                    // Show individual matching apps from inside the folder
+                    for app in folder.apps where app.name.lowercased().contains(searchQuery) {
+                        results.append(.app(app))
+                    }
+                }
+            }
+        }
+        return results
+    }
+
+    /// Reorder all pinned items (apps + folders mixed)
+    func reorderPinnedItems(_ newOrder: [PinnedItem]) {
+        // Extract apps and folders in new order
+        let newApps = newOrder.compactMap { $0.appInfo }
+        let newFolders = newOrder.compactMap { $0.appFolder }
+
+        // Persist app order
+        pinnedAppsViewModel.reorder(newApps)
+        // Persist folder order
+        if newFolders.map(\.id) != folders.map(\.id) {
+            folders = newFolders
+            saveFolders()
+        }
+        // Persist unified order
+        saveItemOrder(newOrder.map { $0.id })
+    }
+
+    private func loadItemOrder() -> [UUID] {
+        guard let data = UserDefaults.standard.data(forKey: itemOrderStorageKey) else {
+            return []
+        }
+        do {
+            return try JSONDecoder().decode([UUID].self, from: data)
+        } catch {
+            NSLog("[Cider] Failed to decode item order: \(error)")
+            return []
+        }
+    }
+
+    private func saveItemOrder(_ ids: [UUID]) {
+        if let data = try? JSONEncoder().encode(ids) {
+            UserDefaults.standard.set(data, forKey: itemOrderStorageKey)
+        }
+    }
+
+    /// Save current item order after mutations
+    private func persistCurrentOrder() {
+        saveItemOrder(pinnedItems.map { $0.id })
+    }
+
+    /// Remove an app from a folder and move it back to pinned (if room) or remove from Cider
+    func removeAppFromFolderToPinned(app: AppInfo, folder: AppFolder) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        folders[idx].apps.removeAll { $0.id == app.id }
+        // Add back to pinned if under cap
+        if canAddMoreItems {
+            pinnedAppsViewModel.addExistingApp(app)
+        }
+        // Dissolve folder if <= 1 app
+        if folders[idx].apps.count <= 1 {
+            let remaining = folders[idx].apps
+            folders.remove(at: idx)
+            for remainingApp in remaining where canAddMoreItems {
+                pinnedAppsViewModel.addExistingApp(remainingApp)
+            }
+        }
+        saveFolders()
+        persistCurrentOrder()
+    }
+
+    /// Remove an app from a folder and from Cider entirely
+    func removeAppFromFolderAndCider(app: AppInfo, folder: AppFolder) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        folders[idx].apps.removeAll { $0.id == app.id }
+        // Dissolve folder if <= 1 app
+        if folders[idx].apps.count <= 1 {
+            let remaining = folders[idx].apps
+            folders.remove(at: idx)
+            for remainingApp in remaining where canAddMoreItems {
+                pinnedAppsViewModel.addExistingApp(remainingApp)
+            }
+        }
+        saveFolders()
+        persistCurrentOrder()
+    }
+
+    /// Move an app from one folder to another
+    func moveAppBetweenFolders(app: AppInfo, from sourceFolder: AppFolder, to destFolder: AppFolder) {
+        guard let srcIdx = folders.firstIndex(where: { $0.id == sourceFolder.id }),
+              let dstIdx = folders.firstIndex(where: { $0.id == destFolder.id }) else { return }
+        guard !folders[dstIdx].apps.contains(where: { $0.bundleIdentifier == app.bundleIdentifier }) else { return }
+        folders[srcIdx].apps.removeAll { $0.id == app.id }
+        folders[dstIdx].apps.append(app)
+        // Dissolve source folder if <= 1 app
+        if folders[srcIdx].apps.count <= 1 {
+            let remaining = folders[srcIdx].apps
+            folders.remove(at: srcIdx)
+            for remainingApp in remaining where canAddMoreItems {
+                pinnedAppsViewModel.addExistingApp(remainingApp)
+            }
+        }
+        saveFolders()
+        persistCurrentOrder()
+    }
+
     // MARK: - Folders
 
     private func loadFolders() {
-        // TODO: Load folders from persistent storage
-        // For now, empty - user will create folders through UI
-        folders = []
-    }
-
-    func createFolder(name: String, apps: [AppInfo]) {
-        let folder = AppFolder(id: UUID(), name: name, apps: apps)
-        folders.append(folder)
-        saveFolders()
+        guard let data = UserDefaults.standard.data(forKey: foldersStorageKey) else {
+            folders = []
+            return
+        }
+        do {
+            folders = try JSONDecoder().decode([AppFolder].self, from: data)
+        } catch {
+            NSLog("[Cider] Failed to decode folders: \(error)")
+            folders = []
+        }
     }
 
     private func saveFolders() {
-        // TODO: Persist folders to storage
+        if let data = try? JSONEncoder().encode(folders) {
+            UserDefaults.standard.set(data, forKey: foldersStorageKey)
+        }
+    }
+
+    /// Create a folder by dropping one app onto another in the palette
+    func createFolderFromDrop(app1: AppInfo, app2: AppInfo) {
+        // Remember position of app2 in the order
+        let currentOrder = pinnedItems.map { $0.id }
+        let insertIndex = currentOrder.firstIndex(of: app2.id)
+
+        // Remove both apps from pinned list
+        pinnedAppsViewModel.removeApps([app1, app2])
+        // Create folder with both apps
+        let folder = AppFolder(name: "Folder", apps: [app1, app2])
+        folders.append(folder)
+        saveFolders()
+
+        // Insert folder at the position where app2 was
+        var newOrder = currentOrder.filter { $0 != app1.id && $0 != app2.id }
+        if let idx = insertIndex {
+            // Find where to insert relative to the filtered order
+            let clampedIdx = min(idx, newOrder.count)
+            newOrder.insert(folder.id, at: clampedIdx)
+        } else {
+            newOrder.append(folder.id)
+        }
+        saveItemOrder(newOrder)
+    }
+
+    /// Add a pinned app to an existing folder (drag app onto folder)
+    func addAppToFolder(app: AppInfo, folder: AppFolder) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        // Don't add duplicates
+        guard !folders[idx].apps.contains(where: { $0.bundleIdentifier == app.bundleIdentifier }) else { return }
+        // Remove from pinned list
+        pinnedAppsViewModel.remove(app)
+        folders[idx].apps.append(app)
+        saveFolders()
+        persistCurrentOrder()
+    }
+
+    /// Add an app to a folder via file picker (from inside folder popup)
+    func addAppToFolderFromURL(_ url: URL, folder: AppFolder) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        guard let info = appInfoFromURL(url) else { return }
+        // Don't add duplicates
+        guard !folders[idx].apps.contains(where: { $0.bundleIdentifier == info.bundleIdentifier }) else { return }
+        folders[idx].apps.append(info)
+        saveFolders()
+    }
+
+    /// Remove an app from a folder
+    func removeAppFromFolder(app: AppInfo, folder: AppFolder) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        folders[idx].apps.removeAll { $0.id == app.id }
+        // If folder has 0 or 1 apps left, dissolve it
+        if folders[idx].apps.count <= 1 {
+            let remaining = folders[idx].apps
+            folders.remove(at: idx)
+            for app in remaining where canAddMoreItems {
+                pinnedAppsViewModel.addExistingApp(app)
+            }
+        }
+        saveFolders()
+        persistCurrentOrder()
+    }
+
+    /// Delete a folder, moving its apps back to pinned list if under cap
+    func deleteFolder(_ folder: AppFolder) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        let appsToRestore = folders[idx].apps
+        folders.remove(at: idx)
+        saveFolders()
+        for app in appsToRestore where canAddMoreItems {
+            pinnedAppsViewModel.addExistingApp(app)
+        }
+        persistCurrentOrder()
+    }
+
+    /// Rename a folder
+    func renameFolder(_ folder: AppFolder, to newName: String) {
+        guard let idx = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        folders[idx].name = newName
+        saveFolders()
+    }
+
+    /// Add a new pinned app (checks cap)
+    func addPinnedApp(from url: URL) {
+        guard canAddMoreItems else { return }
+        pinnedAppsViewModel.addApp(from: url)
+    }
+
+    /// Helper to create AppInfo from a URL
+    private func appInfoFromURL(_ url: URL) -> AppInfo? {
+        let path = url.path
+        guard path.hasSuffix(".app") else { return nil }
+        guard let bundle = Bundle(path: path) else { return nil }
+        let bundleId = bundle.bundleIdentifier ?? ""
+        let name = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? url.deletingPathExtension().lastPathComponent
+        return AppInfo(name: name, bundleIdentifier: bundleId, path: path)
     }
 }
 
 // MARK: - App Folder Model
 
-struct AppFolder: Identifiable {
+struct AppFolder: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
     var apps: [AppInfo]
+
+    init(id: UUID = UUID(), name: String, apps: [AppInfo]) {
+        self.id = id
+        self.name = name
+        self.apps = apps
+    }
 }
 
-// MARK: - Notifications
+// MARK: - Pinned Item (unified app/folder for ordering)
 
-extension Notification.Name {
-    static let dismissCommandPalette = Notification.Name("dismissCommandPalette")
-    static let toggleCommandPalette = Notification.Name("toggleCommandPalette")
-    static let openCiderSettings = Notification.Name("openCiderSettings")
+enum PinnedItem: Identifiable {
+    case app(AppInfo)
+    case folder(AppFolder)
+
+    var id: UUID {
+        switch self {
+        case .app(let app): return app.id
+        case .folder(let folder): return folder.id
+        }
+    }
+
+    var isApp: Bool {
+        if case .app = self { return true }
+        return false
+    }
+
+    var isFolder: Bool {
+        if case .folder = self { return true }
+        return false
+    }
+
+    var appInfo: AppInfo? {
+        if case .app(let app) = self { return app }
+        return nil
+    }
+
+    var appFolder: AppFolder? {
+        if case .folder(let folder) = self { return folder }
+        return nil
+    }
 }
+

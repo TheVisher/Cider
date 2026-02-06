@@ -1,8 +1,15 @@
 import Foundation
 
-enum SidebarEdge: String, Codable {
-    case left
-    case right
+enum ActivationMode: String, Codable, CaseIterable {
+    case doubleTap
+    case singleTap
+
+    var displayName: String {
+        switch self {
+        case .doubleTap: return "Double tap"
+        case .singleTap: return "Single tap"
+        }
+    }
 }
 
 enum TextSize: String, Codable, CaseIterable {
@@ -82,27 +89,27 @@ enum PaletteSize: String, Codable, CaseIterable {
 }
 
 struct CiderConfig: Codable {
-    var sidebarEnabled: Bool
-    var sidebarEdge: SidebarEdge
     var autoHideApps: Bool  // Hide other apps when switching, like Stage Manager
     var showMenuBarIcon: Bool
     var textSize: TextSize
     var paletteSize: PaletteSize
+    var activationMode: ActivationMode
     var enableOptionTabCycling: Bool  // Enable Option+Tab window cycling
     var optionTabCycleAllScreens: Bool  // Cycle windows on all screens vs current only
+    var rememberPaletteState: Bool  // Keep folders open between palette sessions
 
     static let storageKey = "CiderConfig"
 
     static var `default`: CiderConfig {
         CiderConfig(
-            sidebarEnabled: true,
-            sidebarEdge: .left,
             autoHideApps: false,
             showMenuBarIcon: true,
             textSize: .medium,
             paletteSize: .medium,
+            activationMode: .doubleTap,
             enableOptionTabCycling: true,
-            optionTabCycleAllScreens: true
+            optionTabCycleAllScreens: true,
+            rememberPaletteState: false
         )
     }
 
@@ -115,9 +122,11 @@ struct CiderConfig: Codable {
         do {
             return try JSONDecoder().decode(CiderConfig.self, from: data)
         } catch {
-            // If decoding fails (e.g., new fields added), merge with defaults
-            print("Config decode error: \(error). Using defaults for missing fields.")
-            return .default
+            NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
+            UserDefaults.standard.removeObject(forKey: storageKey)
+            let defaults = CiderConfig.default
+            defaults.save()
+            return defaults
         }
     }
 
@@ -125,31 +134,31 @@ struct CiderConfig: Codable {
         if let data = try? JSONEncoder().encode(self) {
             UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
             UserDefaults.standard.synchronize() // Force immediate write
-            print("Config saved: sidebar=\(sidebarEnabled), edge=\(sidebarEdge), textSize=\(textSize), paletteSize=\(paletteSize)")
+            NSLog("[Cider] Config saved: textSize=\(textSize), paletteSize=\(paletteSize)")
         }
     }
 
     // Custom decoding to handle missing fields
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        sidebarEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarEnabled) ?? true
-        sidebarEdge = try container.decodeIfPresent(SidebarEdge.self, forKey: .sidebarEdge) ?? .left
         autoHideApps = try container.decodeIfPresent(Bool.self, forKey: .autoHideApps) ?? false
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
         paletteSize = try container.decodeIfPresent(PaletteSize.self, forKey: .paletteSize) ?? .medium
+        activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
         enableOptionTabCycling = try container.decodeIfPresent(Bool.self, forKey: .enableOptionTabCycling) ?? true
         optionTabCycleAllScreens = try container.decodeIfPresent(Bool.self, forKey: .optionTabCycleAllScreens) ?? true
+        rememberPaletteState = try container.decodeIfPresent(Bool.self, forKey: .rememberPaletteState) ?? false
     }
 
-    init(sidebarEnabled: Bool, sidebarEdge: SidebarEdge, autoHideApps: Bool, showMenuBarIcon: Bool, textSize: TextSize, paletteSize: PaletteSize, enableOptionTabCycling: Bool = true, optionTabCycleAllScreens: Bool = true) {
-        self.sidebarEnabled = sidebarEnabled
-        self.sidebarEdge = sidebarEdge
+    init(autoHideApps: Bool, showMenuBarIcon: Bool, textSize: TextSize, paletteSize: PaletteSize, activationMode: ActivationMode = .doubleTap, enableOptionTabCycling: Bool = true, optionTabCycleAllScreens: Bool = true, rememberPaletteState: Bool = false) {
         self.autoHideApps = autoHideApps
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
         self.paletteSize = paletteSize
+        self.activationMode = activationMode
         self.enableOptionTabCycling = enableOptionTabCycling
         self.optionTabCycleAllScreens = optionTabCycleAllScreens
+        self.rememberPaletteState = rememberPaletteState
     }
 }

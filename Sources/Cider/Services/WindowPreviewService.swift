@@ -39,14 +39,6 @@ final class WindowPreviewService: ObservableObject {
         connectionID = CGSMainConnectionID()
     }
 
-    func checkPermission() async {
-        hasPermission = true
-    }
-
-    func requestPermission() {
-        hasPermission = true
-    }
-
     func startCapturing(windowIDs: [CGWindowID]) async {
         isCapturing = true
         refreshTask?.cancel()
@@ -88,9 +80,11 @@ final class WindowPreviewService: ObservableObject {
         }
 
         let images = imageArray as [AnyObject]
-        guard let cgImage = images.first as! CGImage? else {
+        guard let first = images.first,
+              CFGetTypeID(first) == CGImage.typeID else {
             return nil
         }
+        let cgImage = unsafeDowncast(first, to: CGImage.self)
 
         if isFrameMostlyBlack(cgImage) {
             return nil
@@ -142,8 +136,6 @@ final class WindowPreviewService: ObservableObject {
 
         return blackCount >= 7
     }
-
-    func stopStreams(for windowIDs: [CGWindowID]) async {}
 
     func clearPreview(for windowID: CGWindowID) {
         previews.removeValue(forKey: windowID)

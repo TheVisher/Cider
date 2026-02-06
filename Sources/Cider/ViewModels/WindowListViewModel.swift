@@ -1,5 +1,5 @@
 import AppKit
-import Combine
+@preconcurrency import Combine
 
 struct MonitorWindowGroup: Identifiable, Hashable {
     let monitor: MonitorInfo
@@ -38,6 +38,21 @@ final class WindowListViewModel: ObservableObject {
 
         monitors = MonitorManager.shared.monitors
         refresh()
+        startTimer()
+    }
+
+    deinit {
+        cancellable?.cancel()
+        monitorCancellable?.cancel()
+    }
+
+    func pauseTimer() {
+        cancellable?.cancel()
+        cancellable = nil
+    }
+
+    func resumeTimer() {
+        guard cancellable == nil else { return }
         startTimer()
     }
 
@@ -119,6 +134,20 @@ final class WindowListViewModel: ObservableObject {
         let config = CiderConfig.load()
         print("[Cider] Focusing window: \(window.displayTitle), autoHideApps: \(config.autoHideApps)")
         windowManager.focus(window: window, stageOthers: config.autoHideApps)
+    }
+
+    /// Stage (hide) other apps except the one with the given PID.
+    /// If `onScreenID` is provided, only stages apps with windows on that screen.
+    func stageOtherApps(exceptPID pid: pid_t, onScreenID: UInt32? = nil) {
+        windowManager.stageOtherApps(exceptPID: pid, onScreenID: onScreenID)
+    }
+
+    /// Move a newly launched app's window to a specific screen.
+    /// Returns true if a window was found and moved.
+    @discardableResult
+    func moveAppToScreen(pid: pid_t, screenID: UInt32) -> Bool {
+        guard let monitor = MonitorManager.shared.monitor(for: screenID) else { return false }
+        return windowManager.moveAppToScreen(pid: pid, screen: monitor)
     }
 
     func close(window: WindowInfo) {

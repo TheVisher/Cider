@@ -18,6 +18,7 @@ final class OptionTabDetector: @unchecked Sendable {
     private var isOptionDown = false
     private var isCycling = false
     private var isEnabled = true
+    private var retainedForEventTap = false
 
     init(
         onCycleStart: @escaping @MainActor @Sendable (Int) -> Void,
@@ -39,7 +40,7 @@ final class OptionTabDetector: @unchecked Sendable {
                                       (1 << CGEventType.keyUp.rawValue) |
                                       (1 << CGEventType.flagsChanged.rawValue)
 
-        // Use a wrapper to capture self
+        // Create refcon pointer first as unretained for tapCreate
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
         eventTap = CGEvent.tapCreate(
@@ -59,6 +60,10 @@ final class OptionTabDetector: @unchecked Sendable {
             print("[OptionTabDetector] Failed to create event tap - check accessibility permissions")
             return
         }
+
+        // Retain self only after tap is successfully created to avoid leak on failure
+        _ = Unmanaged.passRetained(self)
+        retainedForEventTap = true
 
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
         if let runLoopSource {
@@ -80,6 +85,13 @@ final class OptionTabDetector: @unchecked Sendable {
         }
 
         eventTap = nil
+
+        // Release the retained self to balance passRetained in start()
+        if retainedForEventTap {
+            Unmanaged.passUnretained(self).release()
+            retainedForEventTap = false
+        }
+
         print("[OptionTabDetector] Stopped")
     }
 
@@ -154,6 +166,8 @@ final class OptionTabDetector: @unchecked Sendable {
             // Start cycling - the direction is passed so startCycling can
             // immediately select the right item (no separate next/prev call needed)
             isCycling = true
+            // Suppress single-tap activation synchronously (before NSEvent monitors fire)
+            DoubleTapDetector.suppressUntilNextOptionDown = true
             let startCallback = onCycleStart
             Task { @MainActor in
                 startCallback(direction)

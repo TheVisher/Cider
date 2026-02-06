@@ -28,6 +28,22 @@ final class PinnedAppsViewModel: ObservableObject {
         refreshRunning()
     }
 
+    /// Remove multiple apps at once (used when creating a folder from two pinned apps)
+    func removeApps(_ appsToRemove: [AppInfo]) {
+        let idsToRemove = Set(appsToRemove.map { $0.id })
+        apps.removeAll { idsToRemove.contains($0.id) }
+        save()
+        refreshRunning()
+    }
+
+    /// Add an existing AppInfo directly (used when restoring apps from a deleted folder)
+    func addExistingApp(_ app: AppInfo) {
+        guard !apps.contains(where: { $0.bundleIdentifier == app.bundleIdentifier || $0.path == app.path }) else { return }
+        apps.append(app)
+        save()
+        refreshRunning()
+    }
+
     func move(app: AppInfo, to target: AppInfo) {
         guard let fromIndex = apps.firstIndex(of: app),
               let toIndex = apps.firstIndex(of: target),
@@ -51,13 +67,19 @@ final class PinnedAppsViewModel: ObservableObject {
             return
         }
 
+        let existingBundleIDs = Set(apps.map { $0.bundleIdentifier })
+        let existingPaths = Set(apps.map { $0.path })
+
         let imported = persistentApps.compactMap { entry -> AppInfo? in
             guard let tileData = entry["tile-data"] as? [String: Any] else { return nil }
+
+            // Try file URL first
             if let fileData = tileData["file-data"] as? [String: Any],
-               let urlString = fileData["_CFURLString"] as? String {
-                let url = URL(string: urlString) ?? URL(fileURLWithPath: urlString)
+               let urlString = fileData["_CFURLString"] as? String,
+               let url = URL(string: urlString) {
                 return appInfo(from: url)
             }
+            // Fallback to file-label
             if let fileLabel = tileData["file-label"] as? String {
                 let appURL = URL(fileURLWithPath: "/Applications/\(fileLabel).app")
                 return appInfo(from: appURL)
@@ -65,11 +87,16 @@ final class PinnedAppsViewModel: ObservableObject {
             return nil
         }
 
-        let unique = Array(Set(imported)).sorted { $0.name.lowercased() < $1.name.lowercased() }
-        if !unique.isEmpty {
-            apps = unique
-            save()
+        // Only add apps that aren't already pinned
+        let newApps = imported.filter { app in
+            !existingBundleIDs.contains(app.bundleIdentifier) && !existingPaths.contains(app.path)
         }
+
+        guard !newApps.isEmpty else { return }
+        apps.append(contentsOf: newApps)
+        apps.sort { $0.name.lowercased() < $1.name.lowercased() }
+        save()
+        refreshRunning()
     }
 
     func addApp(from url: URL) {

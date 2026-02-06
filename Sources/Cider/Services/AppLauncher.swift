@@ -52,21 +52,27 @@ struct AppLauncher {
             // App running but no windows - use AppleScript to activate like dock click
             // This sends the proper "reopen" event that apps respond to
             NSLog("[AppLauncher] App running but no windows, using AppleScript to reopen: \(app.name)")
-            let script = """
-            tell application "\(app.name)"
-                reopen
-                activate
-            end tell
-            """
-            if let appleScript = NSAppleScript(source: script) {
-                var error: NSDictionary?
-                appleScript.executeAndReturnError(&error)
-                if let error = error {
-                    NSLog("[AppLauncher] AppleScript error: \(error)")
-                    // Fallback to opening the app
-                    let url = URL(fileURLWithPath: app.path)
-                    NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+            if !app.bundleIdentifier.isEmpty {
+                let script = """
+                tell application id "\(app.bundleIdentifier)"
+                    reopen
+                    activate
+                end tell
+                """
+                if let appleScript = NSAppleScript(source: script) {
+                    var error: NSDictionary?
+                    appleScript.executeAndReturnError(&error)
+                    if let error = error {
+                        NSLog("[AppLauncher] AppleScript error: \(error)")
+                        // Fallback to opening the app
+                        let url = URL(fileURLWithPath: app.path)
+                        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+                    }
                 }
+            } else {
+                NSLog("[AppLauncher] No bundle identifier, falling back to NSWorkspace: \(app.name)")
+                let url = URL(fileURLWithPath: app.path)
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
             }
             return
         }

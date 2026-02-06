@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - Text Scale Environment
 
@@ -37,6 +38,35 @@ struct CommandPaletteView: View {
     private func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         // Only handle key down events
         guard event.type == .keyDown else { return event }
+
+        // When folder popup is open, handle navigation within it
+        if viewModel.expandedFolderID != nil {
+            // If a text field is being edited (e.g. folder rename), let all events through
+            // except Escape which always closes the popup
+            let isEditingText = NSApp.keyWindow?.firstResponder is NSTextView
+            if isEditingText && Int(event.keyCode) != 53 {
+                return event
+            }
+
+            switch Int(event.keyCode) {
+            case 53: // Escape — close folder popup
+                if !viewModel.handleEscape() {
+                    viewModel.dismiss()
+                }
+                return nil
+            case 123: // Left arrow
+                viewModel.moveFolderFocusLeft()
+                return nil
+            case 124: // Right arrow
+                viewModel.moveFolderFocusRight()
+                return nil
+            case 36: // Return/Enter — open focused app
+                viewModel.activateFocusedFolderApp()
+                return nil
+            default:
+                return event
+            }
+        }
 
         let dominated = viewModel.focusState.section != .search
 
@@ -127,15 +157,39 @@ struct CommandPaletteView: View {
                         .opacity(0.3)
 
                     PaletteAppsRow(
-                        apps: viewModel.filteredApps,
-                        folders: viewModel.filteredFolders,
+                        items: viewModel.filteredPinnedItems,
+                        allFolders: viewModel.folders,
                         searchText: viewModel.searchText,
                         focusedIndex: viewModel.focusState.section == .apps ? viewModel.focusState.appsIndex : nil,
+                        canAddMore: viewModel.canAddMoreItems,
+                        focusedFolderAppIndex: viewModel.expandedFolderID != nil ? viewModel.focusedFolderAppIndex : nil,
+                        expandedFolderID: $viewModel.expandedFolderID,
                         onAppClick: { viewModel.launchApp($0) },
                         onFolderClick: { viewModel.toggleFolder($0) },
                         isRunning: { viewModel.isRunning($0) },
                         onQuitApp: { viewModel.quitApp($0) },
-                        onReorderApps: { viewModel.reorderApps($0) }
+                        onReorderItems: { viewModel.reorderPinnedItems($0) },
+                        onCreateFolder: { viewModel.createFolderFromDrop(app1: $0, app2: $1) },
+                        onAddToFolder: { viewModel.addAppToFolder(app: $0, folder: $1) },
+                        onAddAppToFolderFromPicker: { viewModel.addAppToFolderFromURL($0, folder: $1) },
+                        onRemoveFromFolderToPinned: { viewModel.removeAppFromFolderToPinned(app: $0, folder: $1) },
+                        onRemoveFromFolderAndCider: { viewModel.removeAppFromFolderAndCider(app: $0, folder: $1) },
+                        onMoveAppBetweenFolders: { viewModel.moveAppBetweenFolders(app: $0, from: $1, to: $2) },
+                        onRenameFolder: { viewModel.renameFolder($0, to: $1) },
+                        onAddApp: {
+                            let panel = NSOpenPanel()
+                            panel.allowsMultipleSelection = true
+                            panel.canChooseDirectories = false
+                            panel.canChooseFiles = true
+                            panel.allowedContentTypes = [UTType.application]
+                            panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                            panel.level = .floating
+                            let response = panel.runModal()
+                            guard response == .OK else { return }
+                            for url in panel.urls {
+                                viewModel.addPinnedApp(from: url)
+                            }
+                        }
                     )
                     .padding(.horizontal, Spacing.lg)
                     .padding(.vertical, Spacing.md)

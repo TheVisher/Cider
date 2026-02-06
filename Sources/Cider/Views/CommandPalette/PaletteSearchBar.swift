@@ -10,6 +10,7 @@ struct PaletteSearchBar: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(CiderColors.secondary)
                 .font(.system(size: 16 * textScale, weight: .medium))
+                .accessibilityLabel("Search")
 
             TextField("Search apps, windows, and more...", text: $text)
                 .textFieldStyle(.plain)
@@ -22,6 +23,7 @@ struct PaletteSearchBar: View {
                         .foregroundColor(CiderColors.tertiary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, Spacing.md)

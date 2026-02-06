@@ -1,50 +1,104 @@
 import AppKit
 import Combine
+import os
 
-/// Detects double-tap of a modifier key (e.g., Option)
+/// Detects double-tap or single-tap of a modifier key (e.g., Option)
 final class DoubleTapDetector: @unchecked Sendable {
     private var lastTapTime: Date?
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
+    private var globalFlagsMonitor: Any?
+    private var localFlagsMonitor: Any?
+    private var globalKeyDownMonitor: Any?
+    private var localKeyDownMonitor: Any?
     private let targetKey: NSEvent.ModifierFlags
     private let maxInterval: TimeInterval
-    private let onDoubleTap: @MainActor @Sendable () -> Void
+    private let mode: ActivationMode
+    private let onActivate: @MainActor @Sendable () -> Void
 
     private var wasKeyDown = false
+    private var usedAsModifier = false
 
-    init(key: NSEvent.ModifierFlags = .option, maxInterval: TimeInterval = 0.3, onDoubleTap: @escaping @MainActor @Sendable () -> Void) {
+    /// Set synchronously by OptionTabDetector's CGEventTap to suppress activation.
+    /// Reset on the next Option key-down so it doesn't persist across taps.
+    /// Thread-safe via OSAllocatedUnfairLock since it's accessed from multiple threads.
+    private static let _suppressLock = OSAllocatedUnfairLock(initialState: false)
+
+    static var suppressUntilNextOptionDown: Bool {
+        get { _suppressLock.withLock { $0 } }
+        set { _suppressLock.withLock { $0 = newValue } }
+    }
+
+    init(key: NSEvent.ModifierFlags = .option, maxInterval: TimeInterval = 0.3, mode: ActivationMode = .doubleTap, onActivate: @escaping @MainActor @Sendable () -> Void) {
         self.targetKey = key
         self.maxInterval = maxInterval
-        self.onDoubleTap = onDoubleTap
+        self.mode = mode
+        self.onActivate = onActivate
     }
 
     func start() {
         // Global monitor - for when other apps have focus
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
         }
 
         // Local monitor - for when our app has focus (e.g., settings window open)
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
             return event
+        }
+
+        // For single-tap mode, also monitor keyDown to detect modifier usage
+        if mode == .singleTap {
+            globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+                self?.handleKeyDown()
+            }
+
+            localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handleKeyDown()
+                return event
+            }
         }
     }
 
     func stop() {
-        if let monitor = globalMonitor {
+        if let monitor = globalFlagsMonitor {
             NSEvent.removeMonitor(monitor)
-            globalMonitor = nil
+            globalFlagsMonitor = nil
         }
-        if let monitor = localMonitor {
+        if let monitor = localFlagsMonitor {
             NSEvent.removeMonitor(monitor)
-            localMonitor = nil
+            localFlagsMonitor = nil
+        }
+        if let monitor = globalKeyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalKeyDownMonitor = nil
+        }
+        if let monitor = localKeyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            localKeyDownMonitor = nil
+        }
+    }
+
+    private func handleKeyDown() {
+        // If the target key is held and another key is pressed, it's being used as a modifier
+        if wasKeyDown {
+            usedAsModifier = true
         }
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
         let isKeyDown = event.modifierFlags.contains(targetKey)
 
+        switch mode {
+        case .doubleTap:
+            handleDoubleTap(isKeyDown: isKeyDown)
+        case .singleTap:
+            handleSingleTap(isKeyDown: isKeyDown, event: event)
+        }
+
+        wasKeyDown = isKeyDown
+    }
+
+    private func handleDoubleTap(isKeyDown: Bool) {
         // We care about key-up events (when the modifier is released)
         if wasKeyDown && !isKeyDown {
             // Key was just released
@@ -53,7 +107,7 @@ final class DoubleTapDetector: @unchecked Sendable {
             if let lastTap = lastTapTime, now.timeIntervalSince(lastTap) < maxInterval {
                 // Double tap detected!
                 lastTapTime = nil
-                let callback = onDoubleTap
+                let callback = onActivate
                 Task { @MainActor in
                     callback()
                 }
@@ -62,8 +116,28 @@ final class DoubleTapDetector: @unchecked Sendable {
                 lastTapTime = now
             }
         }
+    }
 
-        wasKeyDown = isKeyDown
+    private func handleSingleTap(isKeyDown: Bool, event: NSEvent) {
+        if isKeyDown && !wasKeyDown {
+            // Option key just pressed down — reset modifier tracking
+            usedAsModifier = false
+            Self.suppressUntilNextOptionDown = false
+
+            // Check if other modifier keys are also held (e.g., Cmd+Option)
+            let otherModifiers: NSEvent.ModifierFlags = [.command, .control, .shift]
+            if !event.modifierFlags.intersection(otherModifiers).isEmpty {
+                usedAsModifier = true
+            }
+        } else if wasKeyDown && !isKeyDown {
+            // Option key just released — fire only if not used as a modifier
+            if !usedAsModifier && !Self.suppressUntilNextOptionDown {
+                let callback = onActivate
+                Task { @MainActor in
+                    callback()
+                }
+            }
+        }
     }
 
     deinit {

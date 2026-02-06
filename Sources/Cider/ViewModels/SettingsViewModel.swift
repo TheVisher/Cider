@@ -11,12 +11,6 @@ final class SettingsViewModel: ObservableObject {
     @Published var hotkeyDoubleTapInterval: Double = 0.3
 
     // Appearance settings
-    @Published var sidebarEnabled: Bool {
-        didSet { saveConfig() }
-    }
-    @Published var sidebarEdge: SidebarEdge {
-        didSet { saveConfig() }
-    }
     @Published var showMenuBarIcon: Bool {
         didSet { saveConfig() }
     }
@@ -32,6 +26,11 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Activation settings
+    @Published var activationMode: ActivationMode {
+        didSet { saveConfig() }
+    }
+
     // Window cycling settings
     @Published var enableOptionTabCycling: Bool {
         didSet { saveConfig() }
@@ -40,19 +39,24 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Palette behavior
+    @Published var rememberPaletteState: Bool {
+        didSet { saveConfig() }
+    }
+
     private var config: CiderConfig
 
     init() {
         // Load config
         self.config = CiderConfig.load()
-        self.sidebarEnabled = config.sidebarEnabled
-        self.sidebarEdge = config.sidebarEdge
         self.showMenuBarIcon = config.showMenuBarIcon
         self.textSize = config.textSize
         self.paletteSize = config.paletteSize
         self.autoHideApps = config.autoHideApps
+        self.activationMode = config.activationMode
         self.enableOptionTabCycling = config.enableOptionTabCycling
         self.optionTabCycleAllScreens = config.optionTabCycleAllScreens
+        self.rememberPaletteState = config.rememberPaletteState
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -63,14 +67,14 @@ final class SettingsViewModel: ObservableObject {
     }
 
     private func saveConfig() {
-        config.sidebarEnabled = sidebarEnabled
-        config.sidebarEdge = sidebarEdge
         config.showMenuBarIcon = showMenuBarIcon
         config.textSize = textSize
         config.paletteSize = paletteSize
         config.autoHideApps = autoHideApps
+        config.activationMode = activationMode
         config.enableOptionTabCycling = enableOptionTabCycling
         config.optionTabCycleAllScreens = optionTabCycleAllScreens
+        config.rememberPaletteState = rememberPaletteState
         config.save()
 
         // Post notification so AppDelegate can respond
@@ -96,9 +100,3 @@ final class SettingsViewModel: ObservableObject {
     }
 }
 
-// MARK: - Notifications
-
-extension Notification.Name {
-    static let dismissSettings = Notification.Name("dismissSettings")
-    static let ciderConfigChanged = Notification.Name("ciderConfigChanged")
-}

@@ -76,7 +76,7 @@ enum AccessibilityHelpers {
 
         // Verify the CFTypeRef is actually an AXValue
         guard CFGetTypeID(cfValue) == AXValueGetTypeID() else { return nil }
-        let axValue = cfValue as! AXValue
+        let axValue = unsafeDowncast(cfValue, to: AXValue.self)
 
         var point = CGPoint.zero
         guard AXValueGetValue(axValue, .cgPoint, &point) else { return nil }
@@ -90,7 +90,7 @@ enum AccessibilityHelpers {
 
         // Verify the CFTypeRef is actually an AXValue
         guard CFGetTypeID(cfValue) == AXValueGetTypeID() else { return nil }
-        let axValue = cfValue as! AXValue
+        let axValue = unsafeDowncast(cfValue, to: AXValue.self)
 
         var size = CGSize.zero
         guard AXValueGetValue(axValue, .cgSize, &size) else { return nil }

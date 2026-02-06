@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-final class SettingsWindow: NSWindow {
+final class SettingsWindow: NSPanel {
     init() {
         let initialFrame = NSRect(x: 0, y: 0, width: 750, height: 580)
 
         super.init(contentRect: initialFrame,
-                   styleMask: [.borderless],
+                   styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered,
                    defer: false)
 
@@ -21,6 +21,8 @@ final class SettingsWindow: NSWindow {
 
         // Standard window behavior
         isReleasedWhenClosed = false
+        becomesKeyOnlyIfNeeded = true
+        hidesOnDeactivate = false
     }
 
     override var canBecomeKey: Bool { true }
@@ -46,8 +48,7 @@ final class SettingsWindow: NSWindow {
 
     func showCentered() {
         centerOnScreen()
-        makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        orderFront(nil)
     }
 }
 

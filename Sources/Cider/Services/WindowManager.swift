@@ -169,6 +169,14 @@ final class WindowCache {
 
 @MainActor
 struct WindowManager {
+    /// Threshold for distinguishing real CGWindowList IDs from pseudo-IDs generated for AX-only windows
+    private static let pseudoWindowIDThreshold: CGWindowID = 1_000_000
+
+    /// Generate a stable pseudo window ID for windows discovered via Accessibility API that lack a CGWindowID
+    private static func generatePseudoWindowID(pid: pid_t, index: Int) -> CGWindowID {
+        CGWindowID(Int(pid) * 1000 + index + Int(pseudoWindowIDThreshold))
+    }
+
     // System processes and window titles to filter out
     private static let filteredOwners: Set<String> = [
         "Window Server", "WindowManager", "Dock", "SystemUIServer",
@@ -195,79 +203,72 @@ struct WindowManager {
         return deduplicateWindows(allWindows)
     }
 
+    /// Shared CGWindowList parsing: returns on-screen windows with all standard filtering applied.
+    /// Both `fetchWindowsRaw()` and `fetchVisibleWindowsOnly()` use this as their foundation.
+    private func parseOnScreenWindows() -> [WindowInfo] {
+        let ownBundle = Bundle.main.bundleIdentifier
+        let cgOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(cgOptions, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        return infoList.compactMap { info in
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { return nil }
+            guard let windowID = info[kCGWindowNumber as String] as? CGWindowID else { return nil }
+            guard let ownerName = info[kCGWindowOwnerName as String] as? String else { return nil }
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t else { return nil }
+
+            // Filter out our own app
+            if let running = NSRunningApplication(processIdentifier: ownerPID),
+               running.bundleIdentifier == ownBundle { return nil }
+
+            // Filter out system processes
+            if Self.filteredOwners.contains(ownerName) { return nil }
+
+            let title = info[kCGWindowName as String] as? String ?? ""
+
+            // Filter out system window titles
+            for pattern in Self.filteredTitlePatterns {
+                if title.localizedCaseInsensitiveContains(pattern) { return nil }
+            }
+
+            // Extract window bounds
+            var windowBounds = CGRect.zero
+            if let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
+               let x = boundsDict["X"], let y = boundsDict["Y"],
+               let w = boundsDict["Width"], let h = boundsDict["Height"] {
+                windowBounds = CGRect(x: x, y: y, width: w, height: h)
+                if w < 50 || h < 50 { return nil }
+            }
+
+            if let alpha = info[kCGWindowAlpha as String] as? CGFloat, alpha < 0.1 { return nil }
+
+            let bundleIdentifier = NSRunningApplication(processIdentifier: ownerPID)?.bundleIdentifier ?? ""
+
+            // Filter out Finder's special windows (Desktop, empty title windows)
+            if bundleIdentifier == "com.apple.finder" && Self.filteredFinderTitles.contains(title) {
+                return nil
+            }
+
+            let screenID = MonitorManager.shared.screenForWindow(windowBounds)?.id
+
+            return WindowInfo(id: windowID, ownerPID: ownerPID, ownerName: ownerName,
+                              title: title, bundleIdentifier: bundleIdentifier,
+                              bounds: windowBounds, screenID: screenID)
+        }
+    }
+
     private func fetchWindowsRaw() -> [WindowInfo] {
         let ownBundle = Bundle.main.bundleIdentifier
-        var windows: [WindowInfo] = []
-        var seenWindowIDs: Set<CGWindowID> = []
 
         // PART 1: Get on-screen windows from CGWindowList (for accurate bounds and window IDs)
-        let cgOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        if let infoList = CGWindowListCopyWindowInfo(cgOptions, kCGNullWindowID) as? [[String: Any]] {
-            for info in infoList {
-                guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
-                guard let windowID = info[kCGWindowNumber as String] as? CGWindowID else { continue }
-                guard let ownerName = info[kCGWindowOwnerName as String] as? String else { continue }
-                guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
-
-                // Filter out our own app
-                if let running = NSRunningApplication(processIdentifier: ownerPID),
-                   running.bundleIdentifier == ownBundle { continue }
-
-                // Filter out system processes
-                if Self.filteredOwners.contains(ownerName) { continue }
-
-                let title = info[kCGWindowName as String] as? String ?? ""
-
-                // Filter out system window titles
-                var skipWindow = false
-                for pattern in Self.filteredTitlePatterns {
-                    if title.localizedCaseInsensitiveContains(pattern) {
-                        skipWindow = true
-                        break
-                    }
-                }
-                if skipWindow { continue }
-
-                // Extract window bounds
-                var windowBounds = CGRect.zero
-                if let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
-                   let x = boundsDict["X"], let y = boundsDict["Y"],
-                   let w = boundsDict["Width"], let h = boundsDict["Height"] {
-                    windowBounds = CGRect(x: x, y: y, width: w, height: h)
-                    if w < 50 || h < 50 { continue }
-                }
-
-                if let alpha = info[kCGWindowAlpha as String] as? CGFloat, alpha < 0.1 { continue }
-
-                let bundleIdentifier = NSRunningApplication(processIdentifier: ownerPID)?.bundleIdentifier ?? ""
-
-                // Filter out Finder's special windows (Desktop, empty title windows)
-                if bundleIdentifier == "com.apple.finder" && Self.filteredFinderTitles.contains(title) {
-                    continue
-                }
-
-                let screenID = MonitorManager.shared.screenForWindow(windowBounds)?.id
-
-                windows.append(WindowInfo(
-                    id: windowID,
-                    ownerPID: ownerPID,
-                    ownerName: ownerName,
-                    title: title,
-                    bundleIdentifier: bundleIdentifier,
-                    bounds: windowBounds,
-                    screenID: screenID
-                ))
-                seenWindowIDs.insert(windowID)
-            }
-        }
+        var windows = parseOnScreenWindows()
+        var seenWindowIDs = Set(windows.map { $0.id })
 
         // PART 2: Use Accessibility API to find minimized AND hidden windows
         // Visible windows are already captured by CGWindowList above
         // Hidden apps (via app.hide()) and minimized windows need AX to be seen
         guard AccessibilityHelpers.isTrusted() else { return windows }
-
-        // Track PIDs that have visible windows from CGWindowList
-        let pidsWithVisibleWindows = Set(windows.map { $0.ownerPID })
 
         for app in NSWorkspace.shared.runningApplications {
             // Skip non-regular apps (background processes, etc.)
@@ -344,7 +345,7 @@ struct WindowManager {
                 }
 
                 // Use window ID if available, otherwise generate a stable pseudo-ID
-                let finalWindowID = windowID ?? CGWindowID(pid * 1000 + Int32(index) + 1000000)
+                let finalWindowID = windowID ?? Self.generatePseudoWindowID(pid: pid, index: index)
 
                 windows.append(WindowInfo(
                     id: finalWindowID,
@@ -366,46 +367,9 @@ struct WindowManager {
         return windows
     }
 
-    // Old fetchWindowsRaw for internal use (CGWindowList only, for staging logic)
+    // CGWindowList only, for staging logic — no AX API overhead
     private func fetchVisibleWindowsOnly() -> [WindowInfo] {
-        let ownBundle = Bundle.main.bundleIdentifier
-        let cgOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let infoList = CGWindowListCopyWindowInfo(cgOptions, kCGNullWindowID) as? [[String: Any]] else {
-            return []
-        }
-
-        return infoList.compactMap { info in
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { return nil }
-            guard let windowID = info[kCGWindowNumber as String] as? CGWindowID else { return nil }
-            guard let ownerName = info[kCGWindowOwnerName as String] as? String else { return nil }
-            guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t else { return nil }
-
-            if let running = NSRunningApplication(processIdentifier: ownerPID),
-               running.bundleIdentifier == ownBundle { return nil }
-            if Self.filteredOwners.contains(ownerName) { return nil }
-
-            let title = info[kCGWindowName as String] as? String ?? ""
-            for pattern in Self.filteredTitlePatterns {
-                if title.localizedCaseInsensitiveContains(pattern) { return nil }
-            }
-
-            var windowBounds = CGRect.zero
-            if let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
-               let x = boundsDict["X"], let y = boundsDict["Y"],
-               let w = boundsDict["Width"], let h = boundsDict["Height"] {
-                windowBounds = CGRect(x: x, y: y, width: w, height: h)
-                if w < 50 || h < 50 { return nil }
-            }
-
-            if let alpha = info[kCGWindowAlpha as String] as? CGFloat, alpha < 0.1 { return nil }
-
-            let bundleIdentifier = NSRunningApplication(processIdentifier: ownerPID)?.bundleIdentifier ?? ""
-            let screenID = MonitorManager.shared.screenForWindow(windowBounds)?.id
-
-            return WindowInfo(id: windowID, ownerPID: ownerPID, ownerName: ownerName,
-                              title: title, bundleIdentifier: bundleIdentifier,
-                              bounds: windowBounds, screenID: screenID)
-        }
+        return deduplicateWindows(parseOnScreenWindows())
     }
 
     /// Remove duplicate windows from the same app with identical titles
@@ -422,8 +386,8 @@ struct WindowManager {
                 if existing.isMinimized && !window.isMinimized {
                     seen[key] = window
                 }
-                // Prefer real window IDs (< 1000000) over pseudo-IDs
-                else if existing.id >= 1000000 && window.id < 1000000 {
+                // Prefer real window IDs over pseudo-IDs
+                else if existing.id >= Self.pseudoWindowIDThreshold && window.id < Self.pseudoWindowIDThreshold {
                     seen[key] = window
                 }
                 // Otherwise keep the first one
@@ -561,6 +525,39 @@ struct WindowManager {
 
             // Now hide the app
             print("[Cider] Staging (hiding) app: \(app.localizedName ?? "Unknown") with \(appWindows.count) windows")
+            app.hide()
+        }
+    }
+
+    /// Stage (hide) other regular apps except the one with the given PID.
+    /// If `onScreenID` is provided, only stages apps that have windows on that screen.
+    func stageOtherApps(exceptPID targetPID: pid_t, onScreenID: UInt32? = nil) {
+        let cache = WindowCache.shared
+        let ownBundle = Bundle.main.bundleIdentifier
+        let currentWindows = fetchVisibleWindowsOnly()
+
+        // Collect PIDs to stage — optionally filtered by screen
+        var pidsToStage: Set<pid_t> = []
+        for window in currentWindows {
+            if window.ownerPID == targetPID { continue }
+            if let screenID = onScreenID, window.screenID != screenID { continue }
+            pidsToStage.insert(window.ownerPID)
+        }
+
+        for pid in pidsToStage {
+            if cache.isStaged(pid) { continue }
+            guard let app = NSRunningApplication(processIdentifier: pid) else { continue }
+            if app.bundleIdentifier == ownBundle { continue }
+            if let bundleID = app.bundleIdentifier, Self.excludedFromStaging.contains(bundleID) { continue }
+            if app.activationPolicy != .regular { continue }
+            if app.isHidden { continue }
+
+            let appWindows = currentWindows.filter { $0.ownerPID == pid }
+            guard !appWindows.isEmpty else { continue }
+
+            cache.stageWindows(for: pid, windows: appWindows)
+            let windowIDs = appWindows.map { $0.id }
+            WindowPreviewService.shared.prepareForHiding(windowIDs: windowIDs)
             app.hide()
         }
     }
@@ -811,17 +808,48 @@ struct WindowManager {
                 end tell
             end tell
             """
-            let task = Process()
-            task.launchPath = "/usr/bin/osascript"
-            task.arguments = ["-e", script]
-            try? task.run()
-            task.waitUntilExit()
+            let scriptCopy = script
+            Task.detached {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                task.arguments = ["-e", scriptCopy]
+                do {
+                    try task.run()
+                } catch {
+                    return
+                }
+                // 3-second timeout: terminate the process if it hasn't exited
+                let timeoutItem = DispatchWorkItem {
+                    if task.isRunning {
+                        task.terminate()
+                    }
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: timeoutItem)
+                task.waitUntilExit()
+                timeoutItem.cancel()
+            }
         }
 
         // Stage other apps on the destination monitor if requested
         if stageOthers {
             stageAppsOnMonitor(screen.id, except: window.ownerPID)
         }
+    }
+
+    /// Move an app's front window to the given screen using the same logic as drag-drop move.
+    /// Returns true if a window was found and moved.
+    @discardableResult
+    func moveAppToScreen(pid: pid_t, screen: MonitorInfo) -> Bool {
+        // Find the app's visible windows
+        let appWindows = fetchVisibleWindowsOnly().filter { $0.ownerPID == pid }
+        guard let window = appWindows.first else { return false }
+
+        // Skip if already on the target screen
+        if window.screenID == screen.id { return true }
+
+        // Use the existing moveWindow which handles AX + AppleScript fallback
+        moveWindow(window, to: screen)
+        return true
     }
 
     func moveWindow(_ window: WindowInfo, to position: CGPoint) {

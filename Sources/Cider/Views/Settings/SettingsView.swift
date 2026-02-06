@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var pinnedAppsViewModel: PinnedAppsViewModel
+    @ObservedObject var commandPaletteViewModel: CommandPaletteViewModel
     @StateObject private var viewModel = SettingsViewModel()
     @State private var selectedTab: SettingsTab = .general
 
@@ -33,6 +35,8 @@ struct SettingsView: View {
         }
         .frame(width: SettingsDesign.width, height: SettingsDesign.height)
         .environmentObject(viewModel)
+        .environmentObject(pinnedAppsViewModel)
+        .environmentObject(commandPaletteViewModel)
     }
 
     @ViewBuilder
@@ -195,9 +199,9 @@ struct SettingsBackgroundView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: 1.5)
-                    .padding(0.75)
+                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                    .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
+                    .padding(CiderBorder.innerStrokeInset)
             )
         }
     }
@@ -207,9 +211,9 @@ struct SettingsBackgroundView: View {
         Color(nsColor: NSColor.windowBackgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
-                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: 1.5)
-                    .padding(0.75)
+                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: CiderBorder.innerStrokeWidth)
+                    .padding(CiderBorder.innerStrokeInset)
             )
     }
 }

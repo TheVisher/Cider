@@ -37,6 +37,7 @@ struct PaletteFooterBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Settings")
+                .accessibilityLabel("Settings")
             }
         }
         .padding(.horizontal, Spacing.lg)
