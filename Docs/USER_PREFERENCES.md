@@ -10,10 +10,6 @@ Cider uses `CiderConfig`, a Codable struct stored in UserDefaults as JSON:
 
 ```swift
 struct CiderConfig: Codable {
-    // Sidebar (legacy)
-    var sidebarEnabled: Bool = true
-    var sidebarEdge: SidebarEdge = .left
-
     // Behavior
     var autoHideApps: Bool = false
 
@@ -32,11 +28,6 @@ struct CiderConfig: Codable {
 ### Enums
 
 ```swift
-enum SidebarEdge: String, Codable {
-    case left
-    case right
-}
-
 enum TextSize: String, Codable, CaseIterable {
     case small, medium, large
 
@@ -97,8 +88,6 @@ init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 
     // Use decodeIfPresent with defaults for all fields
-    sidebarEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarEnabled) ?? true
-    sidebarEdge = try container.decodeIfPresent(SidebarEdge.self, forKey: .sidebarEdge) ?? .left
     autoHideApps = try container.decodeIfPresent(Bool.self, forKey: .autoHideApps) ?? false
     showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
     textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
@@ -149,9 +138,7 @@ extension CiderConfig {
 |---------|------|---------|
 | Text size | Picker | Medium |
 | Palette size | Picker | Medium |
-| Enable sidebar | Toggle | On |
-| Sidebar position | Left/Right | Left |
-| Show menu bar icon | Toggle | On (stored, not yet applied) |
+| Show menu bar icon | Toggle | On |
 
 ### Advanced Tab
 

@@ -18,7 +18,7 @@ This roadmap is optimized for a **native macOS command palette experience**. It 
 - Command palette shell (NSPanel, borderless, non-activating).
 - Acrylic background using NSVisualEffectView.
 - Pinned apps: horizontal row with running indicators.
-- Window list: grouped by app in palette; monitor grouping in legacy sidebar.
+- Window list: grouped by app in palette.
 - Double-tap Option activation.
 - Settings window with tabbed navigation.
 - Multi-monitor support.

@@ -17,7 +17,7 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 **Features:**
 - Search bar at top (filtering not yet wired)
 - Pinned apps row — horizontal dock replacement
-- Window list — grouped by app (monitor grouping in legacy sidebar)
+- Window list — grouped by app
 - Window actions — close, minimize, move between monitors
 - Auto-hide apps — focus one window, others move aside
 
@@ -71,7 +71,7 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 **What it replaces:** Stage Manager, ⌘Tab, App Exposé
 
 **Features:**
-- Grouped by app (monitor grouping is used in the legacy sidebar)
+- Grouped by app
 - Collapse/expand apps
 - Window title with app icon
 
@@ -109,9 +109,7 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 ### Appearance Tab
 - Text size (Small, Medium, Large)
 - Palette size (Small, Medium, Large)
-- Sidebar enable/disable (legacy)
-- Sidebar position (Left/Right, legacy)
-- Show menu bar icon toggle (stored, not yet applied)
+- Show menu bar icon toggle
 
 ### Advanced Tab
 - Auto-hide apps toggle (Stage Manager-like behavior)
@@ -131,7 +129,7 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 ### Multi-Monitor Support
 
 - Palette opens on screen where mouse is located
-- Window grouping by monitor is currently used in the legacy sidebar (palette groups by app)
+- Palette groups windows by app
 - Move windows between monitors via context menu
 
 ### Auto-Hide Apps
@@ -292,7 +290,7 @@ Cider/
 ### v0.1 — MVP (Current)
 - [x] Command palette shell with search field
 - [x] Pinned apps row
-- [x] Window list grouped by app (monitor grouping in legacy sidebar)
+- [x] Window list grouped by app
 - [x] Double-tap activation
 - [x] Settings window
 - [x] Multi-monitor support

@@ -49,7 +49,6 @@ enum CiderAnimation {
     static let reduceMotion: Animation = .linear(duration: 0.2)
 
     // Custom springs
-    static let sidebarSlide = Animation.spring(duration: 0.35, bounce: 0.05)
     static let hoverMagnify = Animation.spring(duration: 0.25, bounce: 0.05)
     static let listReorder = Animation.spring(duration: 0.3, bounce: 0.08)
 }
@@ -57,12 +56,6 @@ enum CiderAnimation {
 // MARK: - Design System
 
 enum CiderDesign {
-    // Sidebar
-    static let sidebarWidthCollapsed: CGFloat = 72
-    static let sidebarWidthExpanded: CGFloat = 280
-    static let sidebarInset: CGFloat = Spacing.md
-    static let sidebarVerticalInset: CGFloat = Spacing.md
-
     // Components
     static let cornerRadius: CGFloat = Radius.xl
     static let componentSpacing: CGFloat = Spacing.sm

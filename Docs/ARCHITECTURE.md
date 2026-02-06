@@ -23,7 +23,6 @@ Cider/
 ├── App/
 │   ├── CiderApp.swift              # @main entry point
 │   ├── AppDelegate.swift           # NSApplicationDelegate, menu bar setup
-│   ├── CiderPanel.swift            # Legacy sidebar NSPanel (non-activating)
 │   ├── CommandPalettePanel.swift   # Command palette NSPanel (non-activating)
 │   └── SettingsWindow.swift        # Settings NSWindow
 │
@@ -42,19 +41,11 @@ Cider/
 │   │   ├── AppearanceSettingsView.swift  # Theme, sizing
 │   │   └── AdvancedSettingsView.swift    # Power user options
 │   │
-│   ├── SidebarView.swift                 # Legacy sidebar UI
-│   ├── SidebarBackgroundView.swift       # Legacy sidebar acrylic
-│   ├── PinnedAppsView.swift              # Pinned apps list (legacy + palette reuse)
-│   ├── WindowListView.swift              # Window list (legacy + palette reuse)
-│   ├── ClipboardView.swift               # Clipboard section (legacy)
-│   ├── LauncherView.swift                # Launcher section (legacy)
-│   ├── DropZoneView.swift                # Drop zone section (legacy)
-│   └── StatusBarView.swift               # Status bar view
+│   └── PinnedAppsView.swift              # Pinned apps list
 │
 ├── ViewModels/
 │   ├── CommandPaletteViewModel.swift     # Palette state and actions
 │   ├── PinnedAppsViewModel.swift         # Pinned apps state
-│   ├── SidebarViewModel.swift            # Legacy sidebar state
 │   ├── WindowListViewModel.swift         # Window enumeration, actions
 │   └── SettingsViewModel.swift           # Settings state
 │
@@ -79,11 +70,7 @@ Cider/
 │   ├── Constants.swift                   # Design tokens, sizes, animations
 │   ├── AccessibilityHelpers.swift        # AXUIElement convenience wrappers
 │   ├── ColorExtractor.swift              # Extract accent color from icons
-│   ├── MouseTrackingView.swift           # Tracking area helpers
-│   ├── RoundedContainerView.swift        # Container styling
-│   ├── SectionFrameKey.swift             # Preference keys for layout
 │   ├── Shell.swift                       # Shell utilities
-│   ├── SideRoundedRectangle.swift        # Custom shapes
 │   └── VisualEffectView.swift            # NSVisualEffectView wrapper
 │
 └── Resources/
@@ -178,8 +165,6 @@ windowManager.focusSelectedItem()  // Don't do this
 
 ```swift
 struct CiderConfig: Codable {
-    var sidebarEnabled: Bool = true
-    var sidebarEdge: SidebarEdge = .left
     var autoHideApps: Bool = false
     var showMenuBarIcon: Bool = true
     var textSize: TextSize = .medium
@@ -188,8 +173,6 @@ struct CiderConfig: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Use decodeIfPresent with defaults for backward compatibility
-        sidebarEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarEnabled) ?? true
-        sidebarEdge = try container.decodeIfPresent(SidebarEdge.self, forKey: .sidebarEdge) ?? .left
         autoHideApps = try container.decodeIfPresent(Bool.self, forKey: .autoHideApps) ?? false
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium

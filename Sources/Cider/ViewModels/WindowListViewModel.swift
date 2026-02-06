@@ -119,15 +119,6 @@ final class WindowListViewModel: ObservableObject {
         }
         knownMonitorIDs = newMonitorIDs
 
-        // NOTE: Screen capture disabled - not using live thumbnails in command palette
-        // Uncomment when sidebar/thumbnails are re-enabled
-        // let visibleWindows = windows.filter { !$0.isMinimized }
-        // let visibleWindowIDs = visibleWindows.map { $0.id }
-        // let allWindowIDs = Set(windows.map { $0.id })
-        // Task { @MainActor in
-        //     await WindowPreviewService.shared.startCapturing(windowIDs: visibleWindowIDs)
-        //     WindowPreviewService.shared.cleanupPreviews(keepingWindowIDs: allWindowIDs)
-        // }
     }
 
     func focus(window: WindowInfo) {

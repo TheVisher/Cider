@@ -2,7 +2,7 @@
 
 This document captures all feature ideas, enhancements, and polish items for Cider. Features are organized by category and will be prioritized based on which foundational systems they depend on.
 
-> **Legacy note:** This backlog was written during the sidebar era. Many items reference a sidebar; interpret those as either legacy/optional or as command‑palette equivalents. This list needs triage for the command‑palette roadmap.
+> **Legacy note:** This backlog was written during the sidebar era. The sidebar has been removed — all sidebar references should be interpreted as command palette equivalents.
 
 ---
 
@@ -14,7 +14,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 4. [App/Window Switching](#4-appwindow-switching)
 5. [Multi-Monitor](#5-multi-monitor)
 6. [Workspaces & Loadouts](#6-workspaces--loadouts)
-7. [UI Views (Sidebar vs Centered Modal)](#7-ui-views-sidebar-vs-centered-modal)
+7. [UI Layout Options](#7-ui-layout-options)
 8. [Media & Audio](#8-media--audio)
 9. [Search & Navigation](#9-search--navigation)
 10. [Peek & Preview](#10-peek--preview)
@@ -45,7 +45,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 
 ### New Ideas
 - [ ] **App picker for adding apps** - "Add app" button opens picker showing /Applications with search
-- [ ] **Drag and drop to add apps** - Drag from Finder into sidebar to pin
+- [ ] **Drag and drop to add apps** - Drag from Finder into palette to pin
 - [ ] **Auto-add newly installed apps** (setting) - Watch /Applications for changes, optionally auto-add
 - [ ] **Smart suggestions** - "You opened Slack 12x this week but it's not in Cider. Add it?"
 - [ ] **Recent apps section** - Show last 3-5 launched apps that aren't pinned
@@ -87,8 +87,8 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 - [ ] **Dynamic tiling (shared edges)** - Windows aware of each other; drag one edge, adjacent windows resize together
 - [ ] **Auto-fill on minimize** - When one tiled window minimizes, adjacent windows expand to fill the space
 - [ ] **Tile groups persist** - Windows remember they're tiled together, respond as a unit
-- [ ] **Drag thumbnail to screen position** - Drag from sidebar, drop anywhere on screen to position window there
-- [ ] **Drag to edge for quick tile** - Drag window thumbnail toward sidebar edge to snap to that half
+- [ ] **Drag thumbnail to screen position** - Drag from palette, drop anywhere on screen to position window there
+- [ ] **Drag to edge for quick tile** - Drag window thumbnail toward screen edge to snap to that half
 - [ ] **Visual indicator of tile state** - Badge or icon showing if window is tiled and where (left half, etc.)
 - [ ] **Multi-select tiling** - Shift+click multiple windows, see overlay with zones, drag each to a zone, adjust borders, apply
 - [ ] **Spring-loaded tile zones** - Drag window toward screen edge, shows preview of where it will tile
@@ -99,11 +99,11 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 
 ### Currently Planned
 - [ ] ⌘K opens launcher
-- [ ] ⌘⌥D toggles sidebar visibility
+- [ ] ⌘⌥D toggles palette visibility
 - [ ] ⌘⌥1-9 launches pinned app by position
 
 ### New Ideas
-- [ ] **Cmd+Space opens Cider** - Main trigger for full UI (sidebar or centered, based on preference)
+- [ ] **Cmd+Space opens Cider** - Main trigger for full UI
 - [ ] **Cmd+Tab tap = quick swap** - Instantly switch to last window, no UI shown
 - [ ] **Cmd+Tab hold = show UI** - After ~300ms, Cider appears for navigation
 - [ ] **Arrow key navigation** - When Cider is open, arrow keys move through window list
@@ -119,17 +119,15 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 ## 5. Multi-Monitor
 
 ### Currently Planned
-- [ ] Windows grouped by monitor in sidebar
+- [ ] Windows grouped by monitor in palette
 - [ ] Drag windows between monitor groups to move them
-- [ ] Choose which monitor(s) show sidebar
-- [ ] Option for independent sidebars per monitor
 - [ ] Keyboard shortcuts: ⌃⌥← / ⌃⌥→ to send window to left/right monitor
 
 ### New Ideas
 - [ ] **"Move all to this monitor" button** - On each monitor header, one click moves all windows from other monitors here
 - [ ] **Option+click = move all except focused** - Move everything but keep current window where it is
 - [ ] **Drag monitor header onto another** - Move all windows between monitors
-- [ ] **Remember sidebar position per monitor** - If monitor disconnects, gracefully move to primary
+- [ ] **Remember palette position per monitor** - If monitor disconnects, gracefully move to primary
 - [ ] **Restore layout when monitor reconnects** - Offer to put windows back where they were
 - [ ] **Mini monitor icons** - Visual indicator showing which monitor is which
 - [ ] **Rescue off-screen windows** - If window is on disconnected monitor, show "rescue" option to bring it back
@@ -141,7 +139,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 ### New Ideas (not in current docs)
 - [ ] **Save current layout as loadout** - Capture which apps are open, window positions, which monitor
 - [ ] **Restore loadout with one click** - Launch all apps, wait for windows, position them
-- [ ] **Loadouts section in sidebar** - Quick access to saved workspaces
+- [ ] **Loadouts section in palette** - Quick access to saved workspaces
 - [ ] **Named loadouts** - "Deep Work", "Communication", "Morning Setup", etc.
 - [ ] **Loadout includes tile relationships** - If windows were dynamically tiled, restore that relationship
 - [ ] **Auto-save last layout on quit** - Option to restore previous session on launch
@@ -150,16 +148,12 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 
 ---
 
-## 7. UI Views (Sidebar vs Centered Modal)
+## 7. UI Layout Options
 
 ### New Ideas (not in current docs)
-- [ ] **User preference: Sidebar or Centered** - Same functionality, different presentation
-- [ ] **Sidebar** - Docked to screen edge, persistent, mouse-friendly
-- [ ] **Centered modal** - Appears in middle of screen, keyboard-first, dismisses after action
-- [ ] **Same trigger for both** - Mouse to edge or Cmd+Space opens whichever is preferred
 - [ ] **Centered layout: horizontal app arrangement** - Apps left-to-right in recency order
 - [ ] **Windows cascade under each app** - Shows all windows/tabs for each app below its icon
-- [ ] **Consistent keyboard nav** - Arrow keys work in both views, adapted to layout direction
+- [ ] **Consistent keyboard nav** - Arrow keys work adapted to layout direction
 
 ---
 
@@ -177,7 +171,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 ## 9. Search & Navigation
 
 ### New Ideas
-- [ ] **Always-visible search field** - At top of sidebar, type to filter instantly
+- [ ] **Always-visible search field** - At top of palette, type to filter instantly
 - [ ] **Search window titles** - Filter by what's in the window title
 - [ ] **Search app names** - Filter by app
 - [ ] **Search browser tabs** - If browser integration exists, search tab titles too
@@ -213,8 +207,8 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 - [ ] Spring-loaded: hover over app while dragging to open that app
 
 ### New Ideas
-- [ ] **Drop zone always visible** - Persistent section at bottom of sidebar
-- [ ] **Drag file over sidebar, it expands** - Auto-reveal on drag approach
+- [ ] **Drop zone always visible** - Persistent section at bottom of palette
+- [ ] **Drag file over palette, it expands** - Auto-reveal on drag approach
 - [ ] **File count badge** - Show how many files are staged
 - [ ] **Sort staged files** - By name, date added, type
 - [ ] **Quick Look integration** - Spacebar on staged file shows Quick Look preview
@@ -233,7 +227,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 - [ ] Sensitive content detection (optional: don't store passwords)
 
 ### New Ideas
-- [ ] **Always show current clipboard** - Small preview at bottom of sidebar
+- [ ] **Always show current clipboard** - Small preview at bottom of palette
 - [ ] **Expand for full history** - Click to see all clipboard items
 - [ ] **Search clipboard history** - Filter by content
 - [ ] **Clipboard and Drop Zone integration** - Unified "stuff I'm holding" concept
@@ -301,7 +295,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 
 - [ ] **Respect Reduce Motion** - Disable bounces/animations
 - [ ] **Respect Increase Contrast** - Adjust visual styling
-- [ ] **Full VoiceOver support** - All sidebar elements accessible
+- [ ] **Full VoiceOver support** - All palette elements accessible
 - [ ] **Keyboard-only operation** - Everything possible without mouse
 - [ ] **Screen reader announcements** - State changes announced properly
 
@@ -316,15 +310,12 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 - [ ] Set Dock auto-hide delay to maximum (effectively hidden)
 - [ ] Store original Dock settings for restore
 - [ ] Import current Dock apps
-- [ ] Choose sidebar position (left/right)
 - [ ] Tutorial overlay highlighting components
 
 ### Settings
 - [ ] **Auto-add newly installed apps** toggle
 - [ ] **Suggest frequently used apps** toggle
 - [ ] **Restore Dock settings** button
-- [ ] **View style: Sidebar or Centered** preference
-- [ ] **Trigger edge: Left or Right**
 
 ---
 
@@ -336,7 +327,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 - [ ] **Frozen app timeout** - Don't let frozen apps freeze Cider
 - [ ] **Crash recovery** - Restore exact state on relaunch
 - [ ] **Force quit removes immediately** - Don't wait for system, update UI instantly
-- [ ] **Menu bar escape hatch** - "Restore Dock" always accessible even if sidebar broken
+- [ ] **Menu bar escape hatch** - "Restore Dock" always accessible even if Cider broken
 - [ ] **Restore Dock on uninstall** - Put everything back
 
 ---

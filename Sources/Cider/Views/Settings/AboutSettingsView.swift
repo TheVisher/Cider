@@ -22,7 +22,7 @@ struct AboutSettingsView: View {
             }
 
             // Description
-            Text("A unified sidebar for macOS that replaces\nDock, Stage Manager, and Spotlight.")
+            Text("A command palette for macOS that replaces\nDock, Stage Manager, and Spotlight.")
                 .font(.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)

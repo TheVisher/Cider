@@ -21,7 +21,7 @@ func focusWindow(_ window: WindowInfo) { }
 var isExpanded = false
 
 // Constants: lowerCamelCase (not SCREAMING_CASE)
-let defaultSidebarWidth: CGFloat = 280
+let defaultPaletteWidth: CGFloat = 600
 
 // Boolean properties: use is/has/should/can prefix
 var isRunning: Bool
@@ -103,10 +103,10 @@ Keep views small. Extract subviews when:
 
 ```swift
 // ❌ One giant view
-struct SidebarView: View {
+struct CommandPaletteView: View {
     var body: some View {
         VStack {
-            // 200 lines of header code
+            // 200 lines of search code
             // 300 lines of list code
             // 150 lines of footer code
         }
@@ -114,12 +114,12 @@ struct SidebarView: View {
 }
 
 // ✅ Composed from smaller views
-struct SidebarView: View {
+struct CommandPaletteView: View {
     var body: some View {
         VStack(spacing: 0) {
-            SidebarHeader()
-            SidebarContent()
-            SidebarFooter()
+            PaletteSearchBar()
+            PaletteContentArea()
+            PaletteFooterBar()
         }
     }
 }
@@ -170,7 +170,7 @@ withAnimation(.easeInOut) { // Don't do this
 
 ```swift
 // ✅ Use defined tokens
-withAnimation(CiderAnimation.sidebarSlide) {
+withAnimation(CiderAnimation.smooth) {
     // ...
 }
 
@@ -367,7 +367,7 @@ LazyVStack(spacing: Spacing.md) {
 
 **Lazy Loading Pattern:**
 ```swift
-// ✅ Sidebar shows metadata only
+// ✅ Show metadata only in list views
 struct LibraryItemMetadata {
     let id: UUID
     let title: String
@@ -1289,15 +1289,6 @@ extension CompanionPanel {
 }
 ```
 
-### 5. Add to Sidebar
-
-```swift
-// Views/Sidebar/QuickCaptureSection.swift
-Button(action: { openTimerWindow() }) {
-    Label("Timer", systemImage: "timer")
-}
-```
-
 ---
 
 ## Constants & Tokens
@@ -1315,9 +1306,11 @@ enum Spacing {
 }
 
 enum CiderAnimation {
-    static let sidebarSlide = Animation.spring(duration: 0.35, bounce: 0.05)
-    static let hoverMagnify = Animation.spring(duration: 0.2, bounce: 0.1)
-    static let listReorder = Animation.spring(duration: 0.4, bounce: 0.05)
+    static let smooth: Animation = .smooth
+    static let snappy: Animation = .snappy
+    static let bouncy: Animation = .bouncy
+    static let hoverMagnify = Animation.spring(duration: 0.25, bounce: 0.05)
+    static let listReorder = Animation.spring(duration: 0.3, bounce: 0.08)
 }
 
 enum Shadow {

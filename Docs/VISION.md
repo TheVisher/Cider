@@ -26,8 +26,6 @@ A floating acrylic panel that appears on-demand. This is Cider.
 
 The palette never steals focus from your active app. Click a window, and you're there — the palette disappears, your work continues.
 
-> **Legacy sidebar:** A hover-activated edge sidebar still exists behind a setting toggle, but the command palette is the primary interface.
-
 ### Activation
 
 - **Double-tap Option** — Toggle the palette (currently fixed to Option)

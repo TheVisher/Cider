@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Cider")
+            button.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Cider")
         }
 
         let menu = NSMenu()
