@@ -2,7 +2,7 @@
 
 This document captures all feature ideas, enhancements, and polish items for Cider. Features are organized by category and will be prioritized based on which foundational systems they depend on.
 
-> **Legacy note:** This backlog was written during the sidebar era. The sidebar has been removed — all sidebar references should be interpreted as command palette equivalents.
+> **Legacy note:** This backlog was written early in development. Some items may reference outdated UI concepts — interpret everything as command palette features.
 
 ---
 

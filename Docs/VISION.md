@@ -76,7 +76,7 @@ You don't "open Cider." You tap Option twice, see your windows, click one, and y
 
 - **Not Raycast/Alfred.** No workflows or plugins yet. Cider focuses on windows and a small pinned-apps row (dock replacement), not a full launcher.
 - **Not Stage Manager.** No automatic grouping, no "stages." You control where windows go.
-- **Not a sidebar.** The palette appears when you need it and disappears when you don't. It doesn't occupy permanent screen space.
+- **Not a persistent panel.** The palette appears when you need it and disappears when you don't. It doesn't occupy permanent screen space.
 - **Not a notes app.** Companion windows may come later, but the core product is window management.
 
 ---
