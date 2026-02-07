@@ -46,9 +46,9 @@ struct PaletteBackgroundView: View {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 // Border stroke - use .stroke() not .strokeBorder() for proper alignment
-                RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: 1.5)
-                    .padding(0.75)
+                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                    .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
+                    .padding(CiderBorder.innerStrokeInset)
             )
         }
     }
@@ -59,9 +59,9 @@ struct PaletteBackgroundView: View {
         Color(nsColor: NSColor.windowBackgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
-                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: 1.5)
-                    .padding(0.75)
+                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: CiderBorder.innerStrokeWidth)
+                    .padding(CiderBorder.innerStrokeInset)
             )
     }
 }

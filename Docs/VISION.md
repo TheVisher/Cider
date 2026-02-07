@@ -60,11 +60,11 @@ The command palette uses `NSPanel` with `.nonactivatingPanel` style. Click it, u
 
 Swift, SwiftUI, AppKit. No Electron, no web views, no cross-platform frameworks. Cider should feel like it shipped with macOS.
 
-Use system APIs: `NSPanel` for floating windows, `AXUIElement` for window management, `CGWindowListCreate` for window enumeration.
+Use system APIs: `NSPanel` for floating windows, `AXUIElement` for window management, `CGWindowListCopyWindowInfo` for window enumeration.
 
 ### Instant Response
 
-The palette must appear within 100ms of activation. No loading states, no spinners, no "warming up." The window list is continuously updated in the background so it's always ready.
+The palette must appear within 100ms of activation. No loading states, no spinners, no "warming up." The window list refreshes on a 1-second timer while the palette is visible (paused when hidden to save CPU).
 
 ### Context Over Destination
 

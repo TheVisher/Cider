@@ -37,16 +37,19 @@ This roadmap is optimized for a **native macOS command palette experience**. It 
 **Goal:** Add visual polish and window thumbnails.
 
 **Deliverables**
-- Window preview thumbnails (requires Screen Recording permission).
-- Drag to reorder pinned apps.
-- ✅ Keyboard navigation (↑↓←→ to navigate, Tab to jump sections, Enter to activate).
-- App folders in pinned apps row.
-- Search filtering of windows.
+- [ ] Window preview thumbnails (requires Screen Recording permission).
+- [x] Drag to reorder pinned apps.
+- [x] Keyboard navigation (↑↓←→ to navigate, Tab to jump sections, Enter to activate).
+- [x] App folders in pinned apps row.
+- [x] Search filtering of windows and apps.
+- [x] Drag windows between monitors in command palette.
+- [x] Option+Tab window cycling overlay.
 
 **Exit Criteria**
 - Previews load quickly without blocking UI.
-- Keyboard-only navigation is fully functional.
-- App folders expand/collapse smoothly.
+- ✅ Keyboard-only navigation is fully functional.
+- ✅ App folders expand/collapse smoothly.
+- ✅ Search filtering works in real-time.
 
 ---
 
@@ -55,10 +58,10 @@ This roadmap is optimized for a **native macOS command palette experience**. It 
 **Goal:** Advanced window management features.
 
 **Deliverables**
-- Window tiling (left half, right half, quadrants).
-- Drag windows between monitors.
-- Window grouping (manual groups).
-- Split-screen shortcuts.
+- [ ] Window tiling from palette (left half, right half, quadrants).
+- [x] Drag windows between monitors (done in v0.2).
+- [ ] Window grouping (manual groups).
+- [ ] Split-screen shortcuts.
 
 **Exit Criteria**
 - Tiling works reliably on multi-monitor setups.

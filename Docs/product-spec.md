@@ -15,9 +15,9 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 - Click menu bar icon
 
 **Features:**
-- Search bar at top (filtering not yet wired)
-- Pinned apps row — horizontal dock replacement
-- Window list — grouped by app
+- Search bar at top — filters windows and apps in real-time
+- Pinned apps row — horizontal dock replacement with folders
+- Window list — grouped by monitor and app
 - Window actions — close, minimize, move between monitors
 - Auto-hide apps — focus one window, others move aside
 
@@ -34,8 +34,9 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 
 **Features:**
 - Search field at top (focused on open)
-- Type to enter query (filtering not yet wired)
+- Type to filter windows and apps in real-time (case-insensitive substring matching)
 - Clear button to reset search
+- Highlighted text shows matching portions in results
 
 ---
 
@@ -57,7 +58,8 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 - Group apps into collapsible folders
 - Mini 2×2 grid preview of folder contents
 - Click folder to expand popup with all apps
-- Folder creation/persistence is scaffolded but not yet wired in UI
+- Folder creation/editing via settings or context menu
+- Folders persist across launches (stored in UserDefaults)
 
 **Settings:**
 - Add/remove pinned apps
@@ -71,15 +73,18 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 **What it replaces:** Stage Manager, ⌘Tab, App Exposé
 
 **Features:**
-- Grouped by app
+- Grouped by monitor, then by app
 - Collapse/expand apps
 - Window title with app icon
+- Drag windows between monitors
+- Keyboard navigation (↑↓ to navigate, Enter to focus, Esc to dismiss)
 
 **Window Actions (on hover):**
 - Minimize button (−)
 - Close button (×)
 
 **Context Menu:**
+- Focus Window
 - Close Window
 - Minimize Window
 - Move to Monitor → [list of monitors]
@@ -103,8 +108,14 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 
 ### General Tab
 - Launch at login toggle
-- Double-tap Option to open (toggle)
-- Double-tap speed (slider, not yet wired)
+- Activation mode (Double tap / Single tap)
+- Option+Tab window cycling toggle
+- Cycle all screens toggle
+
+### Pinned Apps Tab
+- Add/remove pinned apps
+- Create/edit/delete app folders
+- Import apps from Dock
 
 ### Appearance Tab
 - Text size (Small, Medium, Large)
@@ -113,7 +124,12 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 
 ### Advanced Tab
 - Auto-hide apps toggle (Stage Manager-like behavior)
+- Remember palette state toggle
 - Reset to defaults button
+
+### About Tab
+- App version information
+- Credits
 
 ---
 
@@ -121,10 +137,16 @@ Cider replaces the Dock, Stage Manager, and window switching with a unified comm
 
 ### Activation
 
-**Double-tap detection:**
-- Modifier key: Option (configurable later)
-- Tap twice within 300ms to toggle palette
+**Activation detection:**
+- Modifier key: Option
+- Mode: Double-tap (tap twice within 300ms) or Single-tap (configurable)
 - Both global (other apps focused) and local (Cider focused) event monitoring
+
+### Option+Tab Window Cycling
+- Hold Option, tap Tab to cycle through open windows
+- Release Option to focus the selected window
+- Visual overlay shows the cycling state
+- Configurable to cycle current screen only or all screens
 
 ### Multi-Monitor Support
 
@@ -150,8 +172,13 @@ When enabled:
 
 | Shortcut | Action |
 |----------|--------|
-| Option × 2 | Toggle palette |
+| Option × 2 | Toggle palette (double-tap mode) |
+| Option × 1 | Toggle palette (single-tap mode) |
 | ⎋ | Close palette |
+| ↑ / ↓ | Navigate window list |
+| ← / → | Navigate pinned apps / switch sections |
+| ⏎ | Focus selected window or launch app |
+| ⌥ + Tab | Cycle through windows |
 
 ---
 
@@ -204,6 +231,9 @@ When enabled:
 │  ┌─────────┬──────────┬──────────┐         │
 │  │ Window  │ Monitor  │ DoubleTap│         │
 │  │ Manager │ Manager  │ Detector │         │
+│  ├─────────┼──────────┼──────────┤         │
+│  │OptionTab│ Window   │ App      │         │
+│  │ Detector│ Cycling  │ Launcher │         │
 │  └─────────┴──────────┴──────────┘         │
 ├─────────────────────────────────────────────┤
 │  System APIs                                │
@@ -217,10 +247,11 @@ When enabled:
 ### NSPanel Configuration
 
 ```swift
-class CommandPalettePanel: NSPanel {
+final class CommandPalettePanel: NSPanel {
     init() {
+        let initialFrame = NSRect(x: 0, y: 0, width: 600, height: 500)
         super.init(
-            contentRect: .zero,
+            contentRect: initialFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -234,6 +265,9 @@ class CommandPalettePanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false  // We draw custom shadows
+
+        isMovable = false
+        acceptsMouseMovedEvents = true
     }
 
     override var canBecomeKey: Bool { true }   // Allow text input
@@ -251,6 +285,7 @@ Cider/
 │   ├── CiderApp.swift
 │   ├── AppDelegate.swift
 │   ├── CommandPalettePanel.swift
+│   ├── WindowCyclingPanel.swift
 │   └── SettingsWindow.swift
 ├── Views/
 │   ├── CommandPalette/
@@ -260,16 +295,29 @@ Cider/
 │   │   ├── PaletteAppsRow.swift
 │   │   ├── PaletteContentArea.swift
 │   │   └── PaletteFooterBar.swift
-│   └── Settings/
-│       └── SettingsView.swift
+│   ├── Settings/
+│   │   ├── SettingsView.swift
+│   │   ├── GeneralSettingsView.swift
+│   │   ├── AppearanceSettingsView.swift
+│   │   ├── PinnedAppsSettingsView.swift
+│   │   ├── AdvancedSettingsView.swift
+│   │   └── AboutSettingsView.swift
+│   ├── WindowCycling/
+│   │   └── WindowCyclingOverlayView.swift
+│   └── PinnedAppsView.swift
 ├── ViewModels/
 │   ├── CommandPaletteViewModel.swift
 │   ├── PinnedAppsViewModel.swift
-│   └── WindowListViewModel.swift
+│   ├── WindowListViewModel.swift
+│   └── SettingsViewModel.swift
 ├── Services/
 │   ├── WindowManager.swift
 │   ├── MonitorManager.swift
 │   ├── DoubleTapDetector.swift
+│   ├── OptionTabDetector.swift
+│   ├── WindowCyclingManager.swift
+│   ├── AppLauncher.swift
+│   ├── DockManager.swift
 │   └── WindowPreviewService.swift
 ├── Models/
 │   ├── WindowInfo.swift
@@ -280,6 +328,9 @@ Cider/
     ├── Constants.swift
     ├── AccessibilityHelpers.swift
     ├── ColorExtractor.swift
+    ├── HighlightedText.swift
+    ├── PaletteFocusState.swift
+    ├── Shell.swift
     └── VisualEffectView.swift
 ```
 
@@ -297,9 +348,12 @@ Cider/
 
 ### v0.2 — Polish
 - [ ] Window preview thumbnails
-- [ ] Drag to reorder pinned apps
-- [ ] Window tiling (left half, right half)
-- [ ] Keyboard navigation
+- [x] Drag to reorder pinned apps
+- [x] Keyboard navigation (↑↓←→, Enter, Esc)
+- [x] Search filtering of windows and apps
+- [x] App folders in pinned apps row
+- [x] Drag windows between monitors
+- [x] Option+Tab window cycling
 
 ### v0.3 — Extensions
 - [ ] Quick capture (notes, bookmarks)

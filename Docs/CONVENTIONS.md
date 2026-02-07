@@ -80,7 +80,7 @@ struct NoteWindow: View {
 func saveNote(_ note: Note) -> Result<Note, StorageError>
 
 // Use throws for synchronous operations
-func loadDatabase() throws -> Database
+func loadConfig() throws -> CiderConfig
 
 // Use async/await for async operations
 func fetchThumbnail(for url: URL) async throws -> NSImage
@@ -169,12 +169,17 @@ withAnimation(.easeInOut) { // Don't do this
 **Use animation tokens from Constants.swift:**
 
 ```swift
-// ✅ Use defined tokens
-withAnimation(CiderAnimation.smooth) {
+// ✅ Use SwiftUI animation presets (aliased in CiderAnimation)
+withAnimation(.snappy) {
     // ...
 }
 
-// ❌ Magic numbers
+// ✅ Or use custom springs from CiderAnimation
+withAnimation(CiderAnimation.hoverMagnify) {
+    scale = 1.08
+}
+
+// ❌ Don't create ad-hoc springs
 withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
     // ...
 }
@@ -185,6 +190,12 @@ withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
 ```swift
 @Environment(\.accessibilityReduceMotion) var reduceMotion
 
+// ✅ Standard pattern — disable animation entirely
+withAnimation(reduceMotion ? .none : .snappy) {
+    isExpanded.toggle()
+}
+
+// ✅ Alternative — use linear fade if some motion is needed
 withAnimation(reduceMotion ? CiderAnimation.reduceMotion : CiderAnimation.hoverMagnify) {
     scale = 1.08
 }
@@ -232,59 +243,6 @@ VStack(spacing: 12) {
 ---
 
 ## Performance Guidelines
-
-### Database
-
-**Index Strategy:**
-```swift
-// Create indexes on frequently queried columns
-CREATE INDEX idx_tags ON items(tags);
-CREATE INDEX idx_created_at ON items(created_at);
-CREATE INDEX idx_updated_at ON items(updated_at);
-CREATE INDEX idx_type ON items(type);
-CREATE INDEX idx_context ON items(context);
-
-// Composite index for common filter combinations
-CREATE INDEX idx_type_date ON items(type, created_at);
-```
-
-**Query Patterns:**
-```swift
-// ✅ Always use GRDB background queues for searches
-func searchLibrary(query: String) async -> [LibraryItem] {
-    await dbQueue.read { db in
-        try LibraryItem
-            .filter(Column("title").like("%\(query)%"))
-            .limit(50)
-            .fetchAll(db)
-    }
-}
-
-// ✅ Paginate results
-func loadMore(offset: Int, limit: Int = 50) async -> [LibraryItem] {
-    await dbQueue.read { db in
-        try LibraryItem
-            .order(Column("created_at").desc)
-            .limit(limit, offset: offset)
-            .fetchAll(db)
-    }
-}
-
-// ❌ Don't load everything at once
-let allItems = try LibraryItem.fetchAll(db) // Bad for 10k+ items
-```
-
-**Full-Text Search:**
-```swift
-// Use SQLite FTS5 for content search
-CREATE VIRTUAL TABLE items_fts USING fts5(title, content, tags);
-
-// Index for metadata search (faster)
-SELECT * FROM items WHERE title LIKE '%query%' LIMIT 50;
-
-// FTS5 for full content search (slower but comprehensive)
-SELECT * FROM items_fts WHERE items_fts MATCH 'query' LIMIT 50;
-```
 
 ### SwiftUI Optimization
 
@@ -477,295 +435,32 @@ searchPublisher
 
 ---
 
-## Thumbnail System
+## Window Preview Thumbnails
 
-### Architecture
-
-Beautiful, fast thumbnails are critical for bookmarks, notes with images, and files. The system must:
-1. Generate high-quality thumbnails asynchronously
-2. Cache aggressively (memory + disk)
-3. Display placeholders instantly
-4. Never block the UI
-
-### Thumbnail Service
+Cider uses `WindowPreviewService` for window thumbnail capture via private CoreGraphics API `CGSHWCaptureWindowList`. This avoids the Screen Recording permission prompt that `CGWindowListCreateImage` triggers.
 
 ```swift
-actor ThumbnailService {
-    static let shared = ThumbnailService()
-    
-    private let memoryCache = NSCache<NSURL, NSImage>()
-    private let diskCacheURL: URL
-    private let maxThumbnailSize = CGSize(width: 400, height: 400)
-    
-    init() {
-        diskCacheURL = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Cider/Thumbnails")
-        
-        try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
-        
-        // Configure memory cache
-        memoryCache.countLimit = 100 // 100 thumbnails
-        memoryCache.totalCostLimit = 50 * 1024 * 1024 // 50 MB
-    }
-    
-    func getThumbnail(for source: ThumbnailSource) async -> NSImage? {
-        // 1. Check memory cache
-        if let cached = await checkMemoryCache(source: source) {
-            return cached
-        }
-        
-        // 2. Check disk cache
-        if let cached = await checkDiskCache(source: source) {
-            await storeInMemoryCache(image: cached, source: source)
-            return cached
-        }
-        
-        // 3. Generate thumbnail
-        guard let generated = await generate(source: source) else {
-            return nil
-        }
-        
-        // 4. Store in both caches
-        await storeInMemoryCache(image: generated, source: source)
-        await storeToDisk(image: generated, source: source)
-        
-        return generated
-    }
-    
-    private func generate(source: ThumbnailSource) async -> NSImage? {
-        switch source {
-        case .url(let url):
-            return await generateFromURL(url)
-        case .file(let path):
-            return await generateFromFile(path)
-        case .webArchive(let path):
-            return await generateFromWebArchive(path)
-        }
-    }
-    
-    private func generateFromURL(_ url: URL) async -> NSImage? {
-        // Use LinkPresentation for rich Open Graph thumbnails
-        let provider = LPMetadataProvider()
-        
-        do {
-            let metadata = try await provider.startFetchingMetadata(for: url)
-            
-            // Extract image from metadata
-            if let imageProvider = metadata.imageProvider {
-                return await loadImage(from: imageProvider)
-            }
-            
-            // Fallback: Render the page
-            return await renderWebPage(url: url)
-        } catch {
-            Logger.thumbnails.error("Failed to fetch metadata: \(error)")
-            return nil
-        }
-    }
-    
-    private func generateFromFile(_ path: URL) async -> NSImage? {
-        // Use QLThumbnailGenerator for file thumbnails
-        let request = QLThumbnailGenerator.Request(
-            fileAt: path,
-            size: maxThumbnailSize,
-            scale: NSScreen.main?.backingScaleFactor ?? 2.0,
-            representationTypes: .thumbnail
-        )
-        
-        return await withCheckedContinuation { continuation in
-            QLThumbnailGenerator.shared.generateRepresentations(for: request) { thumbnail, _, error in
-                if let thumbnail = thumbnail {
-                    continuation.resume(returning: thumbnail.nsImage)
-                } else {
-                    Logger.thumbnails.error("Failed to generate thumbnail: \(error?.localizedDescription ?? "unknown")")
-                    continuation.resume(returning: nil)
-                }
-            }
-        }
-    }
-    
-    private func renderWebPage(url: URL) async -> NSImage? {
-        // Last resort: render the page with WebKit
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1200, height: 800))
-                webView.load(URLRequest(url: url))
-                
-                // Wait for load
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    webView.takeSnapshot(with: nil) { image, error in
-                        continuation.resume(returning: image)
-                    }
-                }
-            }
-        }
-    }
-    
-    private func checkMemoryCache(source: ThumbnailSource) async -> NSImage? {
-        let key = source.cacheKey as NSURL
-        return memoryCache.object(forKey: key)
-    }
-    
-    private func storeInMemoryCache(image: NSImage, source: ThumbnailSource) async {
-        let key = source.cacheKey as NSURL
-        memoryCache.setObject(image, forKey: key)
-    }
-    
-    private func checkDiskCache(source: ThumbnailSource) async -> NSImage? {
-        let fileURL = diskCacheURL.appendingPathComponent(source.cacheKey + ".png")
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
-        return NSImage(contentsOf: fileURL)
-    }
-    
-    private func storeToDisk(image: NSImage, source: ThumbnailSource) async {
-        let fileURL = diskCacheURL.appendingPathComponent(source.cacheKey + ".png")
-        
-        guard let tiffData = image.tiffRepresentation,
-              let bitmapRep = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
-            return
-        }
-        
-        try? pngData.write(to: fileURL)
-    }
-}
+// Actual pattern: private Window Server API (WindowPreviewService.swift)
+@_silgen_name("CGSHWCaptureWindowList")
+private func CGSHWCaptureWindowList(
+    _ cid: CGSConnectionID,
+    _ windowIDs: UnsafeMutablePointer<CGWindowID>,
+    _ windowCount: UInt32,
+    _ options: UInt32
+) -> CFArray?
 
-enum ThumbnailSource {
-    case url(URL)
-    case file(URL)
-    case webArchive(URL)
-    
-    var cacheKey: String {
-        switch self {
-        case .url(let url):
-            return url.absoluteString.sha256() // Hash for filename
-        case .file(let url):
-            return url.path.sha256()
-        case .webArchive(let url):
-            return url.path.sha256()
-        }
-    }
+// Capture returns a CFArray of CGImage
+guard let imageArray = CGSHWCaptureWindowList(connectionID, &wid, 1, kCGSCaptureIgnoreGlobalClipShape) else {
+    return nil
 }
 ```
 
-### SwiftUI Integration
-
-```swift
-struct ThumbnailView: View {
-    let source: ThumbnailSource
-    let size: CGSize
-    
-    @State private var image: NSImage?
-    @State private var isLoading = true
-    
-    var body: some View {
-        ZStack {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: size.width, height: size.height)
-                    .clipped()
-                    .cornerRadius(8)
-            } else if isLoading {
-                // Beautiful placeholder
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.ultraThinMaterial)
-                    .frame(width: size.width, height: size.height)
-                    .overlay {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-            } else {
-                // Fallback icon
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.ultraThinMaterial)
-                    .frame(width: size.width, height: size.height)
-                    .overlay {
-                        Image(systemName: iconForSource)
-                            .font(.system(size: size.width * 0.4))
-                            .foregroundStyle(.secondary)
-                    }
-            }
-        }
-        .task {
-            image = await ThumbnailService.shared.getThumbnail(for: source)
-            isLoading = false
-        }
-    }
-    
-    private var iconForSource: String {
-        switch source {
-        case .url: return "link"
-        case .file: return "doc"
-        case .webArchive: return "archivebox"
-        }
-    }
-}
-```
-
-### Preloading Strategy
-
-```swift
-// Preload thumbnails for visible + next 10 items
-class LibraryViewModel: ObservableObject {
-    @Published var items: [LibraryItemMetadata] = []
-    
-    func preloadThumbnails(visibleRange: Range<Int>) {
-        let preloadRange = visibleRange.lowerBound..<min(visibleRange.upperBound + 10, items.count)
-        
-        Task.detached(priority: .low) {
-            for index in preloadRange {
-                let item = items[index]
-                if let thumbnailSource = item.thumbnailSource {
-                    _ = await ThumbnailService.shared.getThumbnail(for: thumbnailSource)
-                }
-            }
-        }
-    }
-}
-
-// Usage in List
-List(items) { item in
-    ItemRow(item: item)
-        .onAppear {
-            if let index = items.firstIndex(where: { $0.id == item.id }) {
-                viewModel.preloadThumbnails(visibleRange: index..<index+1)
-            }
-        }
-}
-```
-
-### Thumbnail Quality Guidelines
-
-```swift
-struct ThumbnailConstants {
-    // Sizes
-    static let grid = CGSize(width: 240, height: 180)      // Grid view
-    static let list = CGSize(width: 80, height: 60)        // List view
-    static let detail = CGSize(width: 400, height: 300)    // Detail view
-    
-    // Quality
-    static let jpegQuality: CGFloat = 0.85
-    static let retinaScale: CGFloat = 2.0
-    
-    // Cache limits
-    static let memoryCacheLimit = 100  // thumbnails
-    static let diskCacheSizeLimit = 200 * 1024 * 1024  // 200 MB
-}
-```
-
-### Thumbnail Performance Tips
-
-1. **Always load async** - Never block the main thread
-2. **Placeholders first** - Show something immediately
-3. **Preload strategically** - Load visible + next 10
-4. **Cache aggressively** - Memory + disk caching
-5. **Downscale early** - Generate at display size, not full resolution
-6. **Use QuickLook** - QLThumbnailGenerator for files (it's fast)
-7. **Use LinkPresentation** - For URLs (fetches Open Graph images)
-8. **Batch operations** - Load multiple thumbnails concurrently
+**Guidelines for window thumbnails:**
+- `WindowPreviewService` is a singleton (`WindowPreviewService.shared`) with `startCapturing`/`stopAllStreams` lifecycle
+- Captures run on a 0.1s interval loop (10fps) while active
+- Black-frame detection rejects mostly-black captures (minimized/hidden windows)
+- Freeze/unfreeze API prevents re-capturing windows mid-animation
+- Show a placeholder (app icon or SF Symbol) when thumbnail is unavailable
 
 ---
 
@@ -835,22 +530,19 @@ Use Instruments to catch:
 ### Service Layer Errors
 
 ```swift
-enum StorageError: LocalizedError {
-    case databaseLocked
+enum ConfigError: LocalizedError {
+    case decodingFailed
     case fileNotFound(path: String)
     case permissionDenied
-    case corruptedData
-    
+
     var errorDescription: String? {
         switch self {
-        case .databaseLocked:
-            return "Database is locked by another process"
+        case .decodingFailed:
+            return "Failed to decode configuration"
         case .fileNotFound(let path):
             return "File not found: \(path)"
         case .permissionDenied:
             return "Permission denied"
-        case .corruptedData:
-            return "Data is corrupted or invalid"
         }
     }
 }
@@ -875,23 +567,18 @@ func loadThumbnail() -> NSImage {
 
 ### Logging
 
+Cider currently uses `NSLog` for logging (prefixed with `[Cider]`):
+
 ```swift
-import os.log
+// ✅ Current pattern
+NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
+NSLog("[Cider] Focusing window: \(window.title)")
 
-extension Logger {
-    static let storage = Logger(subsystem: "com.cider", category: "storage")
-    static let windowManager = Logger(subsystem: "com.cider", category: "windows")
-    static let thumbnails = Logger(subsystem: "com.cider", category: "thumbnails")
-    static let ui = Logger(subsystem: "com.cider", category: "ui")
-}
-
-// Usage
-Logger.storage.info("Saving note: \(note.title)")
-Logger.storage.error("Failed to save note: \(error.localizedDescription)")
-Logger.windowManager.debug("Focusing window: \(window.title)")
+// ⚠️ print() output is lost when launching with &>/dev/null &
+// For debugging, use file-based logging (FileHandle) instead of print()
 
 // Never log sensitive data
-// ❌ Logger.storage.info("User password: \(password)")
+// ❌ NSLog("[Cider] User password: \(password)")
 ```
 
 ---
@@ -998,64 +685,48 @@ VStack(alignment: .leading, spacing: Spacing.sm) {
 
 ## Testing Patterns
 
+> **Note:** No tests exist in the repo yet. When adding tests, use the **Swift Testing** framework (not XCTest):
+
 ### ViewModels
+
+```swift
+import Testing
+
+@Test("Config loads with defaults for missing fields")
+func configLoadsDefaults() throws {
+    let oldJSON = """
+    {"textSize":"medium","paletteSize":"medium"}
+    """
+    UserDefaults.standard.set(oldJSON.data(using: .utf8), forKey: "CiderConfig")
+
+    let config = CiderConfig.load()
+
+    #expect(config.autoHideApps == false)
+    #expect(config.activationMode == .doubleTap)
+    #expect(config.enableOptionTabCycling == true)
+}
+```
+
+### Dependency Injection for Testability
 
 ```swift
 // Make ViewModels testable by injecting dependencies
 class WindowListViewModel: ObservableObject {
-    private let windowManager: WindowManaging
-    
-    init(windowManager: WindowManaging = WindowManager.shared) {
+    private let windowManager: WindowManager
+
+    init(windowManager: WindowManager = WindowManager()) {
         self.windowManager = windowManager
     }
-    
+
     func refresh() {
-        windows = windowManager.getAllWindows()
+        windows = windowManager.fetchWindows()
     }
 }
 
-// Protocol for mocking
+// For mocking, extract a protocol:
 protocol WindowManaging {
-    func getAllWindows() -> [WindowInfo]
-    func focusWindow(_ window: WindowInfo)
-}
-
-// Test
-func testRefresh() {
-    let mockManager = MockWindowManager()
-    let viewModel = WindowListViewModel(windowManager: mockManager)
-    
-    viewModel.refresh()
-    
-    XCTAssertEqual(viewModel.windows.count, 2)
-}
-```
-
-### Services
-
-```swift
-// Test with mock database
-func testSaveNote() {
-    let mockDB = MockDatabase()
-    let service = StorageService(database: mockDB)
-    
-    let note = Note(title: "Test", content: "Content")
-    let result = service.save(note)
-    
-    XCTAssertTrue(result.isSuccess)
-    XCTAssertEqual(mockDB.savedNotes.count, 1)
-}
-```
-
-### Async Testing
-
-```swift
-func testAsyncSearch() async throws {
-    let viewModel = LibraryViewModel()
-    
-    await viewModel.search(query: "test")
-    
-    XCTAssertFalse(viewModel.searchResults.isEmpty)
+    func fetchWindows() -> [WindowInfo]
+    func focus(window: WindowInfo, stageOthers: Bool)
 }
 ```
 
@@ -1080,14 +751,13 @@ struct CiderApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Critical: Set up window, show UI immediately
-        setupWindow()
-        
-        // Defer: Background tasks
+        // Critical: Set up panels, start detectors immediately
+        configureCommandPalette()
+        startDoubleTapDetection()
+
+        // Defer: Non-critical setup
         DispatchQueue.global(qos: .utility).async {
-            self.setupDatabase()
-            self.setupClipboardMonitoring()
-            self.checkForUpdates()
+            self.setupStatusItem()
         }
     }
 }
@@ -1123,41 +793,42 @@ Image("custom-icon") // PDF in Assets.xcassets
 
 ```swift
 // ✅ Use async/await for async operations
-func fetchBookmarkMetadata(url: URL) async throws -> BookmarkMetadata {
-    let (data, _) = try await URLSession.shared.data(from: url)
-    return try JSONDecoder().decode(BookmarkMetadata.self, from: data)
-}
-
-// ✅ Call from view
-.task {
-    do {
-        metadata = try await fetchBookmarkMetadata(url: bookmark.url)
-    } catch {
-        Logger.ui.error("Failed to fetch metadata: \(error)")
+func captureSnapshots(for windowIDs: [CGWindowID]) async {
+    for windowID in windowIDs {
+        if let image = captureWindowPrivate(windowID: windowID) {
+            previews[windowID] = image
+        }
     }
 }
 
+// ✅ Call from view with .task
+.task {
+    await previewService.startCapturing(windowIDs: visibleWindowIDs)
+}
+
 // ❌ Old completion handler style (avoid)
-func fetchBookmarkMetadata(url: URL, completion: @escaping (Result<BookmarkMetadata, Error>) -> Void) {
+func captureSnapshot(windowID: CGWindowID, completion: @escaping (NSImage?) -> Void) {
     // Don't use this pattern anymore
 }
 ```
 
 ### Actor for Shared State
 
+> **Note:** Cider doesn't currently use actors, but this is the recommended pattern for future thread-safe shared state.
+
 ```swift
 // ✅ Use actor for thread-safe state
 actor ClipboardHistory {
-    private var items: [ClipboardItem] = []
-    
-    func add(_ item: ClipboardItem) {
+    private var items: [String] = []
+
+    func add(_ item: String) {
         items.append(item)
     }
-    
-    func getRecent(count: Int) -> [ClipboardItem] {
+
+    func getRecent(count: Int) -> [String] {
         Array(items.suffix(count))
     }
-    
+
     func clear() {
         items.removeAll()
     }
@@ -1172,20 +843,20 @@ let recent = await history.getRecent(count: 10)
 ### TaskGroup for Concurrent Operations
 
 ```swift
-// ✅ Load multiple thumbnails concurrently
-func loadThumbnails(for items: [LibraryItem]) async -> [UUID: NSImage] {
-    await withTaskGroup(of: (UUID, NSImage?).self) { group in
-        for item in items {
+// ✅ Load multiple window previews concurrently
+func captureAll(windowIDs: [CGWindowID]) async -> [CGWindowID: NSImage] {
+    await withTaskGroup(of: (CGWindowID, NSImage?).self) { group in
+        for wid in windowIDs {
             group.addTask {
-                let thumbnail = await ThumbnailService.shared.getThumbnail(for: item.thumbnailSource)
-                return (item.id, thumbnail)
+                let image = await WindowPreviewService.shared.captureWindowPrivate(windowID: wid)
+                return (wid, image)
             }
         }
-        
-        var results: [UUID: NSImage] = [:]
-        for await (id, thumbnail) in group {
-            if let thumbnail {
-                results[id] = thumbnail
+
+        var results: [CGWindowID: NSImage] = [:]
+        for await (wid, image) in group {
+            if let image {
+                results[wid] = image
             }
         }
         return results
@@ -1195,7 +866,9 @@ func loadThumbnails(for items: [LibraryItem]) async -> [UUID: NSImage] {
 
 ---
 
-## Adding a New Companion Window
+## Adding a New Companion Window (Future)
+
+> **Note:** Companion windows are not yet implemented. This section describes the planned pattern for when they are added.
 
 Follow this checklist when adding a new companion window type (e.g., Timer, Checklist):
 
@@ -1298,25 +971,27 @@ All constants should be defined in a central location:
 ```swift
 // Utilities/Constants.swift
 enum Spacing {
+    static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
     static let md: CGFloat = 12
     static let lg: CGFloat = 16
-    static let xl: CGFloat = 24
+    static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24
+    static let xxxl: CGFloat = 32
 }
 
 enum CiderAnimation {
     static let smooth: Animation = .smooth
     static let snappy: Animation = .snappy
     static let bouncy: Animation = .bouncy
+
+    // Reduce Motion: 0.2s opacity crossfade
+    static let reduceMotion: Animation = .linear(duration: 0.2)
+
+    // Custom springs
     static let hoverMagnify = Animation.spring(duration: 0.25, bounce: 0.05)
     static let listReorder = Animation.spring(duration: 0.3, bounce: 0.08)
-}
-
-enum Shadow {
-    static let subtle = Shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-    static let medium = Shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
-    static let strong = Shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
 }
 ```
 
@@ -1333,7 +1008,7 @@ Before submitting code, verify:
 - [ ] All images load asynchronously
 - [ ] Accessibility labels on interactive elements
 - [ ] Reduce Motion respected for animations
-- [ ] Database queries on background thread
+
 - [ ] Error handling with graceful fallbacks
 - [ ] Memory leaks checked (weak self in closures)
 - [ ] Logging added for errors

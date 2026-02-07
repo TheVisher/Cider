@@ -34,14 +34,14 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 ## 1. Dock Replacement
 
 ### Currently Planned
-- [ ] Squircle app icons in grid layout
-- [ ] Running indicator (dot beneath icon)
-- [ ] Drag to reorder pinned apps
-- [ ] Right-click context menu (Remove, Open at Login, Show in Finder, Force Quit)
+- [x] Squircle app icons in grid layout
+- [x] Running indicator (colored bar beneath icon, color extracted from app icon)
+- [x] Drag to reorder pinned apps
+- [x] Right-click context menu (Open, Quit, Show in Finder)
 - [ ] Drop files onto app icon to open with that app
-- [ ] Folder support (group apps into collapsible folders)
+- [x] Folder support (group apps into collapsible folders)
 - [ ] Badge support for notification counts
-- [ ] Import current Dock apps during setup
+- [x] Import current Dock apps during setup
 
 ### New Ideas
 - [ ] **App picker for adding apps** - "Add app" button opens picker showing /Applications with search
@@ -56,17 +56,17 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 ## 2. Window Management (Stage Manager Replacement)
 
 ### Currently Planned
-- [ ] Tree view: Apps → Windows
-- [ ] Collapse/expand individual apps
-- [ ] Click window to focus (hides other apps, like Stage Manager)
+- [x] Tree view: Apps → Windows (grouped by monitor then app)
+- [x] Collapse/expand individual apps
+- [x] Click window to focus (hides other apps when auto-hide enabled)
 - [ ] Live preview thumbnails on hover
-- [ ] Window controls on hover: minimize, close
+- [x] Window controls on hover: minimize, close
 - [ ] Drag windows onto each other to create groups
 - [ ] Window groups show as nested items, can be named
 - [ ] "Minimize All", "Tile All" bulk actions
 
 ### New Ideas
-- [ ] **Close window without focusing** - X button works on background windows directly
+- [x] **Close window without focusing** - X button works on background windows directly
 - [ ] **Minimize all for specific app** - One click to sweep all Finder windows away
 - [ ] **Restore all for specific app** - Bring back all minimized windows for an app
 - [ ] **App-level context menu** - Right-click app header: Quit, Hide, Minimize All, Tile All, New Window
@@ -106,21 +106,21 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 - [ ] **Cmd+Space opens Cider** - Main trigger for full UI
 - [ ] **Cmd+Tab tap = quick swap** - Instantly switch to last window, no UI shown
 - [ ] **Cmd+Tab hold = show UI** - After ~300ms, Cider appears for navigation
-- [ ] **Arrow key navigation** - When Cider is open, arrow keys move through window list
+- [x] **Arrow key navigation** - When Cider is open, arrow keys move through window list
 - [ ] **Horizontal layout for centered view** - Apps arranged left-to-right, windows cascade below each app
-- [ ] **↑↓ cycles windows within app** - In centered view, vertical arrows dive into app's windows
+- [x] **↑↓ cycles windows within app** - Vertical arrows navigate the window list
 - [ ] **←→ cycles between apps** - In centered view, horizontal arrows move between apps
-- [ ] **Enter to focus, Esc to dismiss** - Standard keyboard interaction
+- [x] **Enter to focus, Esc to dismiss** - Standard keyboard interaction
 - [ ] **Release Cmd to confirm** - While holding Cmd+Tab, release to switch to highlighted window
-- [ ] **Type-to-filter** - Just start typing to filter the window list
+- [x] **Type-to-filter** - Just start typing to filter the window list
 
 ---
 
 ## 5. Multi-Monitor
 
 ### Currently Planned
-- [ ] Windows grouped by monitor in palette
-- [ ] Drag windows between monitor groups to move them
+- [x] Windows grouped by monitor in palette
+- [x] Drag windows between monitor groups to move them
 - [ ] Keyboard shortcuts: ⌃⌥← / ⌃⌥→ to send window to left/right monitor
 
 ### New Ideas
@@ -171,12 +171,12 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 ## 9. Search & Navigation
 
 ### New Ideas
-- [ ] **Always-visible search field** - At top of palette, type to filter instantly
-- [ ] **Search window titles** - Filter by what's in the window title
-- [ ] **Search app names** - Filter by app
+- [x] **Always-visible search field** - At top of palette, type to filter instantly
+- [x] **Search window titles** - Filter by what's in the window title
+- [x] **Search app names** - Filter by app
 - [ ] **Search browser tabs** - If browser integration exists, search tab titles too
 - [ ] **Fuzzy matching** - "chr doc" matches "Chrome - Google Docs"
-- [ ] **Search in centered modal** - Just start typing, filters in real-time
+- [x] **Search in centered modal** - Just start typing, filters in real-time
 - [ ] **Recent searches** - Quick access to previous filters
 
 ---
@@ -280,7 +280,7 @@ This document captures all feature ideas, enhancements, and polish items for Cid
 
 ## 15. Keyboard & Power User
 
-- [ ] **Full keyboard navigation** - Arrow keys, Enter to focus, Esc to dismiss, Delete to close
+- [x] **Full keyboard navigation** - Arrow keys, Enter to focus, Esc to dismiss, Delete to close
 - [ ] **Option+click close = close all windows for that app**
 - [ ] **Shift+click = multi-select windows** for bulk operations
 - [ ] **Cmd+click = focus without hiding others** (override Stage Manager behavior)

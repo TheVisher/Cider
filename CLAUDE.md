@@ -46,11 +46,11 @@ The command palette is the main way users interact with Cider:
 - Service layer design
 - Storage model
 
-### For Swift 6.2 / GRDB / Modern Patterns
+### For Swift 6.2 / Concurrency / Modern Patterns
 **Read:** `Docs/TECH_STACK.md`
 - Approachable Concurrency patterns
-- GRDB query syntax
-- Combine vs async/await guidance
+- ObservableObject + Combine state management
+- UserDefaults + Codable storage
 
 ### When Adding a New Feature
 **Read:** `Docs/USER_PREFERENCES.md`
@@ -85,9 +85,13 @@ xxs: 2pt | xs: 4pt | sm: 8pt | md: 12pt | lg: 16pt | xl: 20pt | xxl: 24pt | xxxl
 
 ### Animation Presets
 ```swift
-.smooth       // 0.5s, no bounce - default transitions
-.snappy       // 0.35s, no bounce - menus, popovers
-.bouncy       // 0.5s, 0.25 bounce - UI feedback
+.smooth       // spring(duration: 0.5, bounce: 0) - default transitions
+.snappy       // spring(duration: 0.35, bounce: 0) - menus, popovers
+.bouncy       // spring(duration: 0.5, bounce: 0.25) - UI feedback
+
+// Custom springs (in CiderAnimation enum)
+.hoverMagnify // spring(duration: 0.25, bounce: 0.05) - hover effects
+.listReorder  // spring(duration: 0.3, bounce: 0.08) - drag-and-drop
 ```
 
 ### Corner Radii (always .continuous)
@@ -125,25 +129,29 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 
 ## File Structure
 ```
-Sources/
-├── App/           # Entry point, AppDelegate, Panels
-├── Views/
-│   ├── CommandPalette/  # Main UI (palette, search, content)
-│   ├── Settings/        # Settings window views
-│   └── ...              # Other views
-├── ViewModels/    # ObservableObject view models
-├── Services/      # Business logic (WindowManager, etc.)
-├── Models/        # Data models, CiderConfig
-└── Utilities/     # Constants, extensions, helpers
+Sources/Cider/
+├── App/              # Entry point, AppDelegate, Panels (CommandPalette, Settings, WindowCycling)
+├── Models/           # Data models (AppInfo, WindowInfo, MonitorInfo, CiderConfig)
+├── Services/         # Business logic (WindowManager, DoubleTapDetector, OptionTabDetector, etc.)
+├── Utilities/        # Constants, extensions, helpers (HighlightedText, PaletteFocusState, etc.)
+├── ViewModels/       # ObservableObject view models
+└── Views/
+    ├── CommandPalette/    # Main palette UI (search, apps row, content area, footer)
+    ├── Settings/          # Settings (General, Appearance, PinnedApps, Advanced, About)
+    ├── WindowCycling/     # Option+Tab window cycling overlay
+    └── PinnedAppsView.swift
 ```
 
 ## Command Palette Structure
 ```
 CommandPaletteView
 ├── PaletteBackgroundView      # Acrylic + shadow
-├── PaletteSearchBar           # Search input
-├── PaletteAppsRow             # Pinned apps with running indicators
+├── PaletteSearchBar           # Search input with real-time filtering
+├── PaletteAppsRow             # Pinned apps + folders with drag-to-reorder
+│   └── FolderPopupView        # Folder expansion (inline in PaletteAppsRow.swift)
 ├── PaletteContentArea         # Tabs (Windows, Notes, Bookmarks)
-│   └── PaletteWindowRow       # Individual window with actions
+│   ├── Monitor sections       # Multi-monitor grouping (collapsible)
+│   ├── App group headers      # Collapsible app groups with quit button
+│   └── PaletteWindowRow       # Individual window (inline in PaletteContentArea.swift)
 └── PaletteFooterBar           # Actions + settings button
 ```

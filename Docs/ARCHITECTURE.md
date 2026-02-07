@@ -12,7 +12,7 @@
 | UI Framework | SwiftUI | Modern, declarative, handles animations well |
 | System Integration | AppKit | NSPanel, NSPasteboard, NSWorkspace, AXUIElement |
 | Reactive State | Combine | Native to Apple ecosystem, integrates with SwiftUI |
-| Target | macOS 14+ (Sonoma and later) | Modern APIs, broad compatibility |
+| Target | macOS 26+ | Modern APIs, Swift 6.2 concurrency |
 
 ---
 
@@ -21,62 +21,69 @@
 ```
 Cider/
 ├── App/
-│   ├── CiderApp.swift              # @main entry point
-│   ├── AppDelegate.swift           # NSApplicationDelegate, menu bar setup
-│   ├── CommandPalettePanel.swift   # Command palette NSPanel (non-activating)
-│   └── SettingsWindow.swift        # Settings NSWindow
+│   ├── CiderApp.swift                  # @main entry point
+│   ├── AppDelegate.swift               # NSApplicationDelegate, menu bar setup
+│   ├── CommandPalettePanel.swift       # Command palette NSPanel (non-activating)
+│   ├── WindowCyclingPanel.swift        # Window cycling NSPanel (non-activating)
+│   └── SettingsWindow.swift            # Settings NSPanel
 │
 ├── Views/
 │   ├── CommandPalette/
-│   │   ├── CommandPaletteView.swift      # Root palette composition
-│   │   ├── PaletteBackgroundView.swift   # Acrylic background
-│   │   ├── PaletteSearchBar.swift        # Search field
-│   │   ├── PaletteAppsRow.swift          # Pinned apps horizontal row
-│   │   ├── PaletteContentArea.swift      # Window list content
+│   │   ├── CommandPaletteView.swift      # Root palette composition + key handling
+│   │   ├── PaletteBackgroundView.swift   # Acrylic background + custom shadow
+│   │   ├── PaletteSearchBar.swift        # Search field with real-time filtering
+│   │   ├── PaletteAppsRow.swift          # Pinned apps + folders, drag-to-reorder
+│   │   ├── PaletteContentArea.swift      # Window list, tabs, drag between monitors
 │   │   └── PaletteFooterBar.swift        # Footer with actions
 │   │
 │   ├── Settings/
-│   │   ├── SettingsView.swift            # Main settings layout
-│   │   ├── GeneralSettingsView.swift     # General preferences
-│   │   ├── AppearanceSettingsView.swift  # Theme, sizing
-│   │   └── AdvancedSettingsView.swift    # Power user options
+│   │   ├── SettingsView.swift              # Main settings layout (5 tabs)
+│   │   ├── GeneralSettingsView.swift       # General preferences
+│   │   ├── AppearanceSettingsView.swift    # Theme, sizing
+│   │   ├── PinnedAppsSettingsView.swift    # Pinned apps management
+│   │   ├── AdvancedSettingsView.swift      # Power user options
+│   │   └── AboutSettingsView.swift         # About and credits
 │   │
-│   └── PinnedAppsView.swift              # Pinned apps list
+│   ├── WindowCycling/
+│   │   └── WindowCyclingOverlayView.swift  # Option+Tab window cycling UI
+│   │
+│   └── PinnedAppsView.swift                # Pinned apps list view
 │
 ├── ViewModels/
-│   ├── CommandPaletteViewModel.swift     # Palette state and actions
-│   ├── PinnedAppsViewModel.swift         # Pinned apps state
-│   ├── WindowListViewModel.swift         # Window enumeration, actions
-│   └── SettingsViewModel.swift           # Settings state
+│   ├── CommandPaletteViewModel.swift       # Palette state, search, keyboard nav, folders
+│   ├── PinnedAppsViewModel.swift           # Pinned apps state
+│   ├── WindowListViewModel.swift           # Window enumeration, grouping, actions
+│   └── SettingsViewModel.swift             # Settings state
 │
 ├── Services/
-│   ├── AppLauncher.swift                 # Launch/focus apps
-│   ├── ClipboardManager.swift            # Clipboard history helpers
-│   ├── DockManager.swift                 # Dock integration helpers
-│   ├── WindowManager.swift               # AXUIElement + CGWindowList wrapper
-│   ├── WindowPreviewService.swift        # Window thumbnail capture
-│   ├── MonitorManager.swift              # Multi-monitor detection
-│   ├── DoubleTapDetector.swift           # Modifier key double-tap detection
-│   ├── LauncherEngine.swift              # App launch/search plumbing
-│   └── SystemStatus.swift                # System info helpers
+│   ├── AppLauncher.swift                   # Launch/focus apps
+│   ├── ClipboardManager.swift              # Clipboard history helpers (unused)
+│   ├── DockManager.swift                   # Dock integration helpers
+│   ├── DoubleTapDetector.swift             # Modifier key double-tap/single-tap detection
+│   ├── LauncherEngine.swift                # App launch/search plumbing (unused)
+│   ├── MonitorManager.swift                # Multi-monitor detection
+│   ├── OptionTabDetector.swift             # Option+Tab key combination detector
+│   ├── SystemStatus.swift                  # System info helpers (unused)
+│   ├── WindowCyclingManager.swift          # Window cycling state machine
+│   ├── WindowManager.swift                 # AXUIElement + CGWindowList wrapper
+│   └── WindowPreviewService.swift          # Window thumbnail capture (service only, no UI)
 │
 ├── Models/
-│   ├── WindowInfo.swift                  # Window metadata from AX API
-│   ├── AppInfo.swift                     # App metadata (bundle ID, icon, path)
-│   ├── MonitorInfo.swift                 # Display metadata
-│   └── CiderConfig.swift                 # User preferences (Codable)
+│   ├── WindowInfo.swift                    # Window metadata from AX API
+│   ├── AppInfo.swift                       # App metadata (bundle ID, icon, path)
+│   ├── MonitorInfo.swift                   # Display metadata
+│   └── CiderConfig.swift                   # User preferences (Codable)
 │
 ├── Utilities/
-│   ├── Constants.swift                   # Design tokens, sizes, animations
-│   ├── AccessibilityHelpers.swift        # AXUIElement convenience wrappers
-│   ├── ColorExtractor.swift              # Extract accent color from icons
-│   ├── Shell.swift                       # Shell utilities
-│   └── VisualEffectView.swift            # NSVisualEffectView wrapper
+│   ├── Constants.swift                     # Design tokens, sizes, animations, colors
+│   ├── AccessibilityHelpers.swift          # AXUIElement convenience wrappers
+│   ├── ColorExtractor.swift                # Extract accent color from icons
+│   ├── HighlightedText.swift               # Search result text highlighting
+│   ├── PaletteFocusState.swift             # Focus management state
+│   ├── Shell.swift                         # Shell utilities
+│   └── VisualEffectView.swift              # NSVisualEffectView wrapper
 │
-└── Resources/
-    ├── Assets.xcassets
-    ├── Info.plist
-    └── Cider.entitlements
+└── Resources/                              # Currently empty (SPM handles bundling)
 ```
 
 ---
@@ -88,14 +95,13 @@ Cider/
 The command palette uses `NSPanel` with non-activating behavior:
 
 ```swift
-class CommandPalettePanel: NSPanel {
+final class CommandPalettePanel: NSPanel {
     init() {
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
+        let initialFrame = NSRect(x: 0, y: 0, width: 600, height: 500)
+        super.init(contentRect: initialFrame,
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered,
+                   defer: false)
 
         isFloatingPanel = true
         level = .floating
@@ -105,9 +111,12 @@ class CommandPalettePanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false  // We draw our own shadow
+
+        isMovable = false
+        acceptsMouseMovedEvents = true
     }
 
-    override var canBecomeKey: Bool { true }  // Allow text input
+    override var canBecomeKey: Bool { true }   // Allow text input
     override var canBecomeMain: Bool { false }
 }
 ```
@@ -123,15 +132,24 @@ class CommandPalettePanel: NSPanel {
 SwiftUI views are hosted inside NSPanel via `NSHostingView`:
 
 ```swift
-let panel = CommandPalettePanel()
-let windowListViewModel = WindowListViewModel()
-let pinnedAppsViewModel = PinnedAppsViewModel()
+// From AppDelegate.configureCommandPalette() and updateCommandPaletteSize()
 let viewModel = CommandPaletteViewModel(
     windowListViewModel: windowListViewModel,
     pinnedAppsViewModel: pinnedAppsViewModel
 )
-let contentView = CommandPaletteView(viewModel: viewModel)
-panel.contentView = NSHostingView(rootView: contentView)
+let panel = CommandPalettePanel()
+
+let config = CiderConfig.load()
+let shadowPadding = CommandPaletteDesign.shadowPadding
+let paletteView = CommandPaletteView(viewModel: viewModel,
+                                      paletteSize: config.paletteSize,
+                                      textSize: config.textSize)
+    .padding(.horizontal, shadowPadding)
+    .padding(.top, 20)
+    .padding(.bottom, shadowPadding + 15)
+
+let hostingView = CommandPaletteHostingView(rootView: paletteView)
+panel.contentView = hostingView
 ```
 
 ### 3. Double-Tap Activation
@@ -139,10 +157,18 @@ panel.contentView = NSHostingView(rootView: contentView)
 Cider activates via double-tap of a modifier key (currently: Option):
 
 ```swift
-let detector = DoubleTapDetector(key: .option, maxInterval: 0.3) {
-    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+// From AppDelegate.startDoubleTapDetection()
+let config = CiderConfig.load()
+doubleTapDetector = DoubleTapDetector(
+    key: .option,
+    maxInterval: 0.3,
+    mode: config.activationMode
+) { [weak self] in
+    Task { @MainActor in
+        self?.toggleCommandPalette()
+    }
 }
-detector.start()
+doubleTapDetector?.start()
 ```
 
 ### 4. Services Are UI-Independent
@@ -169,6 +195,10 @@ struct CiderConfig: Codable {
     var showMenuBarIcon: Bool = true
     var textSize: TextSize = .medium
     var paletteSize: PaletteSize = .medium
+    var activationMode: ActivationMode = .doubleTap
+    var enableOptionTabCycling: Bool = true
+    var optionTabCycleAllScreens: Bool = true
+    var rememberPaletteState: Bool = false
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -177,6 +207,10 @@ struct CiderConfig: Codable {
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
         paletteSize = try container.decodeIfPresent(PaletteSize.self, forKey: .paletteSize) ?? .medium
+        activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
+        enableOptionTabCycling = try container.decodeIfPresent(Bool.self, forKey: .enableOptionTabCycling) ?? true
+        optionTabCycleAllScreens = try container.decodeIfPresent(Bool.self, forKey: .optionTabCycleAllScreens) ?? true
+        rememberPaletteState = try container.decodeIfPresent(Bool.self, forKey: .rememberPaletteState) ?? false
     }
 }
 ```
@@ -193,8 +227,8 @@ struct CiderConfig: Codable {
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      DoubleTapDetector                           │
-│  • Detects modifier key double-tap                               │
-│  • Fires callback to AppDelegate                                 │
+│  • Detects modifier key double-tap or single-tap                 │
+│  • Fires closure callback to toggle palette                      │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -227,6 +261,9 @@ struct CiderConfig: Codable {
 │  • AXUIElement for window manipulation (focus, close, move)     │
 │  • Accessibility API for precise control                         │
 └─────────────────────────────────────────────────────────────────┘
+
+**Note:** A parallel flow exists for Option+Tab window cycling:
+OptionTabDetector → AppDelegate → WindowCyclingManager → WindowCyclingPanel
 ```
 
 ---
@@ -258,8 +295,9 @@ let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
 
 **First launch flow:**
 1. Check `AXIsProcessTrusted()`
-2. If false, show explanation and link to System Settings > Accessibility
-3. Without Accessibility, window management is non-functional
+2. If false, call `AXIsProcessTrustedWithOptions()` with prompt flag to trigger system dialog
+3. System shows its own accessibility permission dialog linking to System Settings
+4. Without Accessibility, window management is non-functional
 
 ---
 
@@ -269,17 +307,24 @@ Settings are stored in UserDefaults as JSON:
 
 ```swift
 static func load() -> CiderConfig {
-    guard let data = UserDefaults.standard.data(forKey: "CiderConfig"),
-          let config = try? JSONDecoder().decode(CiderConfig.self, from: data) else {
-        return CiderConfig()
+    guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+        return .default
     }
-    return config
+    do {
+        return try JSONDecoder().decode(CiderConfig.self, from: data)
+    } catch {
+        NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
+        UserDefaults.standard.removeObject(forKey: storageKey)
+        let defaults = CiderConfig.default
+        defaults.save()
+        return defaults
+    }
 }
 
 func save() {
     if let data = try? JSONEncoder().encode(self) {
-        UserDefaults.standard.set(data, forKey: "CiderConfig")
-        UserDefaults.standard.synchronize()  // Immediate save
+        UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
+        UserDefaults.standard.synchronize()  // Force immediate write
     }
 }
 ```
@@ -289,12 +334,14 @@ func save() {
 ## Build & Run
 
 ```bash
-# Open in Xcode
-open Package.swift
-
-# Or build from command line
+# Build from command line
 swift build
-swift run
+
+# Run (redirect output to avoid Terminal noise)
+$(swift build --show-bin-path)/Cider &>/dev/null &
+
+# Kill running instance
+pkill -x Cider
 ```
 
 Grant Accessibility permission when prompted for window management to work.

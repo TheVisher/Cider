@@ -38,13 +38,25 @@ The acrylic palette uses a specific dark color palette:
 | Button backgrounds | `Color.white.opacity(0.05)` | Secondary buttons |
 | Footer background | `Color.white.opacity(0.03)` | Footer area tint |
 
-### 2.2 Semantic Text Colors
+### 2.2 CiderColors (Constants.swift)
 
-| Token | SwiftUI | Usage |
-|-------|---------|-------|
-| Primary | `.primary` / `.white` | Primary labels, titles |
-| Secondary | `.secondary` / `.white.opacity(0.6)` | Subtitles, metadata |
-| Tertiary | `.white.opacity(0.4)` | Placeholder text, hints |
+Centralized color tokens used throughout the command palette:
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `CiderColors.primary` | `Color.primary` | Primary labels, titles |
+| `CiderColors.secondary` | `Color.secondary` | Subtitles, metadata |
+| `CiderColors.tertiary` | `Color(.tertiaryLabelColor)` | Placeholder text, hints |
+| `CiderColors.quaternary` | `Color(.quaternaryLabelColor)` | Disabled text |
+| `CiderColors.separator` | `Color(.separatorColor)` | Dividers |
+| `CiderColors.controlAccent` | `Color(.controlAccentColor)` | System accent |
+| `CiderColors.label` | `Color(.labelColor)` | Standard label |
+| `CiderColors.selectedContent` | `Color(.selectedContentBackgroundColor)` | Selection |
+| `CiderColors.success` | `Color.green` | Confirmations |
+| `CiderColors.destructive` | `Color(.systemRed)` | Destructive actions |
+| `CiderColors.opaqueBackground` | `Color(.windowBackgroundColor)` | Reduce Transparency fallback |
+
+These use system semantic colors that automatically adapt to dark/light mode and high contrast settings. Inside the acrylic palette (which has a dark translucent background), `.primary` renders as white and `.secondary` as white at 60% opacity.
 
 ### 2.3 Brand Color (Cider Amber)
 
@@ -75,10 +87,12 @@ Cider uses **SF Pro** (the macOS system font) exclusively.
 
 | Style | Size | Weight | Usage |
 |-------|------|--------|-------|
+| Search bar | 18pt | Regular | Search field text |
 | Section headers | 11pt | Medium | "Pinned", "Windows" labels |
 | App names | 10pt | Regular | Under pinned app icons |
 | Window titles | 12pt | Regular | Window list items |
 | App group headers | 12pt | Medium | App name in window list |
+| Footer text | 11pt | Regular | Footer bar hints |
 | Metadata | 10pt | Regular | Window counts, secondary info |
 
 ### 3.3 Text Scaling

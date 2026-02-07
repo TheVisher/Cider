@@ -11,7 +11,11 @@ Cider uses `CiderConfig`, a Codable struct stored in UserDefaults as JSON:
 ```swift
 struct CiderConfig: Codable {
     // Behavior
-    var autoHideApps: Bool = false
+    var autoHideApps: Bool = false           // Hide other apps when switching, like Stage Manager
+    var activationMode: ActivationMode = .doubleTap  // Double tap vs single tap
+    var enableOptionTabCycling: Bool = true   // Enable Option+Tab window cycling
+    var optionTabCycleAllScreens: Bool = true // Cycle windows on all screens vs current only
+    var rememberPaletteState: Bool = false    // Keep folders open between palette sessions
 
     // System
     var showMenuBarIcon: Bool = true
@@ -22,12 +26,24 @@ struct CiderConfig: Codable {
 }
 ```
 
-**Not stored in CiderConfig:**  
-`launchAtLogin` is managed via `SMAppService`. The hotkey toggle and double-tap interval are currently UI-only (not yet wired to `DoubleTapDetector`).
+**Not stored in CiderConfig:**
+`launchAtLogin` is managed via `SMAppService`.
 
 ### Enums
 
 ```swift
+enum ActivationMode: String, Codable, CaseIterable {
+    case doubleTap
+    case singleTap
+
+    var displayName: String {
+        switch self {
+        case .doubleTap: return "Double tap"
+        case .singleTap: return "Single tap"
+        }
+    }
+}
+
 enum TextSize: String, Codable, CaseIterable {
     case small, medium, large
 
@@ -36,6 +52,30 @@ enum TextSize: String, Codable, CaseIterable {
         case .small: return 0.85
         case .medium: return 1.0
         case .large: return 1.18
+        }
+    }
+
+    var bodySize: CGFloat {
+        switch self {
+        case .small: return 12
+        case .medium: return 14
+        case .large: return 16
+        }
+    }
+
+    var captionSize: CGFloat {
+        switch self {
+        case .small: return 10
+        case .medium: return 12
+        case .large: return 14
+        }
+    }
+
+    var headlineSize: CGFloat {
+        switch self {
+        case .small: return 14
+        case .medium: return 16
+        case .large: return 18
         }
     }
 
@@ -92,6 +132,10 @@ init(from decoder: Decoder) throws {
     showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
     textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
     paletteSize = try container.decodeIfPresent(PaletteSize.self, forKey: .paletteSize) ?? .medium
+    activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
+    enableOptionTabCycling = try container.decodeIfPresent(Bool.self, forKey: .enableOptionTabCycling) ?? true
+    optionTabCycleAllScreens = try container.decodeIfPresent(Bool.self, forKey: .optionTabCycleAllScreens) ?? true
+    rememberPaletteState = try container.decodeIfPresent(Bool.self, forKey: .rememberPaletteState) ?? false
 }
 ```
 
@@ -104,17 +148,24 @@ This ensures old configs without new fields still load correctly.
 ```swift
 extension CiderConfig {
     static func load() -> CiderConfig {
-        guard let data = UserDefaults.standard.data(forKey: "CiderConfig"),
-              let config = try? JSONDecoder().decode(CiderConfig.self, from: data) else {
-            return CiderConfig()
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            return .default
         }
-        return config
+        do {
+            return try JSONDecoder().decode(CiderConfig.self, from: data)
+        } catch {
+            NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
+            UserDefaults.standard.removeObject(forKey: storageKey)
+            let defaults = CiderConfig.default
+            defaults.save()
+            return defaults
+        }
     }
 
     func save() {
         if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: "CiderConfig")
-            UserDefaults.standard.synchronize()  // Force immediate save
+            UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
+            UserDefaults.standard.synchronize()  // Force immediate write
         }
     }
 }
@@ -124,13 +175,28 @@ extension CiderConfig {
 
 ## Settings UI Structure
 
+Settings window has 5 tabs: General, Pinned Apps, Appearance, Advanced, About.
+
 ### General Tab
+
+| Setting | Type | Default | Notes |
+|---------|------|---------|-------|
+| Launch at login | Toggle | Off | Via SMAppService |
+| Activation mode | Picker | Double tap | Double tap or Single tap |
+| Double-tap speed | Slider | 0.3s | 0.2–0.5s range, shown only in double-tap mode. **UI only — not yet persisted in CiderConfig.** |
+| Option+Tab cycling | Toggle | On | |
+| Cycle all screens | Toggle | On | Shown only when cycling enabled |
+| Remember palette state | Toggle | Off | Keep folders open between sessions |
+
+### Pinned Apps Tab
 
 | Setting | Type | Default |
 |---------|------|---------|
-| Launch at login | Toggle | Off |
-| Double-tap Option to open | Toggle | On |
-| Double-tap speed | Slider | 0.3s (UI-only, not yet wired) |
+| Pinned apps list | Drag-to-reorder list | — |
+| Add app | Button | — |
+| Remove app | Button | — |
+| App folders | Folder management | — |
+| Import from Dock | Button | — |
 
 ### Appearance Tab
 
@@ -142,10 +208,19 @@ extension CiderConfig {
 
 ### Advanced Tab
 
-| Setting | Type | Default |
-|---------|------|---------|
-| Auto-hide apps | Toggle | Off |
-| Reset to defaults | Button | — |
+| Setting | Type | Default | Notes |
+|---------|------|---------|-------|
+| Auto-hide inactive apps | Toggle | Off | Stage Manager-like behavior |
+| Show Cider on | Picker | Screen containing mouse | **UI only — not yet persisted in CiderConfig.** Also: Main screen, Last used screen |
+| Open Accessibility Settings | Button | — | Links to System Settings |
+| Reset All Settings | Button | — | **Not yet wired — action is a no-op.** |
+
+### About Tab
+
+| Content | Type |
+|---------|------|
+| App version | Label |
+| Credits | Label |
 
 ---
 
@@ -159,6 +234,8 @@ Features ship without corresponding settings because:
 3. No checklist for "what settings does this feature need?"
 
 ### The Solution: Feature Settings Protocol
+
+> **Note:** This protocol is aspirational — not yet implemented. Currently, all settings are fields on `CiderConfig` directly. This pattern would formalize the approach for future features.
 
 **Every feature declares its settings upfront:**
 
@@ -326,24 +403,29 @@ struct SomeView: View {
 
 ## Testing Settings
 
+> **Note:** No tests exist in the repo yet. The examples below show the recommended pattern using Swift Testing for when tests are added.
+
 ### Test Setting Persistence
 
 ```swift
-func testSettingsPersist() throws {
-    var config = CiderConfig()
+import Testing
+
+@Test("Settings persist across save/load")
+func settingsPersist() throws {
+    var config = CiderConfig.default
     config.autoHideApps = true
     config.save()
 
     let loaded = CiderConfig.load()
-    XCTAssertTrue(loaded.autoHideApps)
+    #expect(loaded.autoHideApps == true)
 }
 ```
 
 ### Test Backward Compatibility
 
 ```swift
-func testLoadingOldConfig() throws {
-    // Simulate old config without new fields
+@Test("Old config loads with defaults for missing fields")
+func loadingOldConfig() throws {
     let oldConfigJSON = """
     {"textSize":"medium","paletteSize":"medium"}
     """
@@ -351,9 +433,9 @@ func testLoadingOldConfig() throws {
 
     let config = CiderConfig.load()
 
-    // New fields should have defaults
-    XCTAssertEqual(config.autoHideApps, false)
-    XCTAssertEqual(config.activationKey, .option)
+    #expect(config.autoHideApps == false)
+    #expect(config.activationMode == .doubleTap)
+    #expect(config.enableOptionTabCycling == true)
 }
 ```
 
@@ -361,7 +443,7 @@ func testLoadingOldConfig() throws {
 
 ## Benefits
 
-1. **Single source of truth**: All settings in one Codable struct
+1. **Single source of truth**: All persisted settings in one Codable struct (except `launchAtLogin` via SMAppService; `hotkeyDoubleTapInterval` and `showOnScreen` are UI-only and not yet wired into CiderConfig)
 2. **Type-safe**: Enums for constrained values
 3. **Backward compatible**: Custom decoding handles missing fields
 4. **Immediate save**: `synchronize()` ensures persistence

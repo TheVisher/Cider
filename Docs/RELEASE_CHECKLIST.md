@@ -23,12 +23,23 @@
 ## Command Palette QA
 - [ ] Palette never steals focus.
 - [ ] Double-tap activation works reliably.
+- [ ] Single-tap activation works reliably (if configured).
 - [ ] Opens on screen where mouse is located.
-- [ ] Search field renders and auto-focuses (filtering pending).
+- [ ] Search field auto-focuses and filters windows/apps in real-time.
 - [ ] Pinned apps show running indicators.
+- [ ] Pinned apps drag-to-reorder works.
+- [ ] App folders create, expand, collapse correctly.
 - [ ] Window actions work (focus, close, minimize).
 - [ ] Move to monitor works.
+- [ ] Drag windows between monitors works.
+- [ ] Keyboard navigation (↑↓ navigate, Enter focus, Esc dismiss).
 - [ ] Settings persist across launches.
+
+## Option+Tab Window Cycling QA
+- [ ] Hold Option + Tab cycles through windows.
+- [ ] Release Option focuses selected window.
+- [ ] Overlay shows on correct screen.
+- [ ] Respects "cycle all screens" setting.
 
 ## Settings Window QA
 - [ ] Opens on same screen as palette.
