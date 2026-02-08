@@ -224,7 +224,15 @@ struct CommandPaletteView: View {
                         }
                     },
                     onTabChange: { viewModel.activeTab = $0 },
-                    isDragging: viewModel.isDraggingWindow
+                    isDragging: viewModel.isDraggingWindow,
+                    tileGroupDisplaysForScreen: { viewModel.tileGroupDisplays(for: $0) },
+                    savedLayoutsForScreen: { viewModel.savedLayouts(for: $0) },
+                    filteredSavedLayouts: viewModel.filteredSavedLayouts,
+                    onFocusTileGroup: { viewModel.focusTileGroup($0) },
+                    onPinTileGroup: { viewModel.pinTileGroup(groupID: $0) },
+                    onBreakApartTileGroup: { viewModel.breakApartTileGroup(groupID: $0) },
+                    onRestoreLayout: { viewModel.restoreSavedLayout($0) },
+                    onDeleteLayout: { viewModel.deleteSavedLayout($0) }
                 )
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.md)

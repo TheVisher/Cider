@@ -21,6 +21,7 @@ final class CommandPaletteViewModel: ObservableObject {
     @Published var currentDraggedWindowID: CGWindowID?
     /// The PID of the window being dragged — stored at drag start so we don't need to look it up later.
     var currentDraggedWindowPID: pid_t = 0
+    @Published var savedLayouts: [SavedTileLayout] = []
 
     private let windowListViewModel: WindowListViewModel
     private let pinnedAppsViewModel: PinnedAppsViewModel
@@ -52,6 +53,14 @@ final class CommandPaletteViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] monitors in
                 self?.monitors = monitors
+            }
+            .store(in: &cancellables)
+
+        // Sync saved tile layouts
+        SavedTileLayoutManager.shared.$layouts
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] layouts in
+                self?.savedLayouts = layouts
             }
             .store(in: &cancellables)
 
@@ -202,6 +211,89 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Tile Group Actions
+
+    /// Build tile group displays for each monitor from the active DynamicTileManager groups.
+    func tileGroupDisplays(for screenID: UInt32) -> [TileGroupDisplay] {
+        let activeGroups = DynamicTileManager.shared.activeTileGroups()
+        var displays: [TileGroupDisplay] = []
+
+        for group in activeGroups where group.screenID == screenID {
+            let windows: [WindowInfo] = group.windowIDs.compactMap { findWindow(byID: $0) }
+            guard !windows.isEmpty else { continue }
+            // Deduplicate app names while preserving order
+            var seen = Set<String>()
+            let uniqueNames = windows.compactMap { w -> String? in
+                if seen.insert(w.ownerName).inserted { return w.ownerName }
+                return nil
+            }
+            let name = uniqueNames.joined(separator: " + ")
+            displays.append(TileGroupDisplay(
+                id: group.groupID,
+                windows: windows,
+                groupID: group.groupID,
+                screenID: screenID,
+                displayName: name
+            ))
+        }
+
+        return displays
+    }
+
+    /// Set of all window IDs that belong to active tile groups (for filtering from app groups).
+    var tiledWindowIDs: Set<CGWindowID> {
+        let activeGroups = DynamicTileManager.shared.activeTileGroups()
+        var ids = Set<CGWindowID>()
+        for group in activeGroups {
+            for wid in group.windowIDs {
+                ids.insert(wid)
+            }
+        }
+        return ids
+    }
+
+    /// Saved layouts for a specific monitor index.
+    func savedLayouts(for screenIndex: Int) -> [SavedTileLayout] {
+        savedLayouts.filter { $0.targetScreenIndex == screenIndex }
+    }
+
+    func pinTileGroup(groupID: UUID) {
+        SavedTileLayoutManager.shared.saveCurrentGroup(groupID: groupID)
+    }
+
+    func breakApartTileGroup(groupID: UUID) {
+        guard let group = DynamicTileManager.shared.group(for: groupID) else { return }
+        let windowIDs = group.root.allWindowIDs().map(\.0)
+        for wid in windowIDs {
+            DynamicTileManager.shared.removeWindow(wid)
+        }
+    }
+
+    func focusTileGroup(_ display: TileGroupDisplay) {
+        for window in display.windows {
+            windowListViewModel.focus(window: window)
+        }
+        dismiss()
+    }
+
+    func restoreSavedLayout(_ layout: SavedTileLayout) {
+        SavedTileLayoutManager.shared.restoreLayout(layout)
+        dismiss()
+    }
+
+    func deleteSavedLayout(_ layout: SavedTileLayout) {
+        SavedTileLayoutManager.shared.deleteLayout(layout)
+    }
+
+    /// Filter search results for saved layouts.
+    var filteredSavedLayouts: [SavedTileLayout] {
+        guard isSearching else { return savedLayouts }
+        return savedLayouts.filter { layout in
+            layout.name.lowercased().contains(searchQuery) ||
+            layout.root.apps.contains(where: { $0.appName.lowercased().contains(searchQuery) })
+        }
+    }
+
     // MARK: - Folder Actions
 
     func toggleFolder(_ folder: AppFolder) {
@@ -309,14 +401,31 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
-    /// Filtered monitor groups - keeps monitors that have matching windows
+    /// Filtered monitor groups - keeps monitors that have matching windows.
+    /// Tiled windows are pulled out of their app groups.
     var filteredMonitorGroups: [MonitorWindowGroup] {
         let monitorGroups = windowListViewModel.monitorGroups
+        let tiledIDs = tiledWindowIDs
 
-        guard isSearching else { return monitorGroups }
-
-        return monitorGroups.compactMap { monitorGroup -> MonitorWindowGroup? in
+        // Filter out tiled windows from app groups
+        let filtered = monitorGroups.map { monitorGroup -> MonitorWindowGroup in
             let filteredAppGroups = monitorGroup.windowGroups.compactMap { group -> WindowAppGroup? in
+                let untimedWindows = group.windows.filter { !tiledIDs.contains($0.id) }
+                guard !untimedWindows.isEmpty else { return nil }
+                return WindowAppGroup(
+                    id: group.id,
+                    appName: group.appName,
+                    bundleIdentifier: group.bundleIdentifier,
+                    windows: untimedWindows
+                )
+            }
+            return MonitorWindowGroup(monitor: monitorGroup.monitor, windowGroups: filteredAppGroups)
+        }
+
+        guard isSearching else { return filtered }
+
+        return filtered.compactMap { monitorGroup -> MonitorWindowGroup? in
+            let searchedGroups = monitorGroup.windowGroups.compactMap { group -> WindowAppGroup? in
                 let matchingWindows = group.windows.filter { window in
                     window.title.lowercased().contains(searchQuery) ||
                     window.ownerName.lowercased().contains(searchQuery)
@@ -335,8 +444,8 @@ final class CommandPaletteViewModel: ObservableObject {
                 )
             }
 
-            guard !filteredAppGroups.isEmpty else { return nil }
-            return MonitorWindowGroup(monitor: monitorGroup.monitor, windowGroups: filteredAppGroups)
+            guard !searchedGroups.isEmpty else { return nil }
+            return MonitorWindowGroup(monitor: monitorGroup.monitor, windowGroups: searchedGroups)
         }
     }
 

@@ -1,7 +1,21 @@
 import Foundation
 import CoreGraphics
 
-enum SplitOrientation {
+struct SplitLineInfo {
+    let orientation: SplitOrientation
+    /// For horizontal split: x position. For vertical split: y position (NSScreen coords).
+    let position: CGFloat
+    /// Start of the line on the perpendicular axis.
+    let rangeStart: CGFloat
+    /// End of the line on the perpendicular axis.
+    let rangeEnd: CGFloat
+    /// The bounding rect this split divides.
+    let boundingRect: CGRect
+    /// Tree path to this split node: 0 = left child, 1 = right child.
+    let path: [Int]
+}
+
+enum SplitOrientation: String, Codable {
     case horizontal  // left | right
     case vertical    // top / bottom
 }
@@ -181,6 +195,104 @@ indirect enum TileNode {
                 // "left" child = top, "right" child = bottom
                 return left.calculateFrames(in: topRect, gap: gap)
                      + right.calculateFrames(in: bottomRect, gap: gap)
+            }
+        }
+    }
+
+    // MARK: - Split Line Extraction
+
+    /// Extract split line geometry from the tree, mirroring calculateFrames layout.
+    func splitLines(in rect: CGRect, gap: CGFloat, path: [Int] = []) -> [SplitLineInfo] {
+        switch self {
+        case .leaf:
+            return []
+        case .split(let orientation, let ratio, let left, let right):
+            let halfGap = gap / 2
+            var lines: [SplitLineInfo] = []
+
+            switch orientation {
+            case .horizontal:
+                let splitX = rect.minX + rect.width * ratio
+                lines.append(SplitLineInfo(
+                    orientation: .horizontal,
+                    position: splitX,
+                    rangeStart: rect.minY,
+                    rangeEnd: rect.maxY,
+                    boundingRect: rect,
+                    path: path
+                ))
+
+                let leftRect = CGRect(
+                    x: rect.minX, y: rect.minY,
+                    width: rect.width * ratio - halfGap, height: rect.height
+                )
+                let rightRect = CGRect(
+                    x: rect.minX + rect.width * ratio + halfGap, y: rect.minY,
+                    width: rect.width * (1 - ratio) - halfGap, height: rect.height
+                )
+                lines += left.splitLines(in: leftRect, gap: gap, path: path + [0])
+                lines += right.splitLines(in: rightRect, gap: gap, path: path + [1])
+
+            case .vertical:
+                // NSScreen coords: Y increases upward. "top" = higher Y.
+                let splitY = rect.minY + rect.height * (1 - ratio)
+                lines.append(SplitLineInfo(
+                    orientation: .vertical,
+                    position: splitY,
+                    rangeStart: rect.minX,
+                    rangeEnd: rect.maxX,
+                    boundingRect: rect,
+                    path: path
+                ))
+
+                let topRect = CGRect(
+                    x: rect.minX,
+                    y: rect.minY + rect.height * (1 - ratio) + halfGap,
+                    width: rect.width,
+                    height: rect.height * ratio - halfGap
+                )
+                let bottomRect = CGRect(
+                    x: rect.minX, y: rect.minY,
+                    width: rect.width,
+                    height: rect.height * (1 - ratio) - halfGap
+                )
+                lines += left.splitLines(in: topRect, gap: gap, path: path + [0])
+                lines += right.splitLines(in: bottomRect, gap: gap, path: path + [1])
+            }
+
+            return lines
+        }
+    }
+
+    // MARK: - Path-Based Ratio Update
+
+    /// Update the ratio of the split at the given tree path. Clamps to 0.1...0.9.
+    func updateRatioAtPath(_ path: [Int], newRatio: CGFloat) -> TileNode {
+        let clamped = min(0.9, max(0.1, newRatio))
+
+        switch self {
+        case .leaf:
+            return self
+        case .split(let orientation, let ratio, let left, let right):
+            if path.isEmpty {
+                return .split(orientation: orientation, ratio: clamped, left: left, right: right)
+            }
+
+            guard let direction = path.first else { return self }
+            let remaining = Array(path.dropFirst())
+
+            if direction == 0 {
+                return .split(
+                    orientation: orientation, ratio: ratio,
+                    left: left.updateRatioAtPath(remaining, newRatio: newRatio),
+                    right: right
+                )
+            } else {
+                return .split(
+                    orientation: orientation, ratio: ratio,
+                    left: left,
+                    right: right.updateRatioAtPath(remaining, newRatio: newRatio)
+                )
             }
         }
     }

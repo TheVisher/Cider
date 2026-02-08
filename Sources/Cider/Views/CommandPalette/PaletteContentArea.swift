@@ -33,6 +33,15 @@ struct PaletteContentArea: View {
     var onDragStarted: ((CGWindowID?) -> Void)? = nil
     let onTabChange: (PaletteTab) -> Void
     var isDragging: Bool = false  // Tracks whether a drag is in progress (from ViewModel)
+    // Tile group support
+    var tileGroupDisplaysForScreen: ((UInt32) -> [TileGroupDisplay])? = nil
+    var savedLayoutsForScreen: ((Int) -> [SavedTileLayout])? = nil
+    var filteredSavedLayouts: [SavedTileLayout] = []
+    var onFocusTileGroup: ((TileGroupDisplay) -> Void)? = nil
+    var onPinTileGroup: ((UUID) -> Void)? = nil
+    var onBreakApartTileGroup: ((UUID) -> Void)? = nil
+    var onRestoreLayout: ((SavedTileLayout) -> Void)? = nil
+    var onDeleteLayout: ((SavedTileLayout) -> Void)? = nil
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -115,8 +124,10 @@ struct PaletteContentArea: View {
     @ViewBuilder
     private var windowsContent: some View {
         let allWindows = monitorGroups.flatMap { $0.windowGroups.flatMap { $0.windows } }
+        let hasTileContent = monitors.contains(where: { !(tileGroupDisplaysForScreen?($0.id) ?? []).isEmpty })
+        let hasSavedContent = !filteredSavedLayouts.isEmpty
 
-        if allWindows.isEmpty {
+        if allWindows.isEmpty && !hasTileContent && !hasSavedContent {
             if isSearching {
                 emptyState("No matching windows", icon: "magnifyingglass")
             } else {
@@ -143,6 +154,7 @@ struct PaletteContentArea: View {
     @ViewBuilder
     private func monitorSection(for monitorGroup: MonitorWindowGroup) -> some View {
         let displayID = monitorGroup.monitor.id
+        let screenIndex = monitors.firstIndex(where: { $0.id == displayID }) ?? 0
         PaletteMonitorSection(
             monitorGroup: monitorGroup,
             monitors: monitors,
@@ -153,6 +165,8 @@ struct PaletteContentArea: View {
             focusedContentIndex: focusedContentIndex,
             flatIndexForWindow: flatIndex,
             appIconProvider: appIcon,
+            tileGroupDisplays: tileGroupDisplaysForScreen?(displayID) ?? [],
+            savedLayouts: savedLayoutsForScreen?(screenIndex) ?? [],
             draggedWindow: $draggedWindow,
             allDraggedIDs: $allDraggedIDs,
             onWindowClick: onWindowClick,
@@ -163,6 +177,11 @@ struct PaletteContentArea: View {
             onMoveWindowByID: onMoveWindowByID,
             onTileWindow: onTileWindow,
             onDragStartedCallback: onDragStarted,
+            onFocusTileGroup: onFocusTileGroup,
+            onPinTileGroup: onPinTileGroup,
+            onBreakApartTileGroup: onBreakApartTileGroup,
+            onRestoreLayout: onRestoreLayout,
+            onDeleteLayout: onDeleteLayout,
             onToggleMonitor: {
                 withAnimation(reduceMotion ? .none : .snappy) {
                     if collapsedMonitorIDs.contains(displayID) {
@@ -184,9 +203,38 @@ struct PaletteContentArea: View {
         )
     }
 
+    /// All tile group displays across all monitors (for flat view).
+    private var allTileGroupDisplays: [TileGroupDisplay] {
+        monitors.flatMap { tileGroupDisplaysForScreen?($0.id) ?? [] }
+    }
+
     @ViewBuilder
     private var flatWindowsContent: some View {
         LazyVStack(alignment: .leading, spacing: Spacing.md) {
+            // Active tile groups
+            ForEach(allTileGroupDisplays) { display in
+                TileGroupRow(
+                    display: display,
+                    monitors: monitors,
+                    searchText: searchText,
+                    onFocusAll: { onFocusTileGroup?(display) },
+                    onPinLayout: { onPinTileGroup?(display.groupID) },
+                    onBreakApart: { onBreakApartTileGroup?(display.groupID) }
+                )
+            }
+
+            // Saved layouts
+            ForEach(filteredSavedLayouts) { layout in
+                SavedLayoutRow(
+                    layout: layout,
+                    monitors: monitors,
+                    searchText: searchText,
+                    onRestore: { onRestoreLayout?(layout) },
+                    onDelete: { onDeleteLayout?(layout) }
+                )
+            }
+
+            // Regular app groups
             ForEach(flatWindowGroups) { group in
                 let isAppCollapsed = !isSearching && group.windows.count >= 2 && collapsedAppGroupIDs.contains(group.id)
                 let canCollapse = !isSearching && group.windows.count >= 2
@@ -547,6 +595,8 @@ struct PaletteMonitorSection: View {
     let focusedContentIndex: Int?
     let flatIndexForWindow: (WindowInfo) -> Int?
     let appIconProvider: (WindowAppGroup) -> NSImage
+    var tileGroupDisplays: [TileGroupDisplay] = []
+    var savedLayouts: [SavedTileLayout] = []
     @Binding var draggedWindow: WindowInfo?
     @Binding var allDraggedIDs: Set<CGWindowID>
     let onWindowClick: (WindowInfo) -> Void
@@ -557,6 +607,11 @@ struct PaletteMonitorSection: View {
     let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void
     let onTileWindow: (WindowInfo, TilePosition) -> Void
     var onDragStartedCallback: ((CGWindowID?) -> Void)? = nil
+    var onFocusTileGroup: ((TileGroupDisplay) -> Void)? = nil
+    var onPinTileGroup: ((UUID) -> Void)? = nil
+    var onBreakApartTileGroup: ((UUID) -> Void)? = nil
+    var onRestoreLayout: ((SavedTileLayout) -> Void)? = nil
+    var onDeleteLayout: ((SavedTileLayout) -> Void)? = nil
     var onToggleMonitor: (() -> Void)? = nil
     var onToggleAppGroup: ((String) -> Void)? = nil
     @Environment(\.textScale) private var textScale
@@ -603,6 +658,32 @@ struct PaletteMonitorSection: View {
 
             // Window rows grouped by app (hidden when monitor is collapsed)
             if !isMonitorCollapsed {
+                // Active tile groups (above app groups)
+                ForEach(tileGroupDisplays) { display in
+                    TileGroupRow(
+                        display: display,
+                        monitors: monitors,
+                        searchText: searchText,
+                        onFocusAll: { onFocusTileGroup?(display) },
+                        onPinLayout: { onPinTileGroup?(display.groupID) },
+                        onBreakApart: { onBreakApartTileGroup?(display.groupID) }
+                    )
+                    .padding(.leading, Spacing.sm)
+                }
+
+                // Saved layouts
+                ForEach(savedLayouts) { layout in
+                    SavedLayoutRow(
+                        layout: layout,
+                        monitors: monitors,
+                        searchText: searchText,
+                        onRestore: { onRestoreLayout?(layout) },
+                        onDelete: { onDeleteLayout?(layout) }
+                    )
+                    .padding(.leading, Spacing.sm)
+                }
+
+                // Regular app groups
                 ForEach(monitorGroup.windowGroups) { group in
                     let isGroupDragged = !group.windows.isEmpty && group.windows.allSatisfy { allDraggedIDs.contains($0.id) }
                     let canCollapseApp = group.windows.count >= 2

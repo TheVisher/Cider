@@ -220,6 +220,36 @@ final class DynamicTileManager {
         windowToGroup[windowID]
     }
 
+    /// Get a TileGroup by its UUID.
+    func group(for groupID: UUID) -> TileGroup? {
+        groups[groupID]
+    }
+
+    /// Get all active tile groups with their window IDs for palette display.
+    func activeTileGroups() -> [(groupID: UUID, screenID: UInt32, windowIDs: [CGWindowID])] {
+        groups.map { (groupID: $0.key, screenID: $0.value.screenID, windowIDs: $0.value.root.allWindowIDs().map(\.0)) }
+    }
+
+    /// Register a pre-built TileGroup from a saved layout restore.
+    func registerRestoredGroup(_ group: TileGroup) {
+        // Remove windows from any existing groups first
+        for (windowID, _) in group.root.allWindowIDs() {
+            removeWindow(windowID)
+        }
+
+        // Register in groups dict + windowToGroup map
+        groups[group.id] = group
+        for (windowID, pid) in group.root.allWindowIDs() {
+            windowToGroup[windowID] = group.id
+            startObserving(windowID: windowID, pid: pid)
+        }
+
+        // Apply frames
+        applyGroupFrames(group)
+
+        NotificationCenter.default.post(name: .ciderDynamicTileGroupChanged, object: nil)
+    }
+
     /// Get split lines for all groups, used by TileHandleManager.
     func groupSplitLines() -> [(groupID: UUID, screenID: UInt32, lines: [SplitLineInfo])] {
         groups.map { (groupID: $0.key, screenID: $0.value.screenID, lines: $0.value.splitLines()) }
