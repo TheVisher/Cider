@@ -62,7 +62,7 @@ final class DynamicTileManager {
 
     /// Tile a window to a zone position, automatically creating/extending tile groups.
     /// This is the unified entry point for all tile zone drops.
-    func tileToZone(windowID: CGWindowID, pid: pid_t, position: TilePosition, monitor: MonitorInfo) {
+    func tileToZone(windowID: CGWindowID, pid: pid_t, position: TilePosition, monitor: MonitorInfo, dropPoint: CGPoint? = nil) {
         // Remove from any existing group first
         removeWindow(windowID)
 
@@ -89,8 +89,21 @@ final class DynamicTileManager {
             return
         }
 
-        // For halves, auto-pair with the topmost window on screen
+        // For halves, try the window currently under cursor first, then fallback to topmost.
         if TilePosition.halves.contains(position) {
+            if let dropPoint,
+               let (targetID, targetPID) = findWindowAtPointOnScreen(
+                point: dropPoint, monitor: monitor, excludeWindowID: windowID
+               ) {
+                let side = splitSideForPosition(position)
+                createGroup(
+                    draggedWindowID: windowID, draggedPID: pid,
+                    targetWindowID: targetID, targetPID: targetPID,
+                    side: side, screenID: monitor.id
+                )
+                return
+            }
+
             if let (topmostID, topmostPID) = findTopmostWindowOnScreen(monitor: monitor, excludeWindowID: windowID) {
                 let side = splitSideForPosition(position)
                 createGroup(
@@ -252,7 +265,20 @@ final class DynamicTileManager {
 
     /// Get split lines for all groups, used by TileHandleManager.
     func groupSplitLines() -> [(groupID: UUID, screenID: UInt32, lines: [SplitLineInfo])] {
-        groups.map { (groupID: $0.key, screenID: $0.value.screenID, lines: $0.value.splitLines()) }
+        let sortedGroupIDs = groups.keys.sorted { $0.uuidString < $1.uuidString }
+        return sortedGroupIDs.compactMap { id in
+            guard let group = groups[id] else { return nil }
+            let sortedLines = group.splitLines().sorted { lhs, rhs in
+                if lhs.path != rhs.path { return lhs.path.lexicographicallyPrecedes(rhs.path) }
+                if lhs.orientation != rhs.orientation {
+                    return lhs.orientation == .horizontal && rhs.orientation == .vertical
+                }
+                if lhs.position != rhs.position { return lhs.position < rhs.position }
+                if lhs.rangeStart != rhs.rangeStart { return lhs.rangeStart < rhs.rangeStart }
+                return lhs.rangeEnd < rhs.rangeEnd
+            }
+            return (groupID: id, screenID: group.screenID, lines: sortedLines)
+        }
     }
 
     /// Update a split ratio by tree path in a specific group, then reapply frames.
@@ -369,6 +395,76 @@ final class DynamicTileManager {
         groups.first(where: { $0.value.screenID == screenID })?.key
     }
 
+    /// Convert an NSScreen global point (bottom-left origin) to CGWindowList point space (top-left origin).
+    private func convertNSPointToWindowList(_ point: CGPoint) -> CGPoint {
+        AccessibilityHelpers.convertToAXCoordinates(point, windowHeight: 0)
+    }
+
+    /// Parse kCGWindowBounds from a CGWindowList dictionary.
+    private func windowBounds(from info: [String: Any]) -> CGRect? {
+        guard let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+              let xRaw = boundsDict["X"],
+              let yRaw = boundsDict["Y"],
+              let wRaw = boundsDict["Width"],
+              let hRaw = boundsDict["Height"] else { return nil }
+
+        func toCGFloat(_ value: Any) -> CGFloat? {
+            if let v = value as? CGFloat { return v }
+            if let v = value as? Double { return v }
+            if let v = value as? Int { return CGFloat(v) }
+            if let v = value as? NSNumber { return CGFloat(truncating: v) }
+            return nil
+        }
+
+        guard let x = toCGFloat(xRaw),
+              let y = toCGFloat(yRaw),
+              let w = toCGFloat(wRaw),
+              let h = toCGFloat(hRaw) else { return nil }
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    private func isFilteredWindowOwner(_ ownerName: String) -> Bool {
+        [
+            "Window Server", "WindowManager", "Dock", "SystemUIServer",
+            "Control Center", "Notification Center", "Spotlight",
+            "universalAccessAuthWarn", "TextInputMenuAgent", "TextInputSwitcher"
+        ].contains(ownerName)
+    }
+
+    /// Find the topmost regular window on a monitor at a specific point.
+    private func findWindowAtPointOnScreen(
+        point: CGPoint,
+        monitor: MonitorInfo,
+        excludeWindowID: CGWindowID
+    ) -> (CGWindowID, pid_t)? {
+        let ownBundle = Bundle.main.bundleIdentifier
+        let queryPoint = convertNSPointToWindowList(point)
+        let cgOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(cgOptions, kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+
+        for info in infoList {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            guard let wid = info[kCGWindowNumber as String] as? CGWindowID else { continue }
+            guard let ownerName = info[kCGWindowOwnerName as String] as? String else { continue }
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
+            guard let bounds = windowBounds(from: info) else { continue }
+
+            if wid == excludeWindowID { continue }
+            if isFilteredWindowOwner(ownerName) { continue }
+            if let running = NSRunningApplication(processIdentifier: ownerPID),
+               running.bundleIdentifier == ownBundle { continue }
+            if bounds.width < 50 || bounds.height < 50 { continue }
+            if let alpha = info[kCGWindowAlpha as String] as? CGFloat, alpha < 0.1 { continue }
+            if !bounds.contains(queryPoint) { continue }
+            if MonitorManager.shared.screenForWindow(bounds)?.id != monitor.id { continue }
+
+            return (wid, ownerPID)
+        }
+        return nil
+    }
+
     /// Find the topmost regular window on a monitor (excluding our own panels and the dragged window).
     private func findTopmostWindowOnScreen(monitor: MonitorInfo, excludeWindowID: CGWindowID) -> (CGWindowID, pid_t)? {
         let ownBundle = Bundle.main.bundleIdentifier
@@ -377,30 +473,20 @@ final class DynamicTileManager {
             return nil
         }
 
-        let filteredOwners: Set<String> = [
-            "Window Server", "WindowManager", "Dock", "SystemUIServer",
-            "Control Center", "Notification Center", "Spotlight",
-            "universalAccessAuthWarn", "TextInputMenuAgent", "TextInputSwitcher"
-        ]
-
         for info in infoList {
             guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
             guard let wid = info[kCGWindowNumber as String] as? CGWindowID else { continue }
             guard let ownerName = info[kCGWindowOwnerName as String] as? String else { continue }
             guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
+            guard let bounds = windowBounds(from: info) else { continue }
 
             if wid == excludeWindowID { continue }
-            if filteredOwners.contains(ownerName) { continue }
+            if isFilteredWindowOwner(ownerName) { continue }
             if let running = NSRunningApplication(processIdentifier: ownerPID),
                running.bundleIdentifier == ownBundle { continue }
-
-            guard let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
-                  let w = boundsDict["Width"], let h = boundsDict["Height"],
-                  let x = boundsDict["X"], let y = boundsDict["Y"] else { continue }
-            if w < 50 || h < 50 { continue }
+            if bounds.width < 50 || bounds.height < 50 { continue }
             if let alpha = info[kCGWindowAlpha as String] as? CGFloat, alpha < 0.1 { continue }
 
-            let bounds = CGRect(x: x, y: y, width: w, height: h)
             if MonitorManager.shared.screenForWindow(bounds)?.id == monitor.id {
                 return (wid, ownerPID)
             }
@@ -530,8 +616,9 @@ final class DynamicTileManager {
 
             // Get the window ID from the AX element
             if let windowID = AccessibilityHelpers.windowID(of: element) {
+                let notif = notification as String
                 Task { @MainActor in
-                    manager.scheduleResizeHandling(windowID: windowID)
+                    manager.handleAXNotification(windowID: windowID, notification: notif)
                 }
             }
         }, &observerRef)
@@ -552,6 +639,9 @@ final class DynamicTileManager {
             if AccessibilityHelpers.windowID(of: axWindow) == windowID {
                 AXObserverAddNotification(observer, axWindow, kAXWindowResizedNotification as CFString, refcon)
                 AXObserverAddNotification(observer, axWindow, kAXWindowMovedNotification as CFString, refcon)
+                AXObserverAddNotification(observer, axWindow, kAXWindowMiniaturizedNotification as CFString, refcon)
+                AXObserverAddNotification(observer, axWindow, kAXWindowDeminiaturizedNotification as CFString, refcon)
+                AXObserverAddNotification(observer, axWindow, kAXUIElementDestroyedNotification as CFString, refcon)
                 break
             }
         }
@@ -567,6 +657,9 @@ final class DynamicTileManager {
             if AccessibilityHelpers.windowID(of: axWindow) == windowID {
                 AXObserverAddNotification(observer, axWindow, kAXWindowResizedNotification as CFString, refcon)
                 AXObserverAddNotification(observer, axWindow, kAXWindowMovedNotification as CFString, refcon)
+                AXObserverAddNotification(observer, axWindow, kAXWindowMiniaturizedNotification as CFString, refcon)
+                AXObserverAddNotification(observer, axWindow, kAXWindowDeminiaturizedNotification as CFString, refcon)
+                AXObserverAddNotification(observer, axWindow, kAXUIElementDestroyedNotification as CFString, refcon)
                 break
             }
         }
@@ -581,6 +674,9 @@ final class DynamicTileManager {
             if AccessibilityHelpers.windowID(of: axWindow) == windowID {
                 AXObserverRemoveNotification(entry.observer, axWindow, kAXWindowResizedNotification as CFString)
                 AXObserverRemoveNotification(entry.observer, axWindow, kAXWindowMovedNotification as CFString)
+                AXObserverRemoveNotification(entry.observer, axWindow, kAXWindowMiniaturizedNotification as CFString)
+                AXObserverRemoveNotification(entry.observer, axWindow, kAXWindowDeminiaturizedNotification as CFString)
+                AXObserverRemoveNotification(entry.observer, axWindow, kAXUIElementDestroyedNotification as CFString)
                 break
             }
         }
@@ -600,6 +696,21 @@ final class DynamicTileManager {
     }
 
     // MARK: - Resize Handling
+
+    private func handleAXNotification(windowID: CGWindowID, notification: String) {
+        let miniaturized = String(kAXWindowMiniaturizedNotification)
+        let deminiaturized = String(kAXWindowDeminiaturizedNotification)
+        let destroyed = String(kAXUIElementDestroyedNotification)
+
+        switch notification {
+        case miniaturized, destroyed:
+            removeWindow(windowID)
+        case deminiaturized:
+            scheduleResizeHandling(windowID: windowID)
+        default:
+            scheduleResizeHandling(windowID: windowID)
+        }
+    }
 
     private func scheduleResizeHandling(windowID: CGWindowID) {
         // Skip entirely if handle drag is in progress
@@ -693,6 +804,7 @@ final class DynamicTileManager {
         // Mark all windows as "currently tiling" to suppress AX feedback
         let windowIDs = Set(frames.map { $0.0 })
         currentlyTilingWindowIDs.formUnion(windowIDs)
+        var missingWindowIDs: [CGWindowID] = []
 
         let windowManager = WindowManager()
 
@@ -702,6 +814,7 @@ final class DynamicTileManager {
             guard let axWindow = axWindows.first(where: { AccessibilityHelpers.windowID(of: $0) == windowID }) else {
                 let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?"
                 debugLog("[ApplyFrames] MISS windowID=\(windowID) pid=\(pid) app=\(appName)")
+                missingWindowIDs.append(windowID)
                 continue
             }
 
@@ -718,6 +831,14 @@ final class DynamicTileManager {
             if let actualPos = AccessibilityHelpers.getWindowPosition(axWindow),
                let actualSize = AccessibilityHelpers.getWindowSize(axWindow) {
                 expectedFrames[windowID] = CGRect(origin: actualPos, size: actualSize)
+            }
+        }
+
+        // Prune stale windows from groups if we can no longer resolve their AX element.
+        if !missingWindowIDs.isEmpty {
+            currentlyTilingWindowIDs.subtract(Set(missingWindowIDs))
+            for missingID in missingWindowIDs {
+                removeWindow(missingID)
             }
         }
 

@@ -47,6 +47,12 @@ final class TileHandleManager {
 
     // MARK: - Handle Computation
 
+    private func handleKey(for info: HandleInfo) -> String {
+        let hPath = info.horizontalSplit?.path.map(String.init).joined(separator: ".") ?? "-"
+        let vPath = info.verticalSplit?.path.map(String.init).joined(separator: ".") ?? "-"
+        return "\(info.groupID.uuidString)|h:\(hPath)|v:\(vPath)"
+    }
+
     private func recalculateHandles() {
         removeAllHandles()
         guard isVisible else { return }
@@ -80,15 +86,22 @@ final class TileHandleManager {
             allHandleInfos.append(contentsOf: handles)
         }
 
-        // Update positions 1:1 (handle count doesn't change during drag)
-        for (i, newInfo) in allHandleInfos.enumerated() where i < handlePanels.count {
-            let panel = handlePanels[i].panel
+        // Update by stable key instead of array index so panel ordering shifts don't
+        // cause the wrong handle to move during drag.
+        let infoByKey = Dictionary(uniqueKeysWithValues: allHandleInfos.map { (handleKey(for: $0), $0) })
+        for i in handlePanels.indices {
+            let existing = handlePanels[i]
+            let key = handleKey(for: existing.info)
+            guard let newInfo = infoByKey[key] else { continue }
+
+            let panel = existing.panel
             let size = panelSize(for: newInfo)
             let origin = NSPoint(
                 x: newInfo.point.x - size.width / 2,
                 y: newInfo.point.y - size.height / 2
             )
             panel.setFrame(NSRect(origin: origin, size: size), display: true)
+            handlePanels[i] = (panel: existing.panel, view: existing.view, info: newInfo)
         }
     }
 
@@ -226,9 +239,17 @@ final class TileHandleManager {
         DynamicTileManager.shared.beginHandleDrag(groupID: info.groupID)
     }
 
+    private func currentSplitLine(groupID: UUID, match original: SplitLineInfo) -> SplitLineInfo? {
+        guard let groupLines = DynamicTileManager.shared.groupSplitLines().first(where: { $0.groupID == groupID })?.lines else {
+            return nil
+        }
+        return groupLines.first(where: { $0.orientation == original.orientation && $0.path == original.path })
+    }
+
     private func handleDrag(screenPoint: NSPoint, info: HandleInfo) {
         // Update horizontal split ratio (drag left/right) — throttled
-        if let hSplit = info.horizontalSplit {
+        if let baseHSplit = info.horizontalSplit {
+            let hSplit = currentSplitLine(groupID: info.groupID, match: baseHSplit) ?? baseHSplit
             let rect = hSplit.boundingRect
             guard rect.width > 0 else { return }
             let newRatio = (screenPoint.x - rect.minX) / rect.width
@@ -240,7 +261,8 @@ final class TileHandleManager {
         }
 
         // Update vertical split ratio (drag up/down) — throttled
-        if let vSplit = info.verticalSplit {
+        if let baseVSplit = info.verticalSplit {
+            let vSplit = currentSplitLine(groupID: info.groupID, match: baseVSplit) ?? baseVSplit
             let rect = vSplit.boundingRect
             guard rect.height > 0 else { return }
             let newRatio = (rect.maxY - screenPoint.y) / rect.height

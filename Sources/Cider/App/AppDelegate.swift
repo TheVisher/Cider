@@ -60,6 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Initialize DynamicTileManager (triggers screen change subscription)
         _ = DynamicTileManager.shared
+
+        // Initialize TileHandleManager (observes group changes)
+        _ = TileHandleManager.shared
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -239,6 +242,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showCommandPalette() {
         guard let panel = commandPalettePanel else { return }
 
+        TileHandleManager.shared.setVisible(false)
+
         commandPaletteViewModel?.show()
         panel.centerOnScreen()
         panel.makeKeyAndOrderFront(nil)
@@ -262,6 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel?.orderOut(nil)
         commandPaletteViewModel?.isVisible = false
         hideTileZoneOverlays()
+        TileHandleManager.shared.setVisible(true)
 
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
@@ -408,15 +414,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let overlayView = TileZoneOverlayView(
                 monitor: monitor,
-                onTile: { [weak self] windowID, position in
-                    guard let self else { return }
-                    // Use PID stored at drag start (reliable) — fall back to CGWindowList lookup
-                    var pid = self.commandPaletteViewModel?.currentDraggedWindowPID ?? 0
-                    if pid == 0 { pid = self.findPIDForWindow(windowID) }
+                onTile: { [weak self] windowIDs, position in
+                    guard let self, !windowIDs.isEmpty else { return }
 
-                    DynamicTileManager.shared.tileToZone(
-                        windowID: windowID, pid: pid, position: position, monitor: monitor
-                    )
+                    let initialDropPoint = NSEvent.mouseLocation
+                    let primaryDraggedID = self.commandPaletteViewModel?.currentDraggedWindowID
+                    let primaryDraggedPID = self.commandPaletteViewModel?.currentDraggedWindowPID ?? 0
+
+                    for (index, windowID) in windowIDs.enumerated() {
+                        let pid: pid_t
+                        if windowID == primaryDraggedID {
+                            pid = primaryDraggedPID != 0 ? primaryDraggedPID : self.findPIDForWindow(windowID)
+                        } else {
+                            pid = self.findPIDForWindow(windowID)
+                        }
+
+                        guard pid != 0 else { continue }
+                        DynamicTileManager.shared.tileToZone(
+                            windowID: windowID,
+                            pid: pid,
+                            position: position,
+                            monitor: monitor,
+                            dropPoint: index == 0 ? initialDropPoint : nil
+                        )
+                    }
 
                     self.commandPaletteViewModel?.dismiss()
                     self.tileActionCompleted = true

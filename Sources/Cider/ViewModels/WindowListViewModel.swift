@@ -159,6 +159,7 @@ final class WindowListViewModel: ObservableObject {
     }
 
     func minimize(window: WindowInfo) {
+        DynamicTileManager.shared.removeWindow(window.id)
         windowManager.minimize(window: window)
         refresh()
     }

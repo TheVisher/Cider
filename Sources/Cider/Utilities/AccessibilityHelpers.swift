@@ -174,24 +174,25 @@ enum AccessibilityHelpers {
 
     // MARK: - Coordinate Conversion
 
-    /// Convert from CGWindowList coordinates (bottom-left origin) to Accessibility coordinates (top-left origin)
-    static func convertToAXCoordinates(_ cgPoint: CGPoint, windowHeight: CGFloat) -> CGPoint {
-        // Get the total height of all screens to perform the conversion
-        let screens = NSScreen.screens
-        guard let primaryScreen = screens.first else { return cgPoint }
-
-        // macOS uses bottom-left origin for CGWindowList
-        // Accessibility API uses top-left origin
-        let totalHeight = primaryScreen.frame.height
-        return CGPoint(x: cgPoint.x, y: totalHeight - cgPoint.y - windowHeight)
+    /// Top Y of the primary (menu-bar) screen in NSScreen coordinates.
+    /// AX/CG top-left coordinate conversion is anchored to this edge.
+    private static var primaryTopY: CGFloat {
+        if let primary = NSScreen.screens.first(where: { $0.frame.contains(CGPoint.zero) })
+            ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first {
+            return primary.frame.maxY
+        }
+        return 0
     }
 
-    /// Convert from Accessibility coordinates (top-left origin) to CGWindowList coordinates (bottom-left origin)
-    static func convertFromAXCoordinates(_ axPoint: CGPoint, windowHeight: CGFloat) -> CGPoint {
-        let screens = NSScreen.screens
-        guard let primaryScreen = screens.first else { return axPoint }
+    /// Convert from NSScreen coordinates (bottom-left origin) to Accessibility coordinates (top-left origin)
+    static func convertToAXCoordinates(_ cgPoint: CGPoint, windowHeight: CGFloat) -> CGPoint {
+        CGPoint(x: cgPoint.x, y: primaryTopY - cgPoint.y - windowHeight)
+    }
 
-        let totalHeight = primaryScreen.frame.height
-        return CGPoint(x: axPoint.x, y: totalHeight - axPoint.y - windowHeight)
+    /// Convert from Accessibility coordinates (top-left origin) to NSScreen coordinates (bottom-left origin)
+    static func convertFromAXCoordinates(_ axPoint: CGPoint, windowHeight: CGFloat) -> CGPoint {
+        CGPoint(x: axPoint.x, y: primaryTopY - axPoint.y - windowHeight)
     }
 }

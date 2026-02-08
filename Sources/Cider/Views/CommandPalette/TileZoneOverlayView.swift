@@ -2,7 +2,7 @@ import SwiftUI
 
 struct TileZoneOverlayView: View {
     let monitor: MonitorInfo
-    let onTile: (CGWindowID, TilePosition) -> Void
+    let onTile: ([CGWindowID], TilePosition) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var activeZone: TilePosition?
@@ -73,10 +73,10 @@ struct TileZoneOverlayView: View {
 
     private func handleDrop(items: [String], position: TilePosition) -> Bool {
         guard let idString = items.first else { return false }
-        // Support single window ID (from window row drag)
+        // Supports both single-window drag and app-group drag payloads.
         let windowIDs = idString.split(separator: ",").compactMap { CGWindowID($0) }
-        guard let firstID = windowIDs.first else { return false }
-        onTile(firstID, position)
+        guard !windowIDs.isEmpty else { return false }
+        onTile(windowIDs, position)
         return true
     }
 

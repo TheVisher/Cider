@@ -28,6 +28,22 @@ indirect enum TileNode {
     case leaf(windowID: CGWindowID, pid: pid_t)
     case split(orientation: SplitOrientation, ratio: CGFloat, left: TileNode, right: TileNode)
 
+    /// Minimum per-child dimension when resolving split geometry.
+    /// Keeps deep trees stable when repeated gap subtraction would otherwise
+    /// produce negative or out-of-bounds frame math.
+    private static let minimumChildDimension: CGFloat = 1
+
+    /// Clamp a split ratio against the actual available length for this node.
+    /// This ensures each child keeps at least `minimumChildDimension` after gap subtraction.
+    private static func effectiveRatio(_ ratio: CGFloat, length: CGFloat, gap: CGFloat) -> CGFloat {
+        guard length > 0 else { return 0.5 }
+        let halfGap = gap / 2
+        let minimumRatio = (halfGap + minimumChildDimension) / length
+        let maximumRatio = 1 - minimumRatio
+        guard minimumRatio < maximumRatio else { return 0.5 }
+        return min(maximumRatio, max(minimumRatio, ratio))
+    }
+
     // MARK: - Queries
 
     /// Collect all leaf window IDs and PIDs.
@@ -65,6 +81,25 @@ indirect enum TileNode {
             }
             // Recurse
             return left.findParentSplit(of: windowID) ?? right.findParentSplit(of: windowID)
+        }
+    }
+
+    /// Find the split that directly contains the given leaf window.
+    /// - Returns: (path to split node, split orientation, direct child index)
+    /// childIndex: 0 = left/top child, 1 = right/bottom child
+    func parentSplitInfo(of windowID: CGWindowID, path: [Int] = []) -> (path: [Int], orientation: SplitOrientation, childIndex: Int)? {
+        switch self {
+        case .leaf:
+            return nil
+        case .split(let orientation, _, let left, let right):
+            if case .leaf(let wid, _) = left, wid == windowID {
+                return (path, orientation, 0)
+            }
+            if case .leaf(let wid, _) = right, wid == windowID {
+                return (path, orientation, 1)
+            }
+            return left.parentSplitInfo(of: windowID, path: path + [0])
+                ?? right.parentSplitInfo(of: windowID, path: path + [1])
         }
     }
 
@@ -155,8 +190,9 @@ indirect enum TileNode {
 
             switch orientation {
             case .horizontal:
-                let leftWidth = rect.width * ratio - halfGap
-                let rightWidth = rect.width * (1 - ratio) - halfGap
+                let resolvedRatio = Self.effectiveRatio(ratio, length: rect.width, gap: gap)
+                let leftWidth = rect.width * resolvedRatio - halfGap
+                let rightWidth = rect.width * (1 - resolvedRatio) - halfGap
 
                 let leftRect = CGRect(
                     x: rect.minX,
@@ -165,7 +201,7 @@ indirect enum TileNode {
                     height: rect.height
                 )
                 let rightRect = CGRect(
-                    x: rect.minX + rect.width * ratio + halfGap,
+                    x: rect.minX + rect.width * resolvedRatio + halfGap,
                     y: rect.minY,
                     width: rightWidth,
                     height: rect.height
@@ -175,13 +211,14 @@ indirect enum TileNode {
                      + right.calculateFrames(in: rightRect, gap: gap)
 
             case .vertical:
-                let topHeight = rect.height * ratio - halfGap
-                let bottomHeight = rect.height * (1 - ratio) - halfGap
+                let resolvedRatio = Self.effectiveRatio(ratio, length: rect.height, gap: gap)
+                let topHeight = rect.height * resolvedRatio - halfGap
+                let bottomHeight = rect.height * (1 - resolvedRatio) - halfGap
 
                 // NSScreen coords: Y increases upward. "top" = higher Y values.
                 let topRect = CGRect(
                     x: rect.minX,
-                    y: rect.minY + rect.height * (1 - ratio) + halfGap,
+                    y: rect.minY + rect.height * (1 - resolvedRatio) + halfGap,
                     width: rect.width,
                     height: topHeight
                 )
@@ -199,6 +236,69 @@ indirect enum TileNode {
         }
     }
 
+    /// Resolve the bounding rect of the split node at the given path.
+    /// Path format: [0, 1, ...] where 0 = left/top child, 1 = right/bottom child.
+    func splitRect(at path: [Int], in rect: CGRect, gap: CGFloat) -> CGRect? {
+        switch self {
+        case .leaf:
+            return nil
+        case .split(let orientation, let ratio, let left, let right):
+            if path.isEmpty {
+                return rect
+            }
+
+            let halfGap = gap / 2
+            let head = path[0]
+            let tail = Array(path.dropFirst())
+
+            switch orientation {
+            case .horizontal:
+                let resolvedRatio = Self.effectiveRatio(ratio, length: rect.width, gap: gap)
+                let leftRect = CGRect(
+                    x: rect.minX,
+                    y: rect.minY,
+                    width: rect.width * resolvedRatio - halfGap,
+                    height: rect.height
+                )
+                let rightRect = CGRect(
+                    x: rect.minX + rect.width * resolvedRatio + halfGap,
+                    y: rect.minY,
+                    width: rect.width * (1 - resolvedRatio) - halfGap,
+                    height: rect.height
+                )
+                if head == 0 {
+                    return left.splitRect(at: tail, in: leftRect, gap: gap)
+                }
+                if head == 1 {
+                    return right.splitRect(at: tail, in: rightRect, gap: gap)
+                }
+                return nil
+
+            case .vertical:
+                let resolvedRatio = Self.effectiveRatio(ratio, length: rect.height, gap: gap)
+                let topRect = CGRect(
+                    x: rect.minX,
+                    y: rect.minY + rect.height * (1 - resolvedRatio) + halfGap,
+                    width: rect.width,
+                    height: rect.height * resolvedRatio - halfGap
+                )
+                let bottomRect = CGRect(
+                    x: rect.minX,
+                    y: rect.minY,
+                    width: rect.width,
+                    height: rect.height * (1 - resolvedRatio) - halfGap
+                )
+                if head == 0 {
+                    return left.splitRect(at: tail, in: topRect, gap: gap)
+                }
+                if head == 1 {
+                    return right.splitRect(at: tail, in: bottomRect, gap: gap)
+                }
+                return nil
+            }
+        }
+    }
+
     // MARK: - Split Line Extraction
 
     /// Extract split line geometry from the tree, mirroring calculateFrames layout.
@@ -212,7 +312,8 @@ indirect enum TileNode {
 
             switch orientation {
             case .horizontal:
-                let splitX = rect.minX + rect.width * ratio
+                let resolvedRatio = Self.effectiveRatio(ratio, length: rect.width, gap: gap)
+                let splitX = rect.minX + rect.width * resolvedRatio
                 lines.append(SplitLineInfo(
                     orientation: .horizontal,
                     position: splitX,
@@ -224,18 +325,19 @@ indirect enum TileNode {
 
                 let leftRect = CGRect(
                     x: rect.minX, y: rect.minY,
-                    width: rect.width * ratio - halfGap, height: rect.height
+                    width: rect.width * resolvedRatio - halfGap, height: rect.height
                 )
                 let rightRect = CGRect(
-                    x: rect.minX + rect.width * ratio + halfGap, y: rect.minY,
-                    width: rect.width * (1 - ratio) - halfGap, height: rect.height
+                    x: rect.minX + rect.width * resolvedRatio + halfGap, y: rect.minY,
+                    width: rect.width * (1 - resolvedRatio) - halfGap, height: rect.height
                 )
                 lines += left.splitLines(in: leftRect, gap: gap, path: path + [0])
                 lines += right.splitLines(in: rightRect, gap: gap, path: path + [1])
 
             case .vertical:
                 // NSScreen coords: Y increases upward. "top" = higher Y.
-                let splitY = rect.minY + rect.height * (1 - ratio)
+                let resolvedRatio = Self.effectiveRatio(ratio, length: rect.height, gap: gap)
+                let splitY = rect.minY + rect.height * (1 - resolvedRatio)
                 lines.append(SplitLineInfo(
                     orientation: .vertical,
                     position: splitY,
@@ -247,14 +349,14 @@ indirect enum TileNode {
 
                 let topRect = CGRect(
                     x: rect.minX,
-                    y: rect.minY + rect.height * (1 - ratio) + halfGap,
+                    y: rect.minY + rect.height * (1 - resolvedRatio) + halfGap,
                     width: rect.width,
-                    height: rect.height * ratio - halfGap
+                    height: rect.height * resolvedRatio - halfGap
                 )
                 let bottomRect = CGRect(
                     x: rect.minX, y: rect.minY,
                     width: rect.width,
-                    height: rect.height * (1 - ratio) - halfGap
+                    height: rect.height * (1 - resolvedRatio) - halfGap
                 )
                 lines += left.splitLines(in: topRect, gap: gap, path: path + [0])
                 lines += right.splitLines(in: bottomRect, gap: gap, path: path + [1])

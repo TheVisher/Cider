@@ -67,37 +67,42 @@ final class TileGroup {
         root.calculateFrames(in: boundingRect, gap: gap)
     }
 
+    /// Extract all split line geometry from the tree.
+    func splitLines() -> [SplitLineInfo] {
+        root.splitLines(in: boundingRect, gap: gap)
+    }
+
+    /// Update the ratio of the split at the given tree path.
+    func updateRatioAtPath(_ path: [Int], newRatio: CGFloat) {
+        root = root.updateRatioAtPath(path, newRatio: newRatio)
+    }
+
     /// Update the split ratio based on a window's new frame after user resize.
     func updateRatio(forWindowID windowID: CGWindowID, newFrame: CGRect) {
-        guard let (orientation, _) = root.findParentSplit(of: windowID) else { return }
-
-        let bounds = boundingRect
-        guard bounds.width > 0, bounds.height > 0 else { return }
+        guard let splitInfo = root.parentSplitInfo(of: windowID),
+              let splitBounds = root.splitRect(at: splitInfo.path, in: boundingRect, gap: gap) else { return }
+        guard splitBounds.width > 0, splitBounds.height > 0 else { return }
 
         let newRatio: CGFloat
-        switch orientation {
+        switch splitInfo.orientation {
         case .horizontal:
-            // Figure out if this window is the "left" or "right" child
-            // by checking where it sits relative to the bounding rect center
-            let midX = newFrame.midX
-            if midX < bounds.midX {
+            if splitInfo.childIndex == 0 {
                 // Left child: ratio = right edge of window / total width
-                newRatio = (newFrame.maxX - bounds.minX + gap / 2) / bounds.width
+                newRatio = (newFrame.maxX - splitBounds.minX + gap / 2) / splitBounds.width
             } else {
                 // Right child: ratio = left edge of window / total width
-                newRatio = (newFrame.minX - bounds.minX - gap / 2) / bounds.width
+                newRatio = (newFrame.minX - splitBounds.minX - gap / 2) / splitBounds.width
             }
         case .vertical:
-            let midY = newFrame.midY
-            if midY > bounds.midY {
+            if splitInfo.childIndex == 0 {
                 // Top child (left in our tree): ratio = distance from top to bottom edge of window
-                newRatio = (bounds.maxY - newFrame.minY + gap / 2) / bounds.height
+                newRatio = (splitBounds.maxY - newFrame.minY + gap / 2) / splitBounds.height
             } else {
                 // Bottom child (right in our tree): ratio = distance from top to top edge of window
-                newRatio = (bounds.maxY - newFrame.maxY - gap / 2) / bounds.height
+                newRatio = (splitBounds.maxY - newFrame.maxY - gap / 2) / splitBounds.height
             }
         }
 
-        root = root.updateRatio(forWindow: windowID, newRatio: newRatio)
+        root = root.updateRatioAtPath(splitInfo.path, newRatio: newRatio)
     }
 }

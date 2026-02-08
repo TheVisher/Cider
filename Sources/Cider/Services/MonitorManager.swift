@@ -58,21 +58,19 @@ final class MonitorManager: ObservableObject {
     }
 
     func screenForWindow(_ bounds: CGRect) -> MonitorInfo? {
-        // CGWindowList uses top-left origin (Y=0 at top, increases downward)
-        // NSScreen uses bottom-left origin (Y=0 at bottom, increases upward)
-        // We need to convert CGWindowList bounds to NSScreen coordinates
-
-        guard let primaryScreen = NSScreen.screens.first else {
-            return monitors.first
-        }
-        let primaryHeight = primaryScreen.frame.height
-
-        // Convert from CG (top-left) to NS (bottom-left) coordinates
-        // CG Y of top edge -> NS Y of top edge = primaryHeight - cgY
-        // NS Y of bottom edge = NS Y of top edge - height
-        let nsTop = primaryHeight - bounds.minY
-        let nsBottom = nsTop - bounds.height
-        let convertedBounds = CGRect(x: bounds.minX, y: nsBottom, width: bounds.width, height: bounds.height)
+        // Input bounds are expected in top-left-origin global coordinates
+        // (CGWindowList/AX style). Convert to NSScreen (bottom-left origin)
+        // using the same primary-screen anchor as AX.
+        let nsOrigin = AccessibilityHelpers.convertFromAXCoordinates(
+            bounds.origin,
+            windowHeight: bounds.height
+        )
+        let convertedBounds = CGRect(
+            x: bounds.minX,
+            y: nsOrigin.y,
+            width: bounds.width,
+            height: bounds.height
+        )
 
         // Find the monitor that contains the center of the window
         let center = CGPoint(x: convertedBounds.midX, y: convertedBounds.midY)

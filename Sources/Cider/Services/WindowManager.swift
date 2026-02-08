@@ -1083,19 +1083,7 @@ struct WindowManager {
     /// The point should be the bottom-left corner of the window in screen coordinates.
     /// windowHeight is needed because AX expects top-left corner position.
     private func convertToAXPosition(_ bottomLeft: CGPoint, windowHeight: CGFloat) -> CGPoint {
-        // Get the primary screen height (menu bar screen)
-        guard let primaryScreen = NSScreen.screens.first else { return bottomLeft }
-        let primaryHeight = primaryScreen.frame.height
-
-        // NSScreen: origin at bottom-left of primary screen, Y increases upward
-        // AX: origin at top-left of primary screen, Y increases downward
-        //
-        // To convert bottom-left corner to top-left corner for AX:
-        // 1. The top of the window in screen coords is: bottomLeft.y + windowHeight
-        // 2. Convert to AX Y: primaryHeight - (bottomLeft.y + windowHeight)
-        let axY = primaryHeight - bottomLeft.y - windowHeight
-
-        return CGPoint(x: bottomLeft.x, y: axY)
+        AccessibilityHelpers.convertToAXCoordinates(bottomLeft, windowHeight: windowHeight)
     }
 
     /// Applies frame using the three-step pattern (size → position → size), with Enhanced UI
