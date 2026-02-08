@@ -51,6 +51,21 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            // Window tiling section
+            SettingsSection(title: "Window Tiling") {
+                SettingsToggleRow(
+                    title: "Tiling hotkeys (Ctrl+Option)",
+                    subtitle: "Rectangle-style shortcuts to tile windows",
+                    isOn: $viewModel.enableTilingHotkeys
+                )
+
+                SettingsToggleRow(
+                    title: "Dynamic tiling",
+                    subtitle: "Auto-pair windows when tiling to half zones",
+                    isOn: $viewModel.enableDynamicTiling
+                )
+            }
+
             // Palette behavior section
             SettingsSection(title: "Palette Behavior") {
                 SettingsToggleRow(

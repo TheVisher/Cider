@@ -44,6 +44,16 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Tiling hotkeys
+    @Published var enableTilingHotkeys: Bool {
+        didSet { saveConfig() }
+    }
+
+    // Dynamic tiling
+    @Published var enableDynamicTiling: Bool {
+        didSet { saveConfig() }
+    }
+
     private var config: CiderConfig
 
     init() {
@@ -57,6 +67,8 @@ final class SettingsViewModel: ObservableObject {
         self.enableOptionTabCycling = config.enableOptionTabCycling
         self.optionTabCycleAllScreens = config.optionTabCycleAllScreens
         self.rememberPaletteState = config.rememberPaletteState
+        self.enableTilingHotkeys = config.enableTilingHotkeys
+        self.enableDynamicTiling = config.enableDynamicTiling
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -75,6 +87,8 @@ final class SettingsViewModel: ObservableObject {
         config.enableOptionTabCycling = enableOptionTabCycling
         config.optionTabCycleAllScreens = optionTabCycleAllScreens
         config.rememberPaletteState = rememberPaletteState
+        config.enableTilingHotkeys = enableTilingHotkeys
+        config.enableDynamicTiling = enableDynamicTiling
         config.save()
 
         // Post notification so AppDelegate can respond

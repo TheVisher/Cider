@@ -29,7 +29,10 @@ struct PaletteContentArea: View {
     let onQuitApp: (WindowInfo) -> Void
     let onMoveWindow: (WindowInfo, MonitorInfo) -> Void
     let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void
+    let onTileWindow: (WindowInfo, TilePosition) -> Void
+    var onDragStarted: ((CGWindowID?) -> Void)? = nil
     let onTabChange: (PaletteTab) -> Void
+    var isDragging: Bool = false  // Tracks whether a drag is in progress (from ViewModel)
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -101,6 +104,12 @@ struct PaletteContentArea: View {
                 }
             }
         }
+        .onChange(of: isDragging) { _, newValue in
+            if !newValue {
+                draggedWindow = nil
+                allDraggedIDs = []
+            }
+        }
     }
 
     @ViewBuilder
@@ -152,6 +161,8 @@ struct PaletteContentArea: View {
             onQuitApp: onQuitApp,
             onMoveWindow: onMoveWindow,
             onMoveWindowByID: onMoveWindowByID,
+            onTileWindow: onTileWindow,
+            onDragStartedCallback: onDragStarted,
             onToggleMonitor: {
                 withAnimation(reduceMotion ? .none : .snappy) {
                     if collapsedMonitorIDs.contains(displayID) {
@@ -242,7 +253,9 @@ struct PaletteContentArea: View {
                                 onTap: { onWindowClick(window) },
                                 onClose: { onCloseWindow(window) },
                                 onMinimize: { onMinimizeWindow(window) },
-                                onMoveToMonitor: { monitor in onMoveWindow(window, monitor) }
+                                onMoveToMonitor: { monitor in onMoveWindow(window, monitor) },
+                                onTileWindow: { position in onTileWindow(window, position) },
+                                onDragStarted: { windowID in onDragStarted?(windowID) }
                             )
                         }
                     }
@@ -378,7 +391,8 @@ struct PaletteWindowRow: View {
     let onClose: () -> Void
     let onMinimize: () -> Void
     let onMoveToMonitor: (MonitorInfo) -> Void
-    var onDragStarted: (() -> Void)? = nil  // Callback when drag begins
+    var onTileWindow: ((TilePosition) -> Void)? = nil
+    var onDragStarted: ((CGWindowID?) -> Void)? = nil  // Callback when drag begins (passes window ID)
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -449,7 +463,7 @@ struct PaletteWindowRow: View {
         .scaleEffect(isDraggedItem ? 0.8 : 1.0)
         .animation(reduceMotion ? .none : .smooth, value: isDraggedItem)
         .onDrag {
-            onDragStarted?()
+            onDragStarted?(window.id)
             return NSItemProvider(object: String(window.id) as NSString)
         }
         .onHover { hovering in
@@ -482,6 +496,41 @@ struct PaletteWindowRow: View {
                     }
                 }
             }
+
+            if let onTileWindow {
+                Divider()
+                Menu("Tile Window") {
+                    ForEach(TilePosition.halves, id: \.self) { position in
+                        Button(action: { onTileWindow(position) }) {
+                            Label("\(position.displayName)  \(position.shortcutLabel)", systemImage: position.icon)
+                        }
+                    }
+                    Divider()
+                    ForEach(TilePosition.quarters, id: \.self) { position in
+                        Button(action: { onTileWindow(position) }) {
+                            Label("\(position.displayName)  \(position.shortcutLabel)", systemImage: position.icon)
+                        }
+                    }
+                    Divider()
+                    ForEach(TilePosition.thirds, id: \.self) { position in
+                        Button(action: { onTileWindow(position) }) {
+                            Label("\(position.displayName)  \(position.shortcutLabel)", systemImage: position.icon)
+                        }
+                    }
+                    Divider()
+                    ForEach(TilePosition.twoThirds, id: \.self) { position in
+                        Button(action: { onTileWindow(position) }) {
+                            Label("\(position.displayName)  \(position.shortcutLabel)", systemImage: position.icon)
+                        }
+                    }
+                    Divider()
+                    ForEach(TilePosition.other, id: \.self) { position in
+                        Button(action: { onTileWindow(position) }) {
+                            Label("\(position.displayName)  \(position.shortcutLabel)", systemImage: position.icon)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -506,6 +555,8 @@ struct PaletteMonitorSection: View {
     let onQuitApp: (WindowInfo) -> Void
     let onMoveWindow: (WindowInfo, MonitorInfo) -> Void
     let onMoveWindowByID: (CGWindowID, MonitorInfo) -> Void
+    let onTileWindow: (WindowInfo, TilePosition) -> Void
+    var onDragStartedCallback: ((CGWindowID?) -> Void)? = nil
     var onToggleMonitor: (() -> Void)? = nil
     var onToggleAppGroup: ((String) -> Void)? = nil
     @Environment(\.textScale) private var textScale
@@ -604,6 +655,7 @@ struct PaletteMonitorSection: View {
                             let ids = group.windows.map { String($0.id) }.joined(separator: ",")
                             allDraggedIDs = Set(group.windows.map(\.id))
                             draggedWindow = nil
+                            onDragStartedCallback?(group.windows.first?.id)
                             return NSItemProvider(object: ids as NSString)
                         }
 
@@ -625,9 +677,11 @@ struct PaletteMonitorSection: View {
                                     onClose: { onCloseWindow(window) },
                                     onMinimize: { onMinimizeWindow(window) },
                                     onMoveToMonitor: { monitor in onMoveWindow(window, monitor) },
-                                    onDragStarted: {
+                                    onTileWindow: { position in onTileWindow(window, position) },
+                                    onDragStarted: { windowID in
                                         draggedWindow = window
                                         allDraggedIDs = [window.id]
+                                        onDragStartedCallback?(windowID)
                                     }
                                 )
                                 .padding(.leading, Spacing.sm)

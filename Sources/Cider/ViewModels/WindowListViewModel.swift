@@ -57,7 +57,10 @@ final class WindowListViewModel: ObservableObject {
     }
 
     func refresh() {
-        isAccessibilityTrusted = AccessibilityHelpers.isTrusted()
+        let newTrusted = AccessibilityHelpers.isTrusted()
+        if newTrusted != isAccessibilityTrusted {
+            isAccessibilityTrusted = newTrusted
+        }
         let allWindows = windowManager.fetchWindows()
 
         // Filter out windows from manually minimized apps (via Cider's minimize button)
@@ -75,7 +78,9 @@ final class WindowListViewModel: ObservableObject {
             return WindowAppGroup(id: key, appName: appName, bundleIdentifier: bundleID, windows: sortedWindows)
         }.sorted { $0.appName.lowercased() < $1.appName.lowercased() }
 
-        groups = newGroups
+        if newGroups != groups {
+            groups = newGroups
+        }
 
         // Group windows by monitor, then by app
         let windowsByScreen = Dictionary(grouping: windows) { window -> UInt32 in
@@ -95,7 +100,9 @@ final class WindowListViewModel: ObservableObject {
 
             newMonitorGroups.append(MonitorWindowGroup(monitor: monitor, windowGroups: appGroups))
         }
-        monitorGroups = newMonitorGroups
+        if newMonitorGroups != monitorGroups {
+            monitorGroups = newMonitorGroups
+        }
 
         // Update expanded states
         let newIDs = Set(groups.map { $0.id })
@@ -103,8 +110,10 @@ final class WindowListViewModel: ObservableObject {
             expandedGroupIDs = newIDs
         } else {
             let added = newIDs.subtracting(knownGroupIDs)
-            expandedGroupIDs.formUnion(added)
-            expandedGroupIDs = expandedGroupIDs.intersection(newIDs)
+            let updated = expandedGroupIDs.union(added).intersection(newIDs)
+            if updated != expandedGroupIDs {
+                expandedGroupIDs = updated
+            }
         }
         knownGroupIDs = newIDs
 
@@ -114,8 +123,10 @@ final class WindowListViewModel: ObservableObject {
             expandedMonitorIDs = newMonitorIDs
         } else {
             let addedMonitors = newMonitorIDs.subtracting(knownMonitorIDs)
-            expandedMonitorIDs.formUnion(addedMonitors)
-            expandedMonitorIDs = expandedMonitorIDs.intersection(newMonitorIDs)
+            let updatedMonitors = expandedMonitorIDs.union(addedMonitors).intersection(newMonitorIDs)
+            if updatedMonitors != expandedMonitorIDs {
+                expandedMonitorIDs = updatedMonitors
+            }
         }
         knownMonitorIDs = newMonitorIDs
 
@@ -142,6 +153,7 @@ final class WindowListViewModel: ObservableObject {
     }
 
     func close(window: WindowInfo) {
+        DynamicTileManager.shared.removeWindow(window.id)
         windowManager.close(window: window)
         refresh()
     }
@@ -152,6 +164,11 @@ final class WindowListViewModel: ObservableObject {
     }
 
     func quitApp(for window: WindowInfo) {
+        // Remove all windows of this app from any tile groups
+        let appWindows = groups.flatMap { $0.windows }.filter { $0.ownerPID == window.ownerPID }
+        for w in appWindows {
+            DynamicTileManager.shared.removeWindow(w.id)
+        }
         windowManager.quitApp(for: window)
         // Small delay to let the app quit before refreshing
         Task { [weak self] in
@@ -187,6 +204,7 @@ final class WindowListViewModel: ObservableObject {
     // MARK: - Window Management Actions
 
     func moveWindow(_ window: WindowInfo, to monitor: MonitorInfo) {
+        DynamicTileManager.shared.removeWindow(window.id)
         let config = CiderConfig.load()
 
         // Check if the window being moved is from the frontmost (focused) app
@@ -245,33 +263,38 @@ final class WindowListViewModel: ObservableObject {
 
             newMonitorGroups.append(MonitorWindowGroup(monitor: monitor, windowGroups: appGroups))
         }
-        monitorGroups = newMonitorGroups
+        if newMonitorGroups != monitorGroups {
+            monitorGroups = newMonitorGroups
+        }
 
         // Also update the flat groups
         let grouped = Dictionary(grouping: allWindows, by: { keyFor(window: $0) })
-        groups = grouped.map { (key, windows) -> WindowAppGroup in
+        let newGroups = grouped.map { (key, windows) -> WindowAppGroup in
             let appName = windows.first?.ownerName ?? key
             let bundleID = windows.first?.bundleIdentifier ?? ""
             let sortedWindows = windows.sorted { $0.displayTitle.lowercased() < $1.displayTitle.lowercased() }
             return WindowAppGroup(id: key, appName: appName, bundleIdentifier: bundleID, windows: sortedWindows)
         }.sorted { $0.appName.lowercased() < $1.appName.lowercased() }
+        if newGroups != groups {
+            groups = newGroups
+        }
     }
 
     func tileWindow(_ window: WindowInfo, position: TilePosition) {
+        DynamicTileManager.shared.removeWindow(window.id)
         // Find the monitor this window is on
-        guard let screenID = window.screenID,
-              let monitor = monitors.first(where: { $0.id == screenID }) else {
-            // Fall back to primary monitor
-            guard let primaryMonitor = monitors.first else { return }
-            windowManager.tileWindow(window, position: position, on: primaryMonitor)
-            refresh()
+        let monitor: MonitorInfo
+        if let screenID = window.screenID, let m = monitors.first(where: { $0.id == screenID }) {
+            monitor = m
+        } else if let primary = monitors.first {
+            monitor = primary
+        } else {
             return
         }
-        windowManager.tileWindow(window, position: position, on: monitor)
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            await MainActor.run {
-                self?.refresh()
+        windowManager.tileWindow(window, position: position, on: monitor) { [weak self] _ in
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                await MainActor.run { self?.refresh() }
             }
         }
     }
@@ -281,15 +304,18 @@ final class WindowListViewModel: ObservableObject {
         guard let screenID = window1.screenID,
               let monitor = monitors.first(where: { $0.id == screenID }) else {
             guard let primaryMonitor = monitors.first else { return }
-            windowManager.splitWindows(window1, window2, on: primaryMonitor, leftRight: leftRight)
-            refresh()
+            windowManager.splitWindows(window1, window2, on: primaryMonitor, leftRight: leftRight) { [weak self] in
+                Task {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    await MainActor.run { self?.refresh() }
+                }
+            }
             return
         }
-        windowManager.splitWindows(window1, window2, on: monitor, leftRight: leftRight)
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            await MainActor.run {
-                self?.refresh()
+        windowManager.splitWindows(window1, window2, on: monitor, leftRight: leftRight) { [weak self] in
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                await MainActor.run { self?.refresh() }
             }
         }
     }

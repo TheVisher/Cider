@@ -8,6 +8,8 @@ extension Notification.Name {
     static let openCiderSettings = Notification.Name("cider.openCiderSettings")
     static let dismissSettings = Notification.Name("cider.dismissSettings")
     static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
+    static let ciderTileActionCompleted = Notification.Name("cider.tileActionCompleted")
+    static let ciderDynamicTileGroupChanged = Notification.Name("cider.dynamicTileGroupChanged")
 }
 
 enum CiderBorder {
@@ -68,6 +70,9 @@ enum CiderDesign {
     // Specific visual elements
     static let runningIndicatorSize: CGFloat = 6
     static let runningIndicatorOffset: CGFloat = 6
+
+    // Dynamic tiling
+    static let tileGap: CGFloat = 5
 
     // Edge detection
     static let edgeDetectionThreshold: CGFloat = 3

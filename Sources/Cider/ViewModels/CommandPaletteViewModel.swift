@@ -16,6 +16,11 @@ final class CommandPaletteViewModel: ObservableObject {
     /// The screen ID where the palette is currently shown
     var paletteScreenID: UInt32?
     @Published var focusedFolderAppIndex: Int? = nil
+    @Published var isDraggingWindow = false
+    /// The window ID currently being dragged from the palette (for split zone targeting).
+    @Published var currentDraggedWindowID: CGWindowID?
+    /// The PID of the window being dragged — stored at drag start so we don't need to look it up later.
+    var currentDraggedWindowPID: pid_t = 0
 
     private let windowListViewModel: WindowListViewModel
     private let pinnedAppsViewModel: PinnedAppsViewModel
@@ -122,6 +127,18 @@ final class CommandPaletteViewModel: ObservableObject {
         pinnedAppsViewModel.reorder(newOrder)
     }
 
+    /// Look up the PID for a window ID from the current window list.
+    func findPID(for windowID: CGWindowID) -> pid_t {
+        for monitorGroup in windowListViewModel.monitorGroups {
+            for group in monitorGroup.windowGroups {
+                if let window = group.windows.first(where: { $0.id == windowID }) {
+                    return window.ownerPID
+                }
+            }
+        }
+        return 0
+    }
+
     // MARK: - Window Actions
 
     func focusWindow(_ window: WindowInfo) {
@@ -145,17 +162,42 @@ final class CommandPaletteViewModel: ObservableObject {
         windowListViewModel.moveWindow(window, to: monitor)
     }
 
-    func moveWindowByID(_ windowID: CGWindowID, to monitor: MonitorInfo) {
-        // Find the window across all monitor groups
+    /// Find a window by its ID across all monitor groups.
+    private func findWindow(byID windowID: CGWindowID) -> WindowInfo? {
         for monitorGroup in windowListViewModel.monitorGroups {
             for group in monitorGroup.windowGroups {
                 if let window = group.windows.first(where: { $0.id == windowID }) {
-                    // Don't move if already on the target monitor
-                    if window.screenID != monitor.id {
-                        windowListViewModel.moveWindow(window, to: monitor)
-                    }
-                    return
+                    return window
                 }
+            }
+        }
+        return nil
+    }
+
+    func moveWindowByID(_ windowID: CGWindowID, to monitor: MonitorInfo) {
+        guard let window = findWindow(byID: windowID) else { return }
+        // Don't move if already on the target monitor
+        if window.screenID != monitor.id {
+            windowListViewModel.moveWindow(window, to: monitor)
+        }
+    }
+
+    func tileWindow(_ window: WindowInfo, position: TilePosition) {
+        dismiss()
+        windowListViewModel.tileWindow(window, position: position)
+    }
+
+    func tileWindowByID(_ windowID: CGWindowID, position: TilePosition, on monitor: MonitorInfo) {
+        guard let window = findWindow(byID: windowID) else { return }
+        let wlvm = windowListViewModel
+        windowListViewModel.windowManager.tileWindow(window, position: position, on: monitor) { [weak self] success in
+            if success {
+                self?.dismiss()
+                NotificationCenter.default.post(name: .ciderTileActionCompleted, object: nil)
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                await MainActor.run { wlvm.refresh() }
             }
         }
     }

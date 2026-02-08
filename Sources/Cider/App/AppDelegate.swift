@@ -18,6 +18,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowCyclingManager: WindowCyclingManager?
     private var optionTabDetector: OptionTabDetector?
 
+    // Tiling Hotkeys
+    private var tileHotkeyDetector: TileHotkeyDetector?
+    private let tileActionHandler = TileActionHandler()
+
+    // Tile Zone Overlay
+    private var tileZoneOverlayPanels: [TileZoneOverlayPanel] = []
+    private var dragMouseMonitor: Any?
+    private var dragMouseUpLocalMonitor: Any?
+    private var dragMouseUpGlobalMonitor: Any?
+    private var dragPollingTimer: Timer?
+    private var isDragOverlayShown = false
+    private var tileActionCompleted = false
+    private var dragGeneration: UInt = 0
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -42,12 +56,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeConfigChanges()
         startDoubleTapDetection()
         startOptionTabDetection()
+        startTileHotkeyDetection()
+
+        // Initialize DynamicTileManager (triggers screen change subscription)
+        _ = DynamicTileManager.shared
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        stopDragMonitoring()
+        hideTileZoneOverlays()
     }
 
     @objc private func quit() {
@@ -110,6 +130,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             optionTabDetector?.setEnabled(false)
         }
+
+        // Handle tiling hotkeys enabled/disabled
+        if config.enableTilingHotkeys {
+            if tileHotkeyDetector == nil {
+                startTileHotkeyDetection()
+            } else {
+                tileHotkeyDetector?.setEnabled(true)
+            }
+        } else {
+            tileHotkeyDetector?.setEnabled(false)
+        }
     }
 
     // MARK: - Command Palette
@@ -125,6 +156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.commandPalettePanel = panel
 
         updateCommandPaletteSize()
+        observeDragState()
+        observeTileCompletion()
     }
 
     private func updateCommandPaletteSize() {
@@ -228,11 +261,215 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func hideCommandPalette() {
         commandPalettePanel?.orderOut(nil)
         commandPaletteViewModel?.isVisible = false
+        hideTileZoneOverlays()
 
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
             clickOutsideMonitor = nil
         }
+    }
+
+    // MARK: - Drag-to-Tile Overlay
+
+    private func observeTileCompletion() {
+        NotificationCenter.default.publisher(for: .ciderTileActionCompleted)
+            .sink { [weak self] _ in
+                self?.tileActionCompleted = true
+                self?.hideTileZoneOverlays()
+                self?.stopDragMonitoring()
+                self?.commandPaletteViewModel?.isDraggingWindow = false
+            }
+            .store(in: &cancellables)
+    }
+
+    private func observeDragState() {
+        commandPaletteViewModel?.$isDraggingWindow
+            .removeDuplicates()
+            .sink { [weak self] isDragging in
+                self?.debugLog("[DragState] isDraggingWindow changed to \(isDragging)")
+                self?.dragMoveLogCount = 0
+                if isDragging {
+                    self?.startDragMonitoring()
+                } else {
+                    self?.hideTileZoneOverlays()
+                    self?.stopDragMonitoring()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func startDragMonitoring() {
+        let config = CiderConfig.load()
+        debugLog("[DragMonitor] startDragMonitoring called, enableDragToTile=\(config.enableDragToTile), dragPollingTimer=\(dragPollingTimer != nil)")
+        guard config.enableDragToTile else { return }
+        guard dragPollingTimer == nil else { return }
+        dragGeneration &+= 1
+        tileActionCompleted = false
+        debugLog("[DragMonitor] Installing polling timer + mouse-up monitors")
+
+        // SwiftUI's .onDrag captures leftMouseDragged events, so NSEvent monitors
+        // don't fire. Instead, poll NSEvent.mouseLocation at ~60Hz.
+        dragPollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleDragMouseMoved()
+            }
+        }
+
+        // Mouse-up monitors to clean up overlay after drop
+        dragMouseUpLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            Task { @MainActor in
+                self?.handleDragEnd()
+            }
+            return event
+        }
+        dragMouseUpGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleDragEnd()
+            }
+        }
+    }
+
+    private func stopDragMonitoring() {
+        dragPollingTimer?.invalidate()
+        dragPollingTimer = nil
+        if let monitor = dragMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            dragMouseMonitor = nil
+        }
+        if let monitor = dragMouseUpLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            dragMouseUpLocalMonitor = nil
+        }
+        if let monitor = dragMouseUpGlobalMonitor {
+            NSEvent.removeMonitor(monitor)
+            dragMouseUpGlobalMonitor = nil
+        }
+    }
+
+    private var dragMoveLogCount = 0
+
+    private func handleDragMouseMoved() {
+        guard let panel = commandPalettePanel, panel.isVisible else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let paletteFrame = panel.frame
+
+        dragMoveLogCount += 1
+        if dragMoveLogCount <= 3 {
+            debugLog("[DragMonitor] handleDragMouseMoved #\(dragMoveLogCount), mouse=\(mouseLocation), palette=\(paletteFrame), insidePalette=\(paletteFrame.contains(mouseLocation)), draggedWindowID=\(String(describing: commandPaletteViewModel?.currentDraggedWindowID))")
+        }
+
+        if paletteFrame.contains(mouseLocation) {
+            // Cursor is inside palette — hide overlays if shown
+            if isDragOverlayShown {
+                hideTileZoneOverlays()
+            }
+        } else {
+            // Cursor is outside palette — show overlays if not shown
+            if !isDragOverlayShown {
+                showTileZoneOverlays()
+            }
+        }
+    }
+
+    private func handleDragEnd() {
+        debugLog("[DragEnd] handleDragEnd called, tileActionCompleted=\(tileActionCompleted)")
+
+        // If tile action already handled cleanup, nothing to do
+        if tileActionCompleted {
+            tileActionCompleted = false
+            return
+        }
+
+        // Safety timeout: wait up to 300ms for tile action to complete, then clean up.
+        // Capture the current drag generation so a new drag started within the delay
+        // doesn't get torn down by this stale cleanup block.
+        let gen = dragGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.dragGeneration == gen else { return }
+            self.tileActionCompleted = false
+            self.hideTileZoneOverlays()
+            self.stopDragMonitoring()
+            self.commandPaletteViewModel?.isDraggingWindow = false
+            self.commandPaletteViewModel?.currentDraggedWindowID = nil
+            self.commandPaletteViewModel?.currentDraggedWindowPID = 0
+        }
+    }
+
+    private func showTileZoneOverlays() {
+        guard !isDragOverlayShown else { return }
+        isDragOverlayShown = true
+
+        let monitors = MonitorManager.shared.monitors
+        guard !monitors.isEmpty else { return }
+
+        for monitor in monitors {
+            let overlayPanel = TileZoneOverlayPanel(monitor: monitor)
+
+            let overlayView = TileZoneOverlayView(
+                monitor: monitor,
+                onTile: { [weak self] windowID, position in
+                    guard let self else { return }
+                    // Use PID stored at drag start (reliable) — fall back to CGWindowList lookup
+                    var pid = self.commandPaletteViewModel?.currentDraggedWindowPID ?? 0
+                    if pid == 0 { pid = self.findPIDForWindow(windowID) }
+
+                    DynamicTileManager.shared.tileToZone(
+                        windowID: windowID, pid: pid, position: position, monitor: monitor
+                    )
+
+                    self.commandPaletteViewModel?.dismiss()
+                    self.tileActionCompleted = true
+                    self.hideTileZoneOverlays()
+                    self.stopDragMonitoring()
+                    self.commandPaletteViewModel?.isDraggingWindow = false
+                    self.commandPaletteViewModel?.currentDraggedWindowID = nil
+                    self.commandPaletteViewModel?.currentDraggedWindowPID = 0
+                    NotificationCenter.default.post(name: .ciderTileActionCompleted, object: nil)
+                }
+            )
+
+            let hostingView = NSHostingView(rootView: overlayView)
+            overlayPanel.contentView = hostingView
+            overlayPanel.setFrame(monitor.frame, display: true)
+            overlayPanel.orderFront(nil)
+
+            tileZoneOverlayPanels.append(overlayPanel)
+        }
+    }
+
+    private func hideTileZoneOverlays() {
+        guard isDragOverlayShown else { return }
+        isDragOverlayShown = false
+
+        for panel in tileZoneOverlayPanels {
+            panel.orderOut(nil)
+        }
+        tileZoneOverlayPanels.removeAll()
+    }
+
+    /// Find PID for a window ID by checking the current window list.
+    private func findPIDForWindow(_ windowID: CGWindowID) -> pid_t {
+        let cgOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(cgOptions, kCGNullWindowID) as? [[String: Any]] else {
+            return 0
+        }
+        for info in infoList {
+            if let wid = info[kCGWindowNumber as String] as? CGWindowID, wid == windowID,
+               let pid = info[kCGWindowOwnerPID as String] as? pid_t {
+                return pid
+            }
+        }
+
+        // Try the view model's window list
+        for monitorGroup in windowListViewModel.monitorGroups {
+            for group in monitorGroup.windowGroups {
+                if let window = group.windows.first(where: { $0.id == windowID }) {
+                    return window.ownerPID
+                }
+            }
+        }
+        return 0
     }
 
     // MARK: - Settings
@@ -333,6 +570,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         optionTabDetector?.start()
     }
 
+    private func startTileHotkeyDetection() {
+        let config = CiderConfig.load()
+        guard config.enableTilingHotkeys else { return }
+
+        tileHotkeyDetector = TileHotkeyDetector(
+            onAction: { [weak self] action in
+                self?.tileActionHandler.execute(action)
+            }
+        )
+        tileHotkeyDetector?.start()
+    }
+
     private func handleCycleStart(direction: Int) {
         // Don't start cycling if command palette is open
         if commandPalettePanel?.isVisible == true {
@@ -368,6 +617,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideWindowCyclingPanel() {
         windowCyclingPanel?.orderOut(nil)
+    }
+
+    // MARK: - Debug Logging
+
+    private func debugLog(_ message: String) {
+        let path = "/tmp/cider-debug.log"
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(line.data(using: .utf8)!)
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: line.data(using: .utf8))
+        }
     }
 
     private func updateWindowCyclingPanelSize() {

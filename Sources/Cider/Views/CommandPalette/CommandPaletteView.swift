@@ -214,7 +214,17 @@ struct CommandPaletteView: View {
                     onQuitApp: { viewModel.quitWindowApp($0) },
                     onMoveWindow: { window, monitor in viewModel.moveWindow(window, to: monitor) },
                     onMoveWindowByID: { windowID, monitor in viewModel.moveWindowByID(windowID, to: monitor) },
-                    onTabChange: { viewModel.activeTab = $0 }
+                    onTileWindow: { window, position in viewModel.tileWindow(window, position: position) },
+                    onDragStarted: { windowID in
+                        viewModel.isDraggingWindow = true
+                        viewModel.currentDraggedWindowID = windowID
+                        // Store PID at drag start — looking it up later via CGWindowList is unreliable
+                        if let wid = windowID {
+                            viewModel.currentDraggedWindowPID = viewModel.findPID(for: wid)
+                        }
+                    },
+                    onTabChange: { viewModel.activeTab = $0 },
+                    isDragging: viewModel.isDraggingWindow
                 )
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.md)

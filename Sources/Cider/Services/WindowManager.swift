@@ -1,6 +1,13 @@
 import AppKit
 import ApplicationServices
 
+/// Wrapper to send AXUIElement across isolation boundaries.
+/// AXUIElement is a thread-safe CF handle but isn't marked Sendable.
+struct SendableAXElement: @unchecked Sendable {
+    let element: AXUIElement
+    init(_ element: AXUIElement) { self.element = element }
+}
+
 enum TilePosition: String, CaseIterable {
     case left
     case right
@@ -11,7 +18,13 @@ enum TilePosition: String, CaseIterable {
     case bottomLeft
     case bottomRight
     case maximize
+    case almostMaximize
     case center
+    case firstThird
+    case centerThird
+    case lastThird
+    case firstTwoThirds
+    case lastTwoThirds
 
     var displayName: String {
         switch self {
@@ -24,7 +37,13 @@ enum TilePosition: String, CaseIterable {
         case .bottomLeft: return "Bottom Left"
         case .bottomRight: return "Bottom Right"
         case .maximize: return "Maximize"
+        case .almostMaximize: return "Almost Maximize"
         case .center: return "Center"
+        case .firstThird: return "First Third"
+        case .centerThird: return "Center Third"
+        case .lastThird: return "Last Third"
+        case .firstTwoThirds: return "First Two Thirds"
+        case .lastTwoThirds: return "Last Two Thirds"
         }
     }
 
@@ -39,13 +58,51 @@ enum TilePosition: String, CaseIterable {
         case .bottomLeft: return "rectangle.inset.bottomleft.filled"
         case .bottomRight: return "rectangle.inset.bottomright.filled"
         case .maximize: return "rectangle.fill"
+        case .almostMaximize: return "rectangle.inset.filled"
         case .center: return "rectangle.center.inset.filled"
+        case .firstThird: return "rectangle.leadinghalf.inset.filled"
+        case .centerThird: return "rectangle.center.inset.filled"
+        case .lastThird: return "rectangle.trailinghalf.inset.filled"
+        case .firstTwoThirds: return "rectangle.lefthalf.filled"
+        case .lastTwoThirds: return "rectangle.righthalf.filled"
+        }
+    }
+
+    var shortcutLabel: String {
+        switch self {
+        case .left: return "⌃⌥←"
+        case .right: return "⌃⌥→"
+        case .top: return "⌃⌥↑"
+        case .bottom: return "⌃⌥↓"
+        case .topLeft: return "⌃⌥U"
+        case .topRight: return "⌃⌥I"
+        case .bottomLeft: return "⌃⌥J"
+        case .bottomRight: return "⌃⌥K"
+        case .maximize: return "⌃⌥↩"
+        case .almostMaximize: return "⌃⌥⇧↩"
+        case .center: return "⌃⌥C"
+        case .firstThird: return "⌃⌥D"
+        case .centerThird: return "⌃⌥F"
+        case .lastThird: return "⌃⌥G"
+        case .firstTwoThirds: return "⌃⌥E"
+        case .lastTwoThirds: return "⌃⌥T"
         }
     }
 
     static var halves: [TilePosition] { [.left, .right, .top, .bottom] }
     static var quarters: [TilePosition] { [.topLeft, .topRight, .bottomLeft, .bottomRight] }
-    static var other: [TilePosition] { [.maximize, .center] }
+    static var thirds: [TilePosition] { [.firstThird, .centerThird, .lastThird] }
+    static var twoThirds: [TilePosition] { [.firstTwoThirds, .lastTwoThirds] }
+    static var other: [TilePosition] { [.maximize, .almostMaximize, .center] }
+}
+
+enum TileAction {
+    case tile(TilePosition)
+    case larger
+    case smaller
+    case restore
+    case nextDisplay
+    case previousDisplay
 }
 
 /// Tracks windows even when their apps are hidden, so Cider can still display them
@@ -433,16 +490,23 @@ struct WindowManager {
         }
     }
 
+    /// Activate an app and raise a specific window to the front.
+    /// Used by completeFocus and tileWindow to bring a window forward before acting on it.
+    private func activateAndRaise(window: WindowInfo, axWindow: AXUIElement) {
+        guard let targetApp = NSRunningApplication(processIdentifier: window.ownerPID) else { return }
+        _ = targetApp.activate(options: [.activateAllWindows])
+        let appElement = AccessibilityHelpers.appElement(for: window.ownerPID)
+        _ = AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, axWindow)
+        _ = AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
+    }
+
     private func completeFocus(window: WindowInfo, targetApp: NSRunningApplication, stageOthers: Bool) {
-        // STEP 2: Activate target app FIRST (before hiding others)
-        // This prevents macOS from auto-activating Finder when we hide other apps
+        // STEP 2: Activate target app and raise the specific window
         _ = targetApp.activate(options: [.activateAllWindows])
 
         // STEP 3: Find and raise the specific window
         if let target = findAXWindow(for: window) {
-            let appElement = AccessibilityHelpers.appElement(for: window.ownerPID)
-            _ = AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, target)
-            _ = AXUIElementPerformAction(target, kAXRaiseAction as CFString)
+            activateAndRaise(window: window, axWindow: target)
         }
 
         // STEP 4: Now hide other apps (AFTER target is focused)
@@ -455,12 +519,11 @@ struct WindowManager {
             print("[Cider] stageOthers=false, not staging")
         }
 
-        // STEP 5: Re-activate target to ensure it stays in front after hiding others
-        _ = targetApp.activate(options: [])
-
-        // STEP 6: Final raise to ensure window is on top
+        // STEP 5: Re-activate and raise to ensure window stays in front after hiding others
         if let target = findAXWindow(for: window) {
-            _ = AXUIElementPerformAction(target, kAXRaiseAction as CFString)
+            activateAndRaise(window: window, axWindow: target)
+        } else {
+            _ = targetApp.activate(options: [])
         }
     }
 
@@ -767,8 +830,11 @@ struct WindowManager {
         return nil
     }
 
-    /// Padding around windows when moved to a new monitor (like Rectangle's "almost maximize")
-    private static let windowPadding: CGFloat = 20
+    /// Padding around windows when moved to a new monitor (like Rectangle's "almost maximize").
+    /// Also used as the step size for larger/smaller hotkeys.
+    static let windowPadding: CGFloat = 20
+    /// Tolerance for frame verification after AX resize
+    private static let frameApplyTolerance: CGFloat = 20
 
     func moveWindow(_ window: WindowInfo, to screen: MonitorInfo, stageOthers: Bool = false) {
         guard let axWindow = findAXWindow(for: window) else {
@@ -800,34 +866,7 @@ struct WindowManager {
         let tolerance: CGFloat = 20
         if let actual = AccessibilityHelpers.getWindowSize(axWindow),
            abs(actual.width - newSize.width) > tolerance || abs(actual.height - newSize.height) > tolerance {
-            let script = """
-            tell application "System Events"
-                tell (first process whose unix id is \(window.ownerPID))
-                    set size of window 1 to {\(Int(newSize.width)), \(Int(newSize.height))}
-                    set position of window 1 to {\(Int(axPoint.x)), \(Int(axPoint.y))}
-                end tell
-            end tell
-            """
-            let scriptCopy = script
-            Task.detached {
-                let task = Process()
-                task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                task.arguments = ["-e", scriptCopy]
-                do {
-                    try task.run()
-                } catch {
-                    return
-                }
-                // 3-second timeout: terminate the process if it hasn't exited
-                let timeoutItem = DispatchWorkItem {
-                    if task.isRunning {
-                        task.terminate()
-                    }
-                }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: timeoutItem)
-                task.waitUntilExit()
-                timeoutItem.cancel()
-            }
+            Self.runAppleScriptResize(pid: window.ownerPID, axPosition: axPoint, size: newSize)
         }
 
         // Stage other apps on the destination monitor if requested
@@ -863,37 +902,126 @@ struct WindowManager {
         AccessibilityHelpers.setWindowSize(axWindow, to: size)
     }
 
-    func tileWindow(_ window: WindowInfo, position: TilePosition, on screen: MonitorInfo) {
-        guard let axWindow = findAXWindow(for: window) else { return }
-        let frame = calculateTileFrame(position: position, on: screen)
-        let axPoint = convertToAXPosition(CGPoint(x: frame.minX, y: frame.minY), windowHeight: frame.height)
-        AccessibilityHelpers.setWindowFrame(axWindow, position: axPoint, size: frame.size)
-    }
-
-    func splitWindows(_ window1: WindowInfo, _ window2: WindowInfo, on screen: MonitorInfo, leftRight: Bool = true) {
-        guard let ax1 = findAXWindow(for: window1),
-              let ax2 = findAXWindow(for: window2) else { return }
-
-        let leftFrame: CGRect
-        let rightFrame: CGRect
-
-        if leftRight {
-            leftFrame = calculateTileFrame(position: .left, on: screen)
-            rightFrame = calculateTileFrame(position: .right, on: screen)
-        } else {
-            leftFrame = calculateTileFrame(position: .top, on: screen)
-            rightFrame = calculateTileFrame(position: .bottom, on: screen)
+    /// Tile a window to a position on a screen.
+    /// - Parameter onComplete: Called on MainActor when the tile operation finishes.
+    ///   For fullscreen windows the work is async, so this fires later.
+    ///   The Bool indicates whether the frame was applied successfully.
+    @discardableResult
+    func tileWindow(_ window: WindowInfo, position: TilePosition, on screen: MonitorInfo,
+                    onComplete: (@MainActor @Sendable (Bool) -> Void)? = nil) -> Bool {
+        guard let axWindow = findAXWindow(for: window) else {
+            onComplete?(false)
+            return false
         }
 
-        let leftAXPoint = convertToAXPosition(CGPoint(x: leftFrame.minX, y: leftFrame.minY), windowHeight: leftFrame.height)
-        let rightAXPoint = convertToAXPosition(CGPoint(x: rightFrame.minX, y: rightFrame.minY), windowHeight: rightFrame.height)
+        // Exit fullscreen if needed — done asynchronously to avoid blocking the main thread
+        // (exitFullScreen polls with usleep for up to ~1s)
+        if AccessibilityHelpers.isFullScreen(axWindow) {
+            // Bridge AXUIElement across isolation — it's a thread-safe CF handle
+            let ax = SendableAXElement(axWindow)
+            let windowCopy = window
+            Task.detached {
+                let exited = AccessibilityHelpers.exitFullScreen(ax.element)
+                guard exited else {
+                    await onComplete?(false)
+                    return
+                }
+                // Brief pause for fullscreen exit animation to settle
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                let result = await MainActor.run {
+                    WindowManager().applyTileFrame(windowCopy, axWindow: ax.element, position: position, on: screen)
+                }
+                await onComplete?(result)
+            }
+            // Async work dispatched — caller should NOT treat this as "done"
+            return false
+        }
 
-        AccessibilityHelpers.setWindowFrame(ax1, position: leftAXPoint, size: leftFrame.size)
-        AccessibilityHelpers.setWindowFrame(ax2, position: rightAXPoint, size: rightFrame.size)
+        let result = applyTileFrame(window, axWindow: axWindow, position: position, on: screen)
+        // Safe to call directly — we're already on @MainActor and callback is @MainActor
+        onComplete?(result)
+        return result
+    }
+
+    @discardableResult
+    private func applyTileFrame(_ window: WindowInfo, axWindow: AXUIElement, position: TilePosition, on screen: MonitorInfo) -> Bool {
+        // Activate and raise so AppleScript fallback targets the correct window
+        activateAndRaise(window: window, axWindow: axWindow)
+
+        let frame = calculateTileFrame(position: position, on: screen)
+        return applyWindowFrame(window, axWindow: axWindow, origin: CGPoint(x: frame.minX, y: frame.minY), size: frame.size)
+    }
+
+    func splitWindows(_ window1: WindowInfo, _ window2: WindowInfo, on screen: MonitorInfo, leftRight: Bool = true,
+                       onComplete: (@MainActor @Sendable () -> Void)? = nil) {
+        guard let ax1 = findAXWindow(for: window1),
+              let ax2 = findAXWindow(for: window2) else {
+            onComplete?()
+            return
+        }
+
+        let needsFullscreenExit = AccessibilityHelpers.isFullScreen(ax1) || AccessibilityHelpers.isFullScreen(ax2)
+
+        if needsFullscreenExit {
+            let sax1 = SendableAXElement(ax1)
+            let sax2 = SendableAXElement(ax2)
+            let w1 = window1, w2 = window2
+            Task.detached {
+                // Exit fullscreen for both if needed
+                if AccessibilityHelpers.isFullScreen(sax1.element) {
+                    let exited = AccessibilityHelpers.exitFullScreen(sax1.element)
+                    if !exited {
+                        await onComplete?()
+                        return
+                    }
+                }
+                if AccessibilityHelpers.isFullScreen(sax2.element) {
+                    let exited = AccessibilityHelpers.exitFullScreen(sax2.element)
+                    if !exited {
+                        await onComplete?()
+                        return
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                await MainActor.run {
+                    WindowManager().applySplitFrames(w1, ax1: sax1.element, w2, ax2: sax2.element, on: screen, leftRight: leftRight)
+                }
+                await onComplete?()
+            }
+        } else {
+            applySplitFrames(window1, ax1: ax1, window2, ax2: ax2, on: screen, leftRight: leftRight)
+            onComplete?()
+        }
+    }
+
+    private func applySplitFrames(_ window1: WindowInfo, ax1: AXUIElement,
+                                  _ window2: WindowInfo, ax2: AXUIElement,
+                                  on screen: MonitorInfo, leftRight: Bool) {
+        let frame1: CGRect
+        let frame2: CGRect
+
+        if leftRight {
+            frame1 = calculateTileFrame(position: .left, on: screen)
+            frame2 = calculateTileFrame(position: .right, on: screen)
+        } else {
+            frame1 = calculateTileFrame(position: .top, on: screen)
+            frame2 = calculateTileFrame(position: .bottom, on: screen)
+        }
+
+        activateAndRaise(window: window1, axWindow: ax1)
+        applyWindowFrame(window1, axWindow: ax1, origin: CGPoint(x: frame1.minX, y: frame1.minY), size: frame1.size)
+
+        activateAndRaise(window: window2, axWindow: ax2)
+        applyWindowFrame(window2, axWindow: ax2, origin: CGPoint(x: frame2.minX, y: frame2.minY), size: frame2.size)
     }
 
     func calculateTileFrame(position: TilePosition, on screen: MonitorInfo) -> CGRect {
+        Self.calculateTileFrameStatic(position: position, on: screen)
+    }
+
+    static func calculateTileFrameStatic(position: TilePosition, on screen: MonitorInfo) -> CGRect {
         let frame = screen.visibleFrame
+        let padding = windowPadding
 
         switch position {
         case .left:
@@ -922,12 +1050,30 @@ struct WindowManager {
                           width: frame.width / 2, height: frame.height / 2)
         case .maximize:
             return frame
+        case .almostMaximize:
+            return CGRect(x: frame.minX + padding, y: frame.minY + padding,
+                          width: frame.width - padding * 2, height: frame.height - padding * 2)
         case .center:
             let width = frame.width * 0.7
             let height = frame.height * 0.7
             return CGRect(x: frame.midX - width / 2,
                           y: frame.midY - height / 2,
                           width: width, height: height)
+        case .firstThird:
+            return CGRect(x: frame.minX, y: frame.minY,
+                          width: frame.width / 3, height: frame.height)
+        case .centerThird:
+            return CGRect(x: frame.minX + frame.width / 3, y: frame.minY,
+                          width: frame.width / 3, height: frame.height)
+        case .lastThird:
+            return CGRect(x: frame.minX + frame.width * 2 / 3, y: frame.minY,
+                          width: frame.width / 3, height: frame.height)
+        case .firstTwoThirds:
+            return CGRect(x: frame.minX, y: frame.minY,
+                          width: frame.width * 2 / 3, height: frame.height)
+        case .lastTwoThirds:
+            return CGRect(x: frame.minX + frame.width / 3, y: frame.minY,
+                          width: frame.width * 2 / 3, height: frame.height)
         }
     }
 
@@ -950,5 +1096,104 @@ struct WindowManager {
         let axY = primaryHeight - bottomLeft.y - windowHeight
 
         return CGPoint(x: bottomLeft.x, y: axY)
+    }
+
+    /// Applies frame using the three-step pattern (size → position → size), with Enhanced UI
+    /// toggle, verify/retry, and AppleScript as absolute last resort. Returns true on success.
+    @discardableResult
+    private func applyWindowFrame(_ window: WindowInfo, axWindow: AXUIElement, origin: CGPoint, size: CGSize) -> Bool {
+        let pid = window.ownerPID
+        let hadEnhancedUI = AccessibilityHelpers.getEnhancedUI(for: pid) == true
+        if hadEnhancedUI {
+            AccessibilityHelpers.setEnhancedUI(for: pid, enabled: false)
+        }
+        defer {
+            if hadEnhancedUI {
+                AccessibilityHelpers.setEnhancedUI(for: pid, enabled: true)
+            }
+        }
+
+        // Two attempts with AX before falling back to AppleScript
+        for attempt in 0..<2 {
+            if attempt > 0 {
+                usleep(20_000) // 20ms between retries
+            }
+
+            // Three-step apply: size → position → size (Rectangle/yabai pattern)
+            AccessibilityHelpers.setWindowSize(axWindow, to: size)
+            let axPoint = convertToAXPosition(origin, windowHeight: size.height)
+            AccessibilityHelpers.setWindowPosition(axWindow, to: axPoint)
+            AccessibilityHelpers.setWindowSize(axWindow, to: size)
+
+            // Verify final frame
+            if verifyFrame(axWindow, expectedOrigin: axPoint, expectedSize: size) {
+                return true
+            }
+        }
+
+        // AppleScript as absolute last resort — fire-and-forget, result unknown
+        applyWindowFrameWithAppleScript(window: window, origin: origin, size: size)
+        return false
+    }
+
+    /// Check whether the window's actual frame is within tolerance of the expected values.
+    private func verifyFrame(_ axWindow: AXUIElement, expectedOrigin: CGPoint, expectedSize: CGSize) -> Bool {
+        guard let actualPos = AccessibilityHelpers.getWindowPosition(axWindow),
+              let actualSize = AccessibilityHelpers.getWindowSize(axWindow) else {
+            return false
+        }
+        let tol = Self.frameApplyTolerance
+        return abs(actualPos.x - expectedOrigin.x) <= tol &&
+               abs(actualPos.y - expectedOrigin.y) <= tol &&
+               abs(actualSize.width - expectedSize.width) <= tol &&
+               abs(actualSize.height - expectedSize.height) <= tol
+    }
+
+    private func applyWindowFrameWithAppleScript(window: WindowInfo, origin: CGPoint, size: CGSize) {
+        let axPoint = convertToAXPosition(origin, windowHeight: size.height)
+        Self.runAppleScriptResize(pid: window.ownerPID, axPosition: axPoint, size: size)
+    }
+
+    /// Fire-and-forget AppleScript resize+move via System Events. Used when AX fails.
+    static func runAppleScriptResize(pid: pid_t, axPosition: CGPoint, size: CGSize) {
+        let script = """
+        tell application "System Events"
+            tell (first process whose unix id is \(pid))
+                set size of window 1 to {\(Int(size.width)), \(Int(size.height))}
+                set position of window 1 to {\(Int(axPosition.x)), \(Int(axPosition.y))}
+            end tell
+        end tell
+        """
+
+        Task.detached {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", script]
+            do {
+                try task.run()
+            } catch {
+                return
+            }
+
+            // 3-second timeout: terminate the process if it hasn't exited
+            let timeoutItem = DispatchWorkItem {
+                if task.isRunning {
+                    task.terminate()
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: timeoutItem)
+            task.waitUntilExit()
+            timeoutItem.cancel()
+        }
+    }
+
+    /// Apply an arbitrary frame to an AX window element (used by TileActionHandler for larger/smaller/restore).
+    @discardableResult
+    func applyFrame(axWindow: AXUIElement, pid: pid_t, origin: CGPoint, size: CGSize) -> Bool {
+        let app = NSRunningApplication(processIdentifier: pid)
+        let ownerName = app?.localizedName ?? "Unknown"
+        let bundleID = app?.bundleIdentifier ?? ""
+        let window = WindowInfo(id: 0, ownerPID: pid, ownerName: ownerName, title: "", bundleIdentifier: bundleID)
+        return applyWindowFrame(window, axWindow: axWindow, origin: origin, size: size)
     }
 }

@@ -1,6 +1,10 @@
 import AppKit
 @preconcurrency import ApplicationServices
 
+// Private AX API — more reliable than AXWindowNumber attribute for getting CGWindowID
+@_silgen_name("_AXUIElementGetWindow")
+func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
+
 enum AccessibilityHelpers {
     private static let promptKey = "CiderPromptedAccessibility"
 
@@ -50,14 +54,10 @@ enum AccessibilityHelpers {
     }
 
     static func windowID(of window: AXUIElement) -> CGWindowID? {
-        var value: CFTypeRef?
-        let error = AXUIElementCopyAttributeValue(window, "AXWindowNumber" as CFString, &value)
-        guard error == .success else { return nil }
-
-        if let number = value as? NSNumber {
-            return CGWindowID(number.uint32Value)
-        }
-        return nil
+        var windowID: CGWindowID = 0
+        let error = _AXUIElementGetWindow(window, &windowID)
+        guard error == .success, windowID != 0 else { return nil }
+        return windowID
     }
 
     static func isMinimized(_ window: AXUIElement) -> Bool {
@@ -113,12 +113,63 @@ enum AccessibilityHelpers {
         return error == .success
     }
 
+    // MARK: - Enhanced User Interface
+
+    /// Read AXEnhancedUserInterface for a process (used by VoiceOver-aware apps like Terminal)
+    static func getEnhancedUI(for pid: pid_t) -> Bool? {
+        let appElement = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, &value)
+        guard error == .success, let boolValue = value as? Bool else { return nil }
+        return boolValue
+    }
+
+    /// Set AXEnhancedUserInterface for a process
     @discardableResult
-    static func setWindowFrame(_ window: AXUIElement, position: CGPoint, size: CGSize) -> Bool {
-        // Set position first, then size
-        let posResult = setWindowPosition(window, to: position)
-        let sizeResult = setWindowSize(window, to: size)
-        return posResult && sizeResult
+    static func setEnhancedUI(for pid: pid_t, enabled: Bool) -> Bool {
+        let appElement = AXUIElementCreateApplication(pid)
+        let error = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, enabled as CFBoolean)
+        return error == .success
+    }
+
+    // MARK: - Fullscreen
+
+    /// Check if a window is in native macOS fullscreen
+    static func isFullScreen(_ window: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &value)
+        guard error == .success, let fullScreen = value as? Bool else { return false }
+        return fullScreen
+    }
+
+    /// Exit native macOS fullscreen. Polls until the window leaves fullscreen or timeout (~1s).
+    /// Must be called off the main thread. Returns true if exited, false if timed out.
+    static func exitFullScreen(_ window: AXUIElement) -> Bool {
+        guard isFullScreen(window) else { return true }
+
+        // Try setting AXFullScreen = false
+        var settable: DarwinBoolean = false
+        AXUIElementIsAttributeSettable(window, "AXFullScreen" as CFString, &settable)
+        if settable.boolValue {
+            AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, false as CFBoolean)
+        } else {
+            // Fallback: press the fullscreen button
+            var buttonRef: CFTypeRef?
+            let err = AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &buttonRef)
+            if err == .success, let button = buttonRef, CFGetTypeID(button) == AXUIElementGetTypeID() {
+                let axButton = unsafeDowncast(button, to: AXUIElement.self)
+                AXUIElementPerformAction(axButton, kAXPressAction as CFString)
+            }
+        }
+
+        // Poll for up to ~1 second (20 × 50ms)
+        for _ in 0..<20 {
+            usleep(50_000)
+            if !isFullScreen(window) {
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: - Coordinate Conversion

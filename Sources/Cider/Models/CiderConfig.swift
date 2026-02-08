@@ -97,6 +97,9 @@ struct CiderConfig: Codable {
     var enableOptionTabCycling: Bool  // Enable Option+Tab window cycling
     var optionTabCycleAllScreens: Bool  // Cycle windows on all screens vs current only
     var rememberPaletteState: Bool  // Keep folders open between palette sessions
+    var enableDragToTile: Bool  // Enable drag-to-tile overlay when dragging windows outside palette
+    var enableTilingHotkeys: Bool  // Enable Ctrl+Option tiling hotkeys (Rectangle-style)
+    var enableDynamicTiling: Bool  // Enable drag-to-split dynamic tile groups
 
     static let storageKey = "CiderConfig"
 
@@ -109,7 +112,10 @@ struct CiderConfig: Codable {
             activationMode: .doubleTap,
             enableOptionTabCycling: true,
             optionTabCycleAllScreens: true,
-            rememberPaletteState: false
+            rememberPaletteState: false,
+            enableDragToTile: true,
+            enableTilingHotkeys: true,
+            enableDynamicTiling: true
         )
     }
 
@@ -149,9 +155,12 @@ struct CiderConfig: Codable {
         enableOptionTabCycling = try container.decodeIfPresent(Bool.self, forKey: .enableOptionTabCycling) ?? true
         optionTabCycleAllScreens = try container.decodeIfPresent(Bool.self, forKey: .optionTabCycleAllScreens) ?? true
         rememberPaletteState = try container.decodeIfPresent(Bool.self, forKey: .rememberPaletteState) ?? false
+        enableDragToTile = try container.decodeIfPresent(Bool.self, forKey: .enableDragToTile) ?? true
+        enableTilingHotkeys = try container.decodeIfPresent(Bool.self, forKey: .enableTilingHotkeys) ?? true
+        enableDynamicTiling = try container.decodeIfPresent(Bool.self, forKey: .enableDynamicTiling) ?? true
     }
 
-    init(autoHideApps: Bool, showMenuBarIcon: Bool, textSize: TextSize, paletteSize: PaletteSize, activationMode: ActivationMode = .doubleTap, enableOptionTabCycling: Bool = true, optionTabCycleAllScreens: Bool = true, rememberPaletteState: Bool = false) {
+    init(autoHideApps: Bool, showMenuBarIcon: Bool, textSize: TextSize, paletteSize: PaletteSize, activationMode: ActivationMode = .doubleTap, enableOptionTabCycling: Bool = true, optionTabCycleAllScreens: Bool = true, rememberPaletteState: Bool = false, enableDragToTile: Bool = true, enableTilingHotkeys: Bool = true, enableDynamicTiling: Bool = true) {
         self.autoHideApps = autoHideApps
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -160,5 +169,8 @@ struct CiderConfig: Codable {
         self.enableOptionTabCycling = enableOptionTabCycling
         self.optionTabCycleAllScreens = optionTabCycleAllScreens
         self.rememberPaletteState = rememberPaletteState
+        self.enableDragToTile = enableDragToTile
+        self.enableTilingHotkeys = enableTilingHotkeys
+        self.enableDynamicTiling = enableDynamicTiling
     }
 }

@@ -12,6 +12,11 @@ let package = Package(
         .executableTarget(
             name: "Cider",
             path: "Sources/Cider"
+        ),
+        .testTarget(
+            name: "CiderTests",
+            dependencies: ["Cider"],
+            path: "Tests/CiderTests"
         )
     ]
 )
