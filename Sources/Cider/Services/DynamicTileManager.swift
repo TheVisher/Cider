@@ -18,8 +18,22 @@ final class DynamicTileManager {
     /// Follows the AeroSpace/yabai pattern for feedback loop prevention.
     private var currentlyTilingWindowIDs: Set<CGWindowID> = []
 
+    /// Set by TileHandleManager during drag to suppress AX resize handling.
+    var isHandleDragging: Bool = false
+
     /// Tolerance (in points) for expected-frame comparison when debouncing AX resize events.
     private let frameTolerance: CGFloat = 2
+
+    // MARK: - Drag Throttle State
+
+    /// Minimum interval between AX frame applications during drag (~60fps).
+    private let dragApplyInterval: CFTimeInterval = 1.0 / 60.0
+    /// Timestamp of the last drag frame application.
+    private var lastDragApplyTime: CFTimeInterval = 0
+    /// Trailing-edge timer to ensure final drag position is always applied.
+    private var pendingDragApply: DispatchWorkItem?
+    /// Pre-populated AX element cache for windows in the dragged group (avoids repeated lookups).
+    private var dragAXCache: [CGWindowID: AXUIElement] = [:]
 
     init() {
         // Recompute all groups when monitors change
@@ -204,6 +218,118 @@ final class DynamicTileManager {
     /// Get the group ID for a window (if any).
     func groupID(for windowID: CGWindowID) -> UUID? {
         windowToGroup[windowID]
+    }
+
+    /// Get split lines for all groups, used by TileHandleManager.
+    func groupSplitLines() -> [(groupID: UUID, screenID: UInt32, lines: [SplitLineInfo])] {
+        groups.map { (groupID: $0.key, screenID: $0.value.screenID, lines: $0.value.splitLines()) }
+    }
+
+    /// Update a split ratio by tree path in a specific group, then reapply frames.
+    func updateSplitRatio(groupID: UUID, path: [Int], newRatio: CGFloat) {
+        guard let group = groups[groupID] else { return }
+        group.updateRatioAtPath(path, newRatio: newRatio)
+        applyGroupFrames(group)
+    }
+
+    // MARK: - Handle Drag Lifecycle
+
+    /// Called at drag start — pre-populates AX cache and resets throttle state.
+    func beginHandleDrag(groupID: UUID) {
+        guard let group = groups[groupID] else { return }
+
+        isHandleDragging = true
+        lastDragApplyTime = 0
+        pendingDragApply?.cancel()
+        pendingDragApply = nil
+        dragAXCache.removeAll()
+
+        // Pre-populate AX element cache for all windows in this group
+        for (windowID, pid) in group.root.allWindowIDs() {
+            let axWindows = AccessibilityHelpers.windows(for: pid)
+            for axWindow in axWindows {
+                if AccessibilityHelpers.windowID(of: axWindow) == windowID {
+                    dragAXCache[windowID] = axWindow
+                    break
+                }
+            }
+        }
+    }
+
+    /// Throttled split ratio update during drag. Always updates the tree immediately
+    /// but rate-limits AX frame application to ~30fps with a trailing-edge guarantee.
+    func updateSplitRatioDrag(groupID: UUID, path: [Int], newRatio: CGFloat) {
+        guard let group = groups[groupID] else { return }
+
+        // Always update the tree ratio immediately (cheap, no AX)
+        group.updateRatioAtPath(path, newRatio: newRatio)
+
+        // Cancel any pending trailing-edge apply
+        pendingDragApply?.cancel()
+
+        let now = CACurrentMediaTime()
+        let elapsed = now - lastDragApplyTime
+
+        if elapsed >= dragApplyInterval {
+            // Enough time has passed — apply immediately
+            lastDragApplyTime = now
+            applyGroupFramesDrag(group)
+        } else {
+            // Schedule trailing-edge timer for the remaining interval
+            let remaining = dragApplyInterval - elapsed
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self, let group = self.groups[groupID] else { return }
+                self.lastDragApplyTime = CACurrentMediaTime()
+                self.applyGroupFramesDrag(group)
+            }
+            pendingDragApply = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: workItem)
+        }
+    }
+
+    /// Lightweight AX frame application for drag — skips EnhancedUI toggle,
+    /// verify/retry, AppleScript fallback, AXRaise, and readback. 2 AX calls
+    /// per window instead of ~10 in the full-fidelity path. Min-size correction
+    /// is deferred to endHandleDrag's full-fidelity apply.
+    private func applyGroupFramesDrag(_ group: TileGroup) {
+        let frames = group.recalculateFrames()
+
+        // Mark all windows as tiling to suppress AX feedback
+        let windowIDs = Set(frames.map { $0.0 })
+        currentlyTilingWindowIDs.formUnion(windowIDs)
+
+        for (windowID, _, nsRect) in frames {
+            guard let axWindow = dragAXCache[windowID] else { continue }
+
+            // Convert NSScreen origin (bottom-left) to AX origin (top-left)
+            let axOrigin = AccessibilityHelpers.convertToAXCoordinates(
+                nsRect.origin, windowHeight: nsRect.height)
+
+            // Fire-and-forget: size then position (no readback, no retry)
+            AccessibilityHelpers.setWindowSize(axWindow, to: nsRect.size)
+            AccessibilityHelpers.setWindowPosition(axWindow, to: axOrigin)
+        }
+
+        // Clear tiling guard after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.currentlyTilingWindowIDs.subtract(windowIDs)
+        }
+    }
+
+    /// Called at drag end — applies final full-fidelity frames and cleans up.
+    func endHandleDrag(groupID: UUID) {
+        // Cancel any pending trailing-edge apply
+        pendingDragApply?.cancel()
+        pendingDragApply = nil
+
+        // Full-fidelity final apply (EnhancedUI, verify/retry, raise)
+        if let group = groups[groupID] {
+            applyGroupFrames(group)
+        }
+
+        // Clean up drag state
+        dragAXCache.removeAll()
+        isHandleDragging = false
     }
 
     // MARK: - Zone Tiling Helpers
@@ -446,6 +572,9 @@ final class DynamicTileManager {
     // MARK: - Resize Handling
 
     private func scheduleResizeHandling(windowID: CGWindowID) {
+        // Skip entirely if handle drag is in progress
+        guard !isHandleDragging else { return }
+
         // Skip entirely if we're currently tiling this window (AeroSpace pattern)
         guard !currentlyTilingWindowIDs.contains(windowID) else { return }
 
