@@ -452,8 +452,12 @@ final class CommandPaletteViewModel: ObservableObject {
     /// Clear search text
     func clearSearch() {
         searchText = ""
-        // Reset focus to search when clearing
-        focusState.section = .search
+        // Reset all focus state when clearing search
+        focusState = .initial
+        // Preserve active tab selection
+        if let idx = PaletteTab.allCases.firstIndex(of: activeTab) {
+            focusState.tabsIndex = idx
+        }
     }
 
     /// Check if search has results

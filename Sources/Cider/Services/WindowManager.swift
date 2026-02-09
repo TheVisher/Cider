@@ -431,12 +431,24 @@ struct WindowManager {
 
     /// Remove duplicate windows from the same app with identical titles
     /// Prefers visible windows over minimized, and windows with valid IDs over pseudo-IDs
+    /// Only deduplicates when one window has a pseudo-ID (likely a duplicate discovery).
+    /// Two windows with different real IDs but same title are kept (e.g., two "New Tab" in Chrome).
     private func deduplicateWindows(_ windows: [WindowInfo]) -> [WindowInfo] {
         var seen: [String: WindowInfo] = [:]
 
         for window in windows {
-            // Key by bundle ID + title for same-app windows
-            let key = "\(window.bundleIdentifier)-\(window.title)"
+            // Only dedup when one window has a pseudo-ID (AX-discovered duplicate
+            // of a CGWindowList window). Two real window IDs with the same title
+            // are legitimately different windows (e.g., two "New Tab" in Chrome).
+            let hasPseudoID = window.id >= Self.pseudoWindowIDThreshold
+            let key: String
+            if hasPseudoID {
+                // Pseudo-ID window: match by bundle + title (may be a duplicate)
+                key = "\(window.bundleIdentifier)-\(window.title)"
+            } else {
+                // Real window ID: use it directly (unique per window)
+                key = "\(window.bundleIdentifier)-wid:\(window.id)"
+            }
 
             if let existing = seen[key] {
                 // Prefer non-minimized over minimized

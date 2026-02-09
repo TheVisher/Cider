@@ -26,6 +26,8 @@ enum Shell {
         }
         if semaphore.wait(timeout: deadline) == .timedOut {
             process.terminate()
+            process.waitUntilExit()
+            try? pipe.fileHandleForReading.close()
             return ""
         }
 

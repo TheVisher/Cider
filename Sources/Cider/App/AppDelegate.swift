@@ -646,12 +646,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let path = "/tmp/cider-debug.log"
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let line = "[\(timestamp)] \(message)\n"
+        guard let lineData = line.data(using: .utf8) else { return }
         if let handle = FileHandle(forWritingAtPath: path) {
+            defer { handle.closeFile() }
             handle.seekToEndOfFile()
-            handle.write(line.data(using: .utf8)!)
-            handle.closeFile()
+            handle.write(lineData)
         } else {
-            FileManager.default.createFile(atPath: path, contents: line.data(using: .utf8))
+            FileManager.default.createFile(atPath: path, contents: lineData)
         }
     }
 

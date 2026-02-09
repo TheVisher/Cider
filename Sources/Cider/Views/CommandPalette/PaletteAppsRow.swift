@@ -44,7 +44,9 @@ struct PaletteAppsRow: View {
         items.map { item in
             switch item {
             case .app(let app): return app.id.uuidString
-            case .folder(let folder): return "\(folder.id):\(folder.name):\(folder.apps.count)"
+            case .folder(let folder):
+                let appIDs = folder.apps.map(\.id.uuidString).joined(separator: ";")
+                return "\(folder.id):\(folder.name):\(appIDs)"
             }
         }.joined(separator: ",")
     }

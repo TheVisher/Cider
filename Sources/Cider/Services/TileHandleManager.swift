@@ -105,6 +105,31 @@ final class TileHandleManager {
         }
     }
 
+    /// Reposition only handles belonging to a specific group.
+    /// Used during drag to reduce unnecessary work and improve responsiveness.
+    private func repositionHandles(forGroupID groupID: UUID) {
+        guard let groupLines = DynamicTileManager.shared.groupSplitLines().first(where: { $0.groupID == groupID })?.lines else {
+            return
+        }
+        let groupInfos = computeHandles(groupID: groupID, lines: groupLines)
+        let infoByKey = Dictionary(uniqueKeysWithValues: groupInfos.map { (handleKey(for: $0), $0) })
+
+        for i in handlePanels.indices where handlePanels[i].info.groupID == groupID {
+            let existing = handlePanels[i]
+            let key = handleKey(for: existing.info)
+            guard let newInfo = infoByKey[key] else { continue }
+
+            let panel = existing.panel
+            let size = panelSize(for: newInfo)
+            let origin = NSPoint(
+                x: newInfo.point.x - size.width / 2,
+                y: newInfo.point.y - size.height / 2
+            )
+            panel.setFrame(NSRect(origin: origin, size: size), display: true)
+            handlePanels[i] = (panel: existing.panel, view: existing.view, info: newInfo)
+        }
+    }
+
     private func computeHandles(groupID: UUID, lines: [SplitLineInfo]) -> [HandleInfo] {
         let horizontalLines = lines.filter { $0.orientation == .horizontal }
         let verticalLines = lines.filter { $0.orientation == .vertical }
@@ -239,42 +264,36 @@ final class TileHandleManager {
         DynamicTileManager.shared.beginHandleDrag(groupID: info.groupID)
     }
 
-    private func currentSplitLine(groupID: UUID, match original: SplitLineInfo) -> SplitLineInfo? {
-        guard let groupLines = DynamicTileManager.shared.groupSplitLines().first(where: { $0.groupID == groupID })?.lines else {
-            return nil
-        }
-        return groupLines.first(where: { $0.orientation == original.orientation && $0.path == original.path })
-    }
-
     private func handleDrag(screenPoint: NSPoint, info: HandleInfo) {
-        // Update horizontal split ratio (drag left/right) — throttled
-        if let baseHSplit = info.horizontalSplit {
-            let hSplit = currentSplitLine(groupID: info.groupID, match: baseHSplit) ?? baseHSplit
+        // Update horizontal split ratio (drag left/right)
+        // Jitter suppression is handled by DynamicTileManager.updateSplitRatioDrag's epsilon check.
+        if let hSplit = info.horizontalSplit {
             let rect = hSplit.boundingRect
-            guard rect.width > 0 else { return }
-            let newRatio = (screenPoint.x - rect.minX) / rect.width
-            DynamicTileManager.shared.updateSplitRatioDrag(
-                groupID: info.groupID,
-                path: hSplit.path,
-                newRatio: newRatio
-            )
+            if rect.width > 0 {
+                let newRatio = (screenPoint.x - rect.minX) / rect.width
+                DynamicTileManager.shared.updateSplitRatioDrag(
+                    groupID: info.groupID,
+                    path: hSplit.path,
+                    newRatio: newRatio
+                )
+            }
         }
 
-        // Update vertical split ratio (drag up/down) — throttled
-        if let baseVSplit = info.verticalSplit {
-            let vSplit = currentSplitLine(groupID: info.groupID, match: baseVSplit) ?? baseVSplit
+        // Update vertical split ratio (drag up/down)
+        if let vSplit = info.verticalSplit {
             let rect = vSplit.boundingRect
-            guard rect.height > 0 else { return }
-            let newRatio = (rect.maxY - screenPoint.y) / rect.height
-            DynamicTileManager.shared.updateSplitRatioDrag(
-                groupID: info.groupID,
-                path: vSplit.path,
-                newRatio: newRatio
-            )
+            if rect.height > 0 {
+                let newRatio = (rect.maxY - screenPoint.y) / rect.height
+                DynamicTileManager.shared.updateSplitRatioDrag(
+                    groupID: info.groupID,
+                    path: vSplit.path,
+                    newRatio: newRatio
+                )
+            }
         }
 
-        // Reposition panels in place — don't destroy/recreate (preserves mouse capture)
-        repositionHandles()
+        // Reposition panels in place for the active group only.
+        repositionHandles(forGroupID: info.groupID)
     }
 
     private func handleDragEnd(info: HandleInfo) {

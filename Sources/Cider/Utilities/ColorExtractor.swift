@@ -36,6 +36,9 @@ enum ColorExtractor {
         var totalB: CGFloat = 0
         var count: CGFloat = 0
 
+        let expectedSize = width * height * 4
+        guard rawData.count >= expectedSize else { return .white }
+
         for y in 0..<height {
             for x in 0..<width {
                 let index = (y * width + x) * 4
@@ -96,6 +99,9 @@ enum ColorExtractor {
         // Find the most saturated color
         var bestColor: (r: CGFloat, g: CGFloat, b: CGFloat) = (0.5, 0.5, 1.0)
         var bestSaturation: CGFloat = 0
+
+        let expectedSize = width * height * 4
+        guard rawData.count >= expectedSize else { return .blue }
 
         for y in 0..<height {
             for x in 0..<width {

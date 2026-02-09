@@ -34,6 +34,10 @@ final class DynamicTileManager {
     private var pendingDragApply: DispatchWorkItem?
     /// Pre-populated AX element cache for windows in the dragged group (avoids repeated lookups).
     private var dragAXCache: [CGWindowID: AXUIElement] = [:]
+    /// Last ratio we accepted for a dragged split path (used to suppress jitter/no-op updates).
+    private var lastDragRatios: [String: CGFloat] = [:]
+    /// Ignore tiny ratio changes during drag to reduce jitter and unnecessary recomputation.
+    private let dragRatioEpsilon: CGFloat = 0.001
 
     init() {
         // Recompute all groups when monitors change
@@ -299,6 +303,7 @@ final class DynamicTileManager {
         pendingDragApply?.cancel()
         pendingDragApply = nil
         dragAXCache.removeAll()
+        lastDragRatios.removeAll()
 
         // Pre-populate AX element cache for all windows in this group
         for (windowID, pid) in group.root.allWindowIDs() {
@@ -313,12 +318,20 @@ final class DynamicTileManager {
     }
 
     /// Throttled split ratio update during drag. Always updates the tree immediately
-    /// but rate-limits AX frame application to ~30fps with a trailing-edge guarantee.
+    /// but rate-limits AX frame application to ~60fps with a trailing-edge guarantee.
     func updateSplitRatioDrag(groupID: UUID, path: [Int], newRatio: CGFloat) {
         guard let group = groups[groupID] else { return }
+        let clampedRatio = min(0.9, max(0.1, newRatio))
+        let pathKey = "\(groupID.uuidString):\(path.map(String.init).joined(separator: "."))"
+
+        if let previous = lastDragRatios[pathKey],
+           abs(previous - clampedRatio) < dragRatioEpsilon {
+            return
+        }
+        lastDragRatios[pathKey] = clampedRatio
 
         // Always update the tree ratio immediately (cheap, no AX)
-        group.updateRatioAtPath(path, newRatio: newRatio)
+        group.updateRatioAtPath(path, newRatio: clampedRatio)
 
         // Cancel any pending trailing-edge apply
         pendingDragApply?.cancel()
@@ -385,6 +398,7 @@ final class DynamicTileManager {
 
         // Clean up drag state
         dragAXCache.removeAll()
+        lastDragRatios.removeAll()
         isHandleDragging = false
     }
 
@@ -629,7 +643,8 @@ final class DynamicTileManager {
         let source = AXObserverGetRunLoopSource(observer)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
 
-        // Retain self for the callback (prevent premature release)
+        // passUnretained is safe here — DynamicTileManager is a singleton
+        // that lives for the entire app lifetime (never deallocated).
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
         // Add notifications for this window
@@ -853,12 +868,13 @@ final class DynamicTileManager {
         let path = "/tmp/cider-debug.log"
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let line = "[\(timestamp)] \(message)\n"
+        guard let lineData = line.data(using: .utf8) else { return }
         if let handle = FileHandle(forWritingAtPath: path) {
+            defer { handle.closeFile() }
             handle.seekToEndOfFile()
-            handle.write(line.data(using: .utf8)!)
-            handle.closeFile()
+            handle.write(lineData)
         } else {
-            FileManager.default.createFile(atPath: path, contents: line.data(using: .utf8))
+            FileManager.default.createFile(atPath: path, contents: lineData)
         }
     }
 
