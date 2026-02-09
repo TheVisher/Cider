@@ -22,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tileHotkeyDetector: TileHotkeyDetector?
     private let tileActionHandler = TileActionHandler()
 
+    // Notes
+    private var notesPanel: NotesPanel?
+    private var notesViewModel: NotesViewModel?
+    private var notesHotkeyDetector: NotesHotkeyDetector?
+
     // Tile Zone Overlay
     private var tileZoneOverlayPanels: [TileZoneOverlayPanel] = []
     private var dragMouseMonitor: Any?
@@ -50,13 +55,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureCommandPalette()
         configureWindowCycling()
         configureSettings()
+        configureNotes()
         configureStatusItem()
         observeCommandPaletteNotifications()
         observeSettingsNotifications()
+        observeNotesNotifications()
         observeConfigChanges()
         startDoubleTapDetection()
         startOptionTabDetection()
         startTileHotkeyDetection()
+        startNotesHotkeyDetection()
 
         // Initialize DynamicTileManager (triggers screen change subscription)
         _ = DynamicTileManager.shared
@@ -144,6 +152,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             tileHotkeyDetector?.setEnabled(false)
         }
+
+        // Handle notes hotkey enabled/disabled
+        if config.enableNotesHotkey {
+            if notesHotkeyDetector == nil {
+                startNotesHotkeyDetection()
+            } else {
+                notesHotkeyDetector?.setEnabled(true)
+            }
+        } else {
+            notesHotkeyDetector?.setEnabled(false)
+        }
+
+        // Update notes directory if changed
+        let expandedDir = NSString(string: config.notesDirectory).expandingTildeInPath
+        NotesStorage.shared.updateDirectory(to: expandedDir)
     }
 
     // MARK: - Command Palette
@@ -638,6 +661,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideWindowCyclingPanel() {
         windowCyclingPanel?.orderOut(nil)
+    }
+
+    // MARK: - Notes
+
+    private func configureNotes() {
+        let viewModel = NotesViewModel()
+        self.notesViewModel = viewModel
+
+        let panel = NotesPanel()
+        self.notesPanel = panel
+
+        updateNotesPanelView()
+    }
+
+    private func updateNotesPanelView() {
+        guard let panel = notesPanel, let viewModel = notesViewModel else { return }
+
+        // Add shadow padding around the notes view (matches command palette approach)
+        let shadowPadding = NotesDesign.shadowPadding
+        let notesView = NotesPanelView(viewModel: viewModel)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, shadowPadding)
+            .padding(.top, 20)
+            .padding(.bottom, shadowPadding + 15)
+
+        let hostingView = NotesPanelHostingView(rootView: notesView)
+        panel.contentView = hostingView
+
+        // Size panel to fit content plus shadow padding
+        let width = NotesDesign.defaultWidth + shadowPadding * 2
+        let height = NotesDesign.defaultHeight + 20 + shadowPadding + 15
+        panel.setContentSize(NSSize(width: width, height: height))
+    }
+
+    private func startNotesHotkeyDetection() {
+        let config = CiderConfig.load()
+        guard config.enableNotesHotkey else { return }
+
+        notesHotkeyDetector = NotesHotkeyDetector(
+            onToggle: { [weak self] in
+                self?.toggleNotesPanel()
+            }
+        )
+        notesHotkeyDetector?.start()
+    }
+
+    private func observeNotesNotifications() {
+        NotificationCenter.default.publisher(for: .toggleNotes)
+            .sink { [weak self] _ in
+                self?.toggleNotesPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .dismissNotes)
+            .sink { [weak self] _ in
+                self?.hideNotesPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .openNoteInPanel)
+            .sink { [weak self] notification in
+                if let note = notification.object as? Note {
+                    self?.showNotesPanel(with: note)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func toggleNotesPanel() {
+        guard let panel = notesPanel else { return }
+
+        if panel.isVisible {
+            hideNotesPanel()
+        } else {
+            showNotesPanel()
+        }
+    }
+
+    private func showNotesPanel(with note: Note? = nil) {
+        guard let panel = notesPanel, let viewModel = notesViewModel else { return }
+
+        if let note {
+            viewModel.selectNote(note)
+        }
+        viewModel.show()
+        panel.showAtMouse()
+        panel.setPinned(viewModel.isPinned)
+    }
+
+    private func hideNotesPanel() {
+        notesPanel?.orderOut(nil)
+        notesViewModel?.flushSave()
+        notesViewModel?.isVisible = false
     }
 
     // MARK: - Debug Logging

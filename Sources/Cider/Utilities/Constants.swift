@@ -10,6 +10,9 @@ extension Notification.Name {
     static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
     static let ciderTileActionCompleted = Notification.Name("cider.tileActionCompleted")
     static let ciderDynamicTileGroupChanged = Notification.Name("cider.dynamicTileGroupChanged")
+    static let toggleNotes = Notification.Name("cider.toggleNotes")
+    static let dismissNotes = Notification.Name("cider.dismissNotes")
+    static let openNoteInPanel = Notification.Name("cider.openNoteInPanel")
 }
 
 enum CiderBorder {
@@ -85,6 +88,17 @@ enum CiderDesign {
     static let shadowPaddingHorizontal: CGFloat = 70
     static let shadowPaddingTop: CGFloat = 20
     static let shadowPaddingBottom: CGFloat = 70
+}
+
+enum NotesDesign {
+    static let defaultWidth: CGFloat = 400
+    static let defaultHeight: CGFloat = 520
+    static let minWidth: CGFloat = 300
+    static let minHeight: CGFloat = 300
+    static let cornerRadius: CGFloat = Radius.lg
+    static let shadowPadding: CGFloat = 40
+    static let titleBarHeight: CGFloat = 40
+    static let toolbarHeight: CGFloat = 36
 }
 
 enum CiderColors {

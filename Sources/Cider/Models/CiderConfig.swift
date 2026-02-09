@@ -100,6 +100,8 @@ struct CiderConfig: Codable {
     var enableDragToTile: Bool  // Enable drag-to-tile overlay when dragging windows outside palette
     var enableTilingHotkeys: Bool  // Enable Ctrl+Option tiling hotkeys (Rectangle-style)
     var enableDynamicTiling: Bool  // Enable drag-to-split dynamic tile groups
+    var notesDirectory: String  // Directory for notes .md files
+    var enableNotesHotkey: Bool  // Enable Option+N to open notes
 
     static let storageKey = "CiderConfig"
 
@@ -115,7 +117,9 @@ struct CiderConfig: Codable {
             rememberPaletteState: false,
             enableDragToTile: true,
             enableTilingHotkeys: true,
-            enableDynamicTiling: true
+            enableDynamicTiling: true,
+            notesDirectory: "~/Documents/Cider Notes",
+            enableNotesHotkey: true
         )
     }
 
@@ -158,9 +162,11 @@ struct CiderConfig: Codable {
         enableDragToTile = try container.decodeIfPresent(Bool.self, forKey: .enableDragToTile) ?? true
         enableTilingHotkeys = try container.decodeIfPresent(Bool.self, forKey: .enableTilingHotkeys) ?? true
         enableDynamicTiling = try container.decodeIfPresent(Bool.self, forKey: .enableDynamicTiling) ?? true
+        notesDirectory = try container.decodeIfPresent(String.self, forKey: .notesDirectory) ?? "~/Documents/Cider Notes"
+        enableNotesHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableNotesHotkey) ?? true
     }
 
-    init(autoHideApps: Bool, showMenuBarIcon: Bool, textSize: TextSize, paletteSize: PaletteSize, activationMode: ActivationMode = .doubleTap, enableOptionTabCycling: Bool = true, optionTabCycleAllScreens: Bool = true, rememberPaletteState: Bool = false, enableDragToTile: Bool = true, enableTilingHotkeys: Bool = true, enableDynamicTiling: Bool = true) {
+    init(autoHideApps: Bool, showMenuBarIcon: Bool, textSize: TextSize, paletteSize: PaletteSize, activationMode: ActivationMode = .doubleTap, enableOptionTabCycling: Bool = true, optionTabCycleAllScreens: Bool = true, rememberPaletteState: Bool = false, enableDragToTile: Bool = true, enableTilingHotkeys: Bool = true, enableDynamicTiling: Bool = true, notesDirectory: String = "~/Documents/Cider Notes", enableNotesHotkey: Bool = true) {
         self.autoHideApps = autoHideApps
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -172,5 +178,7 @@ struct CiderConfig: Codable {
         self.enableDragToTile = enableDragToTile
         self.enableTilingHotkeys = enableTilingHotkeys
         self.enableDynamicTiling = enableDynamicTiling
+        self.notesDirectory = notesDirectory
+        self.enableNotesHotkey = enableNotesHotkey
     }
 }

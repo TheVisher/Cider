@@ -54,6 +54,14 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Notes
+    @Published var enableNotesHotkey: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var notesDirectory: String {
+        didSet { saveConfig() }
+    }
+
     private var config: CiderConfig
 
     init() {
@@ -69,6 +77,8 @@ final class SettingsViewModel: ObservableObject {
         self.rememberPaletteState = config.rememberPaletteState
         self.enableTilingHotkeys = config.enableTilingHotkeys
         self.enableDynamicTiling = config.enableDynamicTiling
+        self.enableNotesHotkey = config.enableNotesHotkey
+        self.notesDirectory = config.notesDirectory
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -89,6 +99,8 @@ final class SettingsViewModel: ObservableObject {
         config.rememberPaletteState = rememberPaletteState
         config.enableTilingHotkeys = enableTilingHotkeys
         config.enableDynamicTiling = enableDynamicTiling
+        config.enableNotesHotkey = enableNotesHotkey
+        config.notesDirectory = notesDirectory
         config.save()
 
         // Post notification so AppDelegate can respond

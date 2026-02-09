@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct GeneralSettingsView: View {
     @EnvironmentObject var viewModel: SettingsViewModel
@@ -66,6 +67,35 @@ struct GeneralSettingsView: View {
                 )
             }
 
+            // Notes section
+            SettingsSection(title: "Notes") {
+                SettingsToggleRow(
+                    title: "Option+N to open notes",
+                    subtitle: "Quick-launch floating notes panel",
+                    isOn: $viewModel.enableNotesHotkey
+                )
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Notes directory")
+                            .font(.body)
+                            .foregroundColor(CiderColors.primary)
+
+                        Text(viewModel.notesDirectory)
+                            .font(.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Button("Choose...") {
+                        chooseNotesDirectory()
+                    }
+                    .controlSize(.small)
+                }
+            }
+
             // Palette behavior section
             SettingsSection(title: "Palette Behavior") {
                 SettingsToggleRow(
@@ -76,6 +106,26 @@ struct GeneralSettingsView: View {
             }
 
             Spacer()
+        }
+    }
+
+    private func chooseNotesDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select a directory for Cider notes"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            // Store with tilde for home directory
+            let path = url.path
+            let home = NSHomeDirectory()
+            if path.hasPrefix(home) {
+                viewModel.notesDirectory = "~" + path.dropFirst(home.count)
+            } else {
+                viewModel.notesDirectory = path
+            }
         }
     }
 }

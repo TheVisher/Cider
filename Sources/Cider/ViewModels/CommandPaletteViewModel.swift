@@ -285,6 +285,30 @@ final class CommandPaletteViewModel: ObservableObject {
         SavedTileLayoutManager.shared.deleteLayout(layout)
     }
 
+    // MARK: - Notes Integration
+
+    var notes: [Note] {
+        NotesStorage.shared.notes
+    }
+
+    var filteredNotes: [Note] {
+        guard isSearching else { return notes }
+        return notes.filter {
+            $0.title.lowercased().contains(searchQuery)
+        }
+    }
+
+    func openNote(_ note: Note) {
+        NotificationCenter.default.post(name: .openNoteInPanel, object: note)
+        dismiss()
+    }
+
+    func createNewNoteFromPalette() {
+        let note = NotesStorage.shared.createNew()
+        NotificationCenter.default.post(name: .openNoteInPanel, object: note)
+        dismiss()
+    }
+
     /// Filter search results for saved layouts.
     var filteredSavedLayouts: [SavedTileLayout] {
         guard isSearching else { return savedLayouts }

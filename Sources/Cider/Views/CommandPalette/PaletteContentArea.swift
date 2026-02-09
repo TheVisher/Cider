@@ -37,6 +37,10 @@ struct PaletteContentArea: View {
     var tileGroupDisplaysForScreen: ((UInt32) -> [TileGroupDisplay])? = nil
     var savedLayoutsForScreen: ((Int) -> [SavedTileLayout])? = nil
     var filteredSavedLayouts: [SavedTileLayout] = []
+    // Notes
+    var notes: [Note] = []
+    var onNoteClick: ((Note) -> Void)? = nil
+    var onNewNote: (() -> Void)? = nil
     var onFocusTileGroup: ((TileGroupDisplay) -> Void)? = nil
     var onPinTileGroup: ((UUID) -> Void)? = nil
     var onBreakApartTileGroup: ((UUID) -> Void)? = nil
@@ -106,7 +110,7 @@ struct PaletteContentArea: View {
                     case .windows:
                         windowsContent
                     case .notes:
-                        comingSoonContent("Notes")
+                        notesContent
                     case .bookmarks:
                         comingSoonContent("Bookmarks")
                     }
@@ -139,6 +143,50 @@ struct PaletteContentArea: View {
         } else {
             // Flat view (single monitor or searching)
             flatWindowsContent
+        }
+    }
+
+    @ViewBuilder
+    private var notesContent: some View {
+        if notes.isEmpty {
+            VStack(spacing: Spacing.md) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 32 * textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                Text("No notes yet")
+                    .font(.system(size: 13 * textScale))
+                    .foregroundColor(CiderColors.secondary)
+                Button(action: { onNewNote?() }) {
+                    Text("Create your first note")
+                        .font(.system(size: 12 * textScale, weight: .medium))
+                        .foregroundColor(CiderColors.controlAccent)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.xxl)
+        } else {
+            LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                // New note button
+                Button(action: { onNewNote?() }) {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 12 * textScale))
+                            .foregroundColor(CiderColors.controlAccent)
+                        Text("New Note")
+                            .font(.system(size: 12 * textScale, weight: .medium))
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                    .padding(.vertical, Spacing.xs)
+                }
+                .buttonStyle(.plain)
+
+                ForEach(notes) { note in
+                    PaletteNoteRow(note: note, searchText: searchText, onTap: {
+                        onNoteClick?(note)
+                    })
+                }
+            }
         }
     }
 
@@ -578,6 +626,66 @@ struct PaletteWindowRow: View {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Note Row
+
+struct PaletteNoteRow: View {
+    let note: Note
+    var searchText: String = ""
+    let onTap: () -> Void
+    @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 11 * textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 16 * textScale)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HighlightedText(note.title, highlight: searchText)
+                        .font(.system(size: 13 * textScale))
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text(Self.dateFormatter.string(from: note.modifiedAt))
+                        .font(.system(size: 10 * textScale))
+                        .foregroundColor(CiderColors.tertiary)
+                }
+
+                Spacer()
+
+                if isHovering {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10 * textScale))
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isHovering ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isHovering = hovering
             }
         }
     }
