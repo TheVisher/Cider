@@ -101,6 +101,7 @@ enum NotesDesign {
     static let shadowPadding: CGFloat = 40
     static let titleBarHeight: CGFloat = 40
     static let toolbarHeight: CGFloat = 36
+    static let findBarHeight: CGFloat = 36
     static let toolbarButtonSize: CGFloat = 28
     static let toolbarIconSize: CGFloat = 11
     static let toolbarDividerHeight: CGFloat = 16

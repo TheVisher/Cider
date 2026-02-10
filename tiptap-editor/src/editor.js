@@ -12,7 +12,8 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import Paragraph from '@tiptap/extension-paragraph';
 import HardBreak from '@tiptap/extension-hard-break';
-import { NodeSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { Markdown } from 'tiptap-markdown';
 import { common, createLowlight } from 'lowlight';
 import {
@@ -1169,6 +1170,340 @@ function initializeFloatingToolbar(currentEditor) {
   requestFloatingToolbarUpdate(true);
 }
 
+const noteFindHighlightPluginKey = new PluginKey('noteFindHighlight');
+
+function buildNoteFindDecorations(doc, matches, activeIndex) {
+  const decorations = [];
+
+  matches.forEach((match, index) => {
+    if (!Number.isInteger(match.from) || !Number.isInteger(match.to) || match.to <= match.from) {
+      return;
+    }
+
+    const from = Math.max(0, Math.min(match.from, doc.content.size));
+    const to = Math.max(0, Math.min(match.to, doc.content.size));
+    if (to <= from) {
+      return;
+    }
+
+    decorations.push(
+      Decoration.inline(
+        from,
+        to,
+        {
+          class: index === activeIndex ? 'cider-find-match-active' : 'cider-find-match',
+        }
+      )
+    );
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+const NoteFindHighlights = Extension.create({
+  name: 'noteFindHighlights',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: noteFindHighlightPluginKey,
+        state: {
+          init() {
+            return DecorationSet.empty;
+          },
+          apply(transaction, oldDecorationSet, _oldState, newState) {
+            const meta = transaction.getMeta(noteFindHighlightPluginKey);
+            if (meta?.type === 'set') {
+              return buildNoteFindDecorations(
+                newState.doc,
+                Array.isArray(meta.matches) ? meta.matches : [],
+                Number.isInteger(meta.activeIndex) ? meta.activeIndex : -1
+              );
+            }
+
+            if (meta?.type === 'clear') {
+              return DecorationSet.empty;
+            }
+
+            if (transaction.docChanged) {
+              return oldDecorationSet.map(transaction.mapping, transaction.doc);
+            }
+
+            return oldDecorationSet;
+          },
+        },
+        props: {
+          decorations(state) {
+            return noteFindHighlightPluginKey.getState(state);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+window._noteFind = {
+  query: '',
+  matches: [],
+  currentIndex: -1,
+};
+
+function normalizeNoteFindQuery(value) {
+  return String(value ?? '').trim();
+}
+
+function buildFindTextSegments(doc) {
+  const segments = [];
+  let plainText = '';
+  let pendingBlockBreak = false;
+
+  doc.descendants((node, pos) => {
+    if (node.isText && node.text) {
+      if (pendingBlockBreak && plainText.length > 0 && !plainText.endsWith('\n')) {
+        plainText += '\n';
+      }
+      pendingBlockBreak = false;
+
+      const start = plainText.length;
+      plainText += node.text;
+      segments.push({
+        start,
+        end: plainText.length,
+        from: pos,
+      });
+      return false;
+    }
+
+    if (node.type?.name === 'hardBreak') {
+      plainText += '\n';
+      pendingBlockBreak = false;
+      return false;
+    }
+
+    if (node.isBlock && plainText.length > 0 && !plainText.endsWith('\n')) {
+      pendingBlockBreak = true;
+    }
+
+    return true;
+  });
+
+  return { plainText, segments };
+}
+
+function mapFindRangeToDocRange(startIndex, endIndex, segments) {
+  if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex) || endIndex <= startIndex) {
+    return null;
+  }
+
+  const startSegment = segments.find(
+    segment => startIndex >= segment.start && startIndex < segment.end
+  );
+  const endSegment = segments.find(
+    segment => (endIndex - 1) >= segment.start && (endIndex - 1) < segment.end
+  );
+
+  if (!startSegment || !endSegment) {
+    return null;
+  }
+
+  const from = startSegment.from + (startIndex - startSegment.start);
+  const to = endSegment.from + (endIndex - endSegment.start);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || to <= from) {
+    return null;
+  }
+
+  return { from, to };
+}
+
+function collectNoteFindMatches(query) {
+  const normalizedQuery = normalizeNoteFindQuery(query);
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  const { plainText, segments } = buildFindTextSegments(editor.state.doc);
+  if (!plainText || segments.length === 0) {
+    return [];
+  }
+
+  const lowerText = plainText.toLocaleLowerCase();
+  const lowerQuery = normalizedQuery.toLocaleLowerCase();
+
+  const matches = [];
+  let searchFrom = 0;
+  while (searchFrom < lowerText.length) {
+    const foundAt = lowerText.indexOf(lowerQuery, searchFrom);
+    if (foundAt < 0) {
+      break;
+    }
+
+    const mappedRange = mapFindRangeToDocRange(
+      foundAt,
+      foundAt + lowerQuery.length,
+      segments
+    );
+    if (mappedRange) {
+      matches.push(mappedRange);
+    }
+
+    searchFrom = foundAt + Math.max(1, lowerQuery.length);
+  }
+
+  return matches;
+}
+
+function noteFindPayload() {
+  const state = window._noteFind;
+  return {
+    count: state.matches.length,
+    index: state.currentIndex >= 0 ? (state.currentIndex + 1) : 0,
+  };
+}
+
+function setNoteFindDecorations(matches, activeIndex) {
+  if (!editor?.view) {
+    return;
+  }
+
+  editor.view.dispatch(
+    editor.state.tr.setMeta(noteFindHighlightPluginKey, {
+      type: 'set',
+      matches,
+      activeIndex,
+    })
+  );
+}
+
+function clearNoteFindDecorations() {
+  if (!editor?.view) {
+    return;
+  }
+
+  editor.view.dispatch(
+    editor.state.tr.setMeta(noteFindHighlightPluginKey, { type: 'clear' })
+  );
+}
+
+function scrollToNoteFindMatch(match) {
+  const scrollHost = document.getElementById('editor');
+  if (!scrollHost || !match) {
+    return;
+  }
+
+  let coords;
+  try {
+    coords = editor.view.coordsAtPos(match.from);
+  } catch {
+    return;
+  }
+
+  const hostRect = scrollHost.getBoundingClientRect();
+  const padding = 24;
+  if (coords.top < hostRect.top + padding || coords.top > hostRect.bottom - padding) {
+    scrollHost.scrollTop += coords.top - (hostRect.top + hostRect.height / 2);
+  }
+}
+
+function selectNoteFindMatch(index) {
+  const state = window._noteFind;
+  if (!Number.isInteger(index) || index < 0 || index >= state.matches.length) {
+    return false;
+  }
+
+  const match = state.matches[index];
+  try {
+    const selection = TextSelection.create(editor.state.doc, match.from, match.to);
+    editor.view.dispatch(editor.state.tr.setSelection(selection).scrollIntoView());
+  } catch (error) {
+    postEditorDiagnostic('find', error?.message ?? 'Failed to select find match');
+    return false;
+  }
+
+  state.currentIndex = index;
+  setNoteFindDecorations(state.matches, state.currentIndex);
+  scrollToNoteFindMatch(match);
+  requestFloatingToolbarUpdate(true);
+  return true;
+}
+
+function refreshNoteFindMatches() {
+  const state = window._noteFind;
+  const previousMatch = state.currentIndex >= 0 ? state.matches[state.currentIndex] : null;
+  state.matches = collectNoteFindMatches(state.query);
+
+  if (state.matches.length === 0) {
+    state.currentIndex = -1;
+    clearNoteFindDecorations();
+    return;
+  }
+
+  if (previousMatch) {
+    const previousIndex = state.matches.findIndex(match =>
+      match.from === previousMatch.from && match.to === previousMatch.to
+    );
+    if (previousIndex >= 0) {
+      state.currentIndex = previousIndex;
+      setNoteFindDecorations(state.matches, state.currentIndex);
+      return;
+    }
+  }
+
+  state.currentIndex = Math.min(
+    Math.max(state.currentIndex, 0),
+    state.matches.length - 1
+  );
+  setNoteFindDecorations(state.matches, state.currentIndex);
+}
+
+function noteFindSetQuery(query) {
+  const state = window._noteFind;
+  state.query = normalizeNoteFindQuery(query);
+
+  if (!state.query) {
+    state.matches = [];
+    state.currentIndex = -1;
+    clearNoteFindDecorations();
+    return noteFindPayload();
+  }
+
+  refreshNoteFindMatches();
+  if (state.matches.length > 0) {
+    selectNoteFindMatch(0);
+  }
+
+  return noteFindPayload();
+}
+
+function noteFindMove(step) {
+  const state = window._noteFind;
+  if (!state.query) {
+    return noteFindPayload();
+  }
+
+  refreshNoteFindMatches();
+  if (state.matches.length === 0) {
+    return noteFindPayload();
+  }
+
+  let nextIndex = state.currentIndex;
+  if (nextIndex < 0) {
+    nextIndex = step >= 0 ? 0 : state.matches.length - 1;
+  } else {
+    nextIndex = (nextIndex + step + state.matches.length) % state.matches.length;
+  }
+
+  selectNoteFindMatch(nextIndex);
+  return noteFindPayload();
+}
+
+function clearNoteFindState() {
+  const state = window._noteFind;
+  state.query = '';
+  state.matches = [];
+  state.currentIndex = -1;
+  clearNoteFindDecorations();
+  return noteFindPayload();
+}
+
 const editor = new Editor({
   element: document.getElementById('editor'),
   extensions: [
@@ -1185,6 +1520,7 @@ const editor = new Editor({
     CiderParagraph,
     CiderHeading,
     CiderHardBreak,
+    NoteFindHighlights,
     TaskList,
     TaskItem.configure({ nested: true }),
     Table.configure({ resizable: false }),
@@ -1272,6 +1608,7 @@ initializeFloatingToolbar(editor);
 // Swift -> JS bridge API
 window.editorAPI = {
   setContent(markdown) {
+    clearNoteFindState();
     editor.commands.setContent(normalizeIncomingMarkdown(markdown), false, {
       preserveWhitespace: 'full',
     });
@@ -1292,6 +1629,7 @@ window.editorAPI = {
     hideFloatingToolbar();
   },
   clear() {
+    clearNoteFindState();
     editor.commands.clearContent();
     requestFloatingToolbarUpdate(true);
   },
@@ -1371,6 +1709,18 @@ window.editorAPI = {
   },
   redo() {
     return editor.chain().focus().redo().run();
+  },
+  findSetQuery(query) {
+    return noteFindSetQuery(query);
+  },
+  findNext() {
+    return noteFindMove(1);
+  },
+  findPrevious() {
+    return noteFindMove(-1);
+  },
+  findClear() {
+    return clearNoteFindState();
   },
   handleNativeSlashClick(x, y) {
     return handleNativeSlashClick(x, y);

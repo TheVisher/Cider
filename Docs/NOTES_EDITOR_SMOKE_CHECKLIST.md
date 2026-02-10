@@ -44,4 +44,4 @@ Run this checklist before shipping any notes/editor changes.
 - Search by note title from command palette and open matching note.
 - Search by sentence fragment from note body and verify note appears.
 - Confirm note search result shows contextual snippet containing match.
-
+- In-note find (`Cmd+F`) focuses instantly, highlights matches, and navigates with up/down.

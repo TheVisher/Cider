@@ -35,6 +35,13 @@ struct NotesPanelView: View {
                             .background(CiderColors.separator)
                     }
 
+                    if viewModel.selectedNote != nil, viewModel.isFindBarVisible {
+                        NotesFindBar(viewModel: viewModel)
+
+                        Divider()
+                            .background(CiderColors.separator)
+                    }
+
                     if viewModel.selectedNote != nil {
                         TipTapEditorView(viewModel: viewModel)
                     } else {
@@ -255,6 +262,14 @@ private struct NotesTitleBar: View {
                 Divider()
 
                 Section("History") {
+                    Button {
+                        viewModel.showFindBar()
+                    } label: {
+                        Label("Find in Note", systemImage: "magnifyingglass")
+                    }
+
+                    Divider()
+
                     Button {
                         viewModel.editorUndo()
                     } label: {
@@ -631,6 +646,166 @@ private struct NotesExternalChangeBanner: View {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .frame(height: NotesDesign.toolbarHeight)
+    }
+}
+
+private struct NotesFindBar: View {
+    @ObservedObject var viewModel: NotesViewModel
+
+    private var statusText: String {
+        guard !viewModel.findQuery.isEmpty else { return "" }
+        guard viewModel.findMatchCount > 0 else { return "No matches" }
+        return "\(viewModel.findMatchIndex)/\(viewModel.findMatchCount)"
+    }
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(CiderColors.tertiary)
+
+            NotesFindTextField(
+                text: Binding(
+                    get: { viewModel.findQuery },
+                    set: { viewModel.updateFindQuery($0) }
+                ),
+                placeholder: "Find in note",
+                focusToken: viewModel.findFocusToken,
+                onMoveUp: viewModel.findPreviousResult,
+                onMoveDown: viewModel.findNextResult,
+                onEscape: viewModel.hideFindBar
+            )
+
+            if !statusText.isEmpty {
+                Text(statusText)
+                    .font(.system(size: 11))
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            }
+
+            NotesToolbarButton(symbol: "chevron.up", help: "Previous Match", action: viewModel.findPreviousResult)
+                .disabled(viewModel.findQuery.isEmpty)
+            NotesToolbarButton(symbol: "chevron.down", help: "Next Match", action: viewModel.findNextResult)
+                .disabled(viewModel.findQuery.isEmpty)
+            NotesToolbarButton(symbol: "xmark", help: "Close Find", action: viewModel.hideFindBar)
+        }
+        .padding(.horizontal, Spacing.md)
+        .frame(height: NotesDesign.findBarHeight)
+    }
+}
+
+private struct NotesFindTextField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let focusToken: UUID
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onEscape: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.delegate = context.coordinator
+        textField.stringValue = text
+        textField.placeholderString = placeholder
+        textField.font = .systemFont(ofSize: 12)
+        textField.isBordered = false
+        textField.isBezeled = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.lineBreakMode = .byTruncatingTail
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        context.coordinator.onMoveUp = onMoveUp
+        context.coordinator.onMoveDown = onMoveDown
+        context.coordinator.onEscape = onEscape
+
+        if nsView.stringValue != text {
+            context.coordinator.isSyncingProgrammaticText = true
+            nsView.stringValue = text
+            context.coordinator.isSyncingProgrammaticText = false
+        }
+
+        if context.coordinator.lastFocusToken != focusToken {
+            context.coordinator.lastFocusToken = focusToken
+            context.coordinator.requestFocus(on: nsView)
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding private var text: String
+        var lastFocusToken: UUID?
+        var isSyncingProgrammaticText = false
+        var onMoveUp: () -> Void = {}
+        var onMoveDown: () -> Void = {}
+        var onEscape: () -> Void = {}
+
+        init(text: Binding<String>) {
+            self._text = text
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard !isSyncingProgrammaticText else { return }
+            guard let textField = obj.object as? NSTextField else { return }
+            text = textField.stringValue
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.moveUp(_:)):
+                onMoveUp()
+                return true
+
+            case #selector(NSResponder.moveDown(_:)):
+                onMoveDown()
+                return true
+
+            case #selector(NSResponder.cancelOperation(_:)):
+                onEscape()
+                return true
+
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                let flags = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+                if flags.contains(.shift) {
+                    onMoveUp()
+                } else {
+                    onMoveDown()
+                }
+                return true
+
+            default:
+                return false
+            }
+        }
+
+        func requestFocus(on textField: NSTextField) {
+            let focusDelays: [TimeInterval] = [0, 0.03, 0.1]
+            for delay in focusDelays {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak textField] in
+                    guard let textField, let window = textField.window else { return }
+                    if window.firstResponder !== textField {
+                        window.makeFirstResponder(textField)
+                    }
+
+                    if let editor = window.fieldEditor(false, for: textField) as? NSTextView {
+                        editor.selectedRange = NSRange(
+                            location: textField.stringValue.count,
+                            length: 0
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

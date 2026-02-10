@@ -22,6 +22,11 @@ struct TipTapEditorView: NSViewRepresentable {
         let webView = TipTapWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
+        webView.onFindRequested = { [weak viewModel] in
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleFindShortcut()
+            }
+        }
 
         // Load editor.html from the bundled resources
         if let resourceURL = Bundle.module.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
@@ -136,6 +141,7 @@ struct TipTapEditorView: NSViewRepresentable {
 private final class TipTapWebView: WKWebView {
     override var mouseDownCanMoveWindow: Bool { false }
     override var acceptsFirstResponder: Bool { true }
+    var onFindRequested: (() -> Void)?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         return true
@@ -215,6 +221,10 @@ private final class TipTapWebView: WKWebView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleFindKeyDown(event) {
+            return
+        }
+
         if handleUndoRedoKeyDown(event) {
             return
         }
@@ -227,6 +237,11 @@ private final class TipTapWebView: WKWebView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self,
+           handleFindKeyDown(event) {
+            return true
+        }
+
         if window?.firstResponder === self,
            handleUndoRedoKeyDown(event) {
             return true
@@ -325,6 +340,23 @@ private final class TipTapWebView: WKWebView {
         return true
     }
 
+    private func handleFindKeyDown(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command),
+              !flags.contains(.control),
+              !flags.contains(.option),
+              !flags.contains(.shift) else {
+            return false
+        }
+
+        guard Int(event.keyCode) == kVK_ANSI_F else {
+            return false
+        }
+
+        onFindRequested?()
+        return true
+    }
+
     private func installEventMonitorsIfNeeded() {
         if localMouseDownMonitor == nil {
             localMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
@@ -347,6 +379,10 @@ private final class TipTapWebView: WKWebView {
             localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self else { return event }
                 guard event.window === self.window else { return event }
+
+                if self.handleFindKeyDown(event) {
+                    return nil
+                }
 
                 if self.handleSlashPopupKeyDown(event) {
                     return nil

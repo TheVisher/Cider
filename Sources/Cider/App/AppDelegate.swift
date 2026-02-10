@@ -809,7 +809,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Ensure the editor takes keyboard focus after the panel appears.
         DispatchQueue.main.async { [weak viewModel] in
-            viewModel?.focusEditor()
+            viewModel?.focusEditorIfFindBarHidden()
         }
     }
 

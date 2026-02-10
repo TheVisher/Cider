@@ -23,6 +23,11 @@ final class NotesViewModel: ObservableObject {
     @Published var editingTitle: String = ""
     @Published var charCount: Int = 0
     @Published var externalChangeState: NotesExternalChangeState?
+    @Published var isFindBarVisible: Bool = false
+    @Published var findQuery: String = ""
+    @Published var findMatchCount: Int = 0
+    @Published var findMatchIndex: Int = 0
+    @Published var findFocusToken = UUID()
     @Published var isFormattingToolbarPinned: Bool {
         didSet {
             UserDefaults.standard.set(
@@ -158,6 +163,12 @@ final class NotesViewModel: ObservableObject {
         webView.evaluateJavaScript("window.editorAPI.focus()")
     }
 
+    /// Focus editor unless the find UI is currently active.
+    func focusEditorIfFindBarHidden() {
+        guard !isFindBarVisible else { return }
+        focusEditor()
+    }
+
     // MARK: - Image Handling
 
     func handleImageDrop(data: Data, filename: String) {
@@ -200,6 +211,9 @@ final class NotesViewModel: ObservableObject {
         editingContent = loaded.content
         editingTitle = loaded.title
         charCount = loaded.content.count
+        isFindBarVisible = false
+        findQuery = ""
+        resetFindResults()
         lastSyncedDiskContent = loaded.content
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
@@ -217,6 +231,9 @@ final class NotesViewModel: ObservableObject {
         editingContent = ""
         editingTitle = note.title
         charCount = 0
+        isFindBarVisible = false
+        findQuery = ""
+        resetFindResults()
         lastSyncedDiskContent = ""
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
@@ -409,10 +426,58 @@ final class NotesViewModel: ObservableObject {
         externalChangeState = nil
 
         pushContentToEditor(diskContent)
+
+        if isFindBarVisible, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            updateFindQuery(findQuery)
+        }
     }
 
     private func loadPersistedContent(for note: Note) -> String {
         NotesStorage.shared.markdownForPersistence(NotesStorage.shared.loadContent(for: note))
+    }
+
+    // MARK: - In-note Find
+
+    func showFindBar() {
+        guard selectedNote != nil else { return }
+        isFindBarVisible = true
+        findFocusToken = UUID()
+        if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            updateFindQuery(findQuery)
+        }
+    }
+
+    func hideFindBar() {
+        isFindBarVisible = false
+        findQuery = ""
+        resetFindResults()
+        runEditorCommand("findClear")
+        focusEditor()
+    }
+
+    func updateFindQuery(_ query: String) {
+        findQuery = query
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            resetFindResults()
+            runEditorCommand("findClear")
+            return
+        }
+
+        runFindCommand("findSetQuery", stringArgument: query)
+    }
+
+    func findNextResult() {
+        guard !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        runFindCommand("findNext")
+    }
+
+    func findPreviousResult() {
+        guard !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        runFindCommand("findPrevious")
+    }
+
+    func handleFindShortcut() {
+        showFindBar()
     }
 
     // MARK: - Editor Formatting
@@ -580,6 +645,50 @@ final class NotesViewModel: ObservableObject {
         webView.evaluateJavaScript("window.editorAPI.\(command)();")
     }
 
+    private func runFindCommand(_ command: String, stringArgument: String? = nil) {
+        guard editorIsReady, let webView = editorWebView else { return }
+
+        let script: String
+        if let stringArgument {
+            guard let argumentData = try? JSONSerialization.data(
+                withJSONObject: stringArgument, options: .fragmentsAllowed
+            ), let argumentJSON = String(data: argumentData, encoding: .utf8) else { return }
+            script = "window.editorAPI.\(command)(\(argumentJSON));"
+        } else {
+            script = "window.editorAPI.\(command)();"
+        }
+
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            Task { @MainActor [weak self] in
+                self?.applyFindResult(result)
+            }
+        }
+    }
+
+    private func applyFindResult(_ result: Any?) {
+        guard let payload = result as? [String: Any] else {
+            return
+        }
+
+        findMatchCount = intValue(payload["count"])
+        findMatchIndex = intValue(payload["index"])
+    }
+
+    private func intValue(_ value: Any?) -> Int {
+        if let intValue = value as? Int {
+            return intValue
+        }
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        return 0
+    }
+
+    private func resetFindResults() {
+        findMatchCount = 0
+        findMatchIndex = 0
+    }
+
     private func promptForLinkURL() -> String? {
         let alert = NSAlert()
         alert.messageText = "Add Link"
@@ -616,6 +725,7 @@ final class NotesViewModel: ObservableObject {
 
     func dismiss() {
         flushSave()
+        isFindBarVisible = false
         isVisible = false
         NotificationCenter.default.post(name: .dismissNotes, object: nil)
     }
@@ -626,6 +736,9 @@ final class NotesViewModel: ObservableObject {
 
     func setCollapsed(_ collapsed: Bool) {
         isCollapsed = collapsed
+        if collapsed {
+            isFindBarVisible = false
+        }
     }
 
     func moveToNextDisplay() {
@@ -637,6 +750,9 @@ final class NotesViewModel: ObservableObject {
         editingContent = ""
         editingTitle = ""
         charCount = 0
+        isFindBarVisible = false
+        findQuery = ""
+        resetFindResults()
         lastSyncedDiskContent = ""
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil

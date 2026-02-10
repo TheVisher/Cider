@@ -67,10 +67,6 @@ final class NotesStorage: ObservableObject {
         directoryURL.appendingPathComponent(indexFileName)
     }
 
-    private var encodedDirectoryPath: String {
-        directoryURL.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? directoryURL.path
-    }
-
     private func loadIndex() {
         guard let data = try? Data(contentsOf: indexURL) else {
             index = [:]
@@ -167,46 +163,12 @@ final class NotesStorage: ObservableObject {
 
     /// Convert stored markdown to editor-friendly markdown (absolute image paths).
     func markdownForEditor(_ markdown: String) -> String {
-        var normalized = markdown
-        let absolutePrefix = encodedDirectoryPath + "/"
-
-        normalized = normalized.replacingOccurrences(of: "(./", with: "(\(absolutePrefix)")
-        normalized = normalized.replacingOccurrences(of: "=\"./", with: "=\"\(absolutePrefix)")
-        normalized = normalized.replacingOccurrences(of: "('./", with: "('\(absolutePrefix)")
-
-        normalized = normalized.replacingOccurrences(of: "(.attachments/", with: "(\(absolutePrefix).attachments/")
-        normalized = normalized.replacingOccurrences(of: "=\".attachments/", with: "=\"\(absolutePrefix).attachments/")
-        normalized = normalized.replacingOccurrences(of: "('.attachments/", with: "('\(absolutePrefix).attachments/")
-
-        return normalized
+        NotesMarkdownPathCodec.markdownForEditor(markdown, notesDirectoryURL: directoryURL)
     }
 
     /// Convert editor markdown to portable markdown (relative image paths).
     func markdownForPersistence(_ markdown: String) -> String {
-        var normalized = markdown
-        let rawPrefix = directoryURL.path + "/"
-        let encodedPrefix = encodedDirectoryPath + "/"
-
-        normalized = normalized.replacingOccurrences(of: "(\(rawPrefix)", with: "(./")
-        normalized = normalized.replacingOccurrences(of: "=\"\(rawPrefix)", with: "=\"./")
-        normalized = normalized.replacingOccurrences(of: "('\(rawPrefix)", with: "('./")
-
-        normalized = normalized.replacingOccurrences(of: "(\(encodedPrefix)", with: "(./")
-        normalized = normalized.replacingOccurrences(of: "=\"\(encodedPrefix)", with: "=\"./")
-        normalized = normalized.replacingOccurrences(of: "('\(encodedPrefix)", with: "('./")
-
-        let fileRawPrefix = "file://\(rawPrefix)"
-        let fileEncodedPrefix = "file://\(encodedPrefix)"
-
-        normalized = normalized.replacingOccurrences(of: "(\(fileRawPrefix)", with: "(./")
-        normalized = normalized.replacingOccurrences(of: "=\"\(fileRawPrefix)", with: "=\"./")
-        normalized = normalized.replacingOccurrences(of: "('\(fileRawPrefix)", with: "('./")
-
-        normalized = normalized.replacingOccurrences(of: "(\(fileEncodedPrefix)", with: "(./")
-        normalized = normalized.replacingOccurrences(of: "=\"\(fileEncodedPrefix)", with: "=\"./")
-        normalized = normalized.replacingOccurrences(of: "('\(fileEncodedPrefix)", with: "('./")
-
-        return normalized
+        NotesMarkdownPathCodec.markdownForPersistence(markdown, notesDirectoryURL: directoryURL)
     }
 
     func save(note: Note) {
