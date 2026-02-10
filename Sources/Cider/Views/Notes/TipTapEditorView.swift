@@ -16,6 +16,8 @@ struct TipTapEditorView: NSViewRepresentable {
         contentController.add(handler, name: "imageDropped")
         contentController.add(handler, name: "slashCommandImage")
         contentController.add(handler, name: "slashPopupState")
+        contentController.add(handler, name: "floatingToolbarState")
+        contentController.add(handler, name: "editorError")
 
         let webView = TipTapWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -85,6 +87,23 @@ struct TipTapEditorView: NSViewRepresentable {
                         webView.updateSlashPopupState(payload)
                     }
 
+                case "floatingToolbarState":
+                    if let payload = message.body as? [String: Any],
+                       let webView = viewModel.editorWebView as? TipTapWebView {
+                        webView.updateFloatingToolbarState(payload)
+                    }
+
+                case "editorError":
+                    if let payload = message.body as? [String: Any],
+                       let kind = payload["kind"] as? String,
+                       let detail = payload["message"] as? String {
+                        NSLog("[TipTapEditor][\(kind)] \(detail)")
+                    } else if let detail = message.body as? String {
+                        NSLog("[TipTapEditor] \(detail)")
+                    } else {
+                        NSLog("[TipTapEditor] Unknown editor diagnostic payload")
+                    }
+
                 default:
                     break
                 }
@@ -124,6 +143,8 @@ private final class TipTapWebView: WKWebView {
 
     private var slashPopupFrame: CGRect?
     private var slashPopupActive = false
+    private var floatingToolbarFrame: CGRect?
+    private var floatingToolbarActive = false
     private var localMouseDownMonitor: Any?
     private var localKeyDownMonitor: Any?
 
@@ -158,8 +179,33 @@ private final class TipTapWebView: WKWebView {
         )
     }
 
+    func updateFloatingToolbarState(_ payload: [String: Any]) {
+        let isActive = payload["active"] as? Bool ?? false
+        floatingToolbarActive = isActive
+
+        guard isActive,
+              let left = payload["left"] as? Double,
+              let top = payload["top"] as? Double,
+              let right = payload["right"] as? Double,
+              let bottom = payload["bottom"] as? Double else {
+            floatingToolbarFrame = nil
+            return
+        }
+
+        floatingToolbarFrame = CGRect(
+            x: left,
+            y: top,
+            width: max(0, right - left),
+            height: max(0, bottom - top)
+        )
+    }
+
     override func mouseDown(with event: NSEvent) {
         _ = window?.makeFirstResponder(self)
+
+        if handleFloatingToolbarMouseDown(event) {
+            return
+        }
 
         if handleSlashPopupMouseDown(event) {
             return
@@ -207,6 +253,27 @@ private final class TipTapWebView: WKWebView {
         }
 
         let js = "window.editorAPI.handleNativeSlashClick(\(domPoint.x), \(domPoint.y));"
+        evaluateJavaScript(js, completionHandler: nil)
+        return true
+    }
+
+    private func handleFloatingToolbarMouseDown(_ event: NSEvent) -> Bool {
+        guard floatingToolbarActive,
+              let floatingToolbarFrame else {
+            return false
+        }
+
+        let localPoint = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(localPoint) else {
+            return false
+        }
+
+        let domPoint = CGPoint(x: localPoint.x, y: bounds.height - localPoint.y)
+        guard floatingToolbarFrame.contains(domPoint) else {
+            return false
+        }
+
+        let js = "window.editorAPI.handleNativeFloatingToolbarClick(\(domPoint.x), \(domPoint.y));"
         evaluateJavaScript(js, completionHandler: nil)
         return true
     }
@@ -265,6 +332,9 @@ private final class TipTapWebView: WKWebView {
                 guard event.window === self.window else { return event }
 
                 _ = self.window?.makeFirstResponder(self)
+                if self.handleFloatingToolbarMouseDown(event) {
+                    return nil
+                }
                 if self.handleSlashPopupMouseDown(event) {
                     return nil
                 }

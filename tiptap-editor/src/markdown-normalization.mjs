@@ -6,6 +6,7 @@ const indentedContinuationPattern = /^\s{2,}\S.*$/;
 const paragraphLinePattern = /^<p(?:\s+style="[^"]*")?\s*>(.*?)<\/p>$/i;
 const emptyParagraphLinePattern = /^<p(?:\s+style="[^"]*")?\s*><\/p>$/i;
 const inlineTaskParagraphPattern = /^(\s*(?:[-+*]|\d+[.)])\s+\[(?: |x|X)\])\s*<p(?:\s+style="[^"]*")?\s*>(.*?)<\/p>\s*$/i;
+const htmlParagraphBlockPattern = /<p(?:\s+style="[^"]*")?\s*>[\s\S]*?<\/p>/gi;
 
 function decodeBasicHtmlEntities(value) {
   if (typeof value !== 'string' || value.length === 0) {
@@ -171,13 +172,45 @@ function normalizeTaskListSpacing(markdown) {
   return lines.join('\n');
 }
 
+function repairEscapedHardBreaksInHtmlParagraphs(markdown) {
+  if (typeof markdown !== 'string' || markdown.length === 0) {
+    return '';
+  }
+
+  return markdown.replace(htmlParagraphBlockPattern, (paragraphBlock) => {
+    const openTagEnd = paragraphBlock.indexOf('>');
+    const closeTagStart = paragraphBlock.lastIndexOf('</p>');
+
+    if (openTagEnd < 0 || closeTagStart <= openTagEnd) {
+      return paragraphBlock;
+    }
+
+    const openTag = paragraphBlock.slice(0, openTagEnd + 1);
+    const closeTag = paragraphBlock.slice(closeTagStart);
+    const innerContent = paragraphBlock.slice(openTagEnd + 1, closeTagStart);
+
+    if (!innerContent.includes('\\')) {
+      return paragraphBlock;
+    }
+
+    const normalizedInner = innerContent
+      .split('\n')
+      .map(line => (line.trim() === '\\\\' ? '<br />' : line))
+      .join('\n');
+
+    return `${openTag}${normalizedInner}${closeTag}`;
+  });
+}
+
 function normalizeMarkdownForPersistence(markdown, options = {}) {
-  const repaired = repairBrokenTaskItems(markdown, options);
-  return normalizeTaskListSpacing(repaired);
+  const repairedTasks = repairBrokenTaskItems(markdown, options);
+  const repairedHardBreaks = repairEscapedHardBreaksInHtmlParagraphs(repairedTasks);
+  return normalizeTaskListSpacing(repairedHardBreaks);
 }
 
 export {
   normalizeMarkdownForPersistence,
   normalizeTaskListSpacing,
+  repairEscapedHardBreaksInHtmlParagraphs,
   repairBrokenTaskItems,
 };

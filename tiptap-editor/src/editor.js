@@ -7,9 +7,11 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Image from '@tiptap/extension-image';
+import Heading from '@tiptap/extension-heading';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import Paragraph from '@tiptap/extension-paragraph';
+import HardBreak from '@tiptap/extension-hard-break';
 import { NodeSelection } from '@tiptap/pm/state';
 import { Markdown } from 'tiptap-markdown';
 import { common, createLowlight } from 'lowlight';
@@ -30,6 +32,29 @@ const IMAGE_RESIZE_MIN_WIDTH = 80;
 const IMAGE_RESIZE_MAX_WIDTH = 2000;
 const supportedTextAlignments = ['left', 'center', 'right'];
 
+function postEditorDiagnostic(kind, message) {
+  const handler = window.webkit?.messageHandlers?.editorError;
+  if (!handler) return;
+
+  handler.postMessage({
+    kind,
+    message: String(message ?? ''),
+  });
+}
+
+window.addEventListener('error', (event) => {
+  postEditorDiagnostic('error', event?.message ?? 'Unknown editor error');
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event?.reason;
+  if (reason instanceof Error) {
+    postEditorDiagnostic('rejection', reason.message);
+    return;
+  }
+  postEditorDiagnostic('rejection', String(reason ?? 'Unhandled rejection'));
+});
+
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -48,7 +73,7 @@ const CiderTextAlign = Extension.create({
 
   addOptions() {
     return {
-      types: ['paragraph'],
+      types: ['paragraph', 'heading'],
       alignments: supportedTextAlignments,
     };
   },
@@ -78,18 +103,82 @@ const CiderTextAlign = Extension.create({
   },
 
   addCommands() {
+    const applyAlignmentToSelection = (alignment, state, dispatch, types) => {
+      const { selection } = state;
+      const { from, to, $from } = selection;
+      const normalizedAlignment = alignment === 'left' ? null : alignment;
+      let tr = state.tr;
+      let changed = false;
+
+      state.doc.nodesBetween(from, to, (node, pos) => {
+        if (!types.includes(node.type.name)) {
+          return true;
+        }
+
+        if (node.attrs?.textAlign === normalizedAlignment) {
+          return true;
+        }
+
+        tr = tr.setNodeMarkup(pos, undefined, {
+          ...node.attrs,
+          textAlign: normalizedAlignment,
+        });
+        changed = true;
+        return true;
+      });
+
+      // Collapsed selections can miss their parent block in nodesBetween.
+      if (!changed && selection.empty) {
+        for (let depth = $from.depth; depth > 0; depth -= 1) {
+          const node = $from.node(depth);
+          if (!types.includes(node.type.name)) {
+            continue;
+          }
+
+          if (node.attrs?.textAlign === normalizedAlignment) {
+            break;
+          }
+
+          tr = tr.setNodeMarkup($from.before(depth), undefined, {
+            ...node.attrs,
+            textAlign: normalizedAlignment,
+          });
+          changed = true;
+          break;
+        }
+      }
+
+      if (!changed) {
+        return false;
+      }
+
+      if (dispatch) {
+        dispatch(tr);
+      }
+
+      return true;
+    };
+
     return {
-      setTextAlign: (alignment) => ({ commands }) => {
+      setTextAlign: (alignment) => ({ state, dispatch }) => {
         if (!this.options.alignments.includes(alignment)) {
           return false;
         }
 
-        return this.options.types.some(type =>
-          commands.updateAttributes(type, { textAlign: alignment })
+        return applyAlignmentToSelection(
+          alignment,
+          state,
+          dispatch,
+          this.options.types
         );
       },
-      unsetTextAlign: () => ({ commands }) =>
-        this.options.types.some(type => commands.updateAttributes(type, { textAlign: null })),
+      unsetTextAlign: () => ({ state, dispatch }) =>
+        applyAlignmentToSelection(
+          'left',
+          state,
+          dispatch,
+          this.options.types
+        ),
     };
   },
 });
@@ -227,6 +316,72 @@ const CiderParagraph = Paragraph.extend({
   },
 });
 
+const CiderHeading = Heading.extend({
+  addStorage() {
+    const parentStorage = this.parent?.() ?? {};
+
+    return {
+      ...parentStorage,
+      markdown: {
+        ...parentStorage.markdown,
+        serialize(state, node, parent) {
+          const parentTypeName = parent?.type?.name ?? '';
+          const allowsInlineHeadingHTML = parentTypeName === 'doc';
+          const textAlign = node.attrs?.textAlign;
+          const hasCustomAlignment = allowsInlineHeadingHTML && textAlign && textAlign !== 'left';
+
+          if (!hasCustomAlignment) {
+            if (typeof parentStorage.markdown?.serialize === 'function') {
+              parentStorage.markdown.serialize(state, node, parent);
+              return;
+            }
+
+            const parsedLevel = Number.parseInt(String(node.attrs?.level ?? ''), 10);
+            const level = Number.isFinite(parsedLevel) ? Math.max(1, Math.min(6, parsedLevel)) : 1;
+            state.write(`${'#'.repeat(level)} `);
+            state.renderInline(node);
+            state.closeBlock(node);
+            return;
+          }
+
+          const headingLevel = Math.max(1, Math.min(6, Number(node.attrs?.level) || 1));
+          state.write(`<h${headingLevel} style="text-align: ${escapeHtmlAttr(textAlign)}">`);
+          state.renderInline(node);
+          state.write(`</h${headingLevel}>`);
+          state.closeBlock(node);
+        },
+      },
+    };
+  },
+});
+
+const CiderHardBreak = HardBreak.extend({
+  addStorage() {
+    const parentStorage = this.parent?.() ?? {};
+
+    return {
+      ...parentStorage,
+      markdown: {
+        ...parentStorage.markdown,
+        serialize(state, node, parent) {
+          const parentTypeName = parent?.type?.name ?? '';
+          const textAlign = parent?.attrs?.textAlign;
+          const insideAlignedParagraph = parentTypeName === 'paragraph'
+            && textAlign
+            && textAlign !== 'left';
+
+          if (insideAlignedParagraph) {
+            state.write('<br />');
+            return;
+          }
+
+          state.write('\\\\\n');
+        },
+      },
+    };
+  },
+});
+
 const CiderImage = Image.extend({
   addAttributes() {
     const parentAttributes = this.parent?.() ?? {};
@@ -289,12 +444,19 @@ const CiderImage = Image.extend({
 
       const image = document.createElement('img');
       image.className = 'cider-image-element';
+      image.draggable = false;
 
-      const handle = document.createElement('span');
-      handle.className = 'cider-image-resize-handle';
+      const dragHandle = document.createElement('span');
+      dragHandle.className = 'cider-image-drag-handle';
+      dragHandle.setAttribute('data-drag-handle', '');
+      dragHandle.title = 'Drag to move image';
 
+      const resizeHandle = document.createElement('span');
+      resizeHandle.className = 'cider-image-resize-handle';
+
+      container.appendChild(dragHandle);
       container.appendChild(image);
-      container.appendChild(handle);
+      container.appendChild(resizeHandle);
 
       const updateImageFromNode = (imageNode) => {
         image.src = imageNode.attrs.src || '';
@@ -325,6 +487,121 @@ const CiderImage = Image.extend({
           width,
         };
         editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, attrs));
+      };
+
+      let dropIndicator = null;
+
+      const ensureDropIndicator = () => {
+        if (dropIndicator) {
+          return dropIndicator;
+        }
+
+        dropIndicator = document.createElement('div');
+        dropIndicator.className = 'cider-image-drop-indicator';
+        document.body.appendChild(dropIndicator);
+        return dropIndicator;
+      };
+
+      const hideDropIndicator = () => {
+        if (dropIndicator) {
+          dropIndicator.style.display = 'none';
+        }
+      };
+
+      const cleanupDropIndicator = () => {
+        if (!dropIndicator) return;
+        dropIndicator.remove();
+        dropIndicator = null;
+      };
+
+      const resolveDropTargetPos = (sourcePos, clientX, clientY) => {
+        const view = editor.view;
+        const sourceNode = view.state.doc.nodeAt(sourcePos);
+        if (!sourceNode || sourceNode.type !== currentNode.type) {
+          return null;
+        }
+
+        const posAtCoords = view.posAtCoords({ left: clientX, top: clientY });
+        if (!posAtCoords) {
+          return null;
+        }
+
+        const sourceSize = sourceNode.nodeSize;
+        const targetPos = posAtCoords.pos;
+        if (targetPos >= sourcePos && targetPos <= sourcePos + sourceSize) {
+          return null;
+        }
+
+        return targetPos;
+      };
+
+      const updateDropIndicator = (sourcePos, clientX, clientY) => {
+        const targetPos = resolveDropTargetPos(sourcePos, clientX, clientY);
+        if (targetPos == null) {
+          hideDropIndicator();
+          return null;
+        }
+
+        let coords;
+        try {
+          coords = editor.view.coordsAtPos(targetPos);
+        } catch {
+          hideDropIndicator();
+          return null;
+        }
+
+        const indicator = ensureDropIndicator();
+        const lineHeight = Number.parseFloat(
+          window.getComputedStyle(editor.view.dom).lineHeight
+        );
+        const caretHeight = Number.isFinite(lineHeight) ? Math.max(16, lineHeight) : 20;
+
+        indicator.style.display = 'block';
+        indicator.style.left = `${Math.round(coords.left)}px`;
+        indicator.style.top = `${Math.round(coords.top)}px`;
+        indicator.style.height = `${Math.round(caretHeight)}px`;
+
+        return targetPos;
+      };
+
+      const moveImageToPos = (sourcePos, rawTargetPos) => {
+        if (!Number.isInteger(rawTargetPos)) {
+          return false;
+        }
+
+        const view = editor.view;
+        const state = view.state;
+        const sourceNode = state.doc.nodeAt(sourcePos);
+
+        if (!sourceNode || sourceNode.type !== currentNode.type) {
+          return false;
+        }
+
+        const sourceSize = sourceNode.nodeSize;
+        let targetPos = rawTargetPos;
+        if (targetPos >= sourcePos && targetPos <= sourcePos + sourceSize) {
+          return false;
+        }
+
+        let tr = state.tr.delete(sourcePos, sourcePos + sourceSize);
+        targetPos = tr.mapping.map(targetPos, -1);
+        targetPos = Math.max(0, Math.min(targetPos, tr.doc.content.size));
+
+        try {
+          tr = tr.insert(targetPos, sourceNode);
+        } catch (error) {
+          postEditorDiagnostic('image-drag', error?.message ?? 'Failed to drop image');
+          return false;
+        }
+
+        try {
+          tr = tr.setSelection(NodeSelection.create(tr.doc, targetPos));
+        } catch {
+          // Selection is best-effort after move.
+        }
+
+        view.dispatch(tr.scrollIntoView());
+        return true;
       };
 
       const startResize = (event) => {
@@ -360,13 +637,90 @@ const CiderImage = Image.extend({
         window.addEventListener('pointerup', onPointerUp);
       };
 
+      const startMove = (event) => {
+        if (!editor.isEditable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        selectThisNode();
+
+        const sourcePos = typeof getPos === 'function' ? getPos() : null;
+        if (sourcePos == null) {
+          return;
+        }
+
+        const startX = event.clientX;
+        const startY = event.clientY;
+        let moved = false;
+        let pendingDropTarget = null;
+        container.classList.add('is-dragging');
+        hideDropIndicator();
+
+        const scrollHost = document.getElementById('editor');
+        const edgeScrollThreshold = 24;
+        const edgeScrollAmount = 12;
+
+        const onPointerMove = (moveEvent) => {
+          const deltaX = moveEvent.clientX - startX;
+          const deltaY = moveEvent.clientY - startY;
+          if (!moved && Math.hypot(deltaX, deltaY) >= 4) {
+            moved = true;
+          }
+
+          if (moved) {
+            pendingDropTarget = updateDropIndicator(
+              sourcePos,
+              moveEvent.clientX,
+              moveEvent.clientY
+            );
+          }
+
+          if (scrollHost) {
+            const rect = scrollHost.getBoundingClientRect();
+            if (moveEvent.clientY < rect.top + edgeScrollThreshold) {
+              scrollHost.scrollTop -= edgeScrollAmount;
+            } else if (moveEvent.clientY > rect.bottom - edgeScrollThreshold) {
+              scrollHost.scrollTop += edgeScrollAmount;
+            }
+          }
+        };
+
+        const onPointerUp = (upEvent) => {
+          window.removeEventListener('pointermove', onPointerMove);
+          window.removeEventListener('pointerup', onPointerUp);
+          container.classList.remove('is-dragging');
+          hideDropIndicator();
+
+          if (!moved) {
+            return;
+          }
+
+          const fallbackTarget = resolveDropTargetPos(
+            sourcePos,
+            upEvent.clientX,
+            upEvent.clientY
+          );
+          const didMove = moveImageToPos(
+            sourcePos,
+            pendingDropTarget ?? fallbackTarget
+          );
+          if (!didMove) {
+            postEditorDiagnostic('image-drag', 'No valid drop target for image move');
+          }
+        };
+
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+      };
+
+      dragHandle.addEventListener('pointerdown', startMove);
+
       image.addEventListener('mousedown', (event) => {
         if (!editor.isEditable) return;
         event.preventDefault();
         selectThisNode();
       });
 
-      handle.addEventListener('pointerdown', startResize);
+      resizeHandle.addEventListener('pointerdown', startResize);
       updateImageFromNode(currentNode);
 
       return {
@@ -382,12 +736,20 @@ const CiderImage = Image.extend({
         },
         deselectNode() {
           container.classList.remove('ProseMirror-selectednode');
+          container.classList.remove('is-dragging');
+          hideDropIndicator();
         },
         stopEvent(event) {
-          return handle === event.target || handle.contains(event.target);
+          return resizeHandle === event.target
+            || resizeHandle.contains(event.target)
+            || dragHandle === event.target
+            || dragHandle.contains(event.target);
         },
         ignoreMutation() {
           return true;
+        },
+        destroy() {
+          cleanupDropIndicator();
         },
       };
     };
@@ -436,23 +798,113 @@ window._slashPopup = {
 
 const floatingToolbarActionGroups = {
   text: [
-    { id: 'text-bold', label: 'B', title: 'Bold', run: currentEditor => currentEditor.chain().focus().toggleBold().run() },
-    { id: 'text-italic', label: 'I', title: 'Italic', run: currentEditor => currentEditor.chain().focus().toggleItalic().run() },
-    { id: 'text-underline', label: 'U', title: 'Underline', run: currentEditor => currentEditor.chain().focus().toggleUnderline().run() },
-    { id: 'text-bullets', label: '•', title: 'Bullet List', run: currentEditor => currentEditor.chain().focus().toggleBulletList().run() },
-    { id: 'text-numbered', label: '1.', title: 'Numbered List', run: currentEditor => currentEditor.chain().focus().toggleOrderedList().run() },
-    { id: 'text-task', label: '☑', title: 'Task List', run: currentEditor => currentEditor.chain().focus().toggleTaskList().run() },
+    {
+      id: 'text-bold',
+      label: 'B',
+      title: 'Bold',
+      run: currentEditor => currentEditor.chain().focus().toggleBold().run(),
+      isActive: currentEditor => currentEditor.isActive('bold'),
+    },
+    {
+      id: 'text-italic',
+      label: 'I',
+      title: 'Italic',
+      run: currentEditor => currentEditor.chain().focus().toggleItalic().run(),
+      isActive: currentEditor => currentEditor.isActive('italic'),
+    },
+    {
+      id: 'text-underline',
+      label: 'U',
+      title: 'Underline',
+      run: currentEditor => currentEditor.chain().focus().toggleUnderline().run(),
+      isActive: currentEditor => currentEditor.isActive('underline'),
+    },
+    {
+      id: 'text-bullets',
+      label: '•',
+      title: 'Bullet List',
+      run: currentEditor => currentEditor.chain().focus().toggleBulletList().run(),
+      isActive: currentEditor => currentEditor.isActive('bulletList'),
+    },
+    {
+      id: 'text-numbered',
+      label: '1.',
+      title: 'Numbered List',
+      run: currentEditor => currentEditor.chain().focus().toggleOrderedList().run(),
+      isActive: currentEditor => currentEditor.isActive('orderedList'),
+    },
+    {
+      id: 'text-task',
+      label: '☑',
+      title: 'Task List',
+      run: currentEditor => currentEditor.chain().focus().toggleTaskList().run(),
+      isActive: currentEditor => currentEditor.isActive('taskList'),
+    },
   ],
   table: [
-    { id: 'table-row-before', label: 'Row↑', title: 'Add Row Above', run: currentEditor => currentEditor.chain().focus().addRowBefore().run() },
-    { id: 'table-row-after', label: 'Row↓', title: 'Add Row Below', run: currentEditor => currentEditor.chain().focus().addRowAfter().run() },
-    { id: 'table-row-delete', label: '-Row', title: 'Delete Row', run: currentEditor => currentEditor.chain().focus().deleteRow().run() },
-    { id: 'table-col-before', label: 'Col←', title: 'Add Column Left', run: currentEditor => currentEditor.chain().focus().addColumnBefore().run() },
-    { id: 'table-col-after', label: 'Col→', title: 'Add Column Right', run: currentEditor => currentEditor.chain().focus().addColumnAfter().run() },
-    { id: 'table-col-delete', label: '-Col', title: 'Delete Column', run: currentEditor => currentEditor.chain().focus().deleteColumn().run() },
-    { id: 'table-merge', label: 'Merge', title: 'Merge Cells', run: currentEditor => currentEditor.chain().focus().mergeCells().run() },
-    { id: 'table-split', label: 'Split', title: 'Split Cell', run: currentEditor => currentEditor.chain().focus().splitCell().run() },
-    { id: 'table-delete', label: 'Del', title: 'Delete Table', run: currentEditor => currentEditor.chain().focus().deleteTable().run() },
+    {
+      id: 'table-row-before',
+      label: 'Row↑',
+      title: 'Add Row Above',
+      run: currentEditor => currentEditor.chain().focus().addRowBefore().run(),
+      isEnabled: currentEditor => currentEditor.can().addRowBefore(),
+    },
+    {
+      id: 'table-row-after',
+      label: 'Row↓',
+      title: 'Add Row Below',
+      run: currentEditor => currentEditor.chain().focus().addRowAfter().run(),
+      isEnabled: currentEditor => currentEditor.can().addRowAfter(),
+    },
+    {
+      id: 'table-row-delete',
+      label: '-Row',
+      title: 'Delete Row',
+      run: currentEditor => currentEditor.chain().focus().deleteRow().run(),
+      isEnabled: currentEditor => currentEditor.can().deleteRow(),
+    },
+    {
+      id: 'table-col-before',
+      label: 'Col←',
+      title: 'Add Column Left',
+      run: currentEditor => currentEditor.chain().focus().addColumnBefore().run(),
+      isEnabled: currentEditor => currentEditor.can().addColumnBefore(),
+    },
+    {
+      id: 'table-col-after',
+      label: 'Col→',
+      title: 'Add Column Right',
+      run: currentEditor => currentEditor.chain().focus().addColumnAfter().run(),
+      isEnabled: currentEditor => currentEditor.can().addColumnAfter(),
+    },
+    {
+      id: 'table-col-delete',
+      label: '-Col',
+      title: 'Delete Column',
+      run: currentEditor => currentEditor.chain().focus().deleteColumn().run(),
+      isEnabled: currentEditor => currentEditor.can().deleteColumn(),
+    },
+    {
+      id: 'table-merge',
+      label: 'Merge',
+      title: 'Merge Cells',
+      run: currentEditor => currentEditor.chain().focus().mergeCells().run(),
+      isEnabled: currentEditor => currentEditor.can().mergeCells(),
+    },
+    {
+      id: 'table-split',
+      label: 'Split',
+      title: 'Split Cell',
+      run: currentEditor => currentEditor.chain().focus().splitCell().run(),
+      isEnabled: currentEditor => currentEditor.can().splitCell(),
+    },
+    {
+      id: 'table-delete',
+      label: 'Del',
+      title: 'Delete Table',
+      run: currentEditor => currentEditor.chain().focus().deleteTable().run(),
+      isEnabled: currentEditor => currentEditor.can().deleteTable(),
+    },
   ],
 };
 
@@ -461,6 +913,12 @@ const floatingToolbarActionLookup = new Map(
     .flat()
     .map(action => [action.id, action]),
 );
+
+function getFloatingToolbarActionState(action, currentEditor) {
+  const isEnabled = action.isEnabled ? Boolean(action.isEnabled(currentEditor)) : true;
+  const isActive = action.isActive ? Boolean(action.isActive(currentEditor)) : false;
+  return { isEnabled, isActive };
+}
 
 window._floatingToolbar = {
   active: false,
@@ -562,9 +1020,17 @@ function renderFloatingToolbar(context) {
   s.popup.textContent = '';
 
   actions.forEach(action => {
+    const { isEnabled, isActive } = getFloatingToolbarActionState(action, s.editor);
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'floating-editor-toolbar-button';
+    if (isActive) {
+      button.classList.add('is-active');
+    }
+    if (!isEnabled) {
+      button.classList.add('is-disabled');
+      button.disabled = true;
+    }
     button.dataset.action = action.id;
     button.textContent = action.label;
     button.title = action.title;
@@ -653,6 +1119,11 @@ function runFloatingToolbarAction(actionId) {
   const action = floatingToolbarActionLookup.get(actionId);
   if (!action) return false;
 
+  const { isEnabled } = getFloatingToolbarActionState(action, currentEditor);
+  if (!isEnabled) {
+    return false;
+  }
+
   const didRun = action.run(currentEditor);
   requestFloatingToolbarUpdate(true);
   return Boolean(didRun);
@@ -705,11 +1176,15 @@ const editor = new Editor({
     StarterKit.configure({
       codeBlock: false,
       paragraph: false,
+      heading: false,
+      hardBreak: false,
     }),
     CiderTextAlign,
     CiderUnderline,
     CiderLink,
     CiderParagraph,
+    CiderHeading,
+    CiderHardBreak,
     TaskList,
     TaskItem.configure({ nested: true }),
     Table.configure({ resizable: false }),

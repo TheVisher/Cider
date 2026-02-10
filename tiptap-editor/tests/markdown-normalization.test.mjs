@@ -65,6 +65,27 @@ test('does not alter non-task list items', () => {
   assert.equal(output, input);
 });
 
+test('repairs escaped hard break lines inside html paragraphs', () => {
+  const input = [
+    '<p style="text-align: center">\\\\',
+    '\\\\',
+    'Testing gaps.</p>',
+  ].join('\n');
+
+  const output = normalizeMarkdownForPersistence(input);
+  assert.equal(output, [
+    '<p style="text-align: center"><br />',
+    '<br />',
+    'Testing gaps.</p>',
+  ].join('\n'));
+});
+
+test('keeps inline escaped backslashes inside html paragraph text', () => {
+  const input = '<p style="text-align: center">Not sure what\\\'s up with the \\\\ all over.</p>';
+  const output = normalizeMarkdownForPersistence(input);
+  assert.equal(output, input);
+});
+
 test('repairs marker-only task items followed by indented plain text', () => {
   const input = [
     '- [x]',

@@ -71,6 +71,22 @@ struct PaletteContentArea: View {
         monitors.count > 1 && !isSearching
     }
 
+    private var hasMatchingWindowResults: Bool {
+        let allWindows = monitorGroups.flatMap { $0.windowGroups.flatMap { $0.windows } }
+        let hasTileContent = monitors.contains(where: { !(tileGroupDisplaysForScreen?($0.id) ?? []).isEmpty })
+        let hasSavedContent = !filteredSavedLayouts.isEmpty
+        return !allWindows.isEmpty || hasTileContent || hasSavedContent
+    }
+
+    private var windowResultCount: Int {
+        monitorGroups.flatMap { $0.windowGroups.flatMap { $0.windows } }.count
+    }
+
+    private func searchResultIndex(for note: Note) -> Int? {
+        guard let noteIndex = notes.firstIndex(where: { $0.id == note.id }) else { return nil }
+        return windowResultCount + noteIndex
+    }
+
     private var selectedNotes: [Note] {
         notes.filter { selectedNoteIDs.contains($0.id) }
     }
@@ -115,8 +131,8 @@ struct PaletteContentArea: View {
             // Content
             ScrollView(showsIndicators: false) {
                 if isSearching {
-                    // When searching, show filtered windows directly (no tabs)
-                    windowsContent
+                    // Search is global across result types.
+                    searchResultsContent
                 } else {
                     switch activeTab {
                     case .windows:
@@ -161,12 +177,67 @@ struct PaletteContentArea: View {
     }
 
     @ViewBuilder
-    private var windowsContent: some View {
-        let allWindows = monitorGroups.flatMap { $0.windowGroups.flatMap { $0.windows } }
-        let hasTileContent = monitors.contains(where: { !(tileGroupDisplaysForScreen?($0.id) ?? []).isEmpty })
-        let hasSavedContent = !filteredSavedLayouts.isEmpty
+    private var searchResultsContent: some View {
+        let hasNoteResults = !notes.isEmpty
 
-        if allWindows.isEmpty && !hasTileContent && !hasSavedContent {
+        if !hasMatchingWindowResults && !hasNoteResults {
+            emptyState("No matching results", icon: "magnifyingglass")
+        } else {
+            LazyVStack(alignment: .leading, spacing: Spacing.md) {
+                if hasMatchingWindowResults {
+                    searchSectionHeader(title: "Windows", icon: "macwindow")
+                    windowsContent
+                }
+
+                if hasNoteResults {
+                    if hasMatchingWindowResults {
+                        Divider()
+                            .padding(.horizontal, Spacing.sm)
+                            .opacity(0.3)
+                    }
+
+                    searchSectionHeader(title: "Notes", icon: "note.text")
+                    searchNotesContent
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var searchNotesContent: some View {
+        LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(notes) { note in
+                let noteFlatIndex = searchResultIndex(for: note)
+                PaletteNoteRow(
+                    note: note,
+                    searchText: searchText,
+                    isKeyboardFocused: focusedContentIndex != nil && noteFlatIndex == focusedContentIndex,
+                    onTap: { onNoteClick?(note) }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func searchSectionHeader(title: String, icon: String) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: icon)
+                .font(.system(size: 10 * textScale, weight: .semibold))
+                .foregroundColor(CiderColors.tertiary)
+
+            Text(title)
+                .font(.system(size: 11 * textScale, weight: .semibold))
+                .foregroundColor(CiderColors.secondary)
+
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.top, Spacing.xs)
+    }
+
+    @ViewBuilder
+    private var windowsContent: some View {
+        if !hasMatchingWindowResults {
             if isSearching {
                 emptyState("No matching windows", icon: "magnifyingglass")
             } else {
@@ -775,6 +846,7 @@ struct PaletteNoteRow: View {
     var searchText: String = ""
     var isSelectionMode: Bool = false
     var isSelected: Bool = false
+    var isKeyboardFocused: Bool = false
     let onTap: () -> Void
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -786,6 +858,10 @@ struct PaletteNoteRow: View {
         f.timeStyle = .short
         return f
     }()
+
+    private var isFocused: Bool {
+        isHovering || isKeyboardFocused
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -828,8 +904,16 @@ struct PaletteNoteRow: View {
                     .fill(
                         isSelectionMode
                         ? (isSelected ? CiderColors.controlAccent.opacity(0.14) : Color.clear)
-                        : (isHovering ? Color.white.opacity(0.08) : Color.clear)
+                        : (isFocused ? Color.white.opacity(0.08) : Color.clear)
                     )
+            )
+            .overlay(
+                Group {
+                    if isKeyboardFocused {
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .strokeBorder(CiderColors.controlAccent.opacity(0.6), lineWidth: 1)
+                    }
+                }
             )
         }
         .buttonStyle(.plain)

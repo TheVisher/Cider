@@ -318,6 +318,40 @@ html, body {
   outline-offset: 2px;
 }
 
+.tiptap-editor .cider-image-drag-handle {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(20, 20, 22, 0.9);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  cursor: grab;
+  -webkit-user-drag: element;
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tiptap-editor .cider-image-drag-handle::before {
+  content: '::';
+}
+
+.tiptap-editor .cider-image-node.is-dragging .cider-image-drag-handle {
+  cursor: grabbing;
+}
+
+.tiptap-editor .cider-image-node.is-dragging img {
+  opacity: 0.65;
+}
+
 .tiptap-editor .cider-image-resize-handle {
   position: absolute;
   right: -6px;
@@ -333,6 +367,9 @@ html, body {
   pointer-events: none;
 }
 
+.tiptap-editor .cider-image-node:hover .cider-image-drag-handle,
+.tiptap-editor .cider-image-node.ProseMirror-selectednode .cider-image-drag-handle,
+.tiptap-editor .cider-image-node.is-dragging .cider-image-drag-handle,
 .tiptap-editor .cider-image-node:hover .cider-image-resize-handle,
 .tiptap-editor .cider-image-node.ProseMirror-selectednode .cider-image-resize-handle,
 .tiptap-editor .cider-image-node.is-resizing .cider-image-resize-handle {
@@ -485,6 +522,17 @@ html, body {
   background: rgba(255, 255, 255, 0.14);
 }
 
+.floating-editor-toolbar-button.is-active {
+  background: rgba(108, 180, 238, 0.24);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.floating-editor-toolbar-button.is-disabled,
+.floating-editor-toolbar-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .floating-editor-toolbar::-webkit-scrollbar {
   height: 4px;
 }
@@ -496,6 +544,19 @@ html, body {
 .floating-editor-toolbar::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
+}
+
+.cider-image-drop-indicator {
+  position: fixed;
+  width: 2px;
+  min-height: 16px;
+  border-radius: 2px;
+  background: #6CB4EE;
+  box-shadow:
+    0 0 0 1px rgba(108, 180, 238, 0.28),
+    0 0 10px rgba(108, 180, 238, 0.42);
+  pointer-events: none;
+  z-index: 10000;
 }
 
 /* Drag-over state */

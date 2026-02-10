@@ -301,8 +301,11 @@ final class CommandPaletteViewModel: ObservableObject {
 
     var filteredNotes: [Note] {
         guard isSearching else { return notes }
+        let query = searchQuery
+        guard !query.isEmpty else { return notes }
         return notes.filter {
-            $0.title.lowercased().contains(searchQuery)
+            $0.title.lowercased().contains(query) ||
+            NotesStorage.shared.loadContent(for: $0).lowercased().contains(query)
         }
     }
 
@@ -501,7 +504,7 @@ final class CommandPaletteViewModel: ObservableObject {
 
     /// Check if search has results
     var hasSearchResults: Bool {
-        !filteredPinnedItems.isEmpty || !flattenedWindows.isEmpty
+        !filteredPinnedItems.isEmpty || !searchableContentResults.isEmpty
     }
 
     // MARK: - Keyboard Navigation
@@ -510,6 +513,30 @@ final class CommandPaletteViewModel: ObservableObject {
     var flattenedWindows: [WindowInfo] {
         filteredMonitorGroups.flatMap { monitorGroup in
             monitorGroup.windowGroups.flatMap { $0.windows }
+        }
+    }
+
+    private enum SearchContentResult {
+        case window(WindowInfo)
+        case note(Note)
+    }
+
+    /// Ordered content results used by keyboard navigation while searching.
+    /// Windows are listed first to preserve existing behavior, followed by notes.
+    private var searchableContentResults: [SearchContentResult] {
+        var results: [SearchContentResult] = flattenedWindows.map { .window($0) }
+        if isSearching {
+            results.append(contentsOf: filteredNotes.map { .note($0) })
+        }
+        return results
+    }
+
+    private func activateSearchContentResult(_ result: SearchContentResult) {
+        switch result {
+        case .window(let window):
+            focusWindow(window)
+        case .note(let note):
+            openNote(note)
         }
     }
 
@@ -594,7 +621,7 @@ final class CommandPaletteViewModel: ObservableObject {
             if totalAppsCount > 0 {
                 focusState.section = .apps
                 focusState.appsIndex = 0
-            } else if !flattenedWindows.isEmpty {
+            } else if !searchableContentResults.isEmpty {
                 // Skip tabs when searching - go directly to results
                 focusState.section = .content
                 focusState.contentIndex = 0
@@ -603,7 +630,7 @@ final class CommandPaletteViewModel: ObservableObject {
             }
         case .apps:
             // Apps → Tabs or Content (skip tabs when searching with results)
-            if isSearching && !flattenedWindows.isEmpty {
+            if isSearching && !searchableContentResults.isEmpty {
                 focusState.section = .content
                 focusState.contentIndex = 0
             } else {
@@ -611,13 +638,13 @@ final class CommandPaletteViewModel: ObservableObject {
             }
         case .tabs:
             // Tabs → Content (first item)
-            if !flattenedWindows.isEmpty {
+            if !searchableContentResults.isEmpty {
                 focusState.section = .content
                 focusState.contentIndex = 0
             }
         case .content:
             // Move down within window list
-            let maxIndex = flattenedWindows.count - 1
+            let maxIndex = searchableContentResults.count - 1
             if maxIndex >= 0 && focusState.contentIndex < maxIndex {
                 focusState.contentIndex += 1
             }
@@ -707,7 +734,7 @@ final class CommandPaletteViewModel: ObservableObject {
         if isSearching {
             var sections: [PaletteSection] = [.search]
             if totalAppsCount > 0 { sections.append(.apps) }
-            if !flattenedWindows.isEmpty { sections.append(.content) }
+            if !searchableContentResults.isEmpty { sections.append(.content) }
             availableSections = sections
         } else {
             availableSections = PaletteSection.allCases
@@ -736,7 +763,7 @@ final class CommandPaletteViewModel: ObservableObject {
         case .tabs:
             focusState.tabsIndex = min(focusState.tabsIndex, max(0, tabsCount - 1))
         case .content:
-            focusState.contentIndex = min(focusState.contentIndex, max(0, flattenedWindows.count - 1))
+            focusState.contentIndex = min(focusState.contentIndex, max(0, searchableContentResults.count - 1))
         }
     }
 
@@ -749,8 +776,8 @@ final class CommandPaletteViewModel: ObservableObject {
             if isSearching && hasSearchResults {
                 if let firstItem = filteredPinnedItems.first {
                     if case .app(let app) = firstItem { launchApp(app) }
-                } else if !flattenedWindows.isEmpty {
-                    focusWindow(flattenedWindows[0])
+                } else if let firstResult = searchableContentResults.first {
+                    activateSearchContentResult(firstResult)
                 }
             }
         case .apps:
@@ -767,9 +794,9 @@ final class CommandPaletteViewModel: ObservableObject {
             // The tab is already active, so this is a no-op
             break
         case .content:
-            // Focus the selected window (use filtered data)
-            if focusState.contentIndex < flattenedWindows.count {
-                focusWindow(flattenedWindows[focusState.contentIndex])
+            // Activate the selected search result (window or note).
+            if focusState.contentIndex < searchableContentResults.count {
+                activateSearchContentResult(searchableContentResults[focusState.contentIndex])
             }
         }
     }
