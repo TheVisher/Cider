@@ -101,6 +101,29 @@ test('repairs marker-only task items followed by indented plain text', () => {
   assert.equal(output, '- [x] Task List\n- [ ] Needs follow up');
 });
 
+test('repairs trailing task hard-break artifacts and standalone slash lines', () => {
+  const input = [
+    '- [x] Close/reopen and confirm no task text drift.\\\\\\\\',
+    '  \\\\',
+    '',
+    '- [ ] Verify checkbox alignment\\\\',
+    '  \\\\',
+  ].join('\n');
+
+  const output = normalizeMarkdownForPersistence(input);
+  assert.equal(output, [
+    '- [x] Close/reopen and confirm no task text drift.',
+    '',
+    '- [ ] Verify checkbox alignment',
+  ].join('\n'));
+});
+
+test('keeps single intentional trailing backslash in task text', () => {
+  const input = '- [ ] Keep a literal trailing slash\\';
+  const output = normalizeMarkdownForPersistence(input);
+  assert.equal(output, input);
+});
+
 test('keeps intentionally empty task items when continuation is not indented', () => {
   const input = [
     '- [ ]',

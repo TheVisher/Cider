@@ -15,6 +15,7 @@ struct NotesRecoverySnapshotChoice: Identifiable, Hashable {
 
 @MainActor
 final class NotesViewModel: ObservableObject {
+    @Published private(set) var hasPendingSave: Bool = false
     @Published var selectedNote: Note?
     @Published var editingContent: String = ""
     @Published var searchText: String = ""
@@ -28,6 +29,7 @@ final class NotesViewModel: ObservableObject {
     @Published var findMatchCount: Int = 0
     @Published var findMatchIndex: Int = 0
     @Published var findFocusToken = UUID()
+    @Published private(set) var notesEditorTextSize: NotesEditorTextSize
     @Published var isFormattingToolbarPinned: Bool {
         didSet {
             UserDefaults.standard.set(
@@ -115,6 +117,8 @@ final class NotesViewModel: ObservableObject {
     }
 
     init() {
+        let config = CiderConfig.load()
+        self.notesEditorTextSize = config.notesEditorTextSize
         self.isFormattingToolbarPinned = UserDefaults.standard.bool(
             forKey: Self.formattingToolbarPinnedStorageKey
         )
@@ -129,6 +133,17 @@ final class NotesViewModel: ObservableObject {
                 self.objectWillChange.send()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .ciderConfigChanged)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let config = CiderConfig.load()
+                guard self.notesEditorTextSize != config.notesEditorTextSize else { return }
+                self.notesEditorTextSize = config.notesEditorTextSize
+                self.applyNotesEditorTextSize()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Editor Bridge
@@ -136,6 +151,8 @@ final class NotesViewModel: ObservableObject {
     /// Called when the TipTap editor signals it is ready.
     func editorDidBecomeReady() {
         editorIsReady = true
+        hasPendingSave = false
+        applyNotesEditorTextSize()
         // If a note is already selected, push its content to the editor
         if let note = selectedNote {
             let content = loadPersistedContent(for: note)
@@ -218,6 +235,7 @@ final class NotesViewModel: ObservableObject {
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
         externalChangeState = nil
+        hasPendingSave = false
 
         pushContentToEditor(loaded.content)
     }
@@ -238,6 +256,7 @@ final class NotesViewModel: ObservableObject {
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
         externalChangeState = nil
+        hasPendingSave = false
 
         // Clear editor and focus
         if editorIsReady, let webView = editorWebView {
@@ -285,6 +304,7 @@ final class NotesViewModel: ObservableObject {
         charCount = persistedContent.count
         guard var note = selectedNote else { return }
         note.content = persistedContent
+        hasPendingSave = true
 
         saveWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -296,6 +316,7 @@ final class NotesViewModel: ObservableObject {
                 self.ignoredExternalDiskContent = nil
                 self.externalChangeState = nil
                 NotesStorage.shared.save(note: current)
+                self.hasPendingSave = false
             }
         }
         saveWorkItem = workItem
@@ -315,6 +336,7 @@ final class NotesViewModel: ObservableObject {
         ignoredExternalDiskContent = nil
         externalChangeState = nil
         NotesStorage.shared.save(note: note)
+        hasPendingSave = false
 
         // Then ask the editor for current content to catch any final keystrokes
         // that haven't crossed the JS->Swift bridge yet.
@@ -340,6 +362,7 @@ final class NotesViewModel: ObservableObject {
                 ignoredExternalDiskContent = nil
                 externalChangeState = nil
                 NotesStorage.shared.save(note: current)
+                hasPendingSave = false
             }
         }
     }
@@ -369,6 +392,7 @@ final class NotesViewModel: ObservableObject {
         current.content = editingContent
         lastSyncedDiskContent = editingContent
         NotesStorage.shared.save(note: current)
+        hasPendingSave = false
     }
 
     private func detectExternalChangeIfNeeded() {
@@ -424,6 +448,7 @@ final class NotesViewModel: ObservableObject {
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
         externalChangeState = nil
+        hasPendingSave = false
 
         pushContentToEditor(diskContent)
 
@@ -433,7 +458,7 @@ final class NotesViewModel: ObservableObject {
     }
 
     private func loadPersistedContent(for note: Note) -> String {
-        NotesStorage.shared.markdownForPersistence(NotesStorage.shared.loadContent(for: note))
+        NotesStorage.shared.loadContent(for: note)
     }
 
     // MARK: - In-note Find
@@ -500,6 +525,42 @@ final class NotesViewModel: ObservableObject {
 
     func editorToggleUnderline() {
         runEditorCommand("toggleUnderline")
+    }
+
+    func editorSetTextSizeSmall() {
+        runEditorCommand("setFontSize", stringArgument: "12px")
+    }
+
+    func editorSetTextSizeNormal() {
+        runEditorCommand("setFontSize", stringArgument: "14px")
+    }
+
+    func editorSetTextSizeLarge() {
+        runEditorCommand("setFontSize", stringArgument: "18px")
+    }
+
+    func editorSetTextSizeExtraLarge() {
+        runEditorCommand("setFontSize", stringArgument: "24px")
+    }
+
+    func editorResetTextSize() {
+        runEditorCommand("unsetFontSize")
+    }
+
+    func setNotesEditorTextSize(_ textSize: NotesEditorTextSize) {
+        guard notesEditorTextSize != textSize else {
+            applyNotesEditorTextSize()
+            return
+        }
+
+        notesEditorTextSize = textSize
+
+        var config = CiderConfig.load()
+        config.notesEditorTextSize = textSize
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+
+        applyNotesEditorTextSize()
     }
 
     func editorAlignLeft() {
@@ -625,6 +686,7 @@ final class NotesViewModel: ObservableObject {
             ignoredExternalDiskContent = nil
             externalChangeState = nil
             selectedNote = current
+            hasPendingSave = false
             pushContentToEditor(persistedContent)
         }
 
@@ -757,6 +819,7 @@ final class NotesViewModel: ObservableObject {
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
         externalChangeState = nil
+        hasPendingSave = false
 
         if editorIsReady, let webView = editorWebView {
             webView.evaluateJavaScript("window.editorAPI.clear()")
@@ -779,5 +842,9 @@ final class NotesViewModel: ObservableObject {
             selectedNote = refreshed
             editingTitle = refreshed.title
         }
+    }
+
+    private func applyNotesEditorTextSize() {
+        runEditorCommand("setEditorBaseFontSize", stringArgument: notesEditorTextSize.cssFontSize)
     }
 }

@@ -5,11 +5,15 @@
   padding: 0;
 }
 
+:root {
+  --cider-editor-base-font-size: 14px;
+}
+
 html, body {
   background: transparent;
   color: #e0e0e0;
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  font-size: 14px;
+  font-size: var(--cider-editor-base-font-size);
   line-height: 1.6;
   height: 100%;
   overflow: hidden;
@@ -44,6 +48,7 @@ html, body {
 .tiptap-editor {
   outline: none;
   min-height: 100%;
+  font-size: var(--cider-editor-base-font-size);
 }
 
 .tiptap-editor > *:first-child {
@@ -568,6 +573,88 @@ html, body {
     0 0 10px rgba(108, 180, 238, 0.42);
   pointer-events: none;
   z-index: 10000;
+}
+
+.cider-image-import-indicator {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 10001;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 22, 0.94);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.35),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.cider-image-import-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  border-top-color: #6CB4EE;
+  animation: cider-image-import-spin 0.65s linear infinite;
+}
+
+@keyframes cider-image-import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cider-image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 8, 10, 0.76);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.cider-image-preview-image {
+  display: block;
+  max-width: min(92vw, 1400px);
+  max-height: 88vh;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 18px 42px rgba(0, 0, 0, 0.5);
+}
+
+.cider-image-preview-caption {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: min(90vw, 820px);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(20, 20, 22, 0.86);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
 
 /* Drag-over state */

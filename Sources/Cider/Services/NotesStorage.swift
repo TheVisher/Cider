@@ -99,8 +99,15 @@ final class NotesStorage: ObservableObject {
             return
         }
 
-        // Reverse map: filename -> UUID
-        let filenameToUUID = Dictionary(uniqueKeysWithValues: index.map { ($0.value, $0.key) })
+        // Build a resilient reverse map (filename -> UUID). If the index was
+        // corrupted with duplicate filenames, keep the first UUID and ignore
+        // the rest so scanning never crashes.
+        var filenameToUUID: [String: UUID] = [:]
+        for (uuid, filename) in index.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            if filenameToUUID[filename] == nil {
+                filenameToUUID[filename] = uuid
+            }
+        }
 
         var scannedNotes: [Note] = []
         for fileURL in files {
@@ -130,6 +137,10 @@ final class NotesStorage: ObservableObject {
                 relativePath: filename
             ))
         }
+
+        // Rebuild the index from scanned files so duplicates/stale entries are
+        // cleaned up automatically.
+        index = Dictionary(uniqueKeysWithValues: scannedNotes.map { ($0.id, $0.relativePath) })
 
         // Sort by most recently modified
         scannedNotes.sort { $0.modifiedAt > $1.modifiedAt }

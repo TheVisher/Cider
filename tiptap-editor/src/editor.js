@@ -1,4 +1,4 @@
-import { Editor, Extension, Mark } from '@tiptap/core';
+import { Editor, Extension, Mark, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -12,7 +12,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import Paragraph from '@tiptap/extension-paragraph';
 import HardBreak from '@tiptap/extension-hard-break';
-import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { EditorState, NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { Markdown } from 'tiptap-markdown';
 import { common, createLowlight } from 'lowlight';
@@ -32,6 +32,17 @@ const fileProtocolPathPattern = /\(file:\/\/\/([^)]+)\)/g;
 const IMAGE_RESIZE_MIN_WIDTH = 80;
 const IMAGE_RESIZE_MAX_WIDTH = 2000;
 const supportedTextAlignments = ['left', 'center', 'right'];
+const supportedFontSizes = ['12px', '14px', '16px', '18px', '24px', '32px'];
+const parserTaskLeadingSpacePattern = /^ +/;
+const webImageDropURLPattern = /\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?.*)?$/i;
+const fontSizePattern = /^([1-9]\d{0,2})px$/i;
+const editorBaseFontSizeCSSVariable = '--cider-editor-base-font-size';
+const defaultEditorBaseFontSize = '14px';
+
+let pendingImageInsertions = 0;
+let pendingImageIndicator = null;
+let pendingImageObserver = null;
+let imagePreviewOverlay = null;
 
 function postEditorDiagnostic(kind, message) {
   const handler = window.webkit?.messageHandlers?.editorError;
@@ -67,6 +78,34 @@ function escapeHtmlAttr(value) {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function normalizeFontSize(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return null;
+  }
+
+  const matched = raw.match(fontSizePattern);
+  if (!matched) {
+    return null;
+  }
+
+  const size = Number.parseInt(matched[1], 10);
+  if (!Number.isFinite(size)) {
+    return null;
+  }
+
+  const clamped = Math.max(10, Math.min(96, size));
+  return `${clamped}px`;
+}
+
+function applyEditorBaseFontSize(value) {
+  const normalized = normalizeFontSize(value) ?? defaultEditorBaseFontSize;
+  document.documentElement.style.setProperty(editorBaseFontSizeCSSVariable, normalized);
+  document.body.style.setProperty(editorBaseFontSizeCSSVariable, normalized);
+  document.getElementById('editor')?.style?.setProperty(editorBaseFontSizeCSSVariable, normalized);
+  return normalized;
 }
 
 const CiderTextAlign = Extension.create({
@@ -276,6 +315,82 @@ const CiderLink = Mark.create({
   },
 });
 
+const CiderFontSize = Mark.create({
+  name: 'fontSize',
+
+  addAttributes() {
+    return {
+      fontSize: {
+        default: null,
+        parseHTML: (element) => normalizeFontSize(element.style?.fontSize),
+        renderHTML: (attributes) => {
+          const size = normalizeFontSize(attributes.fontSize);
+          if (!size) {
+            return {};
+          }
+
+          return {
+            style: `font-size: ${size}`,
+          };
+        },
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        style: 'font-size',
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes), 0];
+  },
+
+  addCommands() {
+    return {
+      setFontSize: (fontSize) => ({ commands }) => {
+        const normalized = normalizeFontSize(fontSize);
+        if (!normalized) {
+          return false;
+        }
+
+        return commands.setMark(this.name, { fontSize: normalized });
+      },
+      unsetFontSize: () => ({ commands }) => commands.unsetMark(this.name),
+    };
+  },
+
+  addStorage() {
+    const parentStorage = this.parent?.() ?? {};
+
+    return {
+      ...parentStorage,
+      markdown: {
+        ...parentStorage.markdown,
+        serialize: {
+          open(_state, mark) {
+            const size = normalizeFontSize(mark.attrs?.fontSize);
+            if (!size) {
+              return '';
+            }
+
+            return `<span style="font-size: ${escapeHtmlAttr(size)}">`;
+          },
+          close(_state, mark) {
+            return normalizeFontSize(mark.attrs?.fontSize) ? '</span>' : '';
+          },
+        },
+        parse: {
+          // handled by markdown-it + parseHTML
+        },
+      },
+    };
+  },
+});
+
 const CiderParagraph = Paragraph.extend({
   addStorage() {
     const parentStorage = this.parent?.() ?? {};
@@ -376,7 +491,7 @@ const CiderHardBreak = HardBreak.extend({
             return;
           }
 
-          state.write('\\\\\n');
+          state.write('\\\n');
         },
       },
     };
@@ -721,6 +836,16 @@ const CiderImage = Image.extend({
         selectThisNode();
       });
 
+      image.addEventListener('click', (event) => {
+        if (container.classList.contains('is-dragging') || container.classList.contains('is-resizing')) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        openImagePreview(currentNode.attrs.src || '', currentNode.attrs.alt || '');
+      });
+
       resizeHandle.addEventListener('pointerdown', startResize);
       updateImageFromNode(currentNode);
 
@@ -784,6 +909,196 @@ function normalizeIncomingMarkdown(value) {
 function getNormalizedMarkdown() {
   return normalizeMarkdownForPersistence(editor.storage.markdown.getMarkdown(), {
     decodeEntities: decodeHtmlEntities,
+  });
+}
+
+function ensurePendingImageIndicator() {
+  if (pendingImageIndicator) {
+    return pendingImageIndicator;
+  }
+
+  const container = document.createElement('div');
+  container.className = 'cider-image-import-indicator';
+  container.style.display = 'none';
+
+  const spinner = document.createElement('span');
+  spinner.className = 'cider-image-import-spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+
+  const label = document.createElement('span');
+  label.className = 'cider-image-import-label';
+  label.textContent = 'Adding image...';
+
+  container.appendChild(spinner);
+  container.appendChild(label);
+  document.body.appendChild(container);
+  pendingImageIndicator = container;
+  return container;
+}
+
+function updatePendingImageIndicator() {
+  const indicator = ensurePendingImageIndicator();
+  indicator.style.display = pendingImageInsertions > 0 ? 'inline-flex' : 'none';
+}
+
+function beginPendingImageInsertion() {
+  pendingImageInsertions += 1;
+  updatePendingImageIndicator();
+}
+
+function completePendingImageInsertion() {
+  pendingImageInsertions = Math.max(0, pendingImageInsertions - 1);
+  updatePendingImageIndicator();
+}
+
+function resetPendingImageInsertions() {
+  pendingImageInsertions = 0;
+  updatePendingImageIndicator();
+}
+
+function ensureImagePreviewOverlay() {
+  if (imagePreviewOverlay) {
+    return imagePreviewOverlay;
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'cider-image-preview-overlay';
+  backdrop.style.display = 'none';
+
+  const image = document.createElement('img');
+  image.className = 'cider-image-preview-image';
+  image.draggable = false;
+
+  const caption = document.createElement('div');
+  caption.className = 'cider-image-preview-caption';
+
+  backdrop.appendChild(image);
+  backdrop.appendChild(caption);
+
+  backdrop.addEventListener('click', (event) => {
+    if (event.target === backdrop) {
+      closeImagePreview();
+    }
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') {
+      return;
+    }
+
+    if (backdrop.style.display === 'none') {
+      return;
+    }
+
+    event.preventDefault();
+    closeImagePreview();
+  });
+
+  document.body.appendChild(backdrop);
+  imagePreviewOverlay = {
+    backdrop,
+    image,
+    caption,
+  };
+  return imagePreviewOverlay;
+}
+
+function openImagePreview(src, alt = '') {
+  if (typeof src !== 'string' || src.length === 0) {
+    return;
+  }
+
+  const overlay = ensureImagePreviewOverlay();
+  overlay.image.src = src;
+  overlay.image.alt = alt;
+  overlay.caption.textContent = alt;
+  overlay.caption.style.display = alt ? 'block' : 'none';
+  overlay.backdrop.style.display = 'flex';
+}
+
+function closeImagePreview() {
+  if (!imagePreviewOverlay) {
+    return;
+  }
+
+  imagePreviewOverlay.backdrop.style.display = 'none';
+}
+
+function looksLikeWebImageDrop(event) {
+  const transfer = event.dataTransfer;
+  if (!transfer) {
+    return false;
+  }
+
+  const types = Array.from(transfer.types || []);
+  if (types.includes('text/uri-list') || types.includes('public.url') || types.includes('text/html')) {
+    return true;
+  }
+
+  const uri = String(
+    transfer.getData('text/uri-list')
+    || transfer.getData('text/plain')
+    || ''
+  ).trim();
+  const html = String(transfer.getData('text/html') || '');
+  return webImageDropURLPattern.test(uri) || /<img\s/i.test(html);
+}
+
+function watchImageLoadState(imageElement) {
+  if (!(imageElement instanceof HTMLImageElement)) {
+    return;
+  }
+
+  if (imageElement.dataset.ciderImageLoadTracked === 'true') {
+    return;
+  }
+
+  imageElement.dataset.ciderImageLoadTracked = 'true';
+
+  if (imageElement.complete) {
+    return;
+  }
+
+  beginPendingImageInsertion();
+  const finish = () => {
+    imageElement.removeEventListener('load', finish);
+    imageElement.removeEventListener('error', finish);
+    completePendingImageInsertion();
+  };
+
+  imageElement.addEventListener('load', finish, { once: true });
+  imageElement.addEventListener('error', finish, { once: true });
+}
+
+function observeEditorImages() {
+  const root = editor?.view?.dom;
+  if (!root) {
+    return;
+  }
+
+  root.querySelectorAll('img').forEach(watchImageLoadState);
+
+  pendingImageObserver?.disconnect();
+  pendingImageObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) {
+          continue;
+        }
+
+        if (node instanceof HTMLImageElement) {
+          watchImageLoadState(node);
+          continue;
+        }
+
+        node.querySelectorAll?.('img').forEach(watchImageLoadState);
+      }
+    }
+  });
+
+  pendingImageObserver.observe(root, {
+    childList: true,
+    subtree: true,
   });
 }
 
@@ -1504,6 +1819,66 @@ function clearNoteFindState() {
   return noteFindPayload();
 }
 
+function stripTaskItemLeadingSpaceArtifacts() {
+  const { state } = editor;
+  let tr = state.tr;
+  let changed = false;
+  const taskPositions = [];
+
+  state.doc.descendants((node, pos) => {
+    if (node.type?.name === 'taskItem') {
+      taskPositions.push(pos);
+    }
+  });
+
+  for (const originalPos of taskPositions) {
+    const mappedPos = tr.mapping.map(originalPos);
+    const taskItem = tr.doc.nodeAt(mappedPos);
+    if (!taskItem || taskItem.type?.name !== 'taskItem') {
+      continue;
+    }
+
+    const paragraph = taskItem.firstChild;
+    if (!paragraph || paragraph.type?.name !== 'paragraph' || paragraph.childCount === 0) {
+      continue;
+    }
+
+    const firstInline = paragraph.child(0);
+    if (!firstInline.isText || typeof firstInline.text !== 'string') {
+      continue;
+    }
+
+    if (!parserTaskLeadingSpacePattern.test(firstInline.text)) {
+      continue;
+    }
+
+    const trimmed = firstInline.text.slice(1);
+    const textFrom = mappedPos + 2;
+    const textTo = textFrom + firstInline.nodeSize;
+
+    if (trimmed.length === 0) {
+      tr = tr.delete(textFrom, textTo);
+    } else {
+      tr = tr.replaceWith(
+        textFrom,
+        textTo,
+        state.schema.text(trimmed, firstInline.marks)
+      );
+    }
+    changed = true;
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  tr = tr.setMeta('addToHistory', false);
+  tr = tr.setMeta('preventUpdate', true);
+  editor.view.dispatch(tr);
+}
+
+applyEditorBaseFontSize(defaultEditorBaseFontSize);
+
 const editor = new Editor({
   element: document.getElementById('editor'),
   extensions: [
@@ -1517,6 +1892,7 @@ const editor = new Editor({
     CiderTextAlign,
     CiderUnderline,
     CiderLink,
+    CiderFontSize,
     CiderParagraph,
     CiderHeading,
     CiderHardBreak,
@@ -1546,21 +1922,36 @@ const editor = new Editor({
     handleDOMEvents: {
       drop(view, event) {
         const files = event.dataTransfer?.files;
-        if (!files || files.length === 0) return false;
-        const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
-        if (imageFiles.length === 0) return false;
+        const imageFiles = files ? Array.from(files).filter(f => f.type.startsWith('image/')) : [];
+        if (imageFiles.length === 0) {
+          if (looksLikeWebImageDrop(event)) {
+            beginPendingImageInsertion();
+            window.setTimeout(() => {
+              completePendingImageInsertion();
+            }, 4500);
+          }
+          return false;
+        }
         event.preventDefault();
         for (const file of imageFiles) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result.split(',')[1];
-            if (window.webkit?.messageHandlers?.imageDropped) {
-              window.webkit.messageHandlers.imageDropped.postMessage(
-                JSON.stringify({ data: base64, name: file.name })
-              );
-            }
-          };
-          reader.readAsDataURL(file);
+          beginPendingImageInsertion();
+          window.requestAnimationFrame(() => {
+            const reader = new FileReader();
+            reader.onerror = () => {
+              completePendingImageInsertion();
+            };
+            reader.onload = () => {
+              const base64 = reader.result.split(',')[1];
+              if (window.webkit?.messageHandlers?.imageDropped) {
+                window.webkit.messageHandlers.imageDropped.postMessage(
+                  JSON.stringify({ data: base64, name: file.name })
+                );
+              } else {
+                completePendingImageInsertion();
+              }
+            };
+            reader.readAsDataURL(file);
+          });
         }
         return true;
       },
@@ -1572,13 +1963,19 @@ const editor = new Editor({
             event.preventDefault();
             const file = item.getAsFile();
             if (!file) continue;
+            beginPendingImageInsertion();
             const reader = new FileReader();
+            reader.onerror = () => {
+              completePendingImageInsertion();
+            };
             reader.onload = () => {
               const base64 = reader.result.split(',')[1];
               if (window.webkit?.messageHandlers?.imageDropped) {
                 window.webkit.messageHandlers.imageDropped.postMessage(
                   JSON.stringify({ data: base64, name: file.name || 'pasted-image.png' })
                 );
+              } else {
+                completePendingImageInsertion();
               }
             };
             reader.readAsDataURL(file);
@@ -1600,25 +1997,48 @@ const editor = new Editor({
     if (window.webkit?.messageHandlers?.editorReady) {
       window.webkit.messageHandlers.editorReady.postMessage('ready');
     }
+    ensurePendingImageIndicator();
+    observeEditorImages();
   },
 });
 
 initializeFloatingToolbar(editor);
 
+function resetEditorPluginState() {
+  const nextState = EditorState.create({
+    schema: editor.state.schema,
+    doc: editor.state.doc,
+    selection: editor.state.selection,
+    plugins: editor.state.plugins,
+  });
+
+  editor.view.updateState(nextState);
+}
+
+function replaceEditorContent(markdown) {
+  clearNoteFindState();
+  closeImagePreview();
+  resetPendingImageInsertions();
+  editor.commands.setContent(normalizeIncomingMarkdown(markdown), false, {
+    preserveWhitespace: 'full',
+  });
+  stripTaskItemLeadingSpaceArtifacts();
+  resetEditorPluginState();
+  requestFloatingToolbarUpdate(true);
+}
+
 // Swift -> JS bridge API
 window.editorAPI = {
   setContent(markdown) {
-    clearNoteFindState();
-    editor.commands.setContent(normalizeIncomingMarkdown(markdown), false, {
-      preserveWhitespace: 'full',
-    });
-    requestFloatingToolbarUpdate(true);
+    replaceEditorContent(markdown);
   },
   getContent() {
     return getNormalizedMarkdown();
   },
   insertImage(src, alt) {
-    editor.chain().focus().setImage({ src, alt: alt || '' }).run();
+    const inserted = editor.chain().focus().setImage({ src, alt: alt || '' }).run();
+    completePendingImageInsertion();
+    return inserted;
   },
   focus() {
     editor.commands.focus();
@@ -1629,9 +2049,7 @@ window.editorAPI = {
     hideFloatingToolbar();
   },
   clear() {
-    clearNoteFindState();
-    editor.commands.clearContent();
-    requestFloatingToolbarUpdate(true);
+    replaceEditorContent('');
   },
   toggleBold() {
     return editor.chain().focus().toggleBold().run();
@@ -1648,6 +2066,32 @@ window.editorAPI = {
     }
 
     return editor.chain().focus().setTextAlign(alignment).run();
+  },
+  setFontSize(fontSize) {
+    const normalized = normalizeFontSize(fontSize);
+    if (!normalized) {
+      return false;
+    }
+
+    return editor.chain().focus().setFontSize(normalized).run();
+  },
+  unsetFontSize() {
+    return editor.chain().focus().unsetFontSize().run();
+  },
+  setEditorBaseFontSize(fontSize) {
+    const normalized = normalizeFontSize(fontSize);
+    if (!normalized) {
+      return false;
+    }
+
+    applyEditorBaseFontSize(normalized);
+    return true;
+  },
+  getEditorBaseFontSize() {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue(editorBaseFontSizeCSSVariable)
+      .trim();
+    return normalizeFontSize(value) ?? defaultEditorBaseFontSize;
   },
   setLink(href) {
     if (typeof href !== 'string' || href.trim().length === 0) {

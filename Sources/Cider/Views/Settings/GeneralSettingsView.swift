@@ -81,6 +81,14 @@ struct GeneralSettingsView: View {
                     isOn: $viewModel.rememberNotesPanelPositionPerNote
                 )
 
+                SettingsPickerRow(
+                    title: "Note text size",
+                    subtitle: "Default display size for note content",
+                    selection: $viewModel.notesEditorTextSize,
+                    options: NotesEditorTextSize.allCases,
+                    label: { $0.displayName }
+                )
+
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Notes directory")

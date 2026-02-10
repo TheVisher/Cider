@@ -366,6 +366,38 @@ private struct NotesTitleBar: View {
                     }
                 }
 
+                Section("Selection Text Size") {
+                    Button("Small") {
+                        viewModel.editorSetTextSizeSmall()
+                    }
+                    Button("Normal") {
+                        viewModel.editorSetTextSizeNormal()
+                    }
+                    Button("Large") {
+                        viewModel.editorSetTextSizeLarge()
+                    }
+                    Button("Extra Large") {
+                        viewModel.editorSetTextSizeExtraLarge()
+                    }
+                    Button("Reset Size") {
+                        viewModel.editorResetTextSize()
+                    }
+                }
+
+                Section("Note Text Size") {
+                    ForEach(NotesEditorTextSize.allCases, id: \.self) { size in
+                        Button {
+                            viewModel.setNotesEditorTextSize(size)
+                        } label: {
+                            if viewModel.notesEditorTextSize == size {
+                                Label(size.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(size.displayName)
+                            }
+                        }
+                    }
+                }
+
                 Section("Lists") {
                     Button {
                         viewModel.editorToggleBulletList()
@@ -849,10 +881,14 @@ private struct NotesStatusBar: View {
             }
             Spacer()
             if viewModel.selectedNote != nil {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: viewModel.hasPendingSave ? "clock.fill" : "checkmark.circle.fill")
                     .font(.system(size: 10))
-                    .foregroundColor(CiderColors.success.opacity(0.7))
-                Text("Saved")
+                    .foregroundColor(
+                        viewModel.hasPendingSave
+                            ? CiderColors.tertiary
+                            : CiderColors.success.opacity(0.7)
+                    )
+                Text(viewModel.hasPendingSave ? "Saving..." : "Saved")
                     .font(.system(size: 10))
                     .foregroundColor(CiderColors.tertiary)
             }

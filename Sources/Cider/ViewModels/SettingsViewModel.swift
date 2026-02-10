@@ -64,6 +64,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var rememberNotesPanelPositionPerNote: Bool {
         didSet { saveConfig() }
     }
+    @Published var notesEditorTextSize: NotesEditorTextSize {
+        didSet { saveConfig() }
+    }
 
     private var config: CiderConfig
 
@@ -83,6 +86,7 @@ final class SettingsViewModel: ObservableObject {
         self.enableNotesHotkey = config.enableNotesHotkey
         self.notesDirectory = config.notesDirectory
         self.rememberNotesPanelPositionPerNote = config.rememberNotesPanelPositionPerNote
+        self.notesEditorTextSize = config.notesEditorTextSize
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -106,6 +110,7 @@ final class SettingsViewModel: ObservableObject {
         config.enableNotesHotkey = enableNotesHotkey
         config.notesDirectory = notesDirectory
         config.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
+        config.notesEditorTextSize = notesEditorTextSize
         config.save()
 
         // Post notification so AppDelegate can respond

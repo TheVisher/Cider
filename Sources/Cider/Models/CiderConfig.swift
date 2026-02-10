@@ -54,6 +54,39 @@ enum TextSize: String, Codable, CaseIterable {
     }
 }
 
+enum NotesEditorTextSize: String, Codable, CaseIterable {
+    case small
+    case normal
+    case large
+    case extraLarge
+
+    var displayName: String {
+        switch self {
+        case .small:
+            "Small"
+        case .normal:
+            "Normal"
+        case .large:
+            "Large"
+        case .extraLarge:
+            "Extra Large"
+        }
+    }
+
+    var cssFontSize: String {
+        switch self {
+        case .small:
+            "12px"
+        case .normal:
+            "14px"
+        case .large:
+            "16px"
+        case .extraLarge:
+            "18px"
+        }
+    }
+}
+
 enum PaletteSize: String, Codable, CaseIterable {
     case small
     case medium
@@ -103,6 +136,7 @@ struct CiderConfig: Codable {
     var notesDirectory: String  // Directory for notes .md files
     var enableNotesHotkey: Bool  // Enable Option+N to open notes
     var rememberNotesPanelPositionPerNote: Bool  // Reopen each note at its last panel position
+    var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
 
     static let storageKey = "CiderConfig"
 
@@ -121,7 +155,8 @@ struct CiderConfig: Codable {
             enableDynamicTiling: true,
             notesDirectory: "~/Documents/Cider Notes",
             enableNotesHotkey: true,
-            rememberNotesPanelPositionPerNote: true
+            rememberNotesPanelPositionPerNote: true,
+            notesEditorTextSize: .normal
         )
     }
 
@@ -169,6 +204,10 @@ struct CiderConfig: Codable {
         rememberNotesPanelPositionPerNote = try container.decodeIfPresent(
             Bool.self, forKey: .rememberNotesPanelPositionPerNote
         ) ?? true
+        notesEditorTextSize = try container.decodeIfPresent(
+            NotesEditorTextSize.self,
+            forKey: .notesEditorTextSize
+        ) ?? .normal
     }
 
     init(
@@ -185,7 +224,8 @@ struct CiderConfig: Codable {
         enableDynamicTiling: Bool = true,
         notesDirectory: String = "~/Documents/Cider Notes",
         enableNotesHotkey: Bool = true,
-        rememberNotesPanelPositionPerNote: Bool = true
+        rememberNotesPanelPositionPerNote: Bool = true,
+        notesEditorTextSize: NotesEditorTextSize = .normal
     ) {
         self.autoHideApps = autoHideApps
         self.showMenuBarIcon = showMenuBarIcon
@@ -201,5 +241,6 @@ struct CiderConfig: Codable {
         self.notesDirectory = notesDirectory
         self.enableNotesHotkey = enableNotesHotkey
         self.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
+        self.notesEditorTextSize = notesEditorTextSize
     }
 }

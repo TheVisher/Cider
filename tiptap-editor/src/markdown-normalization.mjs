@@ -7,6 +7,9 @@ const paragraphLinePattern = /^<p(?:\s+style="[^"]*")?\s*>(.*?)<\/p>$/i;
 const emptyParagraphLinePattern = /^<p(?:\s+style="[^"]*")?\s*><\/p>$/i;
 const inlineTaskParagraphPattern = /^(\s*(?:[-+*]|\d+[.)])\s+\[(?: |x|X)\])\s*<p(?:\s+style="[^"]*")?\s*>(.*?)<\/p>\s*$/i;
 const htmlParagraphBlockPattern = /<p(?:\s+style="[^"]*")?\s*>[\s\S]*?<\/p>/gi;
+const taskListLinePattern = /^\s*(?:[-+*]|\d+[.)])\s+\[(?: |x|X)\]/;
+const trailingBackslashPattern = /\\+$/;
+const backslashOnlyLinePattern = /^\s*\\+\s*$/;
 
 function decodeBasicHtmlEntities(value) {
   if (typeof value !== 'string' || value.length === 0) {
@@ -202,15 +205,74 @@ function repairEscapedHardBreaksInHtmlParagraphs(markdown) {
   });
 }
 
+function repairTaskHardBreakArtifacts(markdown) {
+  if (typeof markdown !== 'string' || markdown.length === 0) {
+    return '';
+  }
+
+  const lines = markdown.split('\n');
+  const repaired = [];
+  let activeFence = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    activeFence = normalizeFenceState(activeFence, line);
+    if (line.match(markdownFencePattern)) {
+      repaired.push(line);
+      continue;
+    }
+
+    if (activeFence) {
+      repaired.push(line);
+      continue;
+    }
+
+    const previousLine = repaired.length > 0 ? repaired[repaired.length - 1] : '';
+    if (
+      backslashOnlyLinePattern.test(line)
+      && (taskListLinePattern.test(previousLine) || trailingBackslashPattern.test(previousLine))
+    ) {
+      continue;
+    }
+
+    if (!taskListLinePattern.test(line)) {
+      repaired.push(line);
+      continue;
+    }
+
+    const trailingBackslashes = line.match(trailingBackslashPattern);
+    if (!trailingBackslashes) {
+      repaired.push(line);
+      continue;
+    }
+
+    const slashCount = trailingBackslashes[0].length;
+    const nextLine = lines[index + 1] ?? '';
+    const hasBackslashContinuation = backslashOnlyLinePattern.test(nextLine);
+
+    if (slashCount < 2 && !hasBackslashContinuation) {
+      repaired.push(line);
+      continue;
+    }
+
+    const trimmedLine = line.slice(0, -slashCount).replace(/\s+$/, '');
+    repaired.push(trimmedLine);
+  }
+
+  return repaired.join('\n');
+}
+
 function normalizeMarkdownForPersistence(markdown, options = {}) {
   const repairedTasks = repairBrokenTaskItems(markdown, options);
   const repairedHardBreaks = repairEscapedHardBreaksInHtmlParagraphs(repairedTasks);
-  return normalizeTaskListSpacing(repairedHardBreaks);
+  const repairedTaskHardBreaks = repairTaskHardBreakArtifacts(repairedHardBreaks);
+  return normalizeTaskListSpacing(repairedTaskHardBreaks);
 }
 
 export {
   normalizeMarkdownForPersistence,
   normalizeTaskListSpacing,
   repairEscapedHardBreaksInHtmlParagraphs,
+  repairTaskHardBreakArtifacts,
   repairBrokenTaskItems,
 };
