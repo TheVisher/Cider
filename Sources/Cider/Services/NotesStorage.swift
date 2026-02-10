@@ -18,10 +18,14 @@ final class NotesStorage: ObservableObject {
     private var directoryFileDescriptor: Int32 = -1
     private var directorySource: DispatchSourceFileSystemObject?
     private var saveWorkItem: DispatchWorkItem?
+    private var attachmentCleanupWorkItem: DispatchWorkItem?
     private let indexFileName = "_cider_notes_index.json"
     private let snapshotsDirectoryName = ".history"
+    private let attachmentsDirectoryName = ".attachments"
     private let maxSnapshotsPerNote = 20
     private let maxSnapshotAgeDays = 30
+    private let attachmentCleanupDelaySeconds: TimeInterval = 2
+    private let orphanAttachmentGracePeriodSeconds: TimeInterval = 5 * 60
 
     /// UUID-to-filename mapping persisted on disk
     private var index: [UUID: String] = [:]
@@ -40,6 +44,8 @@ final class NotesStorage: ObservableObject {
 
     func updateDirectory(to newPath: String) {
         stopDirectoryWatcher()
+        attachmentCleanupWorkItem?.cancel()
+        attachmentCleanupWorkItem = nil
         let expanded = NSString(string: newPath).expandingTildeInPath
         directoryURL = URL(fileURLWithPath: expanded)
         ensureDirectory()
@@ -213,6 +219,10 @@ final class NotesStorage: ObservableObject {
 
         try? note.content.write(to: fileURL, atomically: true, encoding: .utf8)
 
+        if previousContent != note.content {
+            scheduleAttachmentCleanup()
+        }
+
         // Update in-memory list
         if let idx = notes.firstIndex(where: { $0.id == note.id }) {
             notes[idx].modifiedAt = Date()
@@ -263,6 +273,7 @@ final class NotesStorage: ObservableObject {
         index.removeValue(forKey: note.id)
         saveIndex()
         notes.removeAll { $0.id == note.id }
+        scheduleAttachmentCleanup()
     }
 
     func hasSnapshots(for note: Note) -> Bool {
@@ -327,7 +338,7 @@ final class NotesStorage: ObservableObject {
 
     /// Save image data to the `.attachments` subdirectory, returning the file URL.
     func saveImage(data: Data, filename: String, for note: Note) -> URL {
-        let attachmentsDir = directoryURL.appendingPathComponent(".attachments")
+        let attachmentsDir = attachmentsDirectoryURL()
         let fm = FileManager.default
         if !fm.fileExists(atPath: attachmentsDir.path) {
             try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
@@ -412,6 +423,121 @@ final class NotesStorage: ObservableObject {
             if modifiedAt < expirationDate {
                 try? FileManager.default.removeItem(at: file)
             }
+        }
+    }
+
+    private func attachmentsDirectoryURL() -> URL {
+        directoryURL.appendingPathComponent(attachmentsDirectoryName, isDirectory: true)
+    }
+
+    private func scheduleAttachmentCleanup() {
+        attachmentCleanupWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.removeOrphanAttachments()
+            }
+        }
+
+        attachmentCleanupWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + attachmentCleanupDelaySeconds,
+            execute: workItem
+        )
+    }
+
+    private func removeOrphanAttachments() {
+        let fm = FileManager.default
+        let attachmentsDir = attachmentsDirectoryURL()
+        guard fm.fileExists(atPath: attachmentsDir.path) else { return }
+
+        guard let attachmentURLs = try? fm.contentsOfDirectory(
+            at: attachmentsDir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let referencedFiles = referencedAttachmentFilenames()
+        let orphanCutoff = Date().addingTimeInterval(-orphanAttachmentGracePeriodSeconds)
+
+        for fileURL in attachmentURLs {
+            guard let values = try? fileURL.resourceValues(
+                forKeys: [.contentModificationDateKey, .isRegularFileKey]
+            ) else {
+                continue
+            }
+
+            guard values.isRegularFile == true else { continue }
+            let filename = fileURL.lastPathComponent
+            guard !referencedFiles.contains(filename) else { continue }
+
+            let modifiedAt = values.contentModificationDate ?? .distantFuture
+            guard modifiedAt < orphanCutoff else { continue }
+
+            try? fm.removeItem(at: fileURL)
+        }
+    }
+
+    private func referencedAttachmentFilenames() -> Set<String> {
+        let markdownReferencePattern = #"\((?:\./)?\.attachments/([^)]+)\)"#
+        let htmlReferencePattern = #"(?:src|href)=["'](?:\./)?\.attachments/([^"']+)["']"#
+
+        let markdownRegex = try? NSRegularExpression(pattern: markdownReferencePattern, options: [])
+        let htmlRegex = try? NSRegularExpression(pattern: htmlReferencePattern, options: [])
+
+        var referenced = Set<String>()
+
+        for note in notes {
+            let noteURL = directoryURL.appendingPathComponent(note.relativePath)
+            guard let content = try? String(contentsOf: noteURL, encoding: .utf8) else {
+                continue
+            }
+
+            if let markdownRegex {
+                extractAttachmentFilenames(
+                    from: content,
+                    regex: markdownRegex,
+                    into: &referenced
+                )
+            }
+
+            if let htmlRegex {
+                extractAttachmentFilenames(
+                    from: content,
+                    regex: htmlRegex,
+                    into: &referenced
+                )
+            }
+        }
+
+        return referenced
+    }
+
+    private func extractAttachmentFilenames(
+        from content: String,
+        regex: NSRegularExpression,
+        into referenced: inout Set<String>
+    ) {
+        let nsContent = content as NSString
+        let searchRange = NSRange(location: 0, length: nsContent.length)
+
+        regex.enumerateMatches(in: content, options: [], range: searchRange) { match, _, _ in
+            guard let match else { return }
+            guard match.numberOfRanges > 1 else { return }
+            let pathRange = match.range(at: 1)
+            guard pathRange.location != NSNotFound else { return }
+
+            var rawPath = nsContent.substring(with: pathRange)
+            rawPath = rawPath.replacingOccurrences(of: "\\)", with: ")")
+            rawPath = rawPath.replacingOccurrences(of: "\\(", with: "(")
+
+            let decodedPath = rawPath.removingPercentEncoding ?? rawPath
+            let filename = (decodedPath as NSString).lastPathComponent
+            guard !filename.isEmpty else { return }
+
+            referenced.insert(filename)
         }
     }
 

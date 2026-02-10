@@ -76,11 +76,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        flushNotesDraftIfNeeded()
+
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
         }
         stopDragMonitoring()
         hideTileZoneOverlays()
+    }
+
+    func applicationWillResignActive(_ notification: Notification) {
+        flushNotesDraftIfNeeded()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -810,7 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func hideNotesPanel() {
         debugLog("[Notes] hideNotesPanel called")
         persistCurrentNotePanelFrameIfNeeded()
-        notesViewModel?.flushSave()
+        flushNotesDraftIfNeeded()
         notesPanel?.orderOut(nil)
         notesViewModel?.isVisible = false
         updateGlobalHotkeyEnablement()
@@ -840,6 +846,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let noteID = notesViewModel?.selectedNote?.id else { return }
 
         notesPanelPositionStore.setFrame(panel.persistableFrame, for: noteID)
+    }
+
+    private func flushNotesDraftIfNeeded() {
+        guard notesViewModel?.selectedNote != nil else { return }
+        notesViewModel?.flushSave()
     }
 
     private func toggleNotesCollapsed() {

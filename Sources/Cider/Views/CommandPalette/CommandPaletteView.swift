@@ -234,6 +234,7 @@ struct CommandPaletteView: View {
                     savedLayoutsForScreen: { viewModel.savedLayouts(for: $0) },
                     filteredSavedLayouts: viewModel.filteredSavedLayouts,
                     notes: viewModel.filteredNotes,
+                    noteSearchSnippets: viewModel.noteSearchSnippetsByID,
                     onNoteClick: { viewModel.openNote($0) },
                     onNewNote: { viewModel.createNewNoteFromPalette() },
                     onDeleteNotes: { viewModel.deleteNotes($0) },

@@ -34,6 +34,10 @@
 - [ ] Drag windows between monitors works.
 - [ ] Keyboard navigation (↑↓ navigate, Enter focus, Esc dismiss).
 - [ ] Settings persist across launches.
+- [ ] Notes search validates both title and body snippet matches.
+
+## Notes Editor QA
+- [ ] Run `Docs/NOTES_EDITOR_SMOKE_CHECKLIST.md` end-to-end.
 
 ## Option+Tab Window Cycling QA
 - [ ] Hold Option + Tab cycles through windows.

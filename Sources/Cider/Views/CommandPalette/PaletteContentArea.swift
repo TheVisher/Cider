@@ -39,6 +39,7 @@ struct PaletteContentArea: View {
     var filteredSavedLayouts: [SavedTileLayout] = []
     // Notes
     var notes: [Note] = []
+    var noteSearchSnippets: [UUID: String] = [:]
     var onNoteClick: ((Note) -> Void)? = nil
     var onNewNote: (() -> Void)? = nil
     var onDeleteNotes: (([Note]) -> Void)? = nil
@@ -211,6 +212,7 @@ struct PaletteContentArea: View {
                 PaletteNoteRow(
                     note: note,
                     searchText: searchText,
+                    searchSnippet: noteSearchSnippets[note.id],
                     isKeyboardFocused: focusedContentIndex != nil && noteFlatIndex == focusedContentIndex,
                     onTap: { onNoteClick?(note) }
                 )
@@ -844,6 +846,7 @@ struct PaletteWindowRow: View {
 struct PaletteNoteRow: View {
     let note: Note
     var searchText: String = ""
+    var searchSnippet: String? = nil
     var isSelectionMode: Bool = false
     var isSelected: Bool = false
     var isKeyboardFocused: Bool = false
@@ -884,9 +887,16 @@ struct PaletteNoteRow: View {
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(Self.dateFormatter.string(from: note.modifiedAt))
-                        .font(.system(size: 10 * textScale))
-                        .foregroundColor(CiderColors.tertiary)
+                    if let searchSnippet, !searchSnippet.isEmpty {
+                        HighlightedText(searchSnippet, highlight: searchText)
+                            .font(.system(size: 10 * textScale))
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(2)
+                    } else {
+                        Text(Self.dateFormatter.string(from: note.modifiedAt))
+                            .font(.system(size: 10 * textScale))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
                 }
 
                 Spacer()

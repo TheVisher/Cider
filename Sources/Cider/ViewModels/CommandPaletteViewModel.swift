@@ -28,6 +28,16 @@ final class CommandPaletteViewModel: ObservableObject {
     private let appLauncher = AppLauncher()
     private var cancellables = Set<AnyCancellable>()
 
+    struct NoteSearchResult: Identifiable, Hashable {
+        var id: UUID { note.id }
+        let note: Note
+        let snippet: String?
+        let score: Int
+    }
+
+    private static let noteSearchSnippetContextLength = 52
+    private static let noteSearchSnippetMaxLength = 132
+
     init(windowListViewModel: WindowListViewModel, pinnedAppsViewModel: PinnedAppsViewModel) {
         self.windowListViewModel = windowListViewModel
         self.pinnedAppsViewModel = pinnedAppsViewModel
@@ -299,14 +309,42 @@ final class CommandPaletteViewModel: ObservableObject {
         NotesStorage.shared.notes
     }
 
-    var filteredNotes: [Note] {
-        guard isSearching else { return notes }
-        let query = searchQuery
-        guard !query.isEmpty else { return notes }
-        return notes.filter {
-            $0.title.lowercased().contains(query) ||
-            NotesStorage.shared.loadContent(for: $0).lowercased().contains(query)
+    var noteSearchResults: [NoteSearchResult] {
+        guard isSearching else {
+            return notes.map { NoteSearchResult(note: $0, snippet: nil, score: 0) }
         }
+
+        let query = searchQuery
+        guard !query.isEmpty else {
+            return notes.map { NoteSearchResult(note: $0, snippet: nil, score: 0) }
+        }
+
+        let terms = query
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+
+        return notes
+            .compactMap { buildNoteSearchResult(for: $0, query: query, terms: terms) }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.note.modifiedAt > rhs.note.modifiedAt
+                }
+                return lhs.score > rhs.score
+            }
+    }
+
+    var filteredNotes: [Note] {
+        noteSearchResults.map(\.note)
+    }
+
+    var noteSearchSnippetsByID: [UUID: String] {
+        Dictionary(
+            uniqueKeysWithValues: noteSearchResults.compactMap { result in
+                guard let snippet = result.snippet, !snippet.isEmpty else { return nil }
+                return (result.note.id, snippet)
+            }
+        )
     }
 
     func openNote(_ note: Note) {
@@ -325,6 +363,114 @@ final class CommandPaletteViewModel: ObservableObject {
         for note in notes {
             NotesStorage.shared.delete(note: note)
         }
+    }
+
+    private func buildNoteSearchResult(for note: Note, query: String, terms: [String]) -> NoteSearchResult? {
+        let title = note.title
+        let titleMatch = phraseRange(in: title, query: query)
+        let titleTermMatches = terms.reduce(into: 0) { count, term in
+            if phraseRange(in: title, query: term) != nil {
+                count += 1
+            }
+        }
+
+        let rawContent = NotesStorage.shared.loadContent(for: note)
+        let searchableContent = normalizedSearchSnippetContent(rawContent)
+        let contentMatch = phraseRange(in: searchableContent, query: query)
+        let contentTermMatches = terms.reduce(into: 0) { count, term in
+            if phraseRange(in: searchableContent, query: term) != nil {
+                count += 1
+            }
+        }
+
+        let hasPhraseMatch = titleMatch != nil || contentMatch != nil
+        let hasTokenMatch = titleTermMatches > 0 || contentTermMatches > 0
+        guard hasPhraseMatch || hasTokenMatch else { return nil }
+
+        var score = 0
+
+        if let match = titleMatch {
+            score += 1200
+            score += max(0, 100 - match.location)
+        }
+
+        if let match = contentMatch {
+            score += 850
+            score += max(0, 100 - (match.location / 2))
+        }
+
+        score += titleTermMatches * 140
+        score += contentTermMatches * 45
+
+        let snippet: String?
+        if let contentMatch {
+            snippet = snippetForContent(searchableContent, matchRange: contentMatch)
+        } else {
+            var fallbackSnippet: String?
+            for term in terms {
+                guard let range = phraseRange(in: searchableContent, query: term) else { continue }
+                fallbackSnippet = snippetForContent(searchableContent, matchRange: range)
+                break
+            }
+            snippet = fallbackSnippet
+        }
+
+        return NoteSearchResult(note: note, snippet: snippet, score: score)
+    }
+
+    private func phraseRange(in text: String, query: String) -> NSRange? {
+        guard !text.isEmpty, !query.isEmpty else { return nil }
+        let range = (text as NSString).range(
+            of: query,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        )
+        return range.location == NSNotFound ? nil : range
+    }
+
+    private func normalizedSearchSnippetContent(_ content: String) -> String {
+        var normalized = content
+        normalized = normalized.replacingOccurrences(
+            of: #"<[^>]+>"#,
+            with: " ",
+            options: .regularExpression
+        )
+        normalized = normalized.replacingOccurrences(
+            of: #"\!\[[^\]]*\]\([^)]+\)"#,
+            with: " [image] ",
+            options: .regularExpression
+        )
+        normalized = normalized.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        )
+        return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func snippetForContent(_ content: String, matchRange: NSRange) -> String {
+        let nsContent = content as NSString
+        let context = Self.noteSearchSnippetContextLength
+        let start = max(0, matchRange.location - context)
+        let end = min(nsContent.length, matchRange.location + matchRange.length + context)
+        let snippetRange = NSRange(location: start, length: max(0, end - start))
+
+        var snippet = nsContent.substring(with: snippetRange)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if start > 0 {
+            snippet = "…\(snippet)"
+        }
+        if end < nsContent.length {
+            snippet += "…"
+        }
+
+        if snippet.count > Self.noteSearchSnippetMaxLength {
+            let limit = max(0, Self.noteSearchSnippetMaxLength - 1)
+            snippet = String(snippet.prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines)
+            snippet += "…"
+        }
+
+        return snippet
     }
 
     /// Filter search results for saved layouts.
@@ -526,7 +672,7 @@ final class CommandPaletteViewModel: ObservableObject {
     private var searchableContentResults: [SearchContentResult] {
         var results: [SearchContentResult] = flattenedWindows.map { .window($0) }
         if isSearching {
-            results.append(contentsOf: filteredNotes.map { .note($0) })
+            results.append(contentsOf: noteSearchResults.map { .note($0.note) })
         }
         return results
     }
