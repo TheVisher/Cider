@@ -99,6 +99,24 @@ enum NotesDesign {
     static let shadowPadding: CGFloat = 40
     static let titleBarHeight: CGFloat = 40
     static let toolbarHeight: CGFloat = 36
+    static let panelTopPadding: CGFloat = 20
+    static let panelBottomPadding: CGFloat = 15
+
+    static var panelDefaultWidth: CGFloat {
+        defaultWidth + shadowPadding * 2
+    }
+
+    static var panelDefaultHeight: CGFloat {
+        defaultHeight + panelTopPadding + shadowPadding + panelBottomPadding
+    }
+
+    static var panelMinWidth: CGFloat {
+        minWidth + shadowPadding * 2
+    }
+
+    static var panelMinHeight: CGFloat {
+        minHeight + panelTopPadding + shadowPadding + panelBottomPadding
+    }
 }
 
 enum CiderColors {

@@ -77,6 +77,11 @@ final class TileHotkeyDetector: @unchecked Sendable {
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         if let eventTap {
+            if enabled && !CFMachPortIsValid(eventTap) {
+                stop()
+                start()
+                return
+            }
             CGEvent.tapEnable(tap: eventTap, enable: enabled)
         } else if enabled {
             // Retry creation if the initial start() failed (e.g. permissions weren't granted yet)

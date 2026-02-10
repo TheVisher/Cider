@@ -1,16 +1,20 @@
 import SwiftUI
 import Combine
+import WebKit
 
 @MainActor
 final class NotesViewModel: ObservableObject {
     @Published var selectedNote: Note?
     @Published var editingContent: String = ""
     @Published var searchText: String = ""
-    @Published var isMarkdownMode: Bool = false
-    @Published var isPreviewMode: Bool = false
     @Published var isPinned: Bool = true
     @Published var isVisible: Bool = false
     @Published var editingTitle: String = ""
+    @Published var charCount: Int = 0
+
+    /// Reference to the WKWebView for Swift → JS calls
+    var editorWebView: WKWebView?
+    private var editorIsReady = false
 
     private var saveWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
@@ -33,9 +37,71 @@ final class NotesViewModel: ObservableObject {
         NotesStorage.shared.$notes
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                guard let self else { return }
+                self.reconcileSelectedNote()
+                self.objectWillChange.send()
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Editor Bridge
+
+    /// Called when the TipTap editor signals it is ready.
+    func editorDidBecomeReady() {
+        editorIsReady = true
+        // If a note is already selected, push its content to the editor
+        if let note = selectedNote {
+            let content = NotesStorage.shared.loadContent(for: note)
+            editingContent = content
+            pushContentToEditor(content)
+        }
+    }
+
+    /// Push markdown content to the TipTap editor via JS.
+    private func pushContentToEditor(_ markdown: String) {
+        guard editorIsReady, let webView = editorWebView else { return }
+        // Use JSON encoding for safe string transport — handles all special
+        // characters (newlines, quotes, backslashes, unicode) correctly.
+        guard let jsonData = try? JSONSerialization.data(
+            withJSONObject: markdown, options: .fragmentsAllowed
+        ), let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))")
+    }
+
+    /// Focus the TipTap editor.
+    func focusEditor() {
+        guard editorIsReady, let webView = editorWebView else { return }
+        webView.evaluateJavaScript("window.editorAPI.focus()")
+    }
+
+    // MARK: - Image Handling
+
+    func handleImageDrop(data: Data, filename: String) {
+        guard let note = selectedNote else { return }
+        let imageURL = NotesStorage.shared.saveImage(data: data, filename: filename, for: note)
+        guard let webView = editorWebView else { return }
+        let src = imageURL.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? imageURL.path
+        let alt = filename
+        guard let srcData = try? JSONSerialization.data(withJSONObject: src, options: .fragmentsAllowed),
+              let altData = try? JSONSerialization.data(withJSONObject: alt, options: .fragmentsAllowed),
+              let srcJSON = String(data: srcData, encoding: .utf8),
+              let altJSON = String(data: altData, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("window.editorAPI.insertImage(\(srcJSON), \(altJSON))")
+    }
+
+    func openImagePicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self, response == .OK, let url = panel.url else { return }
+                if let data = try? Data(contentsOf: url) {
+                    self.handleImageDrop(data: data, filename: url.lastPathComponent)
+                }
+            }
+        }
     }
 
     // MARK: - Note Selection
@@ -49,6 +115,9 @@ final class NotesViewModel: ObservableObject {
         selectedNote = loaded
         editingContent = loaded.content
         editingTitle = loaded.title
+        charCount = loaded.content.count
+
+        pushContentToEditor(loaded.content)
     }
 
     // MARK: - CRUD
@@ -59,14 +128,34 @@ final class NotesViewModel: ObservableObject {
         selectedNote = note
         editingContent = ""
         editingTitle = note.title
+        charCount = 0
+
+        // Clear editor and focus
+        if editorIsReady, let webView = editorWebView {
+            webView.evaluateJavaScript("window.editorAPI.clear()")
+            webView.evaluateJavaScript("window.editorAPI.focus()")
+        }
     }
 
     func deleteCurrentNote() {
         guard let note = selectedNote else { return }
-        NotesStorage.shared.delete(note: note)
-        selectedNote = nil
-        editingContent = ""
-        editingTitle = ""
+        deleteNotes([note])
+    }
+
+    func deleteNotes(_ notes: [Note]) {
+        guard !notes.isEmpty else { return }
+        saveWorkItem?.cancel()
+        saveWorkItem = nil
+
+        let idsToDelete = Set(notes.map(\.id))
+        if let selected = selectedNote, idsToDelete.contains(selected.id) {
+            clearSelectedNote()
+        }
+
+        for note in notes {
+            NotesStorage.shared.delete(note: note)
+            NotesPanelPositionStore.shared.removeFrame(for: note.id)
+        }
     }
 
     func renameCurrentNote(to newTitle: String) {
@@ -83,6 +172,7 @@ final class NotesViewModel: ObservableObject {
 
     func contentChanged(_ newContent: String) {
         editingContent = newContent
+        charCount = newContent.count
         guard var note = selectedNote else { return }
         note.content = newContent
 
@@ -98,13 +188,37 @@ final class NotesViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
     }
 
-    /// Immediately save any pending content.
+    /// Immediately save any pending content by fetching current markdown from editor.
     func flushSave() {
         saveWorkItem?.cancel()
         saveWorkItem = nil
         guard var note = selectedNote else { return }
+
+        // Save the latest known content immediately.
         note.content = editingContent
         NotesStorage.shared.save(note: note)
+
+        // Then ask the editor for current content to catch any final keystrokes
+        // that haven't crossed the JS->Swift bridge yet.
+        syncContentFromEditor(noteID: note.id)
+    }
+
+    private func syncContentFromEditor(noteID: UUID) {
+        guard editorIsReady, let webView = editorWebView else { return }
+
+        webView.evaluateJavaScript("window.editorAPI.getContent()") { [weak self] result, _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let markdown = result as? String,
+                      var current = self.selectedNote,
+                      current.id == noteID else { return }
+
+                editingContent = markdown
+                charCount = markdown.count
+                current.content = markdown
+                NotesStorage.shared.save(note: current)
+            }
+        }
     }
 
     // MARK: - Panel State
@@ -127,39 +241,32 @@ final class NotesViewModel: ObservableObject {
         isPinned.toggle()
     }
 
-    // MARK: - Markdown Toolbar Actions
+    private func clearSelectedNote() {
+        selectedNote = nil
+        editingContent = ""
+        editingTitle = ""
+        charCount = 0
 
-    func insertBold() {
-        editingContent += "**bold**"
-        syncContent()
+        if editorIsReady, let webView = editorWebView {
+            webView.evaluateJavaScript("window.editorAPI.clear()")
+        }
     }
 
-    func insertItalic() {
-        editingContent += "*italic*"
-        syncContent()
-    }
+    private func reconcileSelectedNote() {
+        guard let selected = selectedNote else { return }
 
-    func insertHeading() {
-        editingContent += "\n## Heading\n"
-        syncContent()
-    }
+        guard let updated = NotesStorage.shared.notes.first(where: { $0.id == selected.id }) else {
+            clearSelectedNote()
+            return
+        }
 
-    func insertCode() {
-        editingContent += "\n```\ncode\n```\n"
-        syncContent()
-    }
-
-    func insertList() {
-        editingContent += "\n- Item\n"
-        syncContent()
-    }
-
-    func insertLink() {
-        editingContent += "[text](url)"
-        syncContent()
-    }
-
-    private func syncContent() {
-        contentChanged(editingContent)
+        if selected.title != updated.title || selected.relativePath != updated.relativePath {
+            var refreshed = selected
+            refreshed.title = updated.title
+            refreshed.relativePath = updated.relativePath
+            refreshed.modifiedAt = updated.modifiedAt
+            selectedNote = refreshed
+            editingTitle = refreshed.title
+        }
     }
 }

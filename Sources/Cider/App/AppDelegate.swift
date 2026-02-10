@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notesPanel: NotesPanel?
     private var notesViewModel: NotesViewModel?
     private var notesHotkeyDetector: NotesHotkeyDetector?
+    private let notesPanelPositionStore = NotesPanelPositionStore.shared
 
     // Tile Zone Overlay
     private var tileZoneOverlayPanels: [TileZoneOverlayPanel] = []
@@ -79,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         stopDragMonitoring()
         hideTileZoneOverlays()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        optionTabDetector?.reclaimPriority()
     }
 
     @objc private func quit() {
@@ -163,6 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             notesHotkeyDetector?.setEnabled(false)
         }
+
+        updateGlobalHotkeyEnablement()
 
         // Update notes directory if changed
         let expandedDir = NSString(string: config.notesDirectory).expandingTildeInPath
@@ -609,6 +616,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onCycleEnd: { [weak self] committed in
                 self?.handleCycleEnd(committed: committed)
+            },
+            isCycleSessionActive: { [weak self] in
+                self?.windowCyclingManager?.isActive == true
             }
         )
         optionTabDetector?.start()
@@ -627,12 +637,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCycleStart(direction: Int) {
+        let notesVisible = notesPanel?.isVisible == true
+        debugLog(
+            "[OptionTab] handleCycleStart direction=\(direction) " +
+            "notesVisible=\(notesVisible) paletteVisible=\(commandPalettePanel?.isVisible == true) " +
+            "managerActiveBefore=\(windowCyclingManager?.isActive == true)"
+        )
+
         // Don't start cycling if command palette is open
         if commandPalettePanel?.isVisible == true {
+            debugLog("[OptionTab] handleCycleStart blocked: command palette visible")
             return
         }
 
         windowCyclingManager?.startCycling(initialDirection: direction)
+        debugLog(
+            "[OptionTab] handleCycleStart after start managerActive=\(windowCyclingManager?.isActive == true) " +
+            "windowCount=\(windowCyclingManager?.windows.count ?? 0)"
+        )
         showWindowCyclingPanel()
     }
 
@@ -645,11 +667,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCycleEnd(committed: Bool) {
+        debugLog(
+            "[OptionTab] handleCycleEnd committed=\(committed) " +
+            "managerActiveBefore=\(windowCyclingManager?.isActive == true)"
+        )
         if committed {
             windowCyclingManager?.commitSelection()
         } else {
             windowCyclingManager?.cancelCycling()
         }
+        debugLog("[OptionTab] handleCycleEnd managerActiveAfter=\(windowCyclingManager?.isActive == true)")
         hideWindowCyclingPanel()
     }
 
@@ -683,15 +710,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let notesView = NotesPanelView(viewModel: viewModel)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, shadowPadding)
-            .padding(.top, 20)
-            .padding(.bottom, shadowPadding + 15)
+            .padding(.top, NotesDesign.panelTopPadding)
+            .padding(.bottom, shadowPadding + NotesDesign.panelBottomPadding)
 
         let hostingView = NotesPanelHostingView(rootView: notesView)
         panel.contentView = hostingView
 
         // Size panel to fit content plus shadow padding
-        let width = NotesDesign.defaultWidth + shadowPadding * 2
-        let height = NotesDesign.defaultHeight + 20 + shadowPadding + 15
+        let width = NotesDesign.panelDefaultWidth
+        let height = NotesDesign.panelDefaultHeight
         panel.setContentSize(NSSize(width: width, height: height))
     }
 
@@ -742,18 +769,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showNotesPanel(with note: Note? = nil) {
         guard let panel = notesPanel, let viewModel = notesViewModel else { return }
 
+        debugLog("[Notes] showNotesPanel called")
+        if panel.isVisible {
+            persistCurrentNotePanelFrameIfNeeded()
+        }
+
         if let note {
             viewModel.selectNote(note)
         }
         viewModel.show()
-        panel.showAtMouse()
+
+        let config = CiderConfig.load()
+        let noteToRestore = note ?? viewModel.selectedNote
+        if config.rememberNotesPanelPositionPerNote,
+           let noteToRestore,
+           let savedFrame = notesPanelPositionStore.frame(for: noteToRestore.id) {
+            panel.show(frame: savedFrame)
+        } else {
+            panel.showAtMouse()
+        }
+
         panel.setPinned(viewModel.isPinned)
+        updateGlobalHotkeyEnablement()
+        optionTabDetector?.reclaimPriority()
+
+        // Ensure the editor takes keyboard focus after the panel appears.
+        DispatchQueue.main.async { [weak viewModel] in
+            viewModel?.focusEditor()
+        }
     }
 
     private func hideNotesPanel() {
-        notesPanel?.orderOut(nil)
+        debugLog("[Notes] hideNotesPanel called")
+        persistCurrentNotePanelFrameIfNeeded()
         notesViewModel?.flushSave()
+        notesPanel?.orderOut(nil)
         notesViewModel?.isVisible = false
+        updateGlobalHotkeyEnablement()
+    }
+
+    private func updateGlobalHotkeyEnablement() {
+        let config = CiderConfig.load()
+        let notesVisible = notesPanel?.isVisible == true
+
+        debugLog(
+            "[Hotkeys] updateGlobalHotkeyEnablement " +
+            "notesVisible=\(notesVisible) " +
+            "optionTabEnabled=\(config.enableOptionTabCycling) " +
+            "tileHotkeysEnabled=\(config.enableTilingHotkeys && !notesVisible) " +
+            "notesHotkeyEnabled=\(config.enableNotesHotkey)"
+        )
+
+        optionTabDetector?.setEnabled(config.enableOptionTabCycling)
+        tileHotkeyDetector?.setEnabled(config.enableTilingHotkeys && !notesVisible)
+        notesHotkeyDetector?.setEnabled(config.enableNotesHotkey)
+    }
+
+    private func persistCurrentNotePanelFrameIfNeeded() {
+        let config = CiderConfig.load()
+        guard config.rememberNotesPanelPositionPerNote else { return }
+        guard let panel = notesPanel, panel.isVisible else { return }
+        guard let noteID = notesViewModel?.selectedNote?.id else { return }
+
+        notesPanelPositionStore.setFrame(panel.frame, for: noteID)
     }
 
     // MARK: - Debug Logging

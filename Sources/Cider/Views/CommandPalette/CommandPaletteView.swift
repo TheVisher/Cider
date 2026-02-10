@@ -39,6 +39,11 @@ struct CommandPaletteView: View {
         // Only handle key down events
         guard event.type == .keyDown else { return event }
 
+        // Defensive: the monitor is process-wide, so ignore events when the
+        // palette is hidden or not the receiving window.
+        guard viewModel.isVisible else { return event }
+        guard event.window is CommandPalettePanel else { return event }
+
         // When folder popup is open, handle navigation within it
         if viewModel.expandedFolderID != nil {
             // If a text field is being edited (e.g. folder rename), let all events through
@@ -231,6 +236,7 @@ struct CommandPaletteView: View {
                     notes: viewModel.filteredNotes,
                     onNoteClick: { viewModel.openNote($0) },
                     onNewNote: { viewModel.createNewNoteFromPalette() },
+                    onDeleteNotes: { viewModel.deleteNotes($0) },
                     onFocusTileGroup: { viewModel.focusTileGroup($0) },
                     onPinTileGroup: { viewModel.pinTileGroup(groupID: $0) },
                     onBreakApartTileGroup: { viewModel.breakApartTileGroup(groupID: $0) },
@@ -258,7 +264,16 @@ struct CommandPaletteView: View {
         .environment(\.textScale, textSize.scale)
         .onAppear {
             isSearchFocused = true
-            installKeyMonitor()
+            if viewModel.isVisible {
+                installKeyMonitor()
+            }
+        }
+        .onChange(of: viewModel.isVisible) { _, isVisible in
+            if isVisible {
+                installKeyMonitor()
+            } else {
+                removeKeyMonitor()
+            }
         }
         .onDisappear {
             removeKeyMonitor()

@@ -11,7 +11,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Cider",
-            path: "Sources/Cider"
+            path: "Sources/Cider",
+            resources: [
+                .copy("Resources/TipTapEditor")
+            ]
         ),
         .testTarget(
             name: "CiderTests",

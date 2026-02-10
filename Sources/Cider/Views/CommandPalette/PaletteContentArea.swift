@@ -41,6 +41,7 @@ struct PaletteContentArea: View {
     var notes: [Note] = []
     var onNoteClick: ((Note) -> Void)? = nil
     var onNewNote: (() -> Void)? = nil
+    var onDeleteNotes: (([Note]) -> Void)? = nil
     var onFocusTileGroup: ((TileGroupDisplay) -> Void)? = nil
     var onPinTileGroup: ((UUID) -> Void)? = nil
     var onBreakApartTileGroup: ((UUID) -> Void)? = nil
@@ -56,6 +57,9 @@ struct PaletteContentArea: View {
     /// Collapse state for sections
     @State private var collapsedMonitorIDs: Set<UInt32> = []
     @State private var collapsedAppGroupIDs: Set<String> = []
+    @State private var isNoteSelectionMode = false
+    @State private var selectedNoteIDs: Set<UUID> = []
+    @State private var showDeleteNotesConfirmation = false
 
     /// Flattened window groups for single-monitor or search view
     private var flatWindowGroups: [WindowAppGroup] {
@@ -65,6 +69,14 @@ struct PaletteContentArea: View {
     /// Whether to show multi-monitor view
     private var showMultiMonitorView: Bool {
         monitors.count > 1 && !isSearching
+    }
+
+    private var selectedNotes: [Note] {
+        notes.filter { selectedNoteIDs.contains($0.id) }
+    }
+
+    private var allVisibleNotesSelected: Bool {
+        !notes.isEmpty && notes.allSatisfy { selectedNoteIDs.contains($0.id) }
     }
 
     /// Calculate the flat index for a window across all monitor groups
@@ -123,6 +135,29 @@ struct PaletteContentArea: View {
                 allDraggedIDs = []
             }
         }
+        .onChange(of: activeTab) { _, newTab in
+            if newTab != .notes {
+                exitNoteSelectionMode()
+            }
+        }
+        .onChange(of: notes.map(\.id)) { _, noteIDs in
+            let visibleIDs = Set(noteIDs)
+            selectedNoteIDs = selectedNoteIDs.intersection(visibleIDs)
+            if visibleIDs.isEmpty {
+                exitNoteSelectionMode()
+            }
+        }
+        .alert(
+            "Delete \(selectedNoteIDs.count) note\(selectedNoteIDs.count == 1 ? "" : "s")?",
+            isPresented: $showDeleteNotesConfirmation
+        ) {
+            Button("Delete", role: .destructive) {
+                deleteSelectedNotes()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
 
     @ViewBuilder
@@ -167,27 +202,129 @@ struct PaletteContentArea: View {
             .padding(.vertical, Spacing.xxl)
         } else {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                // New note button
-                Button(action: { onNewNote?() }) {
-                    HStack(spacing: Spacing.sm) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 12 * textScale))
-                            .foregroundColor(CiderColors.controlAccent)
-                        Text("New Note")
-                            .font(.system(size: 12 * textScale, weight: .medium))
-                            .foregroundColor(CiderColors.controlAccent)
+                HStack(spacing: Spacing.sm) {
+                    if isNoteSelectionMode {
+                        Button(action: toggleSelectAllNotes) {
+                            Text(allVisibleNotesSelected ? "Clear All" : "Select All")
+                                .font(.system(size: 12 * textScale, weight: .medium))
+                                .foregroundColor(CiderColors.controlAccent)
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Button(action: exitNoteSelectionMode) {
+                            Text("Done")
+                                .font(.system(size: 12 * textScale, weight: .medium))
+                                .foregroundColor(CiderColors.controlAccent)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button(action: { onNewNote?() }) {
+                            HStack(spacing: Spacing.sm) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 12 * textScale))
+                                    .foregroundColor(CiderColors.controlAccent)
+                                Text("New Note")
+                                    .font(.system(size: 12 * textScale, weight: .medium))
+                                    .foregroundColor(CiderColors.controlAccent)
+                            }
+                            .padding(.vertical, Spacing.xs)
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Button(action: enterNoteSelectionMode) {
+                            Text("Select")
+                                .font(.system(size: 12 * textScale, weight: .medium))
+                                .foregroundColor(CiderColors.controlAccent)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, Spacing.xs)
                 }
-                .buttonStyle(.plain)
 
                 ForEach(notes) { note in
-                    PaletteNoteRow(note: note, searchText: searchText, onTap: {
-                        onNoteClick?(note)
-                    })
+                    let isSelected = selectedNoteIDs.contains(note.id)
+                    PaletteNoteRow(
+                        note: note,
+                        searchText: searchText,
+                        isSelectionMode: isNoteSelectionMode,
+                        isSelected: isSelected,
+                        onTap: {
+                            if isNoteSelectionMode {
+                                toggleNoteSelection(note.id)
+                            } else {
+                                onNoteClick?(note)
+                            }
+                        }
+                    )
+                }
+
+                if isNoteSelectionMode && !selectedNoteIDs.isEmpty {
+                    HStack {
+                        Spacer()
+                        Button(role: .destructive) {
+                            showDeleteNotesConfirmation = true
+                        } label: {
+                            Label("Delete (\(selectedNoteIDs.count))", systemImage: "trash")
+                                .font(.system(size: 12 * textScale, weight: .semibold))
+                                .foregroundColor(CiderColors.destructive)
+                                .padding(.horizontal, Spacing.md)
+                                .padding(.vertical, Spacing.xs)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                        .fill(CiderColors.destructive.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, Spacing.sm)
                 }
             }
         }
+    }
+
+    private func enterNoteSelectionMode() {
+        withAnimation(reduceMotion ? .none : .snappy) {
+            isNoteSelectionMode = true
+            selectedNoteIDs.removeAll()
+        }
+    }
+
+    private func exitNoteSelectionMode() {
+        withAnimation(reduceMotion ? .none : .snappy) {
+            isNoteSelectionMode = false
+            selectedNoteIDs.removeAll()
+            showDeleteNotesConfirmation = false
+        }
+    }
+
+    private func toggleSelectAllNotes() {
+        withAnimation(reduceMotion ? .none : .snappy) {
+            if allVisibleNotesSelected {
+                selectedNoteIDs.removeAll()
+            } else {
+                selectedNoteIDs = Set(notes.map(\.id))
+            }
+        }
+    }
+
+    private func toggleNoteSelection(_ noteID: UUID) {
+        withAnimation(reduceMotion ? .none : .snappy) {
+            if selectedNoteIDs.contains(noteID) {
+                selectedNoteIDs.remove(noteID)
+            } else {
+                selectedNoteIDs.insert(noteID)
+            }
+        }
+    }
+
+    private func deleteSelectedNotes() {
+        let notesToDelete = selectedNotes
+        guard !notesToDelete.isEmpty else { return }
+        onDeleteNotes?(notesToDelete)
+        exitNoteSelectionMode()
     }
 
     @ViewBuilder
@@ -636,6 +773,8 @@ struct PaletteWindowRow: View {
 struct PaletteNoteRow: View {
     let note: Note
     var searchText: String = ""
+    var isSelectionMode: Bool = false
+    var isSelected: Bool = false
     let onTap: () -> Void
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -651,10 +790,17 @@ struct PaletteNoteRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: "note.text")
-                    .font(.system(size: 11 * textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                    .frame(width: 16 * textScale)
+                Group {
+                    if isSelectionMode {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
+                    } else {
+                        Image(systemName: "note.text")
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+                .font(.system(size: 11 * textScale))
+                .frame(width: 16 * textScale)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HighlightedText(note.title, highlight: searchText)
@@ -669,7 +815,7 @@ struct PaletteNoteRow: View {
 
                 Spacer()
 
-                if isHovering {
+                if !isSelectionMode && isHovering {
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: 10 * textScale))
                         .foregroundColor(CiderColors.tertiary)
@@ -679,11 +825,19 @@ struct PaletteNoteRow: View {
             .padding(.vertical, Spacing.xs)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isHovering ? Color.white.opacity(0.08) : Color.clear)
+                    .fill(
+                        isSelectionMode
+                        ? (isSelected ? CiderColors.controlAccent.opacity(0.14) : Color.clear)
+                        : (isHovering ? Color.white.opacity(0.08) : Color.clear)
+                    )
             )
         }
         .buttonStyle(.plain)
         .onHover { hovering in
+            if isSelectionMode {
+                isHovering = false
+                return
+            }
             withAnimation(reduceMotion ? .none : .snappy) {
                 isHovering = hovering
             }

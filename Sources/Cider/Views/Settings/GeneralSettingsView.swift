@@ -75,6 +75,12 @@ struct GeneralSettingsView: View {
                     isOn: $viewModel.enableNotesHotkey
                 )
 
+                SettingsToggleRow(
+                    title: "Remember note window position",
+                    subtitle: "Reopen each note where you last closed it",
+                    isOn: $viewModel.rememberNotesPanelPositionPerNote
+                )
+
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Notes directory")

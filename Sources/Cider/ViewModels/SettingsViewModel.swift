@@ -61,6 +61,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var notesDirectory: String {
         didSet { saveConfig() }
     }
+    @Published var rememberNotesPanelPositionPerNote: Bool {
+        didSet { saveConfig() }
+    }
 
     private var config: CiderConfig
 
@@ -79,6 +82,7 @@ final class SettingsViewModel: ObservableObject {
         self.enableDynamicTiling = config.enableDynamicTiling
         self.enableNotesHotkey = config.enableNotesHotkey
         self.notesDirectory = config.notesDirectory
+        self.rememberNotesPanelPositionPerNote = config.rememberNotesPanelPositionPerNote
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -101,6 +105,7 @@ final class SettingsViewModel: ObservableObject {
         config.enableDynamicTiling = enableDynamicTiling
         config.enableNotesHotkey = enableNotesHotkey
         config.notesDirectory = notesDirectory
+        config.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
         config.save()
 
         // Post notification so AppDelegate can respond
@@ -125,4 +130,3 @@ final class SettingsViewModel: ObservableObject {
         NotificationCenter.default.post(name: .dismissSettings, object: nil)
     }
 }
-

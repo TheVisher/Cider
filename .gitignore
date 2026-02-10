@@ -12,7 +12,12 @@ DerivedData/
 .swiftpm/
 Package.resolved
 
+# Node
+node_modules/
+
 # Misc
 *.log
 *.tmp
 .claude/
+.cache/
+.research/

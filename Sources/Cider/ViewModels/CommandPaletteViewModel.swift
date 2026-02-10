@@ -48,6 +48,14 @@ final class CommandPaletteViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Re-render when notes change (e.g. after deletion)
+        NotesStorage.shared.$notes
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
         // Sync monitors
         windowListViewModel.$monitors
             .receive(on: DispatchQueue.main)
@@ -307,6 +315,13 @@ final class CommandPaletteViewModel: ObservableObject {
         let note = NotesStorage.shared.createNew()
         NotificationCenter.default.post(name: .openNoteInPanel, object: note)
         dismiss()
+    }
+
+    func deleteNotes(_ notes: [Note]) {
+        guard !notes.isEmpty else { return }
+        for note in notes {
+            NotesStorage.shared.delete(note: note)
+        }
     }
 
     /// Filter search results for saved layouts.
@@ -1092,4 +1107,3 @@ enum PinnedItem: Identifiable {
         return nil
     }
 }
-

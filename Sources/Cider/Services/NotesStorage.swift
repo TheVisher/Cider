@@ -231,6 +231,23 @@ final class NotesStorage: ObservableObject {
         directoryFileDescriptor = -1
     }
 
+    // MARK: - Image Storage
+
+    /// Save image data to the `.attachments` subdirectory, returning the file URL.
+    func saveImage(data: Data, filename: String, for note: Note) -> URL {
+        let attachmentsDir = directoryURL.appendingPathComponent(".attachments")
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: attachmentsDir.path) {
+            try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
+        }
+
+        // Prefix with short UUID to avoid collisions
+        let uniqueName = "\(UUID().uuidString.prefix(8))-\(filename)"
+        let fileURL = attachmentsDir.appendingPathComponent(uniqueName)
+        try? data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+
     // MARK: - Helpers
 
     private func uniqueTitle(_ base: String) -> String {

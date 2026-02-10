@@ -12,26 +12,11 @@ struct NotesPanelView: View {
             VStack(spacing: 0) {
                 NotesTitleBar(viewModel: viewModel)
 
-                if viewModel.isMarkdownMode {
-                    NotesToolbar(viewModel: viewModel)
-                }
-
                 Divider()
                     .background(CiderColors.separator)
 
                 if viewModel.selectedNote != nil {
-                    if viewModel.isPreviewMode {
-                        NotesPreviewView(content: viewModel.editingContent)
-                    } else {
-                        TextEditor(text: $viewModel.editingContent)
-                            .font(.system(size: 13, design: .monospaced))
-                            .scrollContentBackground(.hidden)
-                            .padding(.horizontal, Spacing.sm)
-                            .padding(.vertical, Spacing.sm)
-                            .onChange(of: viewModel.editingContent) { _, newValue in
-                                viewModel.contentChanged(newValue)
-                            }
-                    }
+                    TipTapEditorView(viewModel: viewModel)
                 } else {
                     NotesEmptyState(onCreateNew: { viewModel.createNewNote() })
                 }
@@ -120,12 +105,8 @@ private final class ResizeHandleNSView: NSView {
                 let dx = mouse.x - initialMouse.x
                 let dy = mouse.y - initialMouse.y
 
-                let sp = NotesDesign.shadowPadding
-                let minW = NotesDesign.minWidth + sp * 2
-                let minH = NotesDesign.minHeight + 20 + sp + 15
-
-                let w = max(minW, initialFrame.width + dx)
-                let h = max(minH, initialFrame.height - dy)
+                let w = max(NotesDesign.panelMinWidth, initialFrame.width + dx)
+                let h = max(NotesDesign.panelMinHeight, initialFrame.height - dy)
                 let y = initialFrame.origin.y + (initialFrame.height - h)
 
                 window.setFrame(
@@ -191,7 +172,7 @@ private struct NotesTitleBar: View {
                 Menu {
                     ForEach(viewModel.notes) { note in
                         Button(note.title) {
-                            viewModel.selectNote(note)
+                            NotificationCenter.default.post(name: .openNoteInPanel, object: note)
                         }
                     }
                 } label: {
@@ -212,15 +193,6 @@ private struct NotesTitleBar: View {
             }
             .buttonStyle(.plain)
             .help("New note")
-
-            // Mode toggle (quick text / markdown)
-            Button(action: { viewModel.isMarkdownMode.toggle() }) {
-                Image(systemName: viewModel.isMarkdownMode ? "text.badge.checkmark" : "text.badge.plus")
-                    .font(.system(size: 12))
-                    .foregroundColor(viewModel.isMarkdownMode ? CiderColors.controlAccent : CiderColors.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(viewModel.isMarkdownMode ? "Quick text mode" : "Markdown mode")
 
             // Pin toggle
             Button(action: { viewModel.togglePin() }) {
@@ -262,32 +234,6 @@ private struct NotesEmptyState: View {
     }
 }
 
-// MARK: - Preview View
-
-private struct NotesPreviewView: View {
-    let content: String
-
-    var body: some View {
-        ScrollView {
-            if let attributed = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-                Text(attributed)
-                    .font(.system(size: 13))
-                    .foregroundColor(CiderColors.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Spacing.md)
-            } else {
-                Text(content)
-                    .font(.system(size: 13))
-                    .foregroundColor(CiderColors.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Spacing.md)
-            }
-        }
-    }
-}
-
 // MARK: - Status Bar
 
 private struct NotesStatusBar: View {
@@ -296,7 +242,7 @@ private struct NotesStatusBar: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             if viewModel.selectedNote != nil {
-                Text("\(viewModel.editingContent.count) chars")
+                Text("\(viewModel.charCount) chars")
                     .font(.system(size: 10))
                     .foregroundColor(CiderColors.tertiary)
             }
