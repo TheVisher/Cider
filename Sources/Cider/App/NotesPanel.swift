@@ -1,7 +1,22 @@
 import AppKit
 import SwiftUI
+import Foundation
+import QuartzCore
 
 final class NotesPanel: NSPanel {
+    private(set) var isCollapsed = false
+    private var expandedFrameBeforeCollapse: NSRect?
+    private var lastCollapseToggleDate: Date = .distantPast
+
+    var persistableFrame: NSRect {
+        guard isCollapsed else { return frame }
+
+        var expanded = expandedFrameBeforeCollapse ?? frame
+        expanded.origin.x = frame.minX
+        expanded.origin.y = frame.maxY - expanded.height
+        return expanded
+    }
+
     init() {
         let initialFrame = NSRect(x: 0, y: 0,
                                   width: NotesDesign.panelDefaultWidth,
@@ -32,7 +47,10 @@ final class NotesPanel: NSPanel {
     /// Show the panel using a preferred frame, clamped to visible screen bounds.
     func show(frame preferredFrame: NSRect) {
         guard let screen = preferredScreen(for: preferredFrame) else { return }
-        setFrame(clampedFrame(for: preferredFrame, in: screen), display: true)
+        let clamped = clampedFrame(for: preferredFrame, in: screen)
+        setFrame(clamped, display: true)
+        expandedFrameBeforeCollapse = clamped
+        isCollapsed = false
         makeKeyAndOrderFront(nil)
     }
 
@@ -54,9 +72,47 @@ final class NotesPanel: NSPanel {
         show(at: preferredOrigin)
     }
 
-    /// Toggle between floating (pinned) and normal (unpinned) level.
-    func setPinned(_ pinned: Bool) {
-        level = pinned ? .floating : .normal
+    func setCollapsed(_ collapsed: Bool, animated: Bool = true) {
+        guard collapsed != isCollapsed else { return }
+        let now = Date()
+        let isRapidToggle = now.timeIntervalSince(lastCollapseToggleDate) < NotesDesign.collapseToggleAnimationDuration
+        let shouldAnimate = animated && !isRapidToggle
+        lastCollapseToggleDate = now
+
+        if collapsed {
+            if !isRapidToggle || expandedFrameBeforeCollapse == nil {
+                expandedFrameBeforeCollapse = frame
+            }
+            let collapsedHeight = NotesDesign.panelCollapsedHeight
+            let target = NSRect(
+                x: frame.minX,
+                y: frame.maxY - collapsedHeight,
+                width: frame.width,
+                height: collapsedHeight
+            )
+
+            guard let screen = preferredScreen(for: target) else { return }
+            let clamped = clampedFrame(for: target, in: screen, minimumHeight: NotesDesign.panelCollapsedHeight)
+            applyFrame(clamped, animated: shouldAnimate)
+            isCollapsed = true
+            return
+        }
+
+        let currentTopY = frame.maxY
+        var expanded = expandedFrameBeforeCollapse
+            ?? NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: NotesDesign.panelDefaultHeight)
+        expanded.origin.x = frame.minX
+        expanded.origin.y = currentTopY - expanded.height
+
+        guard let screen = preferredScreen(for: expanded) else { return }
+        let clamped = clampedFrame(for: expanded, in: screen)
+        applyFrame(clamped, animated: shouldAnimate)
+        expandedFrameBeforeCollapse = clamped
+        isCollapsed = false
+    }
+
+    func toggleCollapsed(animated: Bool = true) {
+        setCollapsed(!isCollapsed, animated: animated)
     }
 
     private func preferredScreen(for preferredFrame: NSRect) -> NSScreen? {
@@ -93,14 +149,31 @@ final class NotesPanel: NSPanel {
         } ?? NSScreen.main
     }
 
-    private func clampedFrame(for preferredFrame: NSRect, in screen: NSScreen) -> NSRect {
+    private func clampedFrame(
+        for preferredFrame: NSRect,
+        in screen: NSScreen,
+        minimumHeight: CGFloat = NotesDesign.panelMinHeight
+    ) -> NSRect {
         let screenFrame = screen.visibleFrame
         let clampedWidth = max(NotesDesign.panelMinWidth, min(preferredFrame.size.width, screenFrame.width))
-        let clampedHeight = max(NotesDesign.panelMinHeight, min(preferredFrame.size.height, screenFrame.height))
+        let clampedHeight = max(minimumHeight, min(preferredFrame.size.height, screenFrame.height))
         let clampedX = max(screenFrame.minX, min(preferredFrame.origin.x, screenFrame.maxX - clampedWidth))
         let clampedY = max(screenFrame.minY, min(preferredFrame.origin.y, screenFrame.maxY - clampedHeight))
 
         return NSRect(x: clampedX, y: clampedY, width: clampedWidth, height: clampedHeight)
+    }
+
+    private func applyFrame(_ frame: NSRect, animated: Bool) {
+        guard animated else {
+            setFrame(frame, display: true)
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = NotesDesign.collapseToggleAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            animator().setFrame(frame, display: true)
+        }
     }
 }
 

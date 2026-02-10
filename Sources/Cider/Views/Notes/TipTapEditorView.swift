@@ -169,11 +169,24 @@ private final class TipTapWebView: WKWebView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleUndoRedoKeyDown(event) {
+            return
+        }
+
         if handleSlashPopupKeyDown(event) {
             return
         }
 
         super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self,
+           handleUndoRedoKeyDown(event) {
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
     }
 
     private func handleSlashPopupMouseDown(_ event: NSEvent) -> Bool {
@@ -218,6 +231,29 @@ private final class TipTapWebView: WKWebView {
         }
 
         let js = "window.editorAPI.handleNativeSlashKey(\"\(key)\");"
+        evaluateJavaScript(js, completionHandler: nil)
+        return true
+    }
+
+    private func handleUndoRedoKeyDown(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command),
+              !flags.contains(.control),
+              !flags.contains(.option) else {
+            return false
+        }
+
+        let js: String
+        switch Int(event.keyCode) {
+        case kVK_ANSI_Z:
+            js = flags.contains(.shift) ? "window.editorAPI.redo();" : "window.editorAPI.undo();"
+        case kVK_ANSI_Y:
+            guard !flags.contains(.shift) else { return false }
+            js = "window.editorAPI.redo();"
+        default:
+            return false
+        }
+
         evaluateJavaScript(js, completionHandler: nil)
         return true
     }

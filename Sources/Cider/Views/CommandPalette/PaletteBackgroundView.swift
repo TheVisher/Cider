@@ -2,7 +2,13 @@ import SwiftUI
 
 struct PaletteBackgroundView: View {
     let cornerRadius: CGFloat
+    var shadowStyle: ShadowStyle = .full
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    enum ShadowStyle {
+        case full
+        case compact
+    }
 
     var body: some View {
         if reduceTransparency {
@@ -14,13 +20,14 @@ struct PaletteBackgroundView: View {
 
     @ViewBuilder
     private var acrylicBackground: some View {
+        let metrics = shadowMetrics(for: shadowStyle)
         ZStack {
-            // Shadow layer - tighter, stronger, pushed down significantly
+            // Panel shadow (compact for collapsed notes, full for larger panels)
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Color.black)
-                .blur(radius: 18)
-                .offset(y: 18)
-                .opacity(0.7)
+                .blur(radius: metrics.blur)
+                .offset(y: metrics.yOffset)
+                .opacity(metrics.opacity)
 
             // Main content
             ZStack {
@@ -34,6 +41,15 @@ struct PaletteBackgroundView: View {
                     .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
+        }
+    }
+
+    private func shadowMetrics(for style: ShadowStyle) -> (blur: CGFloat, yOffset: CGFloat, opacity: Double) {
+        switch style {
+        case .full:
+            return (blur: 18, yOffset: 18, opacity: 0.7)
+        case .compact:
+            return (blur: 10, yOffset: 8, opacity: 0.52)
         }
     }
 

@@ -1,4 +1,4 @@
-import { Editor } from '@tiptap/core';
+import { Editor, Extension, Mark } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -25,8 +25,11 @@ const lowlight = createLowlight(common);
 const escapedHtmlTagPattern = /&lt;(?:\/)?(?:p|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|code|img|hr)\b/i;
 const htmlTagPattern = /<(?:\/)?(?:p|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|code|img|hr)\b/i;
 const fileProtocolPathPattern = /\(file:\/\/\/([^)]+)\)/g;
+const taskListItemSpacingPattern = /^(\s*(?:[-+*]|\d+[.)])\s+\[(?: |x|X)\])([ \t]+)(.*)$/;
+const markdownFencePattern = /^(\s*)(`{3,}|~{3,})/;
 const IMAGE_RESIZE_MIN_WIDTH = 80;
 const IMAGE_RESIZE_MAX_WIDTH = 2000;
+const supportedTextAlignments = ['left', 'center', 'right'];
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(value, 10);
@@ -41,6 +44,149 @@ function escapeHtmlAttr(value) {
     .replace(/>/g, '&gt;');
 }
 
+const CiderTextAlign = Extension.create({
+  name: 'ciderTextAlign',
+
+  addOptions() {
+    return {
+      types: ['paragraph'],
+      alignments: supportedTextAlignments,
+    };
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          textAlign: {
+            default: null,
+            parseHTML: (element) => {
+              const value = element.style?.textAlign;
+              return this.options.alignments.includes(value) ? value : null;
+            },
+            renderHTML: (attributes) => {
+              if (!attributes.textAlign || attributes.textAlign === 'left') {
+                return {};
+              }
+
+              return { style: `text-align: ${attributes.textAlign}` };
+            },
+          },
+        },
+      },
+    ];
+  },
+
+  addCommands() {
+    return {
+      setTextAlign: (alignment) => ({ commands }) => {
+        if (!this.options.alignments.includes(alignment)) {
+          return false;
+        }
+
+        return this.options.types.some(type =>
+          commands.updateAttributes(type, { textAlign: alignment })
+        );
+      },
+      unsetTextAlign: () => ({ commands }) =>
+        this.options.types.some(type => commands.updateAttributes(type, { textAlign: null })),
+    };
+  },
+});
+
+const CiderUnderline = Mark.create({
+  name: 'underline',
+
+  parseHTML() {
+    return [
+      { tag: 'u' },
+      {
+        style: 'text-decoration',
+        getAttrs: value =>
+          typeof value === 'string' && value.includes('underline') ? {} : false,
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['u', HTMLAttributes, 0];
+  },
+
+  addCommands() {
+    return {
+      setUnderline: () => ({ commands }) => commands.setMark(this.name),
+      toggleUnderline: () => ({ commands }) => commands.toggleMark(this.name),
+      unsetUnderline: () => ({ commands }) => commands.unsetMark(this.name),
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      'Mod-u': () => this.editor.commands.toggleUnderline(),
+    };
+  },
+});
+
+const CiderLink = Mark.create({
+  name: 'link',
+  inclusive: false,
+
+  addAttributes() {
+    return {
+      href: {
+        default: null,
+      },
+      target: {
+        default: '_blank',
+      },
+      rel: {
+        default: 'noopener noreferrer',
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'a[href]',
+        getAttrs: element => {
+          const href = element.getAttribute('href');
+          if (!href) return false;
+
+          return {
+            href,
+            target: element.getAttribute('target') || '_blank',
+            rel: element.getAttribute('rel') || 'noopener noreferrer',
+          };
+        },
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    if (!HTMLAttributes.href) {
+      return ['span', 0];
+    }
+
+    return ['a', HTMLAttributes, 0];
+  },
+
+  addCommands() {
+    return {
+      setLink: attributes => ({ commands }) => {
+        if (!attributes?.href) return false;
+        return commands.setMark(this.name, attributes);
+      },
+      toggleLink: attributes => ({ commands }) => {
+        if (!attributes?.href) return false;
+        return commands.toggleMark(this.name, attributes);
+      },
+      unsetLink: () => ({ commands }) => commands.unsetMark(this.name),
+    };
+  },
+});
+
 const CiderParagraph = Paragraph.extend({
   addStorage() {
     const parentStorage = this.parent?.() ?? {};
@@ -50,13 +196,27 @@ const CiderParagraph = Paragraph.extend({
       markdown: {
         ...parentStorage.markdown,
         serialize(state, node) {
+          const textAlign = node.attrs?.textAlign;
+          const hasCustomAlignment = textAlign && textAlign !== 'left';
+
           if (node.content.size === 0) {
-            state.write('<p></p>');
+            if (hasCustomAlignment) {
+              state.write(`<p style="text-align: ${escapeHtmlAttr(textAlign)}"></p>`);
+            } else {
+              state.write('<p></p>');
+            }
             state.closeBlock(node);
             return;
           }
 
-          state.renderInline(node);
+          if (hasCustomAlignment) {
+            state.write(`<p style="text-align: ${escapeHtmlAttr(textAlign)}">`);
+            state.renderInline(node);
+            state.write('</p>');
+          } else {
+            state.renderInline(node);
+          }
+
           state.closeBlock(node);
         },
       },
@@ -237,6 +397,42 @@ function decodeHtmlEntities(value) {
   return el.value;
 }
 
+function normalizeTaskListSpacing(markdown) {
+  if (typeof markdown !== 'string' || markdown.length === 0) {
+    return '';
+  }
+
+  const lines = markdown.split('\n');
+  let activeFence = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fenceMatch = line.match(markdownFencePattern);
+    if (fenceMatch) {
+      const marker = fenceMatch[2][0];
+      const markerLength = fenceMatch[2].length;
+
+      if (!activeFence) {
+        activeFence = { marker, markerLength };
+      } else if (activeFence.marker === marker && markerLength >= activeFence.markerLength) {
+        activeFence = null;
+      }
+
+      continue;
+    }
+
+    if (activeFence) continue;
+
+    const taskLineMatch = line.match(taskListItemSpacingPattern);
+    if (!taskLineMatch) continue;
+
+    const [, marker, , content] = taskLineMatch;
+    lines[index] = content.length === 0 ? marker : `${marker} ${content}`;
+  }
+
+  return lines.join('\n');
+}
+
 function normalizeIncomingMarkdown(value) {
   if (typeof value !== 'string') return '';
 
@@ -250,7 +446,11 @@ function normalizeIncomingMarkdown(value) {
     }
   }
 
-  return normalized;
+  return normalizeTaskListSpacing(normalized);
+}
+
+function getNormalizedMarkdown() {
+  return normalizeTaskListSpacing(editor.storage.markdown.getMarkdown());
 }
 
 // Shared slash command popup state.
@@ -271,6 +471,9 @@ const editor = new Editor({
       codeBlock: false,
       paragraph: false,
     }),
+    CiderTextAlign,
+    CiderUnderline,
+    CiderLink,
     CiderParagraph,
     TaskList,
     TaskItem.configure({ nested: true }),
@@ -340,8 +543,8 @@ const editor = new Editor({
       },
     },
   },
-  onUpdate({ editor }) {
-    const markdown = editor.storage.markdown.getMarkdown();
+  onUpdate() {
+    const markdown = getNormalizedMarkdown();
     if (window.webkit?.messageHandlers?.contentChanged) {
       window.webkit.messageHandlers.contentChanged.postMessage(markdown);
     }
@@ -361,7 +564,7 @@ window.editorAPI = {
     });
   },
   getContent() {
-    return editor.storage.markdown.getMarkdown();
+    return getNormalizedMarkdown();
   },
   insertImage(src, alt) {
     editor.chain().focus().setImage({ src, alt: alt || '' }).run();
@@ -374,6 +577,47 @@ window.editorAPI = {
   },
   clear() {
     editor.commands.clearContent();
+  },
+  toggleBold() {
+    return editor.chain().focus().toggleBold().run();
+  },
+  toggleItalic() {
+    return editor.chain().focus().toggleItalic().run();
+  },
+  toggleUnderline() {
+    return editor.chain().focus().toggleUnderline().run();
+  },
+  setTextAlign(alignment) {
+    if (!supportedTextAlignments.includes(alignment)) {
+      return false;
+    }
+
+    return editor.chain().focus().setTextAlign(alignment).run();
+  },
+  setLink(href) {
+    if (typeof href !== 'string' || href.trim().length === 0) {
+      return false;
+    }
+
+    return editor.chain().focus().setLink({ href: href.trim() }).run();
+  },
+  unsetLink() {
+    return editor.chain().focus().unsetLink().run();
+  },
+  toggleBulletList() {
+    return editor.chain().focus().toggleBulletList().run();
+  },
+  toggleOrderedList() {
+    return editor.chain().focus().toggleOrderedList().run();
+  },
+  toggleTaskList() {
+    return editor.chain().focus().toggleTaskList().run();
+  },
+  undo() {
+    return editor.chain().focus().undo().run();
+  },
+  redo() {
+    return editor.chain().focus().redo().run();
   },
   handleNativeSlashClick(x, y) {
     return handleNativeSlashClick(x, y);

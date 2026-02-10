@@ -1,16 +1,25 @@
 import SwiftUI
 import Combine
 import WebKit
+import AppKit
 
 @MainActor
 final class NotesViewModel: ObservableObject {
     @Published var selectedNote: Note?
     @Published var editingContent: String = ""
     @Published var searchText: String = ""
-    @Published var isPinned: Bool = true
+    @Published var isCollapsed: Bool = false
     @Published var isVisible: Bool = false
     @Published var editingTitle: String = ""
     @Published var charCount: Int = 0
+    @Published var isFormattingToolbarPinned: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                isFormattingToolbarPinned,
+                forKey: Self.formattingToolbarPinnedStorageKey
+            )
+        }
+    }
 
     /// Reference to the WKWebView for Swift → JS calls
     var editorWebView: WKWebView?
@@ -18,6 +27,7 @@ final class NotesViewModel: ObservableObject {
 
     private var saveWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
+    private static let formattingToolbarPinnedStorageKey = "cider.notes.formattingToolbarPinned"
 
     var notes: [Note] {
         NotesStorage.shared.notes
@@ -33,6 +43,10 @@ final class NotesViewModel: ObservableObject {
     }
 
     init() {
+        self.isFormattingToolbarPinned = UserDefaults.standard.bool(
+            forKey: Self.formattingToolbarPinnedStorageKey
+        )
+
         // Observe storage changes
         NotesStorage.shared.$notes
             .receive(on: DispatchQueue.main)
@@ -221,6 +235,107 @@ final class NotesViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Editor Formatting
+
+    func editorUndo() {
+        runEditorCommand("undo")
+    }
+
+    func editorRedo() {
+        runEditorCommand("redo")
+    }
+
+    func editorToggleBold() {
+        runEditorCommand("toggleBold")
+    }
+
+    func editorToggleItalic() {
+        runEditorCommand("toggleItalic")
+    }
+
+    func editorToggleUnderline() {
+        runEditorCommand("toggleUnderline")
+    }
+
+    func editorAlignLeft() {
+        runEditorCommand("setTextAlign", stringArgument: "left")
+    }
+
+    func editorAlignCenter() {
+        runEditorCommand("setTextAlign", stringArgument: "center")
+    }
+
+    func editorAlignRight() {
+        runEditorCommand("setTextAlign", stringArgument: "right")
+    }
+
+    func editorToggleBulletList() {
+        runEditorCommand("toggleBulletList")
+    }
+
+    func editorToggleOrderedList() {
+        runEditorCommand("toggleOrderedList")
+    }
+
+    func editorToggleTaskList() {
+        runEditorCommand("toggleTaskList")
+    }
+
+    func editorPromptForLink() {
+        guard let rawValue = promptForLinkURL() else { return }
+        runEditorCommand("setLink", stringArgument: normalizeLinkURL(rawValue))
+    }
+
+    func editorRemoveLink() {
+        runEditorCommand("unsetLink")
+    }
+
+    func toggleFormattingToolbarPinned() {
+        isFormattingToolbarPinned.toggle()
+    }
+
+    func setFormattingToolbarPinned(_ pinned: Bool) {
+        isFormattingToolbarPinned = pinned
+    }
+
+    private func runEditorCommand(_ command: String, stringArgument: String? = nil) {
+        guard editorIsReady, let webView = editorWebView else { return }
+
+        if let stringArgument {
+            guard let argumentData = try? JSONSerialization.data(
+                withJSONObject: stringArgument, options: .fragmentsAllowed
+            ), let argumentJSON = String(data: argumentData, encoding: .utf8) else { return }
+            webView.evaluateJavaScript("window.editorAPI.\(command)(\(argumentJSON));")
+            return
+        }
+
+        webView.evaluateJavaScript("window.editorAPI.\(command)();")
+    }
+
+    private func promptForLinkURL() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Add Link"
+        alert.informativeText = "Enter a URL for the selected text."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Insert")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.placeholderString = "https://example.com"
+        field.stringValue = "https://"
+        alert.accessoryView = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private func normalizeLinkURL(_ value: String) -> String {
+        guard !value.contains("://") else { return value }
+        return "https://\(value)"
+    }
+
     // MARK: - Panel State
 
     func show() {
@@ -237,8 +352,16 @@ final class NotesViewModel: ObservableObject {
         NotificationCenter.default.post(name: .dismissNotes, object: nil)
     }
 
-    func togglePin() {
-        isPinned.toggle()
+    func toggleCollapsed() {
+        NotificationCenter.default.post(name: .toggleNotesCollapse, object: nil)
+    }
+
+    func setCollapsed(_ collapsed: Bool) {
+        isCollapsed = collapsed
+    }
+
+    func moveToNextDisplay() {
+        NotificationCenter.default.post(name: .moveNotesToNextDisplay, object: nil)
     }
 
     private func clearSelectedNote() {

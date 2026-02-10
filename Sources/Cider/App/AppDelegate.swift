@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notesViewModel: NotesViewModel?
     private var notesHotkeyDetector: NotesHotkeyDetector?
     private let notesPanelPositionStore = NotesPanelPositionStore.shared
+    private var notesPanelRestoreFrame: NSRect?
 
     // Tile Zone Overlay
     private var tileZoneOverlayPanels: [TileZoneOverlayPanel] = []
@@ -630,7 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         tileHotkeyDetector = TileHotkeyDetector(
             onAction: { [weak self] action in
-                self?.tileActionHandler.execute(action)
+                self?.handleTileHotkeyAction(action)
             }
         )
         tileHotkeyDetector?.start()
@@ -705,13 +706,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateNotesPanelView() {
         guard let panel = notesPanel, let viewModel = notesViewModel else { return }
 
-        // Add shadow padding around the notes view (matches command palette approach)
-        let shadowPadding = NotesDesign.shadowPadding
         let notesView = NotesPanelView(viewModel: viewModel)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, shadowPadding)
-            .padding(.top, NotesDesign.panelTopPadding)
-            .padding(.bottom, shadowPadding + NotesDesign.panelBottomPadding)
 
         let hostingView = NotesPanelHostingView(rootView: notesView)
         panel.contentView = hostingView
@@ -754,6 +750,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .toggleNotesCollapse)
+            .sink { [weak self] _ in
+                self?.toggleNotesCollapsed()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .moveNotesToNextDisplay)
+            .sink { [weak self] _ in
+                self?.moveNotesPanelToAdjacentDisplay(direction: 1)
+            }
+            .store(in: &cancellables)
     }
 
     private func toggleNotesPanel() {
@@ -789,7 +797,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.showAtMouse()
         }
 
-        panel.setPinned(viewModel.isPinned)
+        viewModel.setCollapsed(false)
         updateGlobalHotkeyEnablement()
         optionTabDetector?.reclaimPriority()
 
@@ -816,12 +824,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "[Hotkeys] updateGlobalHotkeyEnablement " +
             "notesVisible=\(notesVisible) " +
             "optionTabEnabled=\(config.enableOptionTabCycling) " +
-            "tileHotkeysEnabled=\(config.enableTilingHotkeys && !notesVisible) " +
+            "tileHotkeysEnabled=\(config.enableTilingHotkeys) " +
             "notesHotkeyEnabled=\(config.enableNotesHotkey)"
         )
 
         optionTabDetector?.setEnabled(config.enableOptionTabCycling)
-        tileHotkeyDetector?.setEnabled(config.enableTilingHotkeys && !notesVisible)
+        tileHotkeyDetector?.setEnabled(config.enableTilingHotkeys)
         notesHotkeyDetector?.setEnabled(config.enableNotesHotkey)
     }
 
@@ -831,7 +839,178 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel = notesPanel, panel.isVisible else { return }
         guard let noteID = notesViewModel?.selectedNote?.id else { return }
 
-        notesPanelPositionStore.setFrame(panel.frame, for: noteID)
+        notesPanelPositionStore.setFrame(panel.persistableFrame, for: noteID)
+    }
+
+    private func toggleNotesCollapsed() {
+        guard let panel = notesPanel, panel.isVisible else { return }
+        panel.toggleCollapsed()
+        notesViewModel?.setCollapsed(panel.isCollapsed)
+        persistCurrentNotePanelFrameIfNeeded()
+
+        if !panel.isCollapsed {
+            DispatchQueue.main.async { [weak self] in
+                self?.notesViewModel?.focusEditor()
+            }
+        }
+    }
+
+    private func moveNotesPanelToAdjacentDisplay(direction: Int) {
+        guard let panel = notesPanel, panel.isVisible else { return }
+        guard let currentMonitor = monitorForNotesPanelFrame(panel.persistableFrame) else { return }
+
+        let monitors = MonitorManager.shared.monitors
+        guard monitors.count > 1 else { return }
+        guard let currentIndex = monitors.firstIndex(where: { $0.id == currentMonitor.id }) else { return }
+
+        let nextIndex = (currentIndex + direction + monitors.count) % monitors.count
+        let targetMonitor = monitors[nextIndex]
+        let sourceVisible = currentMonitor.visibleFrame
+        let targetVisible = targetMonitor.visibleFrame
+        let frame = panel.persistableFrame
+
+        let sourceWidthRange = max(sourceVisible.width - frame.width, 1)
+        let sourceHeightRange = max(sourceVisible.height - frame.height, 1)
+        let relativeX = (frame.minX - sourceVisible.minX) / sourceWidthRange
+        let relativeY = (frame.minY - sourceVisible.minY) / sourceHeightRange
+
+        let targetWidthRange = max(targetVisible.width - frame.width, 0)
+        let targetHeightRange = max(targetVisible.height - frame.height, 0)
+        let targetX = targetVisible.minX + targetWidthRange * min(max(relativeX, 0), 1)
+        let targetY = targetVisible.minY + targetHeightRange * min(max(relativeY, 0), 1)
+        let targetFrame = NSRect(x: targetX, y: targetY, width: frame.width, height: frame.height)
+
+        applyFrameToNotesPanel(targetFrame, preserveCollapsedState: panel.isCollapsed)
+    }
+
+    private func handleTileHotkeyAction(_ action: TileAction) {
+        if routeTileActionToNotesPanelIfNeeded(action) {
+            return
+        }
+        tileActionHandler.execute(action)
+    }
+
+    private func routeTileActionToNotesPanelIfNeeded(_ action: TileAction) -> Bool {
+        guard let panel = notesPanel, panel.isVisible else { return false }
+        guard shouldRouteTileActionToNotesPanel(panel: panel) else { return false }
+
+        let baseFrame = panel.persistableFrame
+        guard let monitor = monitorForNotesPanelFrame(baseFrame) else { return false }
+
+        switch action {
+        case .tile(let position):
+            notesPanelRestoreFrame = baseFrame
+            let target = WindowManager.calculateTileFrameStatic(position: position, on: monitor)
+            applyFrameToNotesPanel(NSRect(x: target.minX, y: target.minY, width: target.width, height: target.height),
+                                   preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .larger:
+            notesPanelRestoreFrame = baseFrame
+            let target = resizedNotesPanelFrame(baseFrame, visibleFrame: monitor.visibleFrame, direction: .larger)
+            applyFrameToNotesPanel(target, preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .smaller:
+            notesPanelRestoreFrame = baseFrame
+            let target = resizedNotesPanelFrame(baseFrame, visibleFrame: monitor.visibleFrame, direction: .smaller)
+            applyFrameToNotesPanel(target, preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .restore:
+            guard let restoreFrame = notesPanelRestoreFrame else { return true }
+            applyFrameToNotesPanel(restoreFrame, preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .nextDisplay:
+            notesPanelRestoreFrame = baseFrame
+            moveNotesPanelToAdjacentDisplay(direction: 1)
+            return true
+
+        case .previousDisplay:
+            notesPanelRestoreFrame = baseFrame
+            moveNotesPanelToAdjacentDisplay(direction: -1)
+            return true
+        }
+    }
+
+    private func shouldRouteTileActionToNotesPanel(panel: NotesPanel) -> Bool {
+        if panel.isKeyWindow || NSApp.keyWindow === panel || NSApp.mainWindow === panel {
+            return true
+        }
+
+        return panel.frame.contains(NSEvent.mouseLocation)
+    }
+
+    private func applyFrameToNotesPanel(_ frame: NSRect, preserveCollapsedState: Bool) {
+        guard let panel = notesPanel else { return }
+
+        panel.show(frame: frame)
+        if preserveCollapsedState {
+            panel.setCollapsed(true, animated: false)
+        }
+
+        notesViewModel?.setCollapsed(panel.isCollapsed)
+        persistCurrentNotePanelFrameIfNeeded()
+    }
+
+    private enum NotesPanelResizeDirection {
+        case larger
+        case smaller
+    }
+
+    private func resizedNotesPanelFrame(
+        _ frame: NSRect,
+        visibleFrame: CGRect,
+        direction: NotesPanelResizeDirection
+    ) -> NSRect {
+        let step = WindowManager.windowPadding
+        let insetLeft = frame.minX - visibleFrame.minX
+        let insetRight = visibleFrame.maxX - frame.maxX
+        let insetTop = visibleFrame.maxY - frame.maxY
+        let insetBottom = frame.minY - visibleFrame.minY
+        let currentPadding = max(0, min(insetLeft, insetRight, insetTop, insetBottom))
+
+        let newPadding: CGFloat
+        switch direction {
+        case .larger:
+            newPadding = max(0, currentPadding - step)
+        case .smaller:
+            let maxPadding = min(visibleFrame.width, visibleFrame.height) / 4
+            newPadding = min(maxPadding, currentPadding + step)
+        }
+
+        let newWidth = visibleFrame.width - newPadding * 2
+        let newHeight = visibleFrame.height - newPadding * 2
+        let newX = visibleFrame.minX + newPadding
+        let newY = visibleFrame.minY + newPadding
+
+        return NSRect(x: newX, y: newY, width: newWidth, height: newHeight)
+    }
+
+    private func monitorForNotesPanelFrame(_ frame: NSRect) -> MonitorInfo? {
+        MonitorManager.shared.refresh()
+        let monitors = MonitorManager.shared.monitors
+        guard !monitors.isEmpty else { return nil }
+
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        if let exact = monitors.first(where: { $0.visibleFrame.contains(center) }) {
+            return exact
+        }
+
+        var bestMonitor: MonitorInfo?
+        var maxOverlap: CGFloat = 0
+        for monitor in monitors {
+            let overlapRect = monitor.visibleFrame.intersection(frame)
+            guard !overlapRect.isNull else { continue }
+            let overlap = overlapRect.width * overlapRect.height
+            if overlap > maxOverlap {
+                maxOverlap = overlap
+                bestMonitor = monitor
+            }
+        }
+
+        return bestMonitor ?? monitors.first
     }
 
     // MARK: - Debug Logging

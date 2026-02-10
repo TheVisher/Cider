@@ -13,6 +13,8 @@ extension Notification.Name {
     static let toggleNotes = Notification.Name("cider.toggleNotes")
     static let dismissNotes = Notification.Name("cider.dismissNotes")
     static let openNoteInPanel = Notification.Name("cider.openNoteInPanel")
+    static let toggleNotesCollapse = Notification.Name("cider.toggleNotesCollapse")
+    static let moveNotesToNextDisplay = Notification.Name("cider.moveNotesToNextDisplay")
 }
 
 enum CiderBorder {
@@ -99,8 +101,18 @@ enum NotesDesign {
     static let shadowPadding: CGFloat = 40
     static let titleBarHeight: CGFloat = 40
     static let toolbarHeight: CGFloat = 36
+    static let toolbarButtonSize: CGFloat = 28
+    static let toolbarIconSize: CGFloat = 11
+    static let toolbarDividerHeight: CGFloat = 16
     static let panelTopPadding: CGFloat = 20
     static let panelBottomPadding: CGFloat = 15
+    static let panelCollapsedBottomPadding: CGFloat = panelTopPadding
+    static let collapsedContentHeight: CGFloat = titleBarHeight
+    static let trafficLightDiameter: CGFloat = 12
+    static let trafficLightTapTarget: CGFloat = Spacing.lg
+    static let trafficLightSpacing: CGFloat = Spacing.xs
+    static let trafficLightSymbolSize: CGFloat = 7
+    static let collapseToggleAnimationDuration: TimeInterval = 0.18
 
     static var panelDefaultWidth: CGFloat {
         defaultWidth + shadowPadding * 2
@@ -116,6 +128,10 @@ enum NotesDesign {
 
     static var panelMinHeight: CGFloat {
         minHeight + panelTopPadding + shadowPadding + panelBottomPadding
+    }
+
+    static var panelCollapsedHeight: CGFloat {
+        collapsedContentHeight + panelTopPadding + panelCollapsedBottomPadding
     }
 }
 
