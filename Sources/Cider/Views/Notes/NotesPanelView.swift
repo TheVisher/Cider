@@ -25,6 +25,16 @@ struct NotesPanelView: View {
                             .background(CiderColors.separator)
                     }
 
+                    if viewModel.selectedNote != nil, let state = viewModel.externalChangeState {
+                        NotesExternalChangeBanner(
+                            state: state,
+                            onReload: { viewModel.reloadFromDiskAfterExternalChange() },
+                            onKeepMine: { viewModel.keepMineAfterExternalChange() }
+                        )
+                        Divider()
+                            .background(CiderColors.separator)
+                    }
+
                     if viewModel.selectedNote != nil {
                         TipTapEditorView(viewModel: viewModel)
                     } else {
@@ -152,6 +162,8 @@ private final class ResizeHandleNSView: NSView {
 private struct NotesTitleBar: View {
     @ObservedObject var viewModel: NotesViewModel
     @State private var isEditingTitle = false
+    @State private var showRestoreSnapshotAlert = false
+    @State private var pendingSnapshotChoice: NotesRecoverySnapshotChoice?
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
@@ -255,6 +267,44 @@ private struct NotesTitleBar: View {
                     }
                 }
 
+                Section("Recovery") {
+                    if viewModel.recoverySnapshotChoices.isEmpty {
+                        Button("No snapshots yet") {}
+                            .disabled(true)
+                    } else {
+                        Menu {
+                            ForEach(viewModel.recoverySnapshotChoices) { choice in
+                                Button {
+                                    queueSnapshotRestore(choice)
+                                } label: {
+                                    Text(
+                                        "\(choice.title) (\(choice.snapshotDate.formatted(.relative(presentation: .named))))"
+                                    )
+                                }
+                            }
+                        } label: {
+                            Label("Quick Restore", systemImage: "clock.arrow.circlepath")
+                        }
+
+                        Menu {
+                            ForEach(Array(viewModel.allRecoverySnapshotChoices.prefix(12))) { choice in
+                                Button {
+                                    queueSnapshotRestore(choice)
+                                } label: {
+                                    Text(choice.title)
+                                }
+                            }
+
+                            if viewModel.allRecoverySnapshotChoices.count > 12 {
+                                Divider()
+                                Text("Showing 12 newest snapshots")
+                            }
+                        } label: {
+                            Label("All Snapshots", systemImage: "clock")
+                        }
+                    }
+                }
+
                 Section("Alignment") {
                     Button {
                         viewModel.editorAlignLeft()
@@ -318,6 +368,45 @@ private struct NotesTitleBar: View {
                         Label("Task List", systemImage: "checklist")
                     }
                 }
+
+                Section("Table") {
+                    Button("Insert Table") {
+                        viewModel.editorInsertTable()
+                    }
+                    Button("Add Row Above") {
+                        viewModel.editorAddRowBefore()
+                    }
+                    Button("Add Row Below") {
+                        viewModel.editorAddRowAfter()
+                    }
+                    Button("Delete Row") {
+                        viewModel.editorDeleteRow()
+                    }
+                    Button("Add Column Left") {
+                        viewModel.editorAddColumnBefore()
+                    }
+                    Button("Add Column Right") {
+                        viewModel.editorAddColumnAfter()
+                    }
+                    Button("Delete Column") {
+                        viewModel.editorDeleteColumn()
+                    }
+                    Button("Merge Cells") {
+                        viewModel.editorMergeCells()
+                    }
+                    Button("Split Cell") {
+                        viewModel.editorSplitCell()
+                    }
+                    Button("Toggle Header Row") {
+                        viewModel.editorToggleHeaderRow()
+                    }
+                    Button("Toggle Header Column") {
+                        viewModel.editorToggleHeaderColumn()
+                    }
+                    Button("Delete Table") {
+                        viewModel.editorDeleteTable()
+                    }
+                }
             } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12, weight: .medium))
@@ -330,6 +419,30 @@ private struct NotesTitleBar: View {
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: NotesDesign.titleBarHeight)
+        .alert("Restore snapshot?", isPresented: $showRestoreSnapshotAlert) {
+            Button("Restore", role: .destructive) {
+                if let choice = pendingSnapshotChoice {
+                    viewModel.restoreSnapshot(choice)
+                }
+                pendingSnapshotChoice = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSnapshotChoice = nil
+            }
+        } message: {
+            if let choice = pendingSnapshotChoice {
+                Text(
+                    "This replaces the current note with the \(choice.title.lowercased()) snapshot from \(choice.snapshotDate.formatted(date: .abbreviated, time: .shortened))."
+                )
+            } else {
+                Text("This replaces the current note with the latest saved snapshot.")
+            }
+        }
+    }
+
+    private func queueSnapshotRestore(_ choice: NotesRecoverySnapshotChoice) {
+        pendingSnapshotChoice = choice
+        showRestoreSnapshotAlert = true
     }
 }
 
@@ -425,6 +538,12 @@ private struct NotesFormattingToolbar: View {
                         help: "Task List",
                         action: viewModel.editorToggleTaskList
                     )
+                    NotesToolbarDivider()
+                    NotesToolbarButton(
+                        symbol: "tablecells",
+                        help: "Insert Table",
+                        action: viewModel.editorInsertTable
+                    )
                 }
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.xs)
@@ -474,6 +593,44 @@ private struct NotesToolbarDivider: View {
             .fill(CiderColors.separator.opacity(0.7))
             .frame(width: 1, height: NotesDesign.toolbarDividerHeight)
             .padding(.horizontal, Spacing.xs)
+    }
+}
+
+private struct NotesExternalChangeBanner: View {
+    let state: NotesExternalChangeState
+    let onReload: () -> Void
+    let onKeepMine: () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(CiderColors.secondary)
+
+            Text("This note changed outside Cider (\(state.modifiedAt.formatted(.relative(presentation: .named))))")
+                .font(.system(size: 11))
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: Spacing.sm)
+
+            Button("Reload") {
+                onReload()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(CiderColors.controlAccent)
+
+            Button("Keep Mine") {
+                onKeepMine()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(CiderColors.secondary)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xs)
+        .frame(height: NotesDesign.toolbarHeight)
     }
 }
 

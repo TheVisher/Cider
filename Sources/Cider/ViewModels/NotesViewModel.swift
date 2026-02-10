@@ -3,6 +3,16 @@ import Combine
 import WebKit
 import AppKit
 
+struct NotesExternalChangeState: Equatable {
+    let modifiedAt: Date
+}
+
+struct NotesRecoverySnapshotChoice: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let snapshotDate: Date
+}
+
 @MainActor
 final class NotesViewModel: ObservableObject {
     @Published var selectedNote: Note?
@@ -12,6 +22,7 @@ final class NotesViewModel: ObservableObject {
     @Published var isVisible: Bool = false
     @Published var editingTitle: String = ""
     @Published var charCount: Int = 0
+    @Published var externalChangeState: NotesExternalChangeState?
     @Published var isFormattingToolbarPinned: Bool {
         didSet {
             UserDefaults.standard.set(
@@ -27,6 +38,9 @@ final class NotesViewModel: ObservableObject {
 
     private var saveWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
+    private var lastSyncedDiskContent: String = ""
+    private var pendingExternalDiskContent: String?
+    private var ignoredExternalDiskContent: String?
     private static let formattingToolbarPinnedStorageKey = "cider.notes.formattingToolbarPinned"
 
     var notes: [Note] {
@@ -42,6 +56,59 @@ final class NotesViewModel: ObservableObject {
         }
     }
 
+    var recoverySnapshotChoices: [NotesRecoverySnapshotChoice] {
+        guard let note = selectedNote else { return [] }
+        let snapshots = NotesStorage.shared.snapshots(for: note)
+        guard !snapshots.isEmpty else { return [] }
+
+        let now = Date()
+        let targetAges: [(TimeInterval, String)] = [
+            (5 * 60, "5 min"),
+            (15 * 60, "15 min"),
+            (30 * 60, "30 min"),
+            (60 * 60, "1 hour"),
+            (24 * 60 * 60, "24 hours"),
+        ]
+
+        var choices: [NotesRecoverySnapshotChoice] = []
+        var usedSnapshotIDs = Set<String>()
+
+        func appendChoice(from snapshot: NoteSnapshotInfo, title: String) {
+            guard usedSnapshotIDs.insert(snapshot.id).inserted else { return }
+            choices.append(
+                NotesRecoverySnapshotChoice(
+                    id: snapshot.id,
+                    title: title,
+                    snapshotDate: snapshot.modifiedAt
+                )
+            )
+        }
+
+        if let latest = snapshots.first {
+            appendChoice(from: latest, title: "Latest")
+        }
+
+        for (age, title) in targetAges {
+            let cutoff = now.addingTimeInterval(-age)
+            if let match = snapshots.first(where: { $0.modifiedAt <= cutoff }) {
+                appendChoice(from: match, title: title)
+            }
+        }
+
+        return choices
+    }
+
+    var allRecoverySnapshotChoices: [NotesRecoverySnapshotChoice] {
+        guard let note = selectedNote else { return [] }
+        return NotesStorage.shared.snapshots(for: note).map { snapshot in
+            NotesRecoverySnapshotChoice(
+                id: snapshot.id,
+                title: snapshot.modifiedAt.formatted(date: .abbreviated, time: .shortened),
+                snapshotDate: snapshot.modifiedAt
+            )
+        }
+    }
+
     init() {
         self.isFormattingToolbarPinned = UserDefaults.standard.bool(
             forKey: Self.formattingToolbarPinnedStorageKey
@@ -53,6 +120,7 @@ final class NotesViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.reconcileSelectedNote()
+                self.detectExternalChangeIfNeeded()
                 self.objectWillChange.send()
             }
             .store(in: &cancellables)
@@ -65,8 +133,9 @@ final class NotesViewModel: ObservableObject {
         editorIsReady = true
         // If a note is already selected, push its content to the editor
         if let note = selectedNote {
-            let content = NotesStorage.shared.loadContent(for: note)
+            let content = loadPersistedContent(for: note)
             editingContent = content
+            lastSyncedDiskContent = content
             pushContentToEditor(content)
         }
     }
@@ -74,10 +143,11 @@ final class NotesViewModel: ObservableObject {
     /// Push markdown content to the TipTap editor via JS.
     private func pushContentToEditor(_ markdown: String) {
         guard editorIsReady, let webView = editorWebView else { return }
+        let editorMarkdown = NotesStorage.shared.markdownForEditor(markdown)
         // Use JSON encoding for safe string transport — handles all special
         // characters (newlines, quotes, backslashes, unicode) correctly.
         guard let jsonData = try? JSONSerialization.data(
-            withJSONObject: markdown, options: .fragmentsAllowed
+            withJSONObject: editorMarkdown, options: .fragmentsAllowed
         ), let jsonString = String(data: jsonData, encoding: .utf8) else { return }
         webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))")
     }
@@ -125,11 +195,15 @@ final class NotesViewModel: ObservableObject {
         flushSave()
 
         var loaded = note
-        loaded.content = NotesStorage.shared.loadContent(for: note)
+        loaded.content = loadPersistedContent(for: note)
         selectedNote = loaded
         editingContent = loaded.content
         editingTitle = loaded.title
         charCount = loaded.content.count
+        lastSyncedDiskContent = loaded.content
+        pendingExternalDiskContent = nil
+        ignoredExternalDiskContent = nil
+        externalChangeState = nil
 
         pushContentToEditor(loaded.content)
     }
@@ -143,6 +217,10 @@ final class NotesViewModel: ObservableObject {
         editingContent = ""
         editingTitle = note.title
         charCount = 0
+        lastSyncedDiskContent = ""
+        pendingExternalDiskContent = nil
+        ignoredExternalDiskContent = nil
+        externalChangeState = nil
 
         // Clear editor and focus
         if editorIsReady, let webView = editorWebView {
@@ -185,16 +263,21 @@ final class NotesViewModel: ObservableObject {
     // MARK: - Auto-save
 
     func contentChanged(_ newContent: String) {
-        editingContent = newContent
-        charCount = newContent.count
+        let persistedContent = NotesStorage.shared.markdownForPersistence(newContent)
+        editingContent = persistedContent
+        charCount = persistedContent.count
         guard var note = selectedNote else { return }
-        note.content = newContent
+        note.content = persistedContent
 
         saveWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, var current = self.selectedNote else { return }
                 current.content = self.editingContent
+                self.lastSyncedDiskContent = self.editingContent
+                self.pendingExternalDiskContent = nil
+                self.ignoredExternalDiskContent = nil
+                self.externalChangeState = nil
                 NotesStorage.shared.save(note: current)
             }
         }
@@ -210,6 +293,10 @@ final class NotesViewModel: ObservableObject {
 
         // Save the latest known content immediately.
         note.content = editingContent
+        lastSyncedDiskContent = editingContent
+        pendingExternalDiskContent = nil
+        ignoredExternalDiskContent = nil
+        externalChangeState = nil
         NotesStorage.shared.save(note: note)
 
         // Then ask the editor for current content to catch any final keystrokes
@@ -227,12 +314,105 @@ final class NotesViewModel: ObservableObject {
                       var current = self.selectedNote,
                       current.id == noteID else { return }
 
-                editingContent = markdown
-                charCount = markdown.count
-                current.content = markdown
+                let persistedMarkdown = NotesStorage.shared.markdownForPersistence(markdown)
+                editingContent = persistedMarkdown
+                charCount = persistedMarkdown.count
+                current.content = persistedMarkdown
+                lastSyncedDiskContent = persistedMarkdown
+                pendingExternalDiskContent = nil
+                ignoredExternalDiskContent = nil
+                externalChangeState = nil
                 NotesStorage.shared.save(note: current)
             }
         }
+    }
+
+    // MARK: - External Change Handling
+
+    func reloadFromDiskAfterExternalChange() {
+        guard let selected = selectedNote,
+              let pendingExternalDiskContent,
+              let updated = NotesStorage.shared.notes.first(where: { $0.id == selected.id }) else {
+            return
+        }
+
+        applyDiskContent(pendingExternalDiskContent, from: updated)
+    }
+
+    func keepMineAfterExternalChange() {
+        guard let pendingExternalDiskContent,
+              var current = selectedNote else {
+            return
+        }
+
+        ignoredExternalDiskContent = pendingExternalDiskContent
+        self.pendingExternalDiskContent = nil
+        externalChangeState = nil
+
+        current.content = editingContent
+        lastSyncedDiskContent = editingContent
+        NotesStorage.shared.save(note: current)
+    }
+
+    private func detectExternalChangeIfNeeded() {
+        guard let selected = selectedNote,
+              let updated = NotesStorage.shared.notes.first(where: { $0.id == selected.id }) else {
+            return
+        }
+
+        let diskContent = loadPersistedContent(for: updated)
+
+        if diskContent == lastSyncedDiskContent {
+            if pendingExternalDiskContent == diskContent {
+                pendingExternalDiskContent = nil
+                externalChangeState = nil
+            }
+            return
+        }
+
+        if diskContent == editingContent {
+            lastSyncedDiskContent = diskContent
+            pendingExternalDiskContent = nil
+            ignoredExternalDiskContent = nil
+            externalChangeState = nil
+            return
+        }
+
+        let hasUnsavedLocalChanges = editingContent != lastSyncedDiskContent
+        if hasUnsavedLocalChanges {
+            if ignoredExternalDiskContent == diskContent {
+                return
+            }
+            pendingExternalDiskContent = diskContent
+            externalChangeState = NotesExternalChangeState(modifiedAt: updated.modifiedAt)
+            return
+        }
+
+        applyDiskContent(diskContent, from: updated)
+    }
+
+    private func applyDiskContent(_ diskContent: String, from note: Note) {
+        guard var selected = selectedNote else { return }
+
+        selected.title = note.title
+        selected.relativePath = note.relativePath
+        selected.modifiedAt = note.modifiedAt
+        selected.content = diskContent
+        selectedNote = selected
+
+        editingContent = diskContent
+        editingTitle = note.title
+        charCount = diskContent.count
+        lastSyncedDiskContent = diskContent
+        pendingExternalDiskContent = nil
+        ignoredExternalDiskContent = nil
+        externalChangeState = nil
+
+        pushContentToEditor(diskContent)
+    }
+
+    private func loadPersistedContent(for note: Note) -> String {
+        NotesStorage.shared.markdownForPersistence(NotesStorage.shared.loadContent(for: note))
     }
 
     // MARK: - Editor Formatting
@@ -281,6 +461,54 @@ final class NotesViewModel: ObservableObject {
         runEditorCommand("toggleTaskList")
     }
 
+    func editorInsertTable() {
+        runEditorCommand("insertTable")
+    }
+
+    func editorAddRowBefore() {
+        runEditorCommand("addRowBefore")
+    }
+
+    func editorAddRowAfter() {
+        runEditorCommand("addRowAfter")
+    }
+
+    func editorDeleteRow() {
+        runEditorCommand("deleteRow")
+    }
+
+    func editorAddColumnBefore() {
+        runEditorCommand("addColumnBefore")
+    }
+
+    func editorAddColumnAfter() {
+        runEditorCommand("addColumnAfter")
+    }
+
+    func editorDeleteColumn() {
+        runEditorCommand("deleteColumn")
+    }
+
+    func editorMergeCells() {
+        runEditorCommand("mergeCells")
+    }
+
+    func editorSplitCell() {
+        runEditorCommand("splitCell")
+    }
+
+    func editorToggleHeaderRow() {
+        runEditorCommand("toggleHeaderRow")
+    }
+
+    func editorToggleHeaderColumn() {
+        runEditorCommand("toggleHeaderColumn")
+    }
+
+    func editorDeleteTable() {
+        runEditorCommand("deleteTable")
+    }
+
     func editorPromptForLink() {
         guard let rawValue = promptForLinkURL() else { return }
         runEditorCommand("setLink", stringArgument: normalizeLinkURL(rawValue))
@@ -296,6 +524,46 @@ final class NotesViewModel: ObservableObject {
 
     func setFormattingToolbarPinned(_ pinned: Bool) {
         isFormattingToolbarPinned = pinned
+    }
+
+    @discardableResult
+    func restoreMostRecentSnapshot() -> Bool {
+        guard let choice = recoverySnapshotChoices.first else { return false }
+        return restoreSnapshot(choice)
+    }
+
+    @discardableResult
+    func restoreSnapshot(_ choice: NotesRecoverySnapshotChoice) -> Bool {
+        guard var current = selectedNote else {
+            return false
+        }
+
+        guard let snapshot = NotesStorage.shared.snapshots(for: current).first(where: { $0.id == choice.id }),
+              let snapshotContent = NotesStorage.shared.loadSnapshotContent(at: snapshot.url) else {
+            return false
+        }
+
+        saveWorkItem?.cancel()
+        saveWorkItem = nil
+
+        let persistedContent = NotesStorage.shared.markdownForPersistence(snapshotContent)
+        current.content = persistedContent
+        NotesStorage.shared.save(note: current)
+
+        if let updated = NotesStorage.shared.notes.first(where: { $0.id == current.id }) {
+            applyDiskContent(loadPersistedContent(for: updated), from: updated)
+        } else {
+            editingContent = persistedContent
+            charCount = persistedContent.count
+            lastSyncedDiskContent = persistedContent
+            pendingExternalDiskContent = nil
+            ignoredExternalDiskContent = nil
+            externalChangeState = nil
+            selectedNote = current
+            pushContentToEditor(persistedContent)
+        }
+
+        return true
     }
 
     private func runEditorCommand(_ command: String, stringArgument: String? = nil) {
@@ -369,6 +637,10 @@ final class NotesViewModel: ObservableObject {
         editingContent = ""
         editingTitle = ""
         charCount = 0
+        lastSyncedDiskContent = ""
+        pendingExternalDiskContent = nil
+        ignoredExternalDiskContent = nil
+        externalChangeState = nil
 
         if editorIsReady, let webView = editorWebView {
             webView.evaluateJavaScript("window.editorAPI.clear()")
@@ -383,7 +655,7 @@ final class NotesViewModel: ObservableObject {
             return
         }
 
-        if selected.title != updated.title || selected.relativePath != updated.relativePath {
+        if selected.title != updated.title || selected.relativePath != updated.relativePath || selected.modifiedAt != updated.modifiedAt {
             var refreshed = selected
             refreshed.title = updated.title
             refreshed.relativePath = updated.relativePath

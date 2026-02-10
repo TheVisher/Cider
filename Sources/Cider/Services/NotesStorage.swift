@@ -1,6 +1,12 @@
 import Foundation
 import Combine
 
+struct NoteSnapshotInfo: Identifiable, Hashable {
+    let id: String
+    let url: URL
+    let modifiedAt: Date
+}
+
 /// Manages notes as .md files on disk with a lightweight JSON index for UUID mapping.
 @MainActor
 final class NotesStorage: ObservableObject {
@@ -13,6 +19,9 @@ final class NotesStorage: ObservableObject {
     private var directorySource: DispatchSourceFileSystemObject?
     private var saveWorkItem: DispatchWorkItem?
     private let indexFileName = "_cider_notes_index.json"
+    private let snapshotsDirectoryName = ".history"
+    private let maxSnapshotsPerNote = 20
+    private let maxSnapshotAgeDays = 30
 
     /// UUID-to-filename mapping persisted on disk
     private var index: [UUID: String] = [:]
@@ -50,6 +59,10 @@ final class NotesStorage: ObservableObject {
 
     private var indexURL: URL {
         directoryURL.appendingPathComponent(indexFileName)
+    }
+
+    private var encodedDirectoryPath: String {
+        directoryURL.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? directoryURL.path
     }
 
     private func loadIndex() {
@@ -146,8 +159,58 @@ final class NotesStorage: ObservableObject {
         return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
     }
 
+    /// Convert stored markdown to editor-friendly markdown (absolute image paths).
+    func markdownForEditor(_ markdown: String) -> String {
+        var normalized = markdown
+        let absolutePrefix = encodedDirectoryPath + "/"
+
+        normalized = normalized.replacingOccurrences(of: "(./", with: "(\(absolutePrefix)")
+        normalized = normalized.replacingOccurrences(of: "=\"./", with: "=\"\(absolutePrefix)")
+        normalized = normalized.replacingOccurrences(of: "('./", with: "('\(absolutePrefix)")
+
+        normalized = normalized.replacingOccurrences(of: "(.attachments/", with: "(\(absolutePrefix).attachments/")
+        normalized = normalized.replacingOccurrences(of: "=\".attachments/", with: "=\"\(absolutePrefix).attachments/")
+        normalized = normalized.replacingOccurrences(of: "('.attachments/", with: "('\(absolutePrefix).attachments/")
+
+        return normalized
+    }
+
+    /// Convert editor markdown to portable markdown (relative image paths).
+    func markdownForPersistence(_ markdown: String) -> String {
+        var normalized = markdown
+        let rawPrefix = directoryURL.path + "/"
+        let encodedPrefix = encodedDirectoryPath + "/"
+
+        normalized = normalized.replacingOccurrences(of: "(\(rawPrefix)", with: "(./")
+        normalized = normalized.replacingOccurrences(of: "=\"\(rawPrefix)", with: "=\"./")
+        normalized = normalized.replacingOccurrences(of: "('\(rawPrefix)", with: "('./")
+
+        normalized = normalized.replacingOccurrences(of: "(\(encodedPrefix)", with: "(./")
+        normalized = normalized.replacingOccurrences(of: "=\"\(encodedPrefix)", with: "=\"./")
+        normalized = normalized.replacingOccurrences(of: "('\(encodedPrefix)", with: "('./")
+
+        let fileRawPrefix = "file://\(rawPrefix)"
+        let fileEncodedPrefix = "file://\(encodedPrefix)"
+
+        normalized = normalized.replacingOccurrences(of: "(\(fileRawPrefix)", with: "(./")
+        normalized = normalized.replacingOccurrences(of: "=\"\(fileRawPrefix)", with: "=\"./")
+        normalized = normalized.replacingOccurrences(of: "('\(fileRawPrefix)", with: "('./")
+
+        normalized = normalized.replacingOccurrences(of: "(\(fileEncodedPrefix)", with: "(./")
+        normalized = normalized.replacingOccurrences(of: "=\"\(fileEncodedPrefix)", with: "=\"./")
+        normalized = normalized.replacingOccurrences(of: "('\(fileEncodedPrefix)", with: "('./")
+
+        return normalized
+    }
+
     func save(note: Note) {
         let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+        let previousContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+
+        if previousContent != note.content {
+            saveSnapshot(content: previousContent, for: note)
+        }
+
         try? note.content.write(to: fileURL, atomically: true, encoding: .utf8)
 
         // Update in-memory list
@@ -196,9 +259,38 @@ final class NotesStorage: ObservableObject {
     func delete(note: Note) {
         let fileURL = directoryURL.appendingPathComponent(note.relativePath)
         try? FileManager.default.removeItem(at: fileURL)
+        try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
         index.removeValue(forKey: note.id)
         saveIndex()
         notes.removeAll { $0.id == note.id }
+    }
+
+    func hasSnapshots(for note: Note) -> Bool {
+        !snapshots(for: note).isEmpty
+    }
+
+    func loadMostRecentSnapshot(for note: Note) -> String? {
+        guard let latest = snapshots(for: note).first else { return nil }
+        return loadSnapshotContent(at: latest.url)
+    }
+
+    func mostRecentSnapshotDate(for note: Note) -> Date? {
+        snapshots(for: note).first?.modifiedAt
+    }
+
+    func snapshots(for note: Note) -> [NoteSnapshotInfo] {
+        snapshotFiles(for: note).map { url in
+            let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            return NoteSnapshotInfo(
+                id: url.path,
+                url: url,
+                modifiedAt: modifiedAt
+            )
+        }
+    }
+
+    func loadSnapshotContent(at snapshotURL: URL) -> String? {
+        try? String(contentsOf: snapshotURL, encoding: .utf8)
     }
 
     // MARK: - Directory Watcher
@@ -258,6 +350,69 @@ final class NotesStorage: ObservableObject {
             if !existingTitles.contains(candidate) { return candidate }
         }
         return "\(base) \(UUID().uuidString.prefix(4))"
+    }
+
+    private func snapshotsRootURL() -> URL {
+        directoryURL.appendingPathComponent(snapshotsDirectoryName, isDirectory: true)
+    }
+
+    private func snapshotDirectoryURL(for note: Note) -> URL {
+        snapshotsRootURL().appendingPathComponent(note.id.uuidString, isDirectory: true)
+    }
+
+    private func snapshotFiles(for note: Note) -> [URL] {
+        let noteSnapshotDir = snapshotDirectoryURL(for: note)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: noteSnapshotDir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: []
+        ) else {
+            return []
+        }
+
+        return files
+            .filter { $0.pathExtension == "md" }
+            .sorted { lhs, rhs in
+                let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return lhsDate > rhsDate
+            }
+    }
+
+    private func saveSnapshot(content: String, for note: Note) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let fm = FileManager.default
+        let noteSnapshotDir = snapshotDirectoryURL(for: note)
+
+        if !fm.fileExists(atPath: noteSnapshotDir.path) {
+            try? fm.createDirectory(at: noteSnapshotDir, withIntermediateDirectories: true)
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let snapshotURL = noteSnapshotDir.appendingPathComponent("\(timestamp).md")
+
+        try? content.write(to: snapshotURL, atomically: true, encoding: .utf8)
+        pruneSnapshots(for: note)
+    }
+
+    private func pruneSnapshots(for note: Note) {
+        let files = snapshotFiles(for: note)
+
+        for overflow in files.dropFirst(maxSnapshotsPerNote) {
+            try? FileManager.default.removeItem(at: overflow)
+        }
+
+        let expirationDate = Calendar.current.date(byAdding: .day, value: -maxSnapshotAgeDays, to: Date()) ?? .distantPast
+        for file in files {
+            let modifiedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantFuture
+            if modifiedAt < expirationDate {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     deinit {

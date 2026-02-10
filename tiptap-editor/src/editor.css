@@ -245,6 +245,7 @@ html, body {
 .tiptap-editor table {
   border-collapse: collapse;
   width: 100%;
+  table-layout: fixed;
   margin: 0.6em 0;
   overflow: hidden;
 }
@@ -256,6 +257,9 @@ html, body {
   text-align: left;
   vertical-align: top;
   min-width: 80px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .tiptap-editor table th {
@@ -439,6 +443,59 @@ html, body {
 
 .slash-command-popup::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Floating contextual toolbar */
+.floating-editor-toolbar {
+  position: fixed;
+  z-index: 9998;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  max-width: min(560px, calc(100vw - 16px));
+  overflow-x: auto;
+  background: rgba(20, 20, 22, 0.88);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.35),
+    0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.floating-editor-toolbar-button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 7px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.floating-editor-toolbar-button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.floating-editor-toolbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.floating-editor-toolbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.floating-editor-toolbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
 }
 
 /* Drag-over state */

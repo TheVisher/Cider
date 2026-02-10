@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "node build.js"
+    "build": "node build.js",
+    "test": "node --test tests/**/*.test.mjs"
   },
   "dependencies": {
     "@tiptap/core": "^2.11.0",

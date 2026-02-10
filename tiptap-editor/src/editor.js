@@ -19,14 +19,13 @@ import {
   handleNativeSlashKey,
   isSlashPopupActive,
 } from './slash-commands.js';
+import { normalizeMarkdownForPersistence } from './markdown-normalization.mjs';
 
 const lowlight = createLowlight(common);
 
 const escapedHtmlTagPattern = /&lt;(?:\/)?(?:p|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|code|img|hr)\b/i;
 const htmlTagPattern = /<(?:\/)?(?:p|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|code|img|hr)\b/i;
 const fileProtocolPathPattern = /\(file:\/\/\/([^)]+)\)/g;
-const taskListItemSpacingPattern = /^(\s*(?:[-+*]|\d+[.)])\s+\[(?: |x|X)\])([ \t]+)(.*)$/;
-const markdownFencePattern = /^(\s*)(`{3,}|~{3,})/;
 const IMAGE_RESIZE_MIN_WIDTH = 80;
 const IMAGE_RESIZE_MAX_WIDTH = 2000;
 const supportedTextAlignments = ['left', 'center', 'right'];
@@ -195,15 +194,19 @@ const CiderParagraph = Paragraph.extend({
       ...parentStorage,
       markdown: {
         ...parentStorage.markdown,
-        serialize(state, node) {
+        serialize(state, node, parent) {
+          const parentTypeName = parent?.type?.name ?? '';
+          const allowsInlineParagraphHTML = parentTypeName === 'doc';
           const textAlign = node.attrs?.textAlign;
-          const hasCustomAlignment = textAlign && textAlign !== 'left';
+          const hasCustomAlignment = allowsInlineParagraphHTML && textAlign && textAlign !== 'left';
 
           if (node.content.size === 0) {
-            if (hasCustomAlignment) {
+            if (allowsInlineParagraphHTML && hasCustomAlignment) {
               state.write(`<p style="text-align: ${escapeHtmlAttr(textAlign)}"></p>`);
-            } else {
+            } else if (allowsInlineParagraphHTML) {
               state.write('<p></p>');
+            } else {
+              state.renderInline(node);
             }
             state.closeBlock(node);
             return;
@@ -397,42 +400,6 @@ function decodeHtmlEntities(value) {
   return el.value;
 }
 
-function normalizeTaskListSpacing(markdown) {
-  if (typeof markdown !== 'string' || markdown.length === 0) {
-    return '';
-  }
-
-  const lines = markdown.split('\n');
-  let activeFence = null;
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const fenceMatch = line.match(markdownFencePattern);
-    if (fenceMatch) {
-      const marker = fenceMatch[2][0];
-      const markerLength = fenceMatch[2].length;
-
-      if (!activeFence) {
-        activeFence = { marker, markerLength };
-      } else if (activeFence.marker === marker && markerLength >= activeFence.markerLength) {
-        activeFence = null;
-      }
-
-      continue;
-    }
-
-    if (activeFence) continue;
-
-    const taskLineMatch = line.match(taskListItemSpacingPattern);
-    if (!taskLineMatch) continue;
-
-    const [, marker, , content] = taskLineMatch;
-    lines[index] = content.length === 0 ? marker : `${marker} ${content}`;
-  }
-
-  return lines.join('\n');
-}
-
 function normalizeIncomingMarkdown(value) {
   if (typeof value !== 'string') return '';
 
@@ -446,11 +413,15 @@ function normalizeIncomingMarkdown(value) {
     }
   }
 
-  return normalizeTaskListSpacing(normalized);
+  return normalizeMarkdownForPersistence(normalized, {
+    decodeEntities: decodeHtmlEntities,
+  });
 }
 
 function getNormalizedMarkdown() {
-  return normalizeTaskListSpacing(editor.storage.markdown.getMarkdown());
+  return normalizeMarkdownForPersistence(editor.storage.markdown.getMarkdown(), {
+    decodeEntities: decodeHtmlEntities,
+  });
 }
 
 // Shared slash command popup state.
@@ -462,6 +433,270 @@ window._slashPopup = {
   selectedIndex: 0,
   updateUI: null,
 };
+
+const floatingToolbarActionGroups = {
+  text: [
+    { id: 'text-bold', label: 'B', title: 'Bold', run: currentEditor => currentEditor.chain().focus().toggleBold().run() },
+    { id: 'text-italic', label: 'I', title: 'Italic', run: currentEditor => currentEditor.chain().focus().toggleItalic().run() },
+    { id: 'text-underline', label: 'U', title: 'Underline', run: currentEditor => currentEditor.chain().focus().toggleUnderline().run() },
+    { id: 'text-bullets', label: '•', title: 'Bullet List', run: currentEditor => currentEditor.chain().focus().toggleBulletList().run() },
+    { id: 'text-numbered', label: '1.', title: 'Numbered List', run: currentEditor => currentEditor.chain().focus().toggleOrderedList().run() },
+    { id: 'text-task', label: '☑', title: 'Task List', run: currentEditor => currentEditor.chain().focus().toggleTaskList().run() },
+  ],
+  table: [
+    { id: 'table-row-before', label: 'Row↑', title: 'Add Row Above', run: currentEditor => currentEditor.chain().focus().addRowBefore().run() },
+    { id: 'table-row-after', label: 'Row↓', title: 'Add Row Below', run: currentEditor => currentEditor.chain().focus().addRowAfter().run() },
+    { id: 'table-row-delete', label: '-Row', title: 'Delete Row', run: currentEditor => currentEditor.chain().focus().deleteRow().run() },
+    { id: 'table-col-before', label: 'Col←', title: 'Add Column Left', run: currentEditor => currentEditor.chain().focus().addColumnBefore().run() },
+    { id: 'table-col-after', label: 'Col→', title: 'Add Column Right', run: currentEditor => currentEditor.chain().focus().addColumnAfter().run() },
+    { id: 'table-col-delete', label: '-Col', title: 'Delete Column', run: currentEditor => currentEditor.chain().focus().deleteColumn().run() },
+    { id: 'table-merge', label: 'Merge', title: 'Merge Cells', run: currentEditor => currentEditor.chain().focus().mergeCells().run() },
+    { id: 'table-split', label: 'Split', title: 'Split Cell', run: currentEditor => currentEditor.chain().focus().splitCell().run() },
+    { id: 'table-delete', label: 'Del', title: 'Delete Table', run: currentEditor => currentEditor.chain().focus().deleteTable().run() },
+  ],
+};
+
+const floatingToolbarActionLookup = new Map(
+  Object.values(floatingToolbarActionGroups)
+    .flat()
+    .map(action => [action.id, action]),
+);
+
+window._floatingToolbar = {
+  active: false,
+  popup: null,
+  context: null,
+  frame: null,
+  editor: null,
+  updateRaf: null,
+};
+
+function postFloatingToolbarStateToNative() {
+  const handler = window.webkit?.messageHandlers?.floatingToolbarState;
+  if (!handler) return;
+
+  const s = window._floatingToolbar;
+  if (!s.active || !s.popup) {
+    handler.postMessage({ active: false });
+    return;
+  }
+
+  const rect = s.popup.getBoundingClientRect();
+  handler.postMessage({
+    active: true,
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+  });
+}
+
+function resolveFloatingToolbarContext(currentEditor) {
+  if (!currentEditor?.isEditable || !currentEditor.isFocused) {
+    return null;
+  }
+
+  if (isSlashPopupActive()) {
+    return null;
+  }
+
+  if (currentEditor.isActive('table')) {
+    return 'table';
+  }
+
+  if (!currentEditor.state.selection.empty) {
+    return 'text';
+  }
+
+  return null;
+}
+
+function getFloatingToolbarAnchorRect(currentEditor) {
+  const { from, to, empty } = currentEditor.state.selection;
+  const start = currentEditor.view.coordsAtPos(from);
+  const end = empty ? start : currentEditor.view.coordsAtPos(to);
+
+  return {
+    left: Math.min(start.left, end.left),
+    right: Math.max(start.right, end.right),
+    top: Math.min(start.top, end.top),
+    bottom: Math.max(start.bottom, end.bottom),
+  };
+}
+
+function createFloatingToolbarPopup() {
+  const popup = document.createElement('div');
+  popup.className = 'floating-editor-toolbar';
+  popup.addEventListener('mousedown', (event) => {
+    const button = event.target.closest('.floating-editor-toolbar-button');
+    if (!button) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const actionId = button.dataset.action;
+    if (typeof actionId === 'string') {
+      runFloatingToolbarAction(actionId);
+    }
+  });
+
+  document.body.appendChild(popup);
+  return popup;
+}
+
+function hideFloatingToolbar() {
+  const s = window._floatingToolbar;
+  if (s.popup) {
+    s.popup.style.display = 'none';
+  }
+  s.active = false;
+  s.frame = null;
+  postFloatingToolbarStateToNative();
+}
+
+function renderFloatingToolbar(context) {
+  const s = window._floatingToolbar;
+  if (!s.popup || !s.editor) return;
+
+  const actions = floatingToolbarActionGroups[context] ?? [];
+  s.popup.textContent = '';
+
+  actions.forEach(action => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'floating-editor-toolbar-button';
+    button.dataset.action = action.id;
+    button.textContent = action.label;
+    button.title = action.title;
+    s.popup.appendChild(button);
+  });
+
+  s.context = context;
+}
+
+function positionFloatingToolbar(anchorRect) {
+  const s = window._floatingToolbar;
+  if (!s.popup) return;
+
+  const margin = 8;
+  const offset = 8;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+
+  const popupWidth = s.popup.offsetWidth;
+  const popupHeight = s.popup.offsetHeight;
+  const anchorMidX = anchorRect.left + ((anchorRect.right - anchorRect.left) / 2);
+
+  let left = anchorMidX - (popupWidth / 2);
+  let top = anchorRect.top - popupHeight - offset;
+
+  if (top < margin) {
+    top = anchorRect.bottom + offset;
+  }
+
+  left = Math.max(margin, Math.min(left, viewportWidth - popupWidth - margin));
+  top = Math.max(margin, Math.min(top, viewportHeight - popupHeight - margin));
+
+  s.popup.style.left = `${Math.round(left)}px`;
+  s.popup.style.top = `${Math.round(top)}px`;
+}
+
+function updateFloatingToolbar(forceRender = false) {
+  const s = window._floatingToolbar;
+  const currentEditor = s.editor;
+  if (!currentEditor) return;
+
+  const context = resolveFloatingToolbarContext(currentEditor);
+  if (!context) {
+    hideFloatingToolbar();
+    return;
+  }
+
+  if (!s.popup) {
+    s.popup = createFloatingToolbarPopup();
+  }
+
+  if (s.context !== context || forceRender) {
+    renderFloatingToolbar(context);
+  }
+
+  const anchorRect = getFloatingToolbarAnchorRect(currentEditor);
+  if (!anchorRect) {
+    hideFloatingToolbar();
+    return;
+  }
+
+  s.popup.style.display = 'flex';
+  positionFloatingToolbar(anchorRect);
+  s.active = true;
+  s.frame = anchorRect;
+  postFloatingToolbarStateToNative();
+}
+
+function requestFloatingToolbarUpdate(forceRender = false) {
+  const s = window._floatingToolbar;
+  if (s.updateRaf != null) {
+    cancelAnimationFrame(s.updateRaf);
+  }
+
+  s.updateRaf = requestAnimationFrame(() => {
+    s.updateRaf = null;
+    updateFloatingToolbar(forceRender);
+  });
+}
+
+function runFloatingToolbarAction(actionId) {
+  const s = window._floatingToolbar;
+  const currentEditor = s.editor;
+  if (!currentEditor) return false;
+
+  const action = floatingToolbarActionLookup.get(actionId);
+  if (!action) return false;
+
+  const didRun = action.run(currentEditor);
+  requestFloatingToolbarUpdate(true);
+  return Boolean(didRun);
+}
+
+function handleNativeFloatingToolbarClick(x, y) {
+  const s = window._floatingToolbar;
+  if (!s.active || !s.popup) {
+    return false;
+  }
+
+  const hoveredButton = s.popup.querySelector('.floating-editor-toolbar-button:hover');
+  if (hoveredButton) {
+    return runFloatingToolbarAction(hoveredButton.dataset.action);
+  }
+
+  if (Number.isFinite(x) && Number.isFinite(y)) {
+    const hit = document.elementFromPoint(x, y);
+    const button = hit?.closest('.floating-editor-toolbar-button');
+    if (button && s.popup.contains(button)) {
+      return runFloatingToolbarAction(button.dataset.action);
+    }
+  }
+
+  return false;
+}
+
+function initializeFloatingToolbar(currentEditor) {
+  const s = window._floatingToolbar;
+  s.editor = currentEditor;
+
+  const scrollHost = document.getElementById('editor');
+  if (scrollHost) {
+    scrollHost.addEventListener('scroll', () => requestFloatingToolbarUpdate());
+  }
+
+  window.addEventListener('resize', () => requestFloatingToolbarUpdate());
+
+  currentEditor.on('selectionUpdate', () => requestFloatingToolbarUpdate(true));
+  currentEditor.on('focus', () => requestFloatingToolbarUpdate(true));
+  currentEditor.on('blur', () => hideFloatingToolbar());
+
+  requestFloatingToolbarUpdate(true);
+}
 
 const editor = new Editor({
   element: document.getElementById('editor'),
@@ -548,6 +783,7 @@ const editor = new Editor({
     if (window.webkit?.messageHandlers?.contentChanged) {
       window.webkit.messageHandlers.contentChanged.postMessage(markdown);
     }
+    requestFloatingToolbarUpdate();
   },
   onCreate() {
     if (window.webkit?.messageHandlers?.editorReady) {
@@ -556,12 +792,15 @@ const editor = new Editor({
   },
 });
 
+initializeFloatingToolbar(editor);
+
 // Swift -> JS bridge API
 window.editorAPI = {
   setContent(markdown) {
     editor.commands.setContent(normalizeIncomingMarkdown(markdown), false, {
       preserveWhitespace: 'full',
     });
+    requestFloatingToolbarUpdate(true);
   },
   getContent() {
     return getNormalizedMarkdown();
@@ -571,12 +810,15 @@ window.editorAPI = {
   },
   focus() {
     editor.commands.focus();
+    requestFloatingToolbarUpdate(true);
   },
   blur() {
     editor.commands.blur();
+    hideFloatingToolbar();
   },
   clear() {
     editor.commands.clearContent();
+    requestFloatingToolbarUpdate(true);
   },
   toggleBold() {
     return editor.chain().focus().toggleBold().run();
@@ -613,6 +855,42 @@ window.editorAPI = {
   toggleTaskList() {
     return editor.chain().focus().toggleTaskList().run();
   },
+  insertTable() {
+    return editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+  },
+  addColumnBefore() {
+    return editor.chain().focus().addColumnBefore().run();
+  },
+  addColumnAfter() {
+    return editor.chain().focus().addColumnAfter().run();
+  },
+  deleteColumn() {
+    return editor.chain().focus().deleteColumn().run();
+  },
+  addRowBefore() {
+    return editor.chain().focus().addRowBefore().run();
+  },
+  addRowAfter() {
+    return editor.chain().focus().addRowAfter().run();
+  },
+  deleteRow() {
+    return editor.chain().focus().deleteRow().run();
+  },
+  mergeCells() {
+    return editor.chain().focus().mergeCells().run();
+  },
+  splitCell() {
+    return editor.chain().focus().splitCell().run();
+  },
+  toggleHeaderRow() {
+    return editor.chain().focus().toggleHeaderRow().run();
+  },
+  toggleHeaderColumn() {
+    return editor.chain().focus().toggleHeaderColumn().run();
+  },
+  deleteTable() {
+    return editor.chain().focus().deleteTable().run();
+  },
   undo() {
     return editor.chain().focus().undo().run();
   },
@@ -627,5 +905,11 @@ window.editorAPI = {
   },
   isSlashPopupActive() {
     return isSlashPopupActive();
+  },
+  handleNativeFloatingToolbarClick(x, y) {
+    return handleNativeFloatingToolbarClick(x, y);
+  },
+  isFloatingToolbarActive() {
+    return Boolean(window._floatingToolbar?.active);
   },
 };
