@@ -225,6 +225,19 @@ RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
 | Height | 580pt |
 | Same acrylic style as command palette |
 
+### 7.5 Floating Window Traffic Lights
+
+Use the Notes traffic-light geometry for all floating panels/windows (Notes, Settings, and future surfaces) to keep controls visually consistent.
+
+| Token | Value | Source |
+|-------|-------|--------|
+| Circle diameter | 12pt | `NotesDesign.trafficLightDiameter` |
+| Center spacing | 4pt | `NotesDesign.trafficLightSpacing` |
+| Tap target | 16pt × 16pt | `NotesDesign.trafficLightTapTarget` |
+| Symbol size (hover glyphs) | 7pt | `NotesDesign.trafficLightSymbolSize` |
+
+Do not introduce alternate traffic-light sizing/spacing constants per window.
+
 ---
 
 ## 8. Animation Tokens
