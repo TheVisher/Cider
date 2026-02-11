@@ -424,6 +424,16 @@ final class CommandPaletteViewModel: ObservableObject {
         BookmarksStorage.shared.remove(bookmark)
     }
 
+    @discardableResult
+    func updateBookmarkDetails(_ bookmark: Bookmark, title: String, notes: String, tags: [String]) -> Bool {
+        BookmarksStorage.shared.updateDetails(
+            for: bookmark.id,
+            title: title,
+            notes: notes,
+            tags: tags
+        )
+    }
+
     func openBookmark(_ bookmark: Bookmark) {
         guard let url = bookmark.url else { return }
         NSWorkspace.shared.open(url)

@@ -50,6 +50,7 @@ struct PaletteContentArea: View {
     var onBookmarkClick: ((Bookmark) -> Void)? = nil
     var onDeleteBookmark: ((Bookmark) -> Void)? = nil
     var onAddBookmark: ((String, String?) -> Bool)? = nil
+    var onUpdateBookmarkDetails: ((Bookmark, String, String, [String]) -> Bool)? = nil
     var onCaptureBookmarkFromActiveBrowser: (() -> Bool)? = nil
     var onAddBookmarkFromPasteboard: (() -> Bool)? = nil
     var onOpenBookmarksWindow: (() -> Void)? = nil
@@ -415,6 +416,9 @@ struct PaletteContentArea: View {
             onDeleteBookmark: { onDeleteBookmark?($0) },
             onAddBookmark: { url, title in
                 onAddBookmark?(url, title) ?? false
+            },
+            onUpdateBookmarkDetails: { bookmark, title, notes, tags in
+                onUpdateBookmarkDetails?(bookmark, title, notes, tags) ?? false
             },
             onCaptureFromActiveBrowser: { onCaptureBookmarkFromActiveBrowser?() ?? false },
             onAddFromPasteboard: { onAddBookmarkFromPasteboard?() ?? false }

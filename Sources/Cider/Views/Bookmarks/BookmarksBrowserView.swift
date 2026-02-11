@@ -9,8 +9,10 @@ struct BookmarksBrowserView: View {
     var showsOpenWindowButton = false
     var onOpenWindow: (() -> Void)? = nil
     var onOpenBookmark: (Bookmark) -> Void
+    var onShowBookmarkDetails: ((Bookmark) -> Void)? = nil
     var onDeleteBookmark: ((Bookmark) -> Void)? = nil
     var onAddBookmark: (String, String?) -> Bool
+    var onUpdateBookmarkDetails: ((Bookmark, String, String, [String]) -> Bool)? = nil
     var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
     var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
     var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
@@ -204,6 +206,7 @@ struct BookmarksBrowserView: View {
                     BookmarkListRow(
                         bookmark: bookmark,
                         searchText: searchText,
+                        onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) }
                     )
@@ -220,6 +223,7 @@ struct BookmarksBrowserView: View {
                         bookmark: bookmark,
                         searchText: searchText,
                         mode: .grid,
+                        onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
                         onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
@@ -239,6 +243,7 @@ struct BookmarksBrowserView: View {
                         bookmark: bookmark,
                         searchText: searchText,
                         mode: .masonry,
+                        onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
                         onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
@@ -410,6 +415,7 @@ struct BookmarksBrowserView: View {
 private struct BookmarkListRow: View {
     let bookmark: Bookmark
     var searchText: String
+    let onShowDetails: () -> Void
     let onOpen: () -> Void
     let onDelete: () -> Void
 
@@ -419,8 +425,12 @@ private struct BookmarkListRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            BookmarkThumbnailView(bookmark: bookmark, mode: .list)
-                .frame(width: BookmarksDesign.thumbnailWidthList, height: BookmarksDesign.thumbnailHeightList)
+            Button(action: onShowDetails) {
+                BookmarkThumbnailView(bookmark: bookmark, mode: .list)
+                    .frame(width: BookmarksDesign.thumbnailWidthList, height: BookmarksDesign.thumbnailHeightList)
+            }
+            .buttonStyle(.plain)
+            .help("Show bookmark details")
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Button(action: onOpen) {
@@ -502,6 +512,7 @@ private struct BookmarkCard: View {
     let bookmark: Bookmark
     var searchText: String
     let mode: CardMode
+    let onShowDetails: () -> Void
     let onOpen: () -> Void
     let onDelete: () -> Void
     var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
@@ -523,7 +534,7 @@ private struct BookmarkCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: BookmarksDesign.cardContentSpacing) {
-            Button(action: {}) {
+            Button(action: onShowDetails) {
                 BookmarkThumbnailView(
                     bookmark: bookmark,
                     mode: mode == .grid ? .grid : .masonry,
@@ -540,7 +551,7 @@ private struct BookmarkCard: View {
                     }
             }
             .buttonStyle(.plain)
-            .help("Metadata panel coming soon")
+            .help("Show bookmark details")
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Button(action: onOpen) {
@@ -794,8 +805,8 @@ private struct BookmarkThumbnailView: View {
     var onAspectRatioResolved: ((CGFloat?) -> Void)? = nil
 
     @Environment(\.textScale) private var textScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnailImage: NSImage?
+    @State private var rendersAsIconOverlay = false
     @State private var loadedThumbnailPath: String?
 
     private var palette: (Color, Color) {
@@ -815,35 +826,51 @@ private struct BookmarkThumbnailView: View {
 
     @ViewBuilder
     private func thumbnailContent() -> some View {
-        if let thumbnailImage {
-            Image(nsImage: thumbnailImage)
-                .resizable()
-                .aspectRatio(contentMode: mode == .masonry ? .fit : .fill)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topLeading) {
-                    bookmarkBadge
-                }
+        if let thumbnailImage, !shouldSuppressDownloadedThumbnail {
+            if rendersAsIconOverlay {
+                iconOverlayGradient(for: thumbnailImage)
+            } else {
+                Image(nsImage: thumbnailImage)
+                    .resizable()
+                    .aspectRatio(contentMode: mode == .masonry ? .fit : .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else if bookmark.isEnriching {
             BookmarkShimmerPlaceholder()
-                .overlay(alignment: .topLeading) {
-                    bookmarkBadge
-                }
         } else {
             fallbackGradient
         }
     }
 
+    private var shouldSuppressDownloadedThumbnail: Bool {
+        let fingerprint = (bookmark.thumbnailRemoteURLString ?? "").lowercased()
+        if fingerprint.isEmpty { return false }
+
+        let blockedFragments = [
+            "if-you-are-looking-for-an-image",
+            "if_you_are_looking_for_an_image",
+            "/removed.",
+            "/deleted.",
+            "/default.",
+            "/self.",
+            "/nsfw.",
+            "/spoiler.",
+            "preview.redd.it/default",
+            "preview.redd.it/self",
+            "preview.redd.it/nsfw",
+            "preview.redd.it/spoiler",
+        ]
+
+        return blockedFragments.contains { fragment in
+            fingerprint.contains(fragment)
+        }
+    }
+
     private var fallbackGradient: some View {
-        LinearGradient(
-            colors: [palette.0.opacity(0.8), palette.1.opacity(0.8)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        gradientBackground
         .overlay {
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                bookmarkBadge
-
-                Spacer(minLength: Spacing.xxs)
+                Spacer(minLength: 0)
 
                 Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
                     .font(.system(size: mode == .list ? 16 * textScale : 26 * textScale, weight: .black))
@@ -854,16 +881,38 @@ private struct BookmarkThumbnailView: View {
         }
     }
 
-    private var bookmarkBadge: some View {
-        Image(systemName: "bookmark.fill")
-            .font(.system(size: 12 * textScale, weight: .semibold))
-            .foregroundColor(Color.white.opacity(0.9))
-            .padding(Spacing.xxs)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                    .fill(Color.black.opacity(reduceMotion ? 0.24 : 0.18))
-            )
-            .padding(Spacing.sm)
+    private var gradientBackground: some View {
+        LinearGradient(
+            colors: [palette.0.opacity(0.8), palette.1.opacity(0.8)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private func iconOverlayGradient(for image: NSImage) -> some View {
+        gradientBackground
+            .overlay {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(
+                        width: iconOverlaySize * textScale,
+                        height: iconOverlaySize * textScale
+                    )
+                    .padding(.top, mode == .list ? Spacing.xl : Spacing.sm)
+                    .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+            }
+    }
+
+    private var iconOverlaySize: CGFloat {
+        switch mode {
+        case .list:
+            return BookmarksDesign.thumbnailIconOverlaySizeList
+        case .grid, .masonry:
+            return BookmarksDesign.thumbnailIconOverlaySizeGrid
+        }
     }
 
     private func loadThumbnailIfNeeded() {
@@ -873,18 +922,53 @@ private struct BookmarkThumbnailView: View {
 
         guard let path else {
             thumbnailImage = nil
+            rendersAsIconOverlay = false
             onAspectRatioResolved?(nil)
             return
         }
 
         thumbnailImage = NSImage(contentsOfFile: path)
-        onAspectRatioResolved?(resolvedAspectRatio(from: thumbnailImage))
+        if shouldSuppressDownloadedThumbnail {
+            rendersAsIconOverlay = false
+            onAspectRatioResolved?(nil)
+            return
+        }
+        rendersAsIconOverlay = shouldRenderAsIconOverlay(
+            image: thumbnailImage,
+            remoteURLString: bookmark.thumbnailRemoteURLString
+        )
+        onAspectRatioResolved?(rendersAsIconOverlay ? nil : resolvedAspectRatio(from: thumbnailImage))
     }
 
     private func resolvedAspectRatio(from image: NSImage?) -> CGFloat? {
         guard let image else { return nil }
         guard image.size.width > 0, image.size.height > 0 else { return nil }
         return image.size.height / image.size.width
+    }
+
+    private func shouldRenderAsIconOverlay(image: NSImage?, remoteURLString: String?) -> Bool {
+        guard let image else { return false }
+        let width = image.size.width
+        let height = image.size.height
+        guard width > 0, height > 0 else { return false }
+
+        let aspectRatio = width / height
+        let isSquareish = abs(aspectRatio - 1) <= BookmarksDesign.thumbnailIconCandidateMaxAspectDelta
+        let maxDimension = max(width, height)
+        let minDimension = min(width, height)
+        let isTinySquareAsset =
+            isSquareish &&
+            minDimension >= BookmarksDesign.thumbnailIconCandidateMinDimension &&
+            maxDimension <= BookmarksDesign.thumbnailIconCandidateMaxDimension
+
+        let remoteFingerprint = (remoteURLString ?? "").lowercased()
+        let hasIconURLHint =
+            remoteFingerprint.contains("favicon") ||
+            remoteFingerprint.contains("apple-touch-icon") ||
+            remoteFingerprint.contains("mask-icon") ||
+            remoteFingerprint.hasSuffix(".ico")
+
+        return hasIconURLHint || isTinySquareAsset
     }
 }
 

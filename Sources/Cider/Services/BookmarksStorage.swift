@@ -130,6 +130,55 @@ final class BookmarksStorage: ObservableObject {
         return nil
     }
 
+    @discardableResult
+    func updateDetails(
+        for bookmarkID: UUID,
+        title: String,
+        notes: String,
+        tags: [String]
+    ) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else {
+            return false
+        }
+
+        var bookmark = bookmarks[index]
+        let resolvedURL = URL(string: bookmark.urlString)
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitleValue: String
+        if normalizedTitle.isEmpty, let resolvedURL {
+            resolvedTitleValue = resolvedTitle(for: resolvedURL, override: nil)
+        } else if normalizedTitle.isEmpty {
+            resolvedTitleValue = bookmark.title
+        } else {
+            resolvedTitleValue = normalizedTitle
+        }
+
+        let normalizedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTags = deduplicatedTags(from: tags)
+
+        var changed = false
+        if bookmark.title != resolvedTitleValue {
+            bookmark.title = resolvedTitleValue
+            changed = true
+        }
+        if bookmark.notes != normalizedNotes {
+            bookmark.notes = normalizedNotes
+            changed = true
+        }
+        if bookmark.tags != normalizedTags {
+            bookmark.tags = normalizedTags
+            changed = true
+        }
+
+        if changed {
+            bookmark.updatedAt = Date()
+            bookmarks[index] = bookmark
+            persist()
+        }
+
+        return true
+    }
+
     func previewNormalizedURLString(from rawValue: String) -> String? {
         normalizedURL(from: rawValue)?.absoluteString
     }
@@ -747,6 +796,23 @@ final class BookmarksStorage: ObservableObject {
 
         return url.absoluteString
     }
+
+    private func deduplicatedTags(from rawTags: [String]) -> [String] {
+        var result: [String] = []
+        result.reserveCapacity(rawTags.count)
+
+        var seen = Set<String>()
+        for raw in rawTags {
+            let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { continue }
+            let key = normalized.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(normalized)
+        }
+
+        return result
+    }
 }
 
 private struct BookmarkEnrichmentPayload {
@@ -786,6 +852,8 @@ private enum BookmarkMetadataParser {
     )
 
     static func parse(html: String, pageURL: URL) -> BookmarkEnrichmentPayload? {
+        let host = normalizedHost(for: pageURL)
+
         let titleCandidates = [
             metaContent(html: html, keys: [("property", "og:title")]),
             metaContent(html: html, keys: [("name", "twitter:title")]),
@@ -806,11 +874,37 @@ private enum BookmarkMetadataParser {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
 
-        let thumbnailURL =
-            imageMetaRaw.flatMap { resolvedRemoteURL(from: $0, baseURL: pageURL) }
-            ?? jsonLDImageURL(html: html, pageURL: pageURL)
-            ?? siteSpecificThumbnailURL(html: html, pageURL: pageURL)
-            ?? faviconURL(html: html, pageURL: pageURL)
+        let imageMetaURL = imageMetaRaw.flatMap { resolvedRemoteURL(from: $0, baseURL: pageURL) }
+        let jsonLDURL = jsonLDImageURL(html: html, pageURL: pageURL)
+        let siteAdapterURL = siteSpecificThumbnailURL(html: html, pageURL: pageURL)
+        let favicon = faviconURL(html: html, pageURL: pageURL)
+
+        let thumbnailCandidates: [URL?]
+        if host.contains("reddit.com") {
+            // Reddit meta tags frequently point to removed/default placeholders.
+            thumbnailCandidates = [
+                siteAdapterURL,
+                jsonLDURL,
+            ]
+        } else if host == "x.com" || host == "twitter.com" || host.contains("digg.com") {
+            // Prefer real media URLs for social feeds; icon fallbacks are too noisy here.
+            thumbnailCandidates = [
+                siteAdapterURL,
+                imageMetaURL,
+                jsonLDURL,
+            ]
+        } else {
+            thumbnailCandidates = [
+                imageMetaURL,
+                jsonLDURL,
+                siteAdapterURL,
+                favicon,
+            ]
+        }
+
+        let thumbnailURL = thumbnailCandidates
+            .compactMap { $0 }
+            .first(where: { isThumbnailCandidateAcceptable($0, for: pageURL) })
 
         guard title != nil || thumbnailURL != nil else { return nil }
         return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL)
@@ -1008,16 +1102,16 @@ private enum BookmarkMetadataParser {
 
     private static func redditThumbnailURL(html: String, pageURL: URL) -> URL? {
         let patterns = [
-            #"(?is)"url_overridden_by_dest"\s*:\s*"([^"]+)""#,
-            #"(?is)"preview"\s*:\s*\{[\s\S]{0,5000}?"source"\s*:\s*\{[\s\S]{0,1000}?"url"\s*:\s*"([^"]+)""#,
-            #"(?is)"thumbnail"\s*:\s*"(https?:\\\/\\\/(?:i|preview)\.redd\.it[^"]+)""#,
             #"(?is)(https?:\\/\\/(?:i|preview)\.redd\.it\\/[^"'\\s<]+)"#,
             #"(?is)(https?://(?:i|preview)\.redd\.it/[^"'\\s<]+)"#,
+            #"(?is)(https?:\\/\\/external-preview\.redd\.it\\/[^"'\\s<]+)"#,
+            #"(?is)(https?://external-preview\.redd\.it/[^"'\\s<]+)"#,
         ]
 
         for pattern in patterns {
             if let raw = firstRegexCapture(pattern: pattern, in: html),
-               let resolved = resolvedRemoteURL(from: raw, baseURL: pageURL) {
+               let resolved = resolvedRemoteURL(from: raw, baseURL: pageURL),
+               !isLikelyRedditPlaceholderImage(url: resolved) {
                 return resolved
             }
         }
@@ -1042,6 +1136,14 @@ private enum BookmarkMetadataParser {
     }
 
     private static func faviconURL(html: String, pageURL: URL) -> URL? {
+        let host = normalizedHost(for: pageURL)
+        if host.contains("reddit.com")
+            || host == "x.com"
+            || host == "twitter.com"
+            || host.contains("digg.com") {
+            return nil
+        }
+
         guard let linkRegex else { return defaultFaviconURL(for: pageURL) }
         let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
         let matches = linkRegex.matches(in: html, options: [], range: nsRange)
@@ -1076,6 +1178,44 @@ private enum BookmarkMetadataParser {
         }
 
         return bestCandidate?.url ?? defaultFaviconURL(for: pageURL)
+    }
+
+    private static func isThumbnailCandidateAcceptable(_ url: URL, for pageURL: URL) -> Bool {
+        let host = normalizedHost(for: pageURL)
+        if host.contains("reddit.com"),
+           isLikelyRedditPlaceholderImage(url: url) {
+            return false
+        }
+        return true
+    }
+
+    private static func isLikelyRedditPlaceholderImage(url: URL) -> Bool {
+        let fingerprint = [
+            url.host ?? "",
+            url.path,
+            url.query ?? "",
+        ]
+            .joined(separator: " ")
+            .lowercased()
+
+        let blockedFragments = [
+            "if-you-are-looking-for-an-image",
+            "if_you_are_looking_for_an_image",
+            "/removed.",
+            "/deleted.",
+            "/default.",
+            "/self.",
+            "/nsfw.",
+            "/spoiler.",
+            "preview.redd.it/default",
+            "preview.redd.it/self",
+            "preview.redd.it/nsfw",
+            "preview.redd.it/spoiler",
+        ]
+
+        return blockedFragments.contains { fragment in
+            fingerprint.contains(fragment)
+        }
     }
 
     private static func defaultFaviconURL(for pageURL: URL) -> URL? {

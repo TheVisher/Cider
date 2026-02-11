@@ -244,6 +244,7 @@ struct CommandPaletteView: View {
                     onBookmarkClick: { viewModel.openBookmark($0) },
                     onDeleteBookmark: { viewModel.deleteBookmark($0) },
                     onAddBookmark: { viewModel.addBookmark(urlString: $0, title: $1) },
+                    onUpdateBookmarkDetails: { viewModel.updateBookmarkDetails($0, title: $1, notes: $2, tags: $3) },
                     onCaptureBookmarkFromActiveBrowser: { viewModel.captureBookmarkFromActiveBrowserOrClipboard() },
                     onAddBookmarkFromPasteboard: { viewModel.addBookmarkFromPasteboard() },
                     onOpenBookmarksWindow: { viewModel.openBookmarksPanel() },

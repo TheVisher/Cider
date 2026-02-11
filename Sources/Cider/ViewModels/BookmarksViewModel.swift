@@ -78,6 +78,16 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
+    func updateDetails(for bookmark: Bookmark, title: String, notes: String, tags: [String]) -> Bool {
+        BookmarksStorage.shared.updateDetails(
+            for: bookmark.id,
+            title: title,
+            notes: notes,
+            tags: tags
+        )
+    }
+
+    @discardableResult
     func assignThumbnail(for bookmark: Bookmark, droppedString: String) -> Bool {
         let trimmed = droppedString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
