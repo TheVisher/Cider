@@ -77,6 +77,54 @@ final class BookmarksViewModel: ObservableObject {
         BookmarksStorage.shared.remove(bookmark)
     }
 
+    @discardableResult
+    func assignThumbnail(for bookmark: Bookmark, droppedString: String) -> Bool {
+        let trimmed = droppedString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let bookmarkID = bookmark.id
+        Task { @MainActor [weak self] in
+            let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: trimmed)
+            self?.postCaptureToast(
+                message: saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL",
+                isSuccess: saved
+            )
+        }
+        return true
+    }
+
+    @discardableResult
+    func assignThumbnail(for bookmark: Bookmark, fileURL: URL) -> Bool {
+        let bookmarkID = bookmark.id
+        Task { @MainActor [weak self] in
+            let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: fileURL)
+            self?.postCaptureToast(
+                message: saved ? "Updated bookmark thumbnail" : "Could not use dropped image file",
+                isSuccess: saved
+            )
+        }
+        return true
+    }
+
+    @discardableResult
+    func assignThumbnail(for bookmark: Bookmark, imageData: Data, preferredFileExtension: String?) -> Bool {
+        guard !imageData.isEmpty else { return false }
+
+        let bookmarkID = bookmark.id
+        Task { @MainActor [weak self] in
+            let saved = BookmarksStorage.shared.assignThumbnail(
+                for: bookmarkID,
+                imageData: imageData,
+                preferredFileExtension: preferredFileExtension
+            )
+            self?.postCaptureToast(
+                message: saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image",
+                isSuccess: saved
+            )
+        }
+        return true
+    }
+
     func deleteBookmarks(_ bookmarks: [Bookmark]) {
         BookmarksStorage.shared.removeAll(bookmarks)
     }

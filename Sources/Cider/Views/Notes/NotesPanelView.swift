@@ -58,13 +58,13 @@ struct NotesPanelView: View {
                 NotesResizeHandle()
             }
         }
-        .padding(.horizontal, NotesDesign.shadowPadding)
+        .padding(.horizontal, NotesDesign.panelTopPadding)
         .padding(.top, NotesDesign.panelTopPadding)
         .padding(
             .bottom,
             viewModel.isCollapsed
                 ? NotesDesign.panelCollapsedBottomPadding
-                : (NotesDesign.shadowPadding + NotesDesign.panelBottomPadding)
+                : NotesDesign.panelTopPadding
         )
     }
 }

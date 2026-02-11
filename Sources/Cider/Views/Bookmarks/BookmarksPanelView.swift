@@ -29,6 +29,9 @@ struct BookmarksPanelView: View {
                                 onOpenBookmark: { viewModel.open($0) },
                                 onDeleteBookmark: { viewModel.delete($0) },
                                 onAddBookmark: { viewModel.addBookmark(urlString: $0, title: $1) },
+                                onAssignThumbnailFromDroppedString: { viewModel.assignThumbnail(for: $0, droppedString: $1) },
+                                onAssignThumbnailFromLocalFileURL: { viewModel.assignThumbnail(for: $0, fileURL: $1) },
+                                onAssignThumbnailFromImageData: { viewModel.assignThumbnail(for: $0, imageData: $1, preferredFileExtension: $2) },
                                 onCaptureFromActiveBrowser: { viewModel.captureBookmarkFromActiveBrowserOrClipboard() },
                                 onAddFromPasteboard: { viewModel.addBookmarkFromPasteboard() }
                             )
@@ -45,13 +48,13 @@ struct BookmarksPanelView: View {
                 BookmarksResizeHandle()
             }
         }
-        .padding(.horizontal, BookmarksDesign.panelShadowPadding)
+        .padding(.horizontal, BookmarksDesign.panelTopPadding)
         .padding(.top, BookmarksDesign.panelTopPadding)
         .padding(
             .bottom,
             viewModel.isCollapsed
                 ? BookmarksDesign.panelCollapsedBottomPadding
-                : (BookmarksDesign.panelShadowPadding + BookmarksDesign.panelBottomPadding)
+                : BookmarksDesign.panelTopPadding
         )
     }
 

@@ -11,6 +11,9 @@ struct BookmarksBrowserView: View {
     var onOpenBookmark: (Bookmark) -> Void
     var onDeleteBookmark: ((Bookmark) -> Void)? = nil
     var onAddBookmark: (String, String?) -> Bool
+    var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
+    var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
+    var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
     var onCaptureFromActiveBrowser: (() -> Bool)? = nil
     var onAddFromPasteboard: (() -> Bool)? = nil
 
@@ -218,7 +221,10 @@ struct BookmarksBrowserView: View {
                         searchText: searchText,
                         mode: .grid,
                         onOpen: { onOpenBookmark(bookmark) },
-                        onDelete: { onDeleteBookmark?(bookmark) }
+                        onDelete: { onDeleteBookmark?(bookmark) },
+                        onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
+                        onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
+                        onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
                     )
                 }
             }
@@ -234,7 +240,10 @@ struct BookmarksBrowserView: View {
                         searchText: searchText,
                         mode: .masonry,
                         onOpen: { onOpenBookmark(bookmark) },
-                        onDelete: { onDeleteBookmark?(bookmark) }
+                        onDelete: { onDeleteBookmark?(bookmark) },
+                        onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
+                        onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
+                        onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
                     )
                 }
             }
@@ -482,17 +491,35 @@ private struct BookmarkCard: View {
         case masonry
     }
 
+    private static let thumbnailDropTypeIdentifiers: [String] = [
+        UTType.image.identifier,
+        UTType.fileURL.identifier,
+        UTType.url.identifier,
+        UTType.plainText.identifier,
+        UTType.utf8PlainText.identifier,
+    ]
+
     let bookmark: Bookmark
     var searchText: String
     let mode: CardMode
     let onOpen: () -> Void
     let onDelete: () -> Void
+    var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
+    var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
+    var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
+    @State private var isThumbnailDropTargeted = false
     @State private var cardWidth: CGFloat = BookmarksDesign.cardMinWidth
     @State private var resolvedThumbnailAspectRatio: CGFloat?
+
+    private var supportsThumbnailDrops: Bool {
+        onAssignThumbnailFromDroppedString != nil
+            || onAssignThumbnailFromLocalFileURL != nil
+            || onAssignThumbnailFromImageData != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: BookmarksDesign.cardContentSpacing) {
@@ -550,7 +577,14 @@ private struct BookmarkCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(isHovered ? 0.18 : 0.08), lineWidth: 1)
+                .stroke(
+                    supportsThumbnailDrops && isThumbnailDropTargeted
+                        ? CiderColors.controlAccent.opacity(0.65)
+                        : Color.white.opacity(isHovered ? 0.18 : 0.08),
+                    lineWidth: supportsThumbnailDrops && isThumbnailDropTargeted
+                        ? CiderBorder.innerStrokeWidth
+                        : 1
+                )
         )
         .background(
             GeometryReader { proxy in
@@ -572,6 +606,11 @@ private struct BookmarkCard: View {
             Button("Open in Browser") { onOpen() }
             Button("Delete", role: .destructive) { onDelete() }
         }
+        .onDrop(
+            of: Self.thumbnailDropTypeIdentifiers,
+            isTargeted: $isThumbnailDropTargeted,
+            perform: handleThumbnailDrop(providers:)
+        )
     }
 
     private var resolvedThumbnailHeight: CGFloat {
@@ -595,6 +634,151 @@ private struct BookmarkCard: View {
         let normalized = max(width - Spacing.sm * 2, 1)
         guard abs(normalized - cardWidth) > 0.5 else { return }
         cardWidth = normalized
+    }
+
+    private func handleThumbnailDrop(providers: [NSItemProvider]) -> Bool {
+        guard supportsThumbnailDrops else { return false }
+
+        for provider in providers where loadThumbnailDrop(from: provider) {
+            return true
+        }
+
+        return false
+    }
+
+    private func loadThumbnailDrop(from provider: NSItemProvider) -> Bool {
+        if provider.canLoadObject(ofClass: NSImage.self) {
+            provider.loadObject(ofClass: NSImage.self) { item, _ in
+                guard let image = item as? NSImage,
+                      let data = image.pngRepresentation else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    _ = onAssignThumbnailFromImageData?(bookmark, data, "png")
+                }
+            }
+            return true
+        }
+
+        let imageIdentifiers = provider.registeredTypeIdentifiers.filter { identifier in
+            guard let type = UTType(identifier) else { return false }
+            return type.conforms(to: .image)
+        }
+
+        for identifier in imageIdentifiers {
+            provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+                guard let data else { return }
+                DispatchQueue.main.async {
+                    _ = onAssignThumbnailFromImageData?(
+                        bookmark,
+                        data,
+                        preferredImageFileExtension(for: identifier)
+                    )
+                }
+            }
+            return true
+        }
+
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                guard let data else { return }
+
+                if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
+                    DispatchQueue.main.async {
+                        _ = onAssignThumbnailFromLocalFileURL?(bookmark, droppedURL)
+                    }
+                    return
+                }
+
+                if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
+                    DispatchQueue.main.async {
+                        _ = onAssignThumbnailFromDroppedString?(bookmark, droppedString)
+                    }
+                }
+            }
+            return true
+        }
+
+        if provider.canLoadObject(ofClass: NSURL.self) {
+            provider.loadObject(ofClass: NSURL.self) { item, _ in
+                guard let droppedURL = item as? URL else { return }
+                DispatchQueue.main.async {
+                    if droppedURL.isFileURL {
+                        _ = onAssignThumbnailFromLocalFileURL?(bookmark, droppedURL)
+                    } else {
+                        _ = onAssignThumbnailFromDroppedString?(bookmark, droppedURL.absoluteString)
+                    }
+                }
+            }
+            return true
+        }
+
+        if provider.canLoadObject(ofClass: NSString.self) {
+            provider.loadObject(ofClass: NSString.self) { item, _ in
+                guard let droppedString = item as? String else { return }
+                DispatchQueue.main.async {
+                    _ = onAssignThumbnailFromDroppedString?(bookmark, droppedString)
+                }
+            }
+            return true
+        }
+
+        let fallbackIdentifiers = [
+            UTType.url.identifier,
+            UTType.plainText.identifier,
+            UTType.utf8PlainText.identifier,
+        ]
+
+        for identifier in fallbackIdentifiers where provider.hasItemConformingToTypeIdentifier(identifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+                guard let data else { return }
+
+                if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
+                    DispatchQueue.main.async {
+                        _ = onAssignThumbnailFromDroppedString?(bookmark, droppedString)
+                    }
+                    return
+                }
+
+                if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
+                    DispatchQueue.main.async {
+                        if droppedURL.isFileURL {
+                            _ = onAssignThumbnailFromLocalFileURL?(bookmark, droppedURL)
+                        } else {
+                            _ = onAssignThumbnailFromDroppedString?(bookmark, droppedURL.absoluteString)
+                        }
+                    }
+                }
+            }
+            return true
+        }
+
+        return false
+    }
+
+    private func preferredImageFileExtension(for typeIdentifier: String) -> String? {
+        guard let type = UTType(typeIdentifier) else { return nil }
+
+        if let extensionName = type.preferredFilenameExtension?.lowercased() {
+            return extensionName == "jpeg" ? "jpg" : extensionName
+        }
+
+        if type.conforms(to: .png) { return "png" }
+        if type.conforms(to: .jpeg) { return "jpg" }
+        if type.conforms(to: .gif) { return "gif" }
+        if type.conforms(to: .heic) { return "heic" }
+        if type.conforms(to: .tiff) { return "tiff" }
+        return nil
+    }
+}
+
+private extension NSImage {
+    var pngRepresentation: Data? {
+        guard let tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffRepresentation) else {
+            return nil
+        }
+        return bitmap.representation(using: .png, properties: [:])
     }
 }
 

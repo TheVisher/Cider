@@ -134,6 +134,73 @@ final class BookmarksStorage: ObservableObject {
         normalizedURL(from: rawValue)?.absoluteString
     }
 
+    @discardableResult
+    func assignThumbnail(for bookmarkID: UUID, fromDroppedString rawValue: String) async -> Bool {
+        guard let candidate = extractedURLCandidate(from: rawValue) else { return false }
+        let sourceURL: URL
+        if let direct = URL(string: candidate), direct.scheme != nil {
+            sourceURL = direct
+        } else if candidate.hasPrefix("/") {
+            sourceURL = URL(fileURLWithPath: candidate)
+        } else if let withHTTPS = URL(string: "https://\(candidate)") {
+            sourceURL = withHTTPS
+        } else {
+            return false
+        }
+
+        if sourceURL.isFileURL {
+            return assignThumbnail(for: bookmarkID, fromLocalFileURL: sourceURL)
+        }
+
+        guard let scheme = sourceURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return false
+        }
+
+        guard let relativePath = await cacheThumbnail(from: sourceURL, for: bookmarkID) else {
+            return false
+        }
+
+        return applyManualThumbnail(
+            for: bookmarkID,
+            relativePath: relativePath,
+            remoteURLString: sourceURL.absoluteString
+        )
+    }
+
+    @discardableResult
+    func assignThumbnail(for bookmarkID: UUID, fromLocalFileURL fileURL: URL) -> Bool {
+        guard fileURL.isFileURL else { return false }
+        guard let data = try? Data(contentsOf: fileURL) else { return false }
+
+        return assignThumbnail(
+            for: bookmarkID,
+            imageData: data,
+            preferredFileExtension: fileURL.pathExtension
+        )
+    }
+
+    @discardableResult
+    func assignThumbnail(
+        for bookmarkID: UUID,
+        imageData: Data,
+        preferredFileExtension: String? = nil
+    ) -> Bool {
+        guard let relativePath = cacheThumbnail(
+            from: imageData,
+            for: bookmarkID,
+            preferredFileExtension: preferredFileExtension
+        ) else {
+            return false
+        }
+
+        return applyManualThumbnail(
+            for: bookmarkID,
+            relativePath: relativePath,
+            remoteURLString: nil
+        )
+    }
+
     private var htmlFileURL: URL {
         directoryURL.appendingPathComponent(htmlFileName)
     }
@@ -374,15 +441,51 @@ final class BookmarksStorage: ObservableObject {
             || bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         let hasLocalThumbnail = localThumbnailExists(relativePath: bookmark.thumbnailRelativePath)
-        let canRetryThumbnail: Bool
-        if let metadataUpdatedAt = bookmark.metadataUpdatedAt {
-            canRetryThumbnail = Date().timeIntervalSince(metadataUpdatedAt) > 60 * 60 * 6
-        } else {
-            canRetryThumbnail = true
+        let needsThumbnail = !hasLocalThumbnail
+        guard needsTitle || needsThumbnail else { return false }
+
+        guard let metadataUpdatedAt = bookmark.metadataUpdatedAt else {
+            return true
         }
 
-        let needsThumbnail = !hasLocalThumbnail && canRetryThumbnail
-        return needsTitle || needsThumbnail
+        let elapsed = Date().timeIntervalSince(metadataUpdatedAt)
+        let retryInterval = enrichmentRetryInterval(for: bookmark, sourceURL: url)
+        return elapsed >= retryInterval
+    }
+
+    private func enrichmentRetryInterval(for bookmark: Bookmark, sourceURL: URL) -> TimeInterval {
+        let host = normalizedHost(from: sourceURL)
+        let age = Date().timeIntervalSince(bookmark.createdAt)
+        let isHighChurnSite = host.contains("reddit.com")
+            || host == "x.com"
+            || host == "twitter.com"
+
+        if isHighChurnSite {
+            if age < EnrichmentRetryThresholds.firstHour {
+                return EnrichmentRetryThresholds.socialEarly
+            }
+            return EnrichmentRetryThresholds.socialSteady
+        }
+
+        if bookmark.thumbnailRemoteURLString == nil {
+            if age < EnrichmentRetryThresholds.firstHour {
+                return EnrichmentRetryThresholds.noThumbnailEarly
+            }
+            return EnrichmentRetryThresholds.noThumbnailSteady
+        }
+
+        return EnrichmentRetryThresholds.defaultSteady
+    }
+
+    private func normalizedHost(from url: URL) -> String {
+        let host = url.host?.lowercased() ?? ""
+        if host.hasPrefix("www.") {
+            return String(host.dropFirst(4))
+        }
+        if host.hasPrefix("m.") {
+            return String(host.dropFirst(2))
+        }
+        return host
     }
 
     private func shouldApplyEnrichedTitle(_ title: String, to bookmark: Bookmark, sourceURL: URL) -> Bool {
@@ -444,6 +547,50 @@ final class BookmarksStorage: ObservableObject {
         }
     }
 
+    private func cacheThumbnail(
+        from data: Data,
+        for bookmarkID: UUID,
+        preferredFileExtension: String?
+    ) -> String? {
+        guard data.count > 128, data.count < 12_000_000 else { return nil }
+        guard NSImage(data: data) != nil else { return nil }
+
+        let fileExtension = normalizedImageFileExtension(preferredFileExtension)
+        let filename = "\(bookmarkID.uuidString).\(fileExtension)"
+        let relativePath = "\(thumbnailsDirectoryName)/\(filename)"
+        let fileURL = directoryURL.appendingPathComponent(relativePath)
+
+        do {
+            try FileManager.default.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
+            deleteExistingThumbnailFiles(for: bookmarkID)
+            try data.write(to: fileURL, options: .atomic)
+            return relativePath
+        } catch {
+            return nil
+        }
+    }
+
+    private func applyManualThumbnail(
+        for bookmarkID: UUID,
+        relativePath: String,
+        remoteURLString: String?
+    ) -> Bool {
+        cancelEnrichment(for: bookmarkID)
+
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+
+        var bookmark = bookmarks[index]
+        bookmark.thumbnailRelativePath = relativePath
+        bookmark.thumbnailRemoteURLString = remoteURLString
+        bookmark.metadataUpdatedAt = Date()
+        bookmark.updatedAt = Date()
+        bookmark.isEnriching = false
+
+        bookmarks[index] = bookmark
+        persist()
+        return true
+    }
+
     private func deleteExistingThumbnailFiles(for bookmarkID: UUID) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: thumbnailsDirectoryURL, includingPropertiesForKeys: nil) else {
@@ -464,14 +611,31 @@ final class BookmarksStorage: ObservableObject {
             if contentType.contains("webp") { return "webp" }
             if contentType.contains("gif") { return "gif" }
             if contentType.contains("heic") { return "heic" }
+            if contentType.contains("icon") || contentType.contains("ico") { return "ico" }
         }
 
         let ext = remoteURL.pathExtension.lowercased()
-        if ["png", "jpg", "jpeg", "webp", "gif", "heic", "avif"].contains(ext) {
+        if ["png", "jpg", "jpeg", "webp", "gif", "heic", "avif", "ico"].contains(ext) {
             return ext == "jpeg" ? "jpg" : ext
         }
 
         return "jpg"
+    }
+
+    private func normalizedImageFileExtension(_ rawExtension: String?) -> String {
+        guard let rawExtension else { return "png" }
+        let normalized = rawExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch normalized {
+        case "jpg", "jpeg":
+            return "jpg"
+        case "png", "webp", "gif", "heic", "avif", "bmp", "tif", "tiff", "ico":
+            return normalized == "tif" ? "tiff" : normalized
+        default:
+            return "png"
+        }
     }
 
     private func copyThumbnailAssetsIfNeeded(from previousDirectoryURL: URL, bookmarks: [Bookmark]) {
@@ -590,6 +754,15 @@ private struct BookmarkEnrichmentPayload {
     let thumbnailURL: URL?
 }
 
+private enum EnrichmentRetryThresholds {
+    static let firstHour: TimeInterval = 60 * 60
+    static let socialEarly: TimeInterval = 60 * 5
+    static let socialSteady: TimeInterval = 60 * 45
+    static let noThumbnailEarly: TimeInterval = 60 * 10
+    static let noThumbnailSteady: TimeInterval = 60 * 60 * 3
+    static let defaultSteady: TimeInterval = 60 * 60 * 6
+}
+
 private enum BookmarkMetadataParser {
     private static let titleRegex = try? NSRegularExpression(
         pattern: #"(?is)<title\b[^>]*>(.*?)</title>"#,
@@ -599,24 +772,33 @@ private enum BookmarkMetadataParser {
         pattern: #"(?is)<meta\b[^>]*>"#,
         options: []
     )
+    private static let linkRegex = try? NSRegularExpression(
+        pattern: #"(?is)<link\b[^>]*>"#,
+        options: []
+    )
+    private static let scriptRegex = try? NSRegularExpression(
+        pattern: #"(?is)<script\b([^>]*)>(.*?)</script>"#,
+        options: []
+    )
     private static let attributeRegex = try? NSRegularExpression(
         pattern: #"([A-Za-z_:][A-Za-z0-9_:\-\.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#,
         options: []
     )
 
     static func parse(html: String, pageURL: URL) -> BookmarkEnrichmentPayload? {
-        let candidates = [
+        let titleCandidates = [
             metaContent(html: html, keys: [("property", "og:title")]),
             metaContent(html: html, keys: [("name", "twitter:title")]),
             metaContent(html: html, keys: [("name", "title")]),
+            jsonLDTitle(html: html),
             titleTagContent(html: html),
         ]
 
-        let title = candidates
+        let title = titleCandidates
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
 
-        let imageRaw = [
+        let imageMetaRaw = [
             metaContent(html: html, keys: [("property", "og:image")]),
             metaContent(html: html, keys: [("name", "twitter:image")]),
             metaContent(html: html, keys: [("name", "twitter:image:src")]),
@@ -624,7 +806,11 @@ private enum BookmarkMetadataParser {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
 
-        let thumbnailURL = imageRaw.flatMap { resolvedURL(from: $0, baseURL: pageURL) }
+        let thumbnailURL =
+            imageMetaRaw.flatMap { resolvedRemoteURL(from: $0, baseURL: pageURL) }
+            ?? jsonLDImageURL(html: html, pageURL: pageURL)
+            ?? siteSpecificThumbnailURL(html: html, pageURL: pageURL)
+            ?? faviconURL(html: html, pageURL: pageURL)
 
         guard title != nil || thumbnailURL != nil else { return nil }
         return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL)
@@ -664,6 +850,246 @@ private enum BookmarkMetadataParser {
         return nil
     }
 
+    private static func jsonLDTitle(html: String) -> String? {
+        for object in jsonLDObjects(fromHTML: html) {
+            if let title = firstJSONLDString(
+                forKeys: ["headline", "name", "title"],
+                in: object
+            ) {
+                return title
+            }
+        }
+        return nil
+    }
+
+    private static func jsonLDImageURL(html: String, pageURL: URL) -> URL? {
+        for object in jsonLDObjects(fromHTML: html) {
+            if let imageRaw = firstJSONLDString(
+                forKeys: ["image", "thumbnailUrl", "thumbnailURL", "contentUrl", "primaryImageOfPage", "associatedMedia"],
+                in: object
+            ),
+               let imageURL = resolvedRemoteURL(from: imageRaw, baseURL: pageURL) {
+                return imageURL
+            }
+        }
+        return nil
+    }
+
+    private static func jsonLDObjects(fromHTML html: String) -> [Any] {
+        guard let scriptRegex else { return [] }
+        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        let matches = scriptRegex.matches(in: html, options: [], range: nsRange)
+        guard !matches.isEmpty else { return [] }
+
+        var results: [Any] = []
+        results.reserveCapacity(matches.count)
+
+        for match in matches {
+            guard let attrsRange = Range(match.range(at: 1), in: html),
+                  let bodyRange = Range(match.range(at: 2), in: html) else {
+                continue
+            }
+
+            let attributes = parseAttributes(String(html[attrsRange]))
+            guard let scriptType = attributes["type"]?.lowercased(),
+                  scriptType.contains("application/ld+json") else {
+                continue
+            }
+
+            let scriptBody = String(html[bodyRange])
+            guard let object = parseJSONLDObject(from: scriptBody) else { continue }
+            results.append(object)
+        }
+
+        return results
+    }
+
+    private static func parseJSONLDObject(from raw: String) -> Any? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let candidates = jsonLDCandidates(from: trimmed)
+        for candidate in candidates {
+            guard let data = candidate.data(using: .utf8) else { continue }
+            if let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+                return object
+            }
+        }
+
+        return nil
+    }
+
+    private static func jsonLDCandidates(from raw: String) -> [String] {
+        var normalized = raw
+            .replacingOccurrences(of: "<!--", with: "")
+            .replacingOccurrences(of: "-->", with: "")
+            .replacingOccurrences(of: "<![CDATA[", with: "")
+            .replacingOccurrences(of: "]]>", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if normalized.hasSuffix(";") {
+            normalized.removeLast()
+            normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return [raw, normalized]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func firstJSONLDString(forKeys keys: [String], in object: Any) -> String? {
+        for key in keys {
+            var values: [Any] = []
+            collectJSONValues(forKey: key, from: object, into: &values)
+            for value in values {
+                if let stringValue = stringFromJSONValue(value), !stringValue.isEmpty {
+                    return decodeEscapedURLString(stringValue)
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func collectJSONValues(forKey key: String, from object: Any, into values: inout [Any]) {
+        if let dictionary = object as? [String: Any] {
+            for (candidateKey, value) in dictionary {
+                if candidateKey.lowercased() == key.lowercased() {
+                    values.append(value)
+                }
+                collectJSONValues(forKey: key, from: value, into: &values)
+            }
+            return
+        }
+
+        if let array = object as? [Any] {
+            for item in array {
+                collectJSONValues(forKey: key, from: item, into: &values)
+            }
+        }
+    }
+
+    private static func stringFromJSONValue(_ value: Any) -> String? {
+        if let string = value as? String {
+            return string
+        }
+
+        if let array = value as? [Any] {
+            for item in array {
+                if let resolved = stringFromJSONValue(item) {
+                    return resolved
+                }
+            }
+            return nil
+        }
+
+        if let dictionary = value as? [String: Any] {
+            let prioritizedKeys = ["url", "contentUrl", "thumbnailUrl", "thumbnailURL"]
+            for key in prioritizedKeys {
+                if let nested = dictionary[key],
+                   let resolved = stringFromJSONValue(nested) {
+                    return resolved
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func siteSpecificThumbnailURL(html: String, pageURL: URL) -> URL? {
+        let host = normalizedHost(for: pageURL)
+        if host.contains("reddit.com") {
+            return redditThumbnailURL(html: html, pageURL: pageURL)
+        }
+        if host == "x.com" || host == "twitter.com" {
+            return xThumbnailURL(html: html, pageURL: pageURL)
+        }
+        return nil
+    }
+
+    private static func redditThumbnailURL(html: String, pageURL: URL) -> URL? {
+        let patterns = [
+            #"(?is)"url_overridden_by_dest"\s*:\s*"([^"]+)""#,
+            #"(?is)"preview"\s*:\s*\{[\s\S]{0,5000}?"source"\s*:\s*\{[\s\S]{0,1000}?"url"\s*:\s*"([^"]+)""#,
+            #"(?is)"thumbnail"\s*:\s*"(https?:\\\/\\\/(?:i|preview)\.redd\.it[^"]+)""#,
+            #"(?is)(https?:\\/\\/(?:i|preview)\.redd\.it\\/[^"'\\s<]+)"#,
+            #"(?is)(https?://(?:i|preview)\.redd\.it/[^"'\\s<]+)"#,
+        ]
+
+        for pattern in patterns {
+            if let raw = firstRegexCapture(pattern: pattern, in: html),
+               let resolved = resolvedRemoteURL(from: raw, baseURL: pageURL) {
+                return resolved
+            }
+        }
+
+        return nil
+    }
+
+    private static func xThumbnailURL(html: String, pageURL: URL) -> URL? {
+        let patterns = [
+            #"(?is)(https?:\\/\\/pbs\.twimg\.com\\/(?:media|amplify_video_thumb)\\/[^"'\\s<]+)"#,
+            #"(?is)(https?://pbs\.twimg\.com/(?:media|amplify_video_thumb)/[^"'\\s<]+)"#,
+        ]
+
+        for pattern in patterns {
+            if let raw = firstRegexCapture(pattern: pattern, in: html),
+               let resolved = resolvedRemoteURL(from: raw, baseURL: pageURL) {
+                return resolved
+            }
+        }
+
+        return nil
+    }
+
+    private static func faviconURL(html: String, pageURL: URL) -> URL? {
+        guard let linkRegex else { return defaultFaviconURL(for: pageURL) }
+        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        let matches = linkRegex.matches(in: html, options: [], range: nsRange)
+
+        var bestCandidate: (priority: Int, url: URL)?
+        for match in matches {
+            guard let range = Range(match.range, in: html) else { continue }
+            let tag = String(html[range])
+            let attributes = parseAttributes(tag)
+            guard let href = attributes["href"], !href.isEmpty else { continue }
+
+            let rel = attributes["rel"]?.lowercased() ?? ""
+            let priority: Int
+            if rel.contains("apple-touch-icon") {
+                priority = 0
+            } else if rel.contains("shortcut icon") {
+                priority = 1
+            } else if rel.contains("icon") || rel.contains("mask-icon") {
+                priority = 2
+            } else {
+                continue
+            }
+
+            guard let resolved = resolvedRemoteURL(from: href, baseURL: pageURL) else { continue }
+            if let currentBest = bestCandidate {
+                if priority < currentBest.priority {
+                    bestCandidate = (priority, resolved)
+                }
+            } else {
+                bestCandidate = (priority, resolved)
+            }
+        }
+
+        return bestCandidate?.url ?? defaultFaviconURL(for: pageURL)
+    }
+
+    private static func defaultFaviconURL(for pageURL: URL) -> URL? {
+        guard var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              (scheme == "http" || scheme == "https") else {
+            return nil
+        }
+        components.path = "/favicon.ico"
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
     private static func parseAttributes(_ tag: String) -> [String: String] {
         guard let attributeRegex else { return [:] }
         let nsRange = NSRange(tag.startIndex..<tag.endIndex, in: tag)
@@ -694,11 +1120,76 @@ private enum BookmarkMetadataParser {
     }
 
     private static func resolvedURL(from rawValue: String, baseURL: URL) -> URL? {
-        let decoded = decodeHTMLEntities(rawValue)
+        let decoded = decodeEscapedURLString(rawValue)
         if let absolute = URL(string: decoded), absolute.scheme != nil {
             return absolute
         }
         return URL(string: decoded, relativeTo: baseURL)?.absoluteURL
+    }
+
+    private static func resolvedRemoteURL(from rawValue: String, baseURL: URL) -> URL? {
+        guard let resolved = resolvedURL(from: rawValue, baseURL: baseURL),
+              let scheme = resolved.scheme?.lowercased(),
+              (scheme == "http" || scheme == "https") else {
+            return nil
+        }
+        return resolved
+    }
+
+    private static func normalizedHost(for pageURL: URL) -> String {
+        let host = pageURL.host?.lowercased() ?? ""
+        if host.hasPrefix("www.") {
+            return String(host.dropFirst(4))
+        }
+        if host.hasPrefix("m.") {
+            return String(host.dropFirst(2))
+        }
+        return host
+    }
+
+    private static func firstRegexCapture(pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        ) else {
+            return nil
+        }
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: nsRange) else {
+            return nil
+        }
+
+        let captureRange: NSRange
+        if match.numberOfRanges > 1 {
+            captureRange = match.range(at: 1)
+        } else {
+            captureRange = match.range(at: 0)
+        }
+
+        guard let range = Range(captureRange, in: text) else {
+            return nil
+        }
+        return String(text[range])
+    }
+
+    private static func decodeEscapedURLString(_ value: String) -> String {
+        var decoded = decodeHTMLEntities(value)
+        decoded = decoded
+            .replacingOccurrences(of: #"\\/"#, with: "/", options: .regularExpression)
+            .replacingOccurrences(of: "\\u002F", with: "/")
+            .replacingOccurrences(of: "\\u003A", with: ":")
+            .replacingOccurrences(of: "\\u003D", with: "=")
+            .replacingOccurrences(of: "\\u0026", with: "&")
+            .replacingOccurrences(of: "\\u0025", with: "%")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if decoded.hasPrefix("\""), decoded.hasSuffix("\""), decoded.count > 1 {
+            decoded.removeFirst()
+            decoded.removeLast()
+        }
+
+        return decoded
     }
 
     private static func decodeHTMLEntities(_ value: String) -> String {
