@@ -43,6 +43,16 @@ struct PaletteContentArea: View {
     var onNoteClick: ((Note) -> Void)? = nil
     var onNewNote: (() -> Void)? = nil
     var onDeleteNotes: (([Note]) -> Void)? = nil
+    // Bookmarks
+    var bookmarks: [Bookmark] = []
+    var bookmarkDisplayMode: BookmarkDisplayMode = .masonry
+    var onBookmarkDisplayModeChange: ((BookmarkDisplayMode) -> Void)? = nil
+    var onBookmarkClick: ((Bookmark) -> Void)? = nil
+    var onDeleteBookmark: ((Bookmark) -> Void)? = nil
+    var onAddBookmark: ((String, String?) -> Bool)? = nil
+    var onCaptureBookmarkFromActiveBrowser: (() -> Bool)? = nil
+    var onAddBookmarkFromPasteboard: (() -> Bool)? = nil
+    var onOpenBookmarksWindow: (() -> Void)? = nil
     var onFocusTileGroup: ((TileGroupDisplay) -> Void)? = nil
     var onPinTileGroup: ((UUID) -> Void)? = nil
     var onBreakApartTileGroup: ((UUID) -> Void)? = nil
@@ -86,6 +96,11 @@ struct PaletteContentArea: View {
     private func searchResultIndex(for note: Note) -> Int? {
         guard let noteIndex = notes.firstIndex(where: { $0.id == note.id }) else { return nil }
         return windowResultCount + noteIndex
+    }
+
+    private func searchResultIndex(for bookmark: Bookmark) -> Int? {
+        guard let bookmarkIndex = bookmarks.firstIndex(where: { $0.id == bookmark.id }) else { return nil }
+        return windowResultCount + notes.count + bookmarkIndex
     }
 
     private var selectedNotes: [Note] {
@@ -141,7 +156,7 @@ struct PaletteContentArea: View {
                     case .notes:
                         notesContent
                     case .bookmarks:
-                        comingSoonContent("Bookmarks")
+                        bookmarksContent
                     }
                 }
             }
@@ -180,8 +195,9 @@ struct PaletteContentArea: View {
     @ViewBuilder
     private var searchResultsContent: some View {
         let hasNoteResults = !notes.isEmpty
+        let hasBookmarkResults = !bookmarks.isEmpty
 
-        if !hasMatchingWindowResults && !hasNoteResults {
+        if !hasMatchingWindowResults && !hasNoteResults && !hasBookmarkResults {
             emptyState("No matching results", icon: "magnifyingglass")
         } else {
             LazyVStack(alignment: .leading, spacing: Spacing.md) {
@@ -200,6 +216,17 @@ struct PaletteContentArea: View {
                     searchSectionHeader(title: "Notes", icon: "note.text")
                     searchNotesContent
                 }
+
+                if hasBookmarkResults {
+                    if hasMatchingWindowResults || hasNoteResults {
+                        Divider()
+                            .padding(.horizontal, Spacing.sm)
+                            .opacity(0.3)
+                    }
+
+                    searchSectionHeader(title: "Bookmarks", icon: "bookmark")
+                    searchBookmarksContent
+                }
             }
         }
     }
@@ -215,6 +242,21 @@ struct PaletteContentArea: View {
                     searchSnippet: noteSearchSnippets[note.id],
                     isKeyboardFocused: focusedContentIndex != nil && noteFlatIndex == focusedContentIndex,
                     onTap: { onNoteClick?(note) }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var searchBookmarksContent: some View {
+        LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(bookmarks) { bookmark in
+                let bookmarkFlatIndex = searchResultIndex(for: bookmark)
+                PaletteBookmarkRow(
+                    bookmark: bookmark,
+                    searchText: searchText,
+                    isKeyboardFocused: focusedContentIndex != nil && bookmarkFlatIndex == focusedContentIndex,
+                    onTap: { onBookmarkClick?(bookmark) }
                 )
             }
         }
@@ -356,6 +398,27 @@ struct PaletteContentArea: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var bookmarksContent: some View {
+        BookmarksBrowserView(
+            bookmarks: bookmarks,
+            displayMode: Binding(
+                get: { bookmarkDisplayMode },
+                set: { onBookmarkDisplayModeChange?($0) }
+            ),
+            searchText: searchText,
+            showsOpenWindowButton: true,
+            onOpenWindow: { onOpenBookmarksWindow?() },
+            onOpenBookmark: { onBookmarkClick?($0) },
+            onDeleteBookmark: { onDeleteBookmark?($0) },
+            onAddBookmark: { url, title in
+                onAddBookmark?(url, title) ?? false
+            },
+            onCaptureFromActiveBrowser: { onCaptureBookmarkFromActiveBrowser?() ?? false },
+            onAddFromPasteboard: { onAddBookmarkFromPasteboard?() ?? false }
+        )
     }
 
     private func enterNoteSelectionMode() {
@@ -568,11 +631,6 @@ struct PaletteContentArea: View {
                 }
             }
         }
-    }
-
-    @ViewBuilder
-    private func comingSoonContent(_ feature: String) -> some View {
-        emptyState("\(feature) coming soon", icon: "clock")
     }
 
     @ViewBuilder
@@ -932,6 +990,74 @@ struct PaletteNoteRow: View {
                 isHovering = false
                 return
             }
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Bookmark Row
+
+struct PaletteBookmarkRow: View {
+    let bookmark: Bookmark
+    var searchText: String = ""
+    var isKeyboardFocused: Bool = false
+    let onTap: () -> Void
+
+    @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    private var isFocused: Bool {
+        isHovering || isKeyboardFocused
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 11 * textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 16 * textScale)
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HighlightedText(bookmark.title, highlight: searchText)
+                        .font(.system(size: 13 * textScale))
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    HighlightedText(bookmark.hostDisplay, highlight: searchText)
+                        .font(.system(size: 10 * textScale))
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: Spacing.sm)
+
+                if isHovering {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10 * textScale))
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isFocused ? Color.white.opacity(0.08) : Color.clear)
+            )
+            .overlay(
+                Group {
+                    if isKeyboardFocused {
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .strokeBorder(CiderColors.controlAccent.opacity(0.6), lineWidth: 1)
+                    }
+                }
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
             withAnimation(reduceMotion ? .none : .snappy) {
                 isHovering = hovering
             }

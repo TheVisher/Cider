@@ -29,6 +29,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notesPanelPositionStore = NotesPanelPositionStore.shared
     private var notesPanelRestoreFrame: NSRect?
 
+    // Bookmarks
+    private var bookmarksPanel: BookmarksPanel?
+    private var bookmarksViewModel: BookmarksViewModel?
+    private var bookmarksHotkeyDetector: BookmarksHotkeyDetector?
+    private let bookmarksPanelPositionStore = BookmarksPanelPositionStore.shared
+    private var bookmarksPanelRestoreFrame: NSRect?
+    private var bookmarkCaptureToastPanel: BookmarkCaptureToastPanel?
+    private var bookmarkCaptureToastHideWorkItem: DispatchWorkItem?
+    private let bookmarkClipboardReviewToastModel = BookmarkClipboardReviewToastModel()
+    private var bookmarkClipboardReviewTimer: Timer?
+    private var bookmarkClipboardReviewIsHovering = false
+    private var bookmarkClipboardReviewRemaining: TimeInterval = BookmarksToastDesign.reviewAutoHideDuration
+    private var bookmarkClipboardReviewLastTick: Date?
+
     // Tile Zone Overlay
     private var tileZoneOverlayPanels: [TileZoneOverlayPanel] = []
     private var dragMouseMonitor: Any?
@@ -58,15 +72,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureWindowCycling()
         configureSettings()
         configureNotes()
+        configureBookmarks()
         configureStatusItem()
         observeCommandPaletteNotifications()
         observeSettingsNotifications()
         observeNotesNotifications()
+        observeBookmarksNotifications()
         observeConfigChanges()
+        observeWorkspaceApplicationActivation()
         startDoubleTapDetection()
         startOptionTabDetection()
         startTileHotkeyDetection()
         startNotesHotkeyDetection()
+        startBookmarksHotkeyDetection()
 
         // Initialize DynamicTileManager (triggers screen change subscription)
         _ = DynamicTileManager.shared
@@ -77,6 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         flushNotesDraftIfNeeded()
+        stopBookmarkClipboardReviewTimer()
+        bookmarkCaptureToastHideWorkItem?.cancel()
+        bookmarkCaptureToastPanel?.orderOut(nil)
 
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
@@ -176,11 +197,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             notesHotkeyDetector?.setEnabled(false)
         }
 
+        // Handle bookmarks hotkeys enabled/disabled
+        if config.enableBookmarksHotkey || config.enableBookmarksCaptureHotkey {
+            if bookmarksHotkeyDetector == nil {
+                startBookmarksHotkeyDetection()
+            } else {
+                bookmarksHotkeyDetector?.setEnabled(true)
+            }
+        } else {
+            bookmarksHotkeyDetector?.setEnabled(false)
+        }
+
         updateGlobalHotkeyEnablement()
 
         // Update notes directory if changed
         let expandedDir = NSString(string: config.notesDirectory).expandingTildeInPath
         NotesStorage.shared.updateDirectory(to: expandedDir)
+
+        // Update bookmarks directory if changed
+        let expandedBookmarksDir = NSString(string: config.bookmarksDirectory).expandingTildeInPath
+        BookmarksStorage.shared.updateDirectory(to: expandedBookmarksDir)
+
+        // Toggle automatic bookmark capture from copied URLs
+        BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
+    }
+
+    private func observeWorkspaceApplicationActivation() {
+        ActiveBrowserCaptureService.registerActivatedApplication(NSWorkspace.shared.frontmostApplication)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .sink { notification in
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                ActiveBrowserCaptureService.registerActivatedApplication(app)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Command Palette
@@ -831,12 +881,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "notesVisible=\(notesVisible) " +
             "optionTabEnabled=\(config.enableOptionTabCycling) " +
             "tileHotkeysEnabled=\(config.enableTilingHotkeys) " +
-            "notesHotkeyEnabled=\(config.enableNotesHotkey)"
+            "notesHotkeyEnabled=\(config.enableNotesHotkey) " +
+            "bookmarksHotkeyEnabled=\(config.enableBookmarksHotkey) " +
+            "bookmarksCaptureHotkeyEnabled=\(config.enableBookmarksCaptureHotkey)"
         )
 
         optionTabDetector?.setEnabled(config.enableOptionTabCycling)
         tileHotkeyDetector?.setEnabled(config.enableTilingHotkeys)
         notesHotkeyDetector?.setEnabled(config.enableNotesHotkey)
+        bookmarksHotkeyDetector?.setEnabled(config.enableBookmarksHotkey || config.enableBookmarksCaptureHotkey)
     }
 
     private func persistCurrentNotePanelFrameIfNeeded() {
@@ -895,6 +948,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleTileHotkeyAction(_ action: TileAction) {
+        if routeTileActionToBookmarksPanelIfNeeded(action) {
+            return
+        }
         if routeTileActionToNotesPanelIfNeeded(action) {
             return
         }
@@ -911,6 +967,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .tile(let position):
             notesPanelRestoreFrame = baseFrame
+            if let shrunk = progressiveHorizontalShrinkFrameIfNeeded(
+                for: baseFrame,
+                position: position,
+                visibleFrame: monitor.visibleFrame,
+                minimumWidth: NotesDesign.panelMinWidth
+            ) {
+                applyFrameToNotesPanel(shrunk, preserveCollapsedState: panel.isCollapsed)
+                return true
+            }
             let target = WindowManager.calculateTileFrameStatic(position: position, on: monitor)
             applyFrameToNotesPanel(NSRect(x: target.minX, y: target.minY, width: target.width, height: target.height),
                                    preserveCollapsedState: panel.isCollapsed)
@@ -951,6 +1016,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         return panel.frame.contains(NSEvent.mouseLocation)
+    }
+
+    private func routeTileActionToBookmarksPanelIfNeeded(_ action: TileAction) -> Bool {
+        guard let panel = bookmarksPanel, panel.isVisible else { return false }
+        guard shouldRouteTileActionToBookmarksPanel(panel: panel) else { return false }
+
+        let baseFrame = panel.persistableFrame
+        guard let monitor = monitorForNotesPanelFrame(baseFrame) else { return false }
+
+        switch action {
+        case .tile(let position):
+            bookmarksPanelRestoreFrame = baseFrame
+            if let shrunk = progressiveHorizontalShrinkFrameIfNeeded(
+                for: baseFrame,
+                position: position,
+                visibleFrame: monitor.visibleFrame,
+                minimumWidth: BookmarksDesign.panelMinWidth
+            ) {
+                applyFrameToBookmarksPanel(shrunk, preserveCollapsedState: panel.isCollapsed)
+                return true
+            }
+            let target = WindowManager.calculateTileFrameStatic(position: position, on: monitor)
+            applyFrameToBookmarksPanel(
+                NSRect(x: target.minX, y: target.minY, width: target.width, height: target.height),
+                preserveCollapsedState: panel.isCollapsed
+            )
+            return true
+
+        case .larger:
+            bookmarksPanelRestoreFrame = baseFrame
+            let target = resizedNotesPanelFrame(baseFrame, visibleFrame: monitor.visibleFrame, direction: .larger)
+            applyFrameToBookmarksPanel(target, preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .smaller:
+            bookmarksPanelRestoreFrame = baseFrame
+            let target = resizedNotesPanelFrame(baseFrame, visibleFrame: monitor.visibleFrame, direction: .smaller)
+            applyFrameToBookmarksPanel(target, preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .restore:
+            guard let restoreFrame = bookmarksPanelRestoreFrame else { return true }
+            applyFrameToBookmarksPanel(restoreFrame, preserveCollapsedState: panel.isCollapsed)
+            return true
+
+        case .nextDisplay:
+            bookmarksPanelRestoreFrame = baseFrame
+            moveBookmarksPanelToAdjacentDisplay(direction: 1)
+            return true
+
+        case .previousDisplay:
+            bookmarksPanelRestoreFrame = baseFrame
+            moveBookmarksPanelToAdjacentDisplay(direction: -1)
+            return true
+        }
+    }
+
+    private func shouldRouteTileActionToBookmarksPanel(panel: BookmarksPanel) -> Bool {
+        if panel.isKeyWindow || NSApp.keyWindow === panel || NSApp.mainWindow === panel {
+            return true
+        }
+
+        return panel.frame.contains(NSEvent.mouseLocation)
+    }
+
+    private func progressiveHorizontalShrinkFrameIfNeeded(
+        for frame: NSRect,
+        position: TilePosition,
+        visibleFrame: CGRect,
+        minimumWidth: CGFloat
+    ) -> NSRect? {
+        let edgeTolerance: CGFloat = 6
+        let step = max(WindowManager.windowPadding, Spacing.md)
+        let clampedMinWidth = max(minimumWidth, 1)
+
+        switch position {
+        case .left:
+            let anchoredLeft = abs(frame.minX - visibleFrame.minX) <= edgeTolerance
+            guard anchoredLeft else { return nil }
+            let newWidth = max(clampedMinWidth, frame.width - step)
+            guard newWidth < frame.width - 0.5 else { return frame }
+            return NSRect(x: frame.minX, y: frame.minY, width: newWidth, height: frame.height)
+
+        case .right:
+            let anchoredRight = abs(frame.maxX - visibleFrame.maxX) <= edgeTolerance
+            guard anchoredRight else { return nil }
+            let newWidth = max(clampedMinWidth, frame.width - step)
+            guard newWidth < frame.width - 0.5 else { return frame }
+            let newX = frame.maxX - newWidth
+            return NSRect(x: newX, y: frame.minY, width: newWidth, height: frame.height)
+
+        default:
+            return nil
+        }
     }
 
     private func applyFrameToNotesPanel(_ frame: NSRect, preserveCollapsedState: Bool) {
@@ -1022,6 +1181,362 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         return bestMonitor ?? monitors.first
+    }
+
+    // MARK: - Bookmarks
+
+    private func configureBookmarks() {
+        let viewModel = BookmarksViewModel()
+        self.bookmarksViewModel = viewModel
+
+        let panel = BookmarksPanel()
+        self.bookmarksPanel = panel
+
+        updateBookmarksPanelView()
+
+        let config = CiderConfig.load()
+        BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
+    }
+
+    private func updateBookmarksPanelView() {
+        guard let panel = bookmarksPanel, let viewModel = bookmarksViewModel else { return }
+
+        let bookmarksView = BookmarksPanelView(viewModel: viewModel)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        let hostingView = BookmarksPanelHostingView(rootView: bookmarksView)
+        panel.contentView = hostingView
+
+        panel.setContentSize(NSSize(
+            width: BookmarksDesign.panelContentWidth,
+            height: BookmarksDesign.panelContentHeight
+        ))
+    }
+
+    private func startBookmarksHotkeyDetection() {
+        let config = CiderConfig.load()
+        guard config.enableBookmarksHotkey || config.enableBookmarksCaptureHotkey else { return }
+
+        bookmarksHotkeyDetector = BookmarksHotkeyDetector(
+            onToggle: { [weak self] in
+                guard CiderConfig.load().enableBookmarksHotkey else { return }
+                self?.toggleBookmarksPanel()
+            },
+            onCapture: { [weak self] in
+                guard CiderConfig.load().enableBookmarksCaptureHotkey else { return }
+                self?.captureBookmarkFromHotkey()
+            }
+        )
+        bookmarksHotkeyDetector?.start()
+    }
+
+    private func observeBookmarksNotifications() {
+        NotificationCenter.default.publisher(for: .toggleBookmarks)
+            .sink { [weak self] _ in
+                self?.toggleBookmarksPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .showBookmarks)
+            .sink { [weak self] _ in
+                self?.showBookmarksPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .dismissBookmarks)
+            .sink { [weak self] _ in
+                self?.hideBookmarksPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .toggleBookmarksCollapse)
+            .sink { [weak self] _ in
+                self?.toggleBookmarksCollapsed()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .showBookmarkCaptureToast)
+            .sink { [weak self] notification in
+                let message = notification.userInfo?["message"] as? String ?? "Bookmark updated"
+                let isSuccess = notification.userInfo?["isSuccess"] as? Bool ?? true
+                self?.showBookmarkCaptureToast(message: message, isSuccess: isSuccess)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .showBookmarkClipboardReviewToast)
+            .sink { [weak self] notification in
+                guard let urlString = notification.userInfo?["urlString"] as? String else { return }
+                self?.showBookmarkClipboardReviewToast(urlString: urlString)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func toggleBookmarksPanel() {
+        guard let panel = bookmarksPanel else { return }
+
+        if panel.isVisible {
+            hideBookmarksPanel()
+        } else {
+            showBookmarksPanel()
+        }
+    }
+
+    private func showBookmarksPanel() {
+        guard let panel = bookmarksPanel, let viewModel = bookmarksViewModel else { return }
+
+        if panel.isVisible {
+            persistCurrentBookmarksPanelFrameIfNeeded()
+        }
+
+        viewModel.show()
+        viewModel.setCollapsed(false)
+        panel.setCollapsed(false, animated: false)
+
+        let config = CiderConfig.load()
+        if config.rememberBookmarksPanelPosition,
+           let savedFrame = bookmarksPanelPositionStore.frame() {
+            panel.show(frame: savedFrame)
+        } else {
+            panel.showAtMouse()
+        }
+
+        updateGlobalHotkeyEnablement()
+        optionTabDetector?.reclaimPriority()
+    }
+
+    private func hideBookmarksPanel() {
+        persistCurrentBookmarksPanelFrameIfNeeded()
+        bookmarksPanel?.orderOut(nil)
+        bookmarksViewModel?.isVisible = false
+        updateGlobalHotkeyEnablement()
+    }
+
+    private func toggleBookmarksCollapsed() {
+        guard let panel = bookmarksPanel, panel.isVisible else { return }
+        panel.toggleCollapsed()
+        bookmarksViewModel?.setCollapsed(panel.isCollapsed)
+        persistCurrentBookmarksPanelFrameIfNeeded()
+    }
+
+    private func captureBookmarkFromHotkey() {
+        guard let viewModel = bookmarksViewModel else { return }
+        _ = viewModel.captureBookmarkFromActiveBrowserOrClipboard()
+    }
+
+    private func persistCurrentBookmarksPanelFrameIfNeeded() {
+        let config = CiderConfig.load()
+        guard config.rememberBookmarksPanelPosition else { return }
+        guard let panel = bookmarksPanel, panel.isVisible else { return }
+        bookmarksPanelPositionStore.setFrame(panel.persistableFrame)
+    }
+
+    private func applyFrameToBookmarksPanel(_ frame: NSRect, preserveCollapsedState: Bool) {
+        guard let panel = bookmarksPanel else { return }
+
+        panel.show(frame: frame)
+        if preserveCollapsedState {
+            panel.setCollapsed(true, animated: false)
+        }
+
+        bookmarksViewModel?.setCollapsed(panel.isCollapsed)
+        persistCurrentBookmarksPanelFrameIfNeeded()
+    }
+
+    private func moveBookmarksPanelToAdjacentDisplay(direction: Int) {
+        guard let panel = bookmarksPanel, panel.isVisible else { return }
+        guard let currentMonitor = monitorForNotesPanelFrame(panel.persistableFrame) else { return }
+
+        let monitors = MonitorManager.shared.monitors
+        guard monitors.count > 1 else { return }
+        guard let currentIndex = monitors.firstIndex(where: { $0.id == currentMonitor.id }) else { return }
+
+        let nextIndex = (currentIndex + direction + monitors.count) % monitors.count
+        let targetMonitor = monitors[nextIndex]
+        let sourceVisible = currentMonitor.visibleFrame
+        let targetVisible = targetMonitor.visibleFrame
+        let frame = panel.persistableFrame
+
+        let sourceWidthRange = max(sourceVisible.width - frame.width, 1)
+        let sourceHeightRange = max(sourceVisible.height - frame.height, 1)
+        let relativeX = (frame.minX - sourceVisible.minX) / sourceWidthRange
+        let relativeY = (frame.minY - sourceVisible.minY) / sourceHeightRange
+
+        let targetWidthRange = max(targetVisible.width - frame.width, 0)
+        let targetHeightRange = max(targetVisible.height - frame.height, 0)
+        let targetX = targetVisible.minX + targetWidthRange * min(max(relativeX, 0), 1)
+        let targetY = targetVisible.minY + targetHeightRange * min(max(relativeY, 0), 1)
+        let targetFrame = NSRect(x: targetX, y: targetY, width: frame.width, height: frame.height)
+
+        applyFrameToBookmarksPanel(targetFrame, preserveCollapsedState: panel.isCollapsed)
+    }
+
+    private func showBookmarkCaptureToast(message: String, isSuccess: Bool) {
+        stopBookmarkClipboardReviewTimer()
+        bookmarkClipboardReviewIsHovering = false
+        bookmarkClipboardReviewToastModel.progress = 1
+        bookmarkCaptureToastHideWorkItem?.cancel()
+        bookmarkCaptureToastHideWorkItem = nil
+
+        let panel = resolveBookmarkCaptureToastPanel()
+
+        let toastView = BookmarkCaptureToastView(message: message, isSuccess: isSuccess)
+        let hostingView = BookmarkCaptureToastHostingView(rootView: toastView)
+        panel.contentView = hostingView
+        showBookmarkToastPanel(panel, contentHeight: BookmarksToastDesign.height)
+
+        let hideWork = DispatchWorkItem { [weak self, weak panel] in
+            panel?.orderOut(nil)
+            self?.bookmarkCaptureToastHideWorkItem = nil
+        }
+        bookmarkCaptureToastHideWorkItem = hideWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + BookmarksToastDesign.autoHideDuration, execute: hideWork)
+    }
+
+    private func showBookmarkClipboardReviewToast(urlString: String) {
+        stopBookmarkClipboardReviewTimer()
+        bookmarkClipboardReviewIsHovering = false
+        bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+        bookmarkClipboardReviewToastModel.progress = 1
+        bookmarkCaptureToastHideWorkItem?.cancel()
+        bookmarkCaptureToastHideWorkItem = nil
+
+        guard let normalized = BookmarksStorage.shared.previewNormalizedURLString(from: urlString),
+              let url = URL(string: normalized) else {
+            return
+        }
+
+        let panel = resolveBookmarkCaptureToastPanel()
+        let urlDisplay = compactURLDisplay(from: url)
+        let toastView = BookmarkClipboardReviewToastView(
+            model: bookmarkClipboardReviewToastModel,
+            urlDisplay: urlDisplay,
+            onHoverChanged: { [weak self] hovering in
+                self?.handleBookmarkClipboardReviewHoverChange(hovering)
+            },
+            onSave: { [weak self] in
+                guard let self else { return }
+                let saved = BookmarksStorage.shared.add(urlString: normalized, title: nil) != nil
+                self.showBookmarkCaptureToast(
+                    message: saved ? "Saved copied URL" : "Could not save copied URL",
+                    isSuccess: saved
+                )
+            },
+            onDiscard: { [weak self] in
+                self?.dismissBookmarkCaptureToast()
+            }
+        )
+        let hostingView = BookmarkCaptureToastHostingView(rootView: toastView)
+        panel.contentView = hostingView
+        showBookmarkToastPanel(panel, contentHeight: BookmarksToastDesign.reviewHeight)
+        startBookmarkClipboardReviewTimer(resetToFull: true)
+    }
+
+    private func dismissBookmarkCaptureToast() {
+        stopBookmarkClipboardReviewTimer()
+        bookmarkClipboardReviewIsHovering = false
+        bookmarkClipboardReviewToastModel.progress = 1
+        bookmarkCaptureToastHideWorkItem?.cancel()
+        bookmarkCaptureToastHideWorkItem = nil
+        bookmarkCaptureToastPanel?.orderOut(nil)
+    }
+
+    private func handleBookmarkClipboardReviewHoverChange(_ hovering: Bool) {
+        guard bookmarkClipboardReviewIsHovering != hovering else { return }
+        bookmarkClipboardReviewIsHovering = hovering
+
+        if hovering {
+            bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+            bookmarkClipboardReviewToastModel.progress = 1
+            stopBookmarkClipboardReviewTimer()
+        } else {
+            startBookmarkClipboardReviewTimer(resetToFull: true)
+        }
+    }
+
+    private func startBookmarkClipboardReviewTimer(resetToFull: Bool) {
+        stopBookmarkClipboardReviewTimer()
+
+        if resetToFull {
+            bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+            bookmarkClipboardReviewToastModel.progress = 1
+        }
+        bookmarkClipboardReviewLastTick = Date()
+
+        let timer = Timer(timeInterval: BookmarksToastDesign.reviewProgressTickInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.bookmarkClipboardReviewTimerTick()
+            }
+        }
+        bookmarkClipboardReviewTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopBookmarkClipboardReviewTimer() {
+        bookmarkClipboardReviewTimer?.invalidate()
+        bookmarkClipboardReviewTimer = nil
+        bookmarkClipboardReviewLastTick = nil
+    }
+
+    private func bookmarkClipboardReviewTimerTick() {
+        guard !bookmarkClipboardReviewIsHovering else { return }
+        guard let lastTick = bookmarkClipboardReviewLastTick else {
+            bookmarkClipboardReviewLastTick = Date()
+            return
+        }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastTick)
+        bookmarkClipboardReviewLastTick = now
+        guard elapsed.isFinite, elapsed > 0 else { return }
+
+        bookmarkClipboardReviewRemaining -= elapsed
+        let duration = max(BookmarksToastDesign.reviewAutoHideDuration, 0.01)
+
+        if bookmarkClipboardReviewRemaining <= 0 {
+            bookmarkClipboardReviewToastModel.progress = 0
+            dismissBookmarkCaptureToast()
+            return
+        }
+
+        bookmarkClipboardReviewToastModel.progress = max(0, min(1, bookmarkClipboardReviewRemaining / duration))
+    }
+
+    private func resolveBookmarkCaptureToastPanel() -> BookmarkCaptureToastPanel {
+        if let existingPanel = bookmarkCaptureToastPanel {
+            return existingPanel
+        }
+
+        let newPanel = BookmarkCaptureToastPanel()
+        bookmarkCaptureToastPanel = newPanel
+        return newPanel
+    }
+
+    private func showBookmarkToastPanel(_ panel: BookmarkCaptureToastPanel, contentHeight: CGFloat) {
+        let panelHeight = contentHeight + BookmarksToastDesign.shadowPadding * 2
+        panel.setContentSize(NSSize(width: BookmarksToastDesign.panelWidth, height: panelHeight))
+
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let screen else { return }
+
+        let visibleFrame = screen.visibleFrame
+        let x = visibleFrame.midX - BookmarksToastDesign.panelWidth / 2
+        let y = visibleFrame.maxY - panelHeight - BookmarksToastDesign.topInset
+        panel.setFrame(
+            NSRect(x: x, y: y, width: BookmarksToastDesign.panelWidth, height: panelHeight),
+            display: true
+        )
+        panel.orderFrontRegardless()
+    }
+
+    private func compactURLDisplay(from url: URL) -> String {
+        let host = url.host ?? url.absoluteString
+        let path = url.path.isEmpty ? "" : url.path
+        let query = url.query.map { "?\($0)" } ?? ""
+        let compact = "\(host)\(path)\(query)"
+        return compact.count > 72 ? "\(compact.prefix(69))..." : compact
     }
 
     // MARK: - Debug Logging

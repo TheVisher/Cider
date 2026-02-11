@@ -9,6 +9,7 @@ final class CommandPaletteViewModel: ObservableObject {
     @Published var windowGroups: [WindowAppGroup] = []
     @Published var activeTab: PaletteTab = .windows
     @Published var isVisible = false
+    @Published var bookmarkDisplayMode: BookmarkDisplayMode = CiderConfig.load().bookmarksDefaultViewMode
     @Published var monitors: [MonitorInfo] = []
     @Published var focusState: PaletteFocusState = .initial
     @Published var searchText: String = ""
@@ -60,6 +61,14 @@ final class CommandPaletteViewModel: ObservableObject {
 
         // Re-render when notes change (e.g. after deletion)
         NotesStorage.shared.$notes
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        // Re-render when bookmarks change.
+        BookmarksStorage.shared.$bookmarks
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -365,6 +374,88 @@ final class CommandPaletteViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Bookmarks Integration
+
+    var bookmarks: [Bookmark] {
+        BookmarksStorage.shared.bookmarks
+    }
+
+    var filteredBookmarks: [Bookmark] {
+        guard isSearching else { return bookmarks }
+        let query = searchQuery
+        guard !query.isEmpty else { return bookmarks }
+        return bookmarks.filter { bookmark in
+            bookmark.title.lowercased().contains(query) ||
+            bookmark.urlString.lowercased().contains(query) ||
+            bookmark.hostDisplay.lowercased().contains(query)
+        }
+    }
+
+    @discardableResult
+    func addBookmark(urlString: String, title: String?) -> Bool {
+        BookmarksStorage.shared.add(urlString: urlString, title: title) != nil
+    }
+
+    @discardableResult
+    func addBookmarkFromPasteboard() -> Bool {
+        BookmarksStorage.shared.addFromPasteboard() != nil
+    }
+
+    @discardableResult
+    func captureBookmarkFromActiveBrowserOrClipboard() -> Bool {
+        if let capture = ActiveBrowserCaptureService.captureFromFrontmostBrowser() {
+            let saved = addBookmark(urlString: capture.urlString, title: capture.title)
+            postBookmarkCaptureToast(
+                message: saved ? "Saved from active browser" : "Unable to save active browser tab",
+                isSuccess: saved
+            )
+            return saved
+        }
+
+        let failureHint = ActiveBrowserCaptureService.consumeFailureHint()
+        postBookmarkCaptureToast(
+            message: failureHint ?? "Could not capture active browser tab",
+            isSuccess: false
+        )
+        return false
+    }
+
+    func deleteBookmark(_ bookmark: Bookmark) {
+        BookmarksStorage.shared.remove(bookmark)
+    }
+
+    func openBookmark(_ bookmark: Bookmark) {
+        guard let url = bookmark.url else { return }
+        NSWorkspace.shared.open(url)
+        dismiss()
+    }
+
+    func setBookmarkDisplayMode(_ mode: BookmarkDisplayMode) {
+        guard bookmarkDisplayMode != mode else { return }
+        bookmarkDisplayMode = mode
+
+        var config = CiderConfig.load()
+        config.bookmarksDefaultViewMode = mode
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+    }
+
+    func openBookmarksPanel() {
+        NotificationCenter.default.post(name: .showBookmarks, object: nil)
+        dismiss()
+    }
+
+    private func postBookmarkCaptureToast(message: String, isSuccess: Bool) {
+        NotificationCenter.default.post(
+            name: .showBookmarkCaptureToast,
+            object: nil,
+            userInfo: [
+                "message": message,
+                "isSuccess": isSuccess,
+            ]
+        )
+    }
+
     private func buildNoteSearchResult(for note: Note, query: String, terms: [String]) -> NoteSearchResult? {
         let title = note.title
         let titleMatch = phraseRange(in: title, query: query)
@@ -517,6 +608,7 @@ final class CommandPaletteViewModel: ObservableObject {
         searchText = ""
 
         let config = CiderConfig.load()
+        bookmarkDisplayMode = config.bookmarksDefaultViewMode
         if !config.rememberPaletteState {
             expandedFolderID = nil
         }
@@ -665,6 +757,7 @@ final class CommandPaletteViewModel: ObservableObject {
     private enum SearchContentResult {
         case window(WindowInfo)
         case note(Note)
+        case bookmark(Bookmark)
     }
 
     /// Ordered content results used by keyboard navigation while searching.
@@ -673,6 +766,7 @@ final class CommandPaletteViewModel: ObservableObject {
         var results: [SearchContentResult] = flattenedWindows.map { .window($0) }
         if isSearching {
             results.append(contentsOf: noteSearchResults.map { .note($0.note) })
+            results.append(contentsOf: filteredBookmarks.map { .bookmark($0) })
         }
         return results
     }
@@ -683,6 +777,8 @@ final class CommandPaletteViewModel: ObservableObject {
             focusWindow(window)
         case .note(let note):
             openNote(note)
+        case .bookmark(let bookmark):
+            openBookmark(bookmark)
         }
     }
 

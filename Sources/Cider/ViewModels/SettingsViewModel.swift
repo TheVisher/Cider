@@ -68,6 +68,29 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Bookmarks
+    @Published var enableBookmarksHotkey: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enableBookmarksCaptureHotkey: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var autoCaptureCopiedURLs: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var confirmCopiedURLBeforeSave: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var bookmarksDirectory: String {
+        didSet { saveConfig() }
+    }
+    @Published var rememberBookmarksPanelPosition: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var bookmarksDefaultViewMode: BookmarkDisplayMode {
+        didSet { saveConfig() }
+    }
+
     private var config: CiderConfig
 
     init() {
@@ -87,6 +110,13 @@ final class SettingsViewModel: ObservableObject {
         self.notesDirectory = config.notesDirectory
         self.rememberNotesPanelPositionPerNote = config.rememberNotesPanelPositionPerNote
         self.notesEditorTextSize = config.notesEditorTextSize
+        self.enableBookmarksHotkey = config.enableBookmarksHotkey
+        self.enableBookmarksCaptureHotkey = config.enableBookmarksCaptureHotkey
+        self.autoCaptureCopiedURLs = config.autoCaptureCopiedURLs
+        self.confirmCopiedURLBeforeSave = config.confirmCopiedURLBeforeSave
+        self.bookmarksDirectory = config.bookmarksDirectory
+        self.rememberBookmarksPanelPosition = config.rememberBookmarksPanelPosition
+        self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -111,6 +141,13 @@ final class SettingsViewModel: ObservableObject {
         config.notesDirectory = notesDirectory
         config.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
         config.notesEditorTextSize = notesEditorTextSize
+        config.enableBookmarksHotkey = enableBookmarksHotkey
+        config.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
+        config.autoCaptureCopiedURLs = autoCaptureCopiedURLs
+        config.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
+        config.bookmarksDirectory = bookmarksDirectory
+        config.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
+        config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.save()
 
         // Post notification so AppDelegate can respond

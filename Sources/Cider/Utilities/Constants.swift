@@ -15,6 +15,12 @@ extension Notification.Name {
     static let openNoteInPanel = Notification.Name("cider.openNoteInPanel")
     static let toggleNotesCollapse = Notification.Name("cider.toggleNotesCollapse")
     static let moveNotesToNextDisplay = Notification.Name("cider.moveNotesToNextDisplay")
+    static let toggleBookmarks = Notification.Name("cider.toggleBookmarks")
+    static let dismissBookmarks = Notification.Name("cider.dismissBookmarks")
+    static let showBookmarks = Notification.Name("cider.showBookmarks")
+    static let toggleBookmarksCollapse = Notification.Name("cider.toggleBookmarksCollapse")
+    static let showBookmarkCaptureToast = Notification.Name("cider.showBookmarkCaptureToast")
+    static let showBookmarkClipboardReviewToast = Notification.Name("cider.showBookmarkClipboardReviewToast")
 }
 
 enum CiderBorder {
@@ -133,6 +139,73 @@ enum NotesDesign {
 
     static var panelCollapsedHeight: CGFloat {
         collapsedContentHeight + panelTopPadding + panelCollapsedBottomPadding
+    }
+}
+
+enum BookmarksDesign {
+    static let panelWidth: CGFloat = 760
+    static let panelHeight: CGFloat = 620
+    static let panelMinWidth: CGFloat = 520
+    static let panelMinHeight: CGFloat = 420
+    static let panelCornerRadius: CGFloat = Radius.lg
+    static let panelShadowPadding: CGFloat = 40
+    static let panelTopPadding: CGFloat = 20
+    static let panelBottomPadding: CGFloat = 15
+    static let panelCollapsedBottomPadding: CGFloat = panelTopPadding
+
+    static let toolbarHeight: CGFloat = 40
+    static let collapsedContentHeight: CGFloat = toolbarHeight
+    static let thumbnailHeightGrid: CGFloat = 140
+    static let thumbnailHeightMasonryMin: CGFloat = 120
+    static let thumbnailHeightMasonryMax: CGFloat = 360
+    static let thumbnailHeightMasonryFallback: CGFloat = 180
+    static let thumbnailShimmerDuration: TimeInterval = 1.7
+    static let thumbnailShimmerBandWidthRatio: CGFloat = 0.55
+    static let thumbnailShimmerBandMinWidth: CGFloat = 120
+    static let thumbnailHeightList: CGFloat = 52
+    static let thumbnailWidthList: CGFloat = 72
+    static let cardMinWidth: CGFloat = 220
+    static let cardContentSpacing: CGFloat = Spacing.sm
+    static let cardCornerRadius: CGFloat = Radius.md
+    static let buttonTapTarget: CGFloat = 28
+    static let layoutPickerMaxWidth: CGFloat = 320
+    static let collapseToggleAnimationDuration: TimeInterval = 0.18
+
+    static var panelContentWidth: CGFloat {
+        panelWidth + panelShadowPadding * 2
+    }
+
+    static var panelContentHeight: CGFloat {
+        panelHeight + panelTopPadding + panelShadowPadding + panelBottomPadding
+    }
+
+    static var panelCollapsedHeight: CGFloat {
+        collapsedContentHeight + panelTopPadding + panelCollapsedBottomPadding
+    }
+}
+
+enum BookmarksToastDesign {
+    static let width: CGFloat = 320
+    static let height: CGFloat = 56
+    static let reviewHeight: CGFloat = 96
+    static let cornerRadius: CGFloat = Radius.md
+    static let shadowPadding: CGFloat = 24
+    static let topInset: CGFloat = Spacing.xxxl
+    static let autoHideDuration: TimeInterval = 1.8
+    static let reviewAutoHideDuration: TimeInterval = 5.0
+    static let reviewProgressHeight: CGFloat = Spacing.xxs
+    static let reviewProgressTickInterval: TimeInterval = 1.0 / 30.0
+
+    static var panelWidth: CGFloat {
+        width + shadowPadding * 2
+    }
+
+    static var panelHeight: CGFloat {
+        height + shadowPadding * 2
+    }
+
+    static var reviewPanelHeight: CGFloat {
+        reviewHeight + shadowPadding * 2
     }
 }
 

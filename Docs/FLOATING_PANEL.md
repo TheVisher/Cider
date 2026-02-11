@@ -351,6 +351,17 @@ enum MyDesign {
 7. Wire show/hide/toggle in AppDelegate with notification observers
 8. Add hotkey detector if needed (follow `TileHotkeyDetector` pattern)
 
+### Companion Window Defaults (Notes/Bookmarks baseline)
+
+Apply these defaults to any new companion window unless there is a strong reason not to:
+
+1. Traffic lights use `NotesDesign` sizing/spacing tokens (no per-window variants).
+2. Yellow traffic light collapses to a strip and restores without losing panel state.
+3. Resizable bottom-right handle with consistent minimum size and clamp-to-screen behavior.
+4. Respect `remember...PanelPosition` settings when opening/reopening.
+5. Route global Ctrl+Option tiling hotkeys to the panel when it is focused or hovered.
+6. Keep panel acrylic/chrome behavior consistent (`PaletteBackgroundView`, custom shadow padding).
+
 ---
 
 ## File References

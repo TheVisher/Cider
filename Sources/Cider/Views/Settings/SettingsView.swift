@@ -248,7 +248,70 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
         case .bookmarksManage:
-            PinnedAppsSettingsView()
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Bookmarks") {
+                    SettingsToggleRow(
+                        title: "Option+B to open bookmarks",
+                        subtitle: "Quick-launch floating bookmarks panel",
+                        isOn: $viewModel.enableBookmarksHotkey
+                    )
+
+                    SettingsToggleRow(
+                        title: "Option+Shift+B to capture active tab",
+                        subtitle: "Save the current browser tab instantly",
+                        isOn: $viewModel.enableBookmarksCaptureHotkey
+                    )
+
+                    SettingsToggleRow(
+                        title: "Auto-save copied URLs",
+                        subtitle: "Whenever you copy a web link, save it as a bookmark",
+                        isOn: $viewModel.autoCaptureCopiedURLs
+                    )
+
+                    SettingsToggleRow(
+                        title: "Review copied URLs before save",
+                        subtitle: "Show Save/Discard toast; auto-discard if ignored",
+                        isOn: $viewModel.confirmCopiedURLBeforeSave
+                    )
+                    .disabled(!viewModel.autoCaptureCopiedURLs)
+                    .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : 0.55)
+
+                    SettingsToggleRow(
+                        title: "Remember bookmarks window position",
+                        subtitle: "Reopen bookmarks where you last left it",
+                        isOn: $viewModel.rememberBookmarksPanelPosition
+                    )
+
+                    SettingsPickerRow(
+                        title: "Default view mode",
+                        subtitle: "Choose how bookmarks are shown by default",
+                        selection: $viewModel.bookmarksDefaultViewMode,
+                        options: BookmarkDisplayMode.allCases,
+                        label: { $0.displayName }
+                    )
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Bookmarks directory")
+                                .font(.body)
+                                .foregroundColor(CiderColors.primary)
+
+                            Text(viewModel.bookmarksDirectory)
+                                .font(.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Button("Choose...") {
+                            chooseBookmarksDirectory()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
         case .appearanceText:
@@ -377,6 +440,25 @@ struct SettingsView: View {
                 viewModel.notesDirectory = "~" + path.dropFirst(home.count)
             } else {
                 viewModel.notesDirectory = path
+            }
+        }
+    }
+
+    private func chooseBookmarksDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select a directory for Cider bookmarks"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            let path = url.path
+            let home = NSHomeDirectory()
+            if path.hasPrefix(home) {
+                viewModel.bookmarksDirectory = "~" + path.dropFirst(home.count)
+            } else {
+                viewModel.bookmarksDirectory = path
             }
         }
     }

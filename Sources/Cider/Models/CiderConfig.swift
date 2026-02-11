@@ -137,6 +137,13 @@ struct CiderConfig: Codable {
     var enableNotesHotkey: Bool  // Enable Option+N to open notes
     var rememberNotesPanelPositionPerNote: Bool  // Reopen each note at its last panel position
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
+    var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
+    var enableBookmarksCaptureHotkey: Bool  // Enable Option+Shift+B to capture active browser tab
+    var autoCaptureCopiedURLs: Bool  // Automatically save copied URLs as bookmarks
+    var confirmCopiedURLBeforeSave: Bool  // Require explicit save/discard for copied URLs
+    var bookmarksDirectory: String  // Directory for bookmark files
+    var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
+    var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
 
     static let storageKey = "CiderConfig"
 
@@ -153,10 +160,17 @@ struct CiderConfig: Codable {
             enableDragToTile: true,
             enableTilingHotkeys: true,
             enableDynamicTiling: true,
-            notesDirectory: "~/Documents/Cider Notes",
+            notesDirectory: "~/Documents/Cider/Notes",
             enableNotesHotkey: true,
             rememberNotesPanelPositionPerNote: true,
-            notesEditorTextSize: .normal
+            notesEditorTextSize: .normal,
+            enableBookmarksHotkey: true,
+            enableBookmarksCaptureHotkey: true,
+            autoCaptureCopiedURLs: false,
+            confirmCopiedURLBeforeSave: false,
+            bookmarksDirectory: "~/Documents/Cider/Bookmarks",
+            rememberBookmarksPanelPosition: false,
+            bookmarksDefaultViewMode: .masonry
         )
     }
 
@@ -167,7 +181,30 @@ struct CiderConfig: Codable {
 
         // Try to decode, handling missing fields gracefully
         do {
-            return try JSONDecoder().decode(CiderConfig.self, from: data)
+            var config = try JSONDecoder().decode(CiderConfig.self, from: data)
+            var didMigrate = false
+
+            if config.notesDirectory == "~/Documents/Cider Notes" {
+                config.notesDirectory = "~/Documents/Cider/Notes"
+                didMigrate = true
+            }
+
+            let expandedLegacyNotes = NSString(string: "~/Documents/Cider Notes").expandingTildeInPath
+            if config.notesDirectory == expandedLegacyNotes {
+                config.notesDirectory = "~/Documents/Cider/Notes"
+                didMigrate = true
+            }
+
+            if config.bookmarksDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                config.bookmarksDirectory = "~/Documents/Cider/Bookmarks"
+                didMigrate = true
+            }
+
+            if didMigrate {
+                config.save()
+            }
+
+            return config
         } catch {
             NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
             UserDefaults.standard.removeObject(forKey: storageKey)
@@ -199,7 +236,7 @@ struct CiderConfig: Codable {
         enableDragToTile = try container.decodeIfPresent(Bool.self, forKey: .enableDragToTile) ?? true
         enableTilingHotkeys = try container.decodeIfPresent(Bool.self, forKey: .enableTilingHotkeys) ?? true
         enableDynamicTiling = try container.decodeIfPresent(Bool.self, forKey: .enableDynamicTiling) ?? true
-        notesDirectory = try container.decodeIfPresent(String.self, forKey: .notesDirectory) ?? "~/Documents/Cider Notes"
+        notesDirectory = try container.decodeIfPresent(String.self, forKey: .notesDirectory) ?? "~/Documents/Cider/Notes"
         enableNotesHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableNotesHotkey) ?? true
         rememberNotesPanelPositionPerNote = try container.decodeIfPresent(
             Bool.self, forKey: .rememberNotesPanelPositionPerNote
@@ -208,6 +245,31 @@ struct CiderConfig: Codable {
             NotesEditorTextSize.self,
             forKey: .notesEditorTextSize
         ) ?? .normal
+        enableBookmarksHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableBookmarksHotkey) ?? true
+        enableBookmarksCaptureHotkey = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .enableBookmarksCaptureHotkey
+        ) ?? true
+        autoCaptureCopiedURLs = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .autoCaptureCopiedURLs
+        ) ?? false
+        confirmCopiedURLBeforeSave = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .confirmCopiedURLBeforeSave
+        ) ?? false
+        bookmarksDirectory = try container.decodeIfPresent(
+            String.self,
+            forKey: .bookmarksDirectory
+        ) ?? "~/Documents/Cider/Bookmarks"
+        rememberBookmarksPanelPosition = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .rememberBookmarksPanelPosition
+        ) ?? false
+        bookmarksDefaultViewMode = try container.decodeIfPresent(
+            BookmarkDisplayMode.self,
+            forKey: .bookmarksDefaultViewMode
+        ) ?? .masonry
     }
 
     init(
@@ -222,10 +284,17 @@ struct CiderConfig: Codable {
         enableDragToTile: Bool = true,
         enableTilingHotkeys: Bool = true,
         enableDynamicTiling: Bool = true,
-        notesDirectory: String = "~/Documents/Cider Notes",
+        notesDirectory: String = "~/Documents/Cider/Notes",
         enableNotesHotkey: Bool = true,
         rememberNotesPanelPositionPerNote: Bool = true,
-        notesEditorTextSize: NotesEditorTextSize = .normal
+        notesEditorTextSize: NotesEditorTextSize = .normal,
+        enableBookmarksHotkey: Bool = true,
+        enableBookmarksCaptureHotkey: Bool = true,
+        autoCaptureCopiedURLs: Bool = false,
+        confirmCopiedURLBeforeSave: Bool = false,
+        bookmarksDirectory: String = "~/Documents/Cider/Bookmarks",
+        rememberBookmarksPanelPosition: Bool = false,
+        bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry
     ) {
         self.autoHideApps = autoHideApps
         self.showMenuBarIcon = showMenuBarIcon
@@ -242,5 +311,12 @@ struct CiderConfig: Codable {
         self.enableNotesHotkey = enableNotesHotkey
         self.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
         self.notesEditorTextSize = notesEditorTextSize
+        self.enableBookmarksHotkey = enableBookmarksHotkey
+        self.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
+        self.autoCaptureCopiedURLs = autoCaptureCopiedURLs
+        self.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
+        self.bookmarksDirectory = bookmarksDirectory
+        self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
+        self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
     }
 }
