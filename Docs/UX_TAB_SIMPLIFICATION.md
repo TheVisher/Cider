@@ -1,5 +1,6 @@
 # UX Insight: Tab Simplification
 
+> **Status:** Future UX Proposal (Not Implemented)
 > Captured during workspace implementation testing (Feb 2026)
 
 ## Observation

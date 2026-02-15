@@ -1,6 +1,6 @@
 # Cider Integration Design
 
-> **Status:** Approved design (Feb 2026)
+> **Status:** Approved design (Feb 2026) — Panel refactor (Phase 1) complete. Integration work (Phases 2+) is future.
 > **Companion to:** `PIVOT_STRATEGY.md`
 
 This document defines how Cider integrates with Obsidian and other knowledge bases, the sync adapter architecture, data format decisions, and cross-platform considerations.

@@ -2,6 +2,8 @@
 
 > Step-by-step plan for implementing universal folders, center search palette, search tabs, and projects.
 > See `WORKSPACES_VISION.md` for the full product vision.
+>
+> **Status:** Phase 1 (Universal Folders) — Complete. Phases 2-4 — Future work.
 
 ---
 

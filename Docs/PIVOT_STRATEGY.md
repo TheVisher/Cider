@@ -1,7 +1,7 @@
 # Cider Pivot Strategy: Capture & Reference Layer
 
-> **Status:** Proposal (Feb 2026)
-> **Context:** Cider started as a command palette for window management. This document proposes a pivot toward a universal capture and reference tool that integrates with knowledge bases like Obsidian.
+> **Status:** Implemented (Feb 2026)
+> **Context:** Cider pivoted from a command palette for window management to a panel-only capture and reference tool. The command palette, window tiling, and window cycling features have been removed. The app is now a floating NSPanel with tabbed content (Home, Bookmarks, Notes), a universal folder sidebar, and title bar controls.
 
 ---
 

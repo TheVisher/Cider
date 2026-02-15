@@ -1,6 +1,8 @@
 # Workspaces Vision: Folders, Projects, and Search
 
 > This document captures the product vision for Cider's organizational system: universal folders, project workspaces, and search-to-tab flow.
+>
+> **Status:** Phase 1 (Universal Folders) — Complete. Phases 2-4 (Search, Projects) — Future work.
 
 ---
 

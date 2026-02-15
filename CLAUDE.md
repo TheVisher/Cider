@@ -1,6 +1,6 @@
 # Cider - Claude Context Guide
 
-Cider is a native macOS **command palette** app that replaces Dock, Stage Manager, and Spotlight with a unified floating interface. Activated by double-tapping Option, it provides quick access to pinned apps, open windows, and more. Uses SwiftUI + AppKit, targets macOS 14+.
+Cider is a native macOS **floating panel** app for capturing and organizing bookmarks, notes, and projects. Activated by double-tapping Option, it provides a persistent workspace panel with tabbed content, a universal folder sidebar, and inline search. Uses SwiftUI + AppKit, targets macOS 14+.
 
 ## Critical Rules (Always Follow)
 
@@ -10,12 +10,15 @@ Cider is a native macOS **command palette** app that replaces Dock, Stage Manage
 - **Spring animations only** - No `.easeIn`, `.easeOut`, `.linear` for UI motion
 - **Acrylic style** - Use `NSVisualEffectView` with `.underWindowBackground`, NOT `.glassEffect()`
 
-## Primary Interface: Command Palette
+## Primary Interface: Floating Panel
 
-The command palette is the main way users interact with Cider:
+The floating panel is the main way users interact with Cider:
 - **Activation:** Double-tap Option key
 - **Opens on:** Screen where mouse is located
-- **Style:** Raycast-inspired dark acrylic with custom shadows
+- **Style:** Dark acrylic with custom shadows, resizable from all edges
+- **Tabs:** Home, Bookmarks, Notes (fixed tabs in title bar)
+- **Sidebar:** Universal folder sidebar (auto-hides at compact widths)
+- **Title bar:** Tab bar + contextual action buttons (capture, view options)
 - **Dismissal:** Escape key, click outside, or double-tap Option again
 
 ## Documentation Reference
@@ -39,12 +42,11 @@ The command palette is the main way users interact with Cider:
 - SwiftUI patterns, state management
 - Performance guidelines, threading
 
-### For Architecture Decisions
-**Read:** `Docs/ARCHITECTURE.md`
-- Project structure
-- NSPanel patterns
-- Service layer design
-- Storage model
+### For Panel Architecture
+**Read:** `Docs/FLOATING_PANEL.md`
+- NSPanel patterns and configuration
+- Panel positioning and resize handling
+- CiderPanel implementation details
 
 ### For Swift 6.2 / Concurrency / Modern Patterns
 **Read:** `Docs/TECH_STACK.md`
@@ -57,21 +59,15 @@ The command palette is the main way users interact with Cider:
 - Settings patterns
 - CiderConfig for persistent settings
 
-### To Understand the Product
-**Read:** `Docs/VISION.md`
-- What Cider is and isn't
-- Design principles
-- Command palette as primary interface
+### For Workspace / Folder Design
+**Read:** `Docs/WORKSPACES_VISION.md` - Folders, projects, search vision
+**Read:** `Docs/WORKSPACES_IMPLEMENTATION_PLAN.md` - Phased implementation
 
-### For Full Feature Specs
-**Read:** `Docs/product-spec.md`
-- Command palette components
-- Keyboard shortcuts
-- Technical architecture
-
-### For Current Work
-**Read:** `Docs/NEXT_SPRINT.md` - Active sprint tasks
-**Read:** `Docs/ROADMAP.md` - Milestone plan
+### For Bookmark Display Issues
+**Read:** `Docs/TROUBLESHOOTING.md`
+- Card sizing and masonry layout fixes
+- Width pressure and panel resize issues
+- Thumbnail rendering patterns
 
 ### Before Release
 **Read:** `Docs/RELEASE_CHECKLIST.md` - QA verification
@@ -101,7 +97,7 @@ xs: 4pt | sm: 6pt | md: 10pt | lg: 14pt | xl: 20pt
 
 ### Key Patterns
 ```swift
-// NSPanel setup (command palette)
+// NSPanel setup (floating panel)
 panel.styleMask = [.borderless, .nonactivatingPanel]
 panel.level = .floating
 panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -130,28 +126,51 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 ## File Structure
 ```
 Sources/Cider/
-├── App/              # Entry point, AppDelegate, Panels (CommandPalette, Settings, WindowCycling)
-├── Models/           # Data models (AppInfo, WindowInfo, MonitorInfo, CiderConfig)
-├── Services/         # Business logic (WindowManager, DoubleTapDetector, OptionTabDetector, etc.)
-├── Utilities/        # Constants, extensions, helpers (HighlightedText, PaletteFocusState, etc.)
-├── ViewModels/       # ObservableObject view models
+├── App/              # Entry point, AppDelegate, Panels (CiderPanel, Bookmarks, Notes, Settings)
+├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, CiderTab)
+├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, etc.)
+├── Utilities/        # Constants, extensions, helpers (HighlightedText, etc.)
+├── ViewModels/       # ObservableObject view models (BookmarksViewModel, NotesViewModel, SettingsViewModel)
 └── Views/
-    ├── CommandPalette/    # Main palette UI (search, apps row, content area, footer)
-    ├── Settings/          # Settings (General, Appearance, PinnedApps, Advanced, About)
-    ├── WindowCycling/     # Option+Tab window cycling overlay
-    └── PinnedAppsView.swift
+    ├── Bookmarks/         # Bookmark browser, cards, masonry layout, panel view
+    ├── Home/              # Home dashboard
+    ├── Notes/             # Notes editor, tab content, panel view
+    ├── Projects/          # Project tab content
+    ├── Search/            # Search palette and tab content
+    ├── Settings/          # Settings views (General, Advanced, About)
+    └── Shared/            # Reusable: CiderTabBar, FolderSidebarView, ViewOptionsDropdown, etc.
 ```
 
-## Command Palette Structure
+## Panel Structure
 ```
-CommandPaletteView
-├── PaletteBackgroundView      # Acrylic + shadow
-├── PaletteSearchBar           # Search input with real-time filtering
-├── PaletteAppsRow             # Pinned apps + folders with drag-to-reorder
-│   └── FolderPopupView        # Folder expansion (inline in PaletteAppsRow.swift)
-├── PaletteContentArea         # Tabs (Windows, Notes, Bookmarks)
-│   ├── Monitor sections       # Multi-monitor grouping (collapsible)
-│   ├── App group headers      # Collapsible app groups with quit button
-│   └── PaletteWindowRow       # Individual window (inline in PaletteContentArea.swift)
-└── PaletteFooterBar           # Actions + settings button
+CiderPanelView
+├── titleBar
+│   ├── Sidebar toggle button
+│   ├── CiderTabBar (Home, Bookmarks, Notes)
+│   ├── Capture button (bookmarks tab only)
+│   └── View options button + popover (bookmarks tab only)
+│       └── ViewOptionsDropdown (card size slider + view mode icons)
+├── HStack
+│   ├── FolderSidebarView (universal, auto-hides at compact width)
+│   │   ├── Search field
+│   │   ├── Folders section (hierarchical tree)
+│   │   └── Projects section
+│   └── Content area (switches by selectedTab)
+│       ├── HomeDashboardView
+│       ├── BookmarksTabContent → BookmarksBrowserView
+│       └── NotesTabContent
+└── PanelEdgeResizeView (all-edge resize handles)
+```
+
+## Bookmark Display Modes
+```
+BookmarkDisplayMode: .list | .grid | .masonry
+
+Card sizing: Continuous slider (0-3 scale) via CardSizing struct
+- Interpolates between 4 stops: compact → comfortable → large → extraLarge
+- Grid: fixed thumbnail height, proportional to card width
+- Masonry: thumbnail height = exact image aspect ratio (no clamping)
+- List: thumbnail width/height scale with slider
+
+View options: Dropdown popover in title bar (ViewOptionsDropdown.swift)
 ```
