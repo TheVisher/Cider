@@ -1,6 +1,6 @@
 import Foundation
 
-struct BookmarkFolder: Identifiable, Hashable, Codable {
+struct Folder: Identifiable, Hashable, Codable {
     let id: UUID
     var name: String
     var parentID: UUID?

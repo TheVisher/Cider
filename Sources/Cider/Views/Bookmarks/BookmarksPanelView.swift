@@ -372,7 +372,7 @@ struct BookmarksPanelView: View {
     }
 }
 
-private struct BookmarkDetailsDraft: Equatable {
+struct BookmarkDetailsDraft: Equatable {
     let id: UUID
     let urlString: String
     let hostDisplay: String
@@ -394,7 +394,7 @@ private struct BookmarkDetailsDraft: Equatable {
     }
 }
 
-private struct BookmarkDetailsSheet: View {
+struct BookmarkDetailsSheet: View {
     @Binding var draft: BookmarkDetailsDraft
     var bookmark: Bookmark?
     var errorMessage: String?
@@ -698,7 +698,7 @@ private struct BookmarkDetailsSheet: View {
     }
 }
 
-private struct BookmarkDetailsHeroPreview: View {
+struct BookmarkDetailsHeroPreview: View {
     let bookmark: Bookmark?
     let draft: BookmarkDetailsDraft
 
@@ -796,7 +796,7 @@ private struct BookmarkDetailsHeroPreview: View {
     }
 }
 
-private struct BookmarkDetailsPlaceholderSection: View {
+struct BookmarkDetailsPlaceholderSection: View {
     let title: String
     let subtitle: String
     let icon: String
@@ -949,7 +949,7 @@ private final class BookmarksResizeHandleNSView: NSView {
     }
 }
 
-private struct BookmarksTrafficLightButton: View {
+struct BookmarksTrafficLightButton: View {
     let color: NSColor
     let symbol: String
     let help: String

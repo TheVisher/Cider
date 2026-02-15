@@ -31,6 +31,9 @@ extension Notification.Name {
     static let toggleBookmarksCollapse = Notification.Name("cider.toggleBookmarksCollapse")
     static let showBookmarkCaptureToast = Notification.Name("cider.showBookmarkCaptureToast")
     static let showBookmarkClipboardReviewToast = Notification.Name("cider.showBookmarkClipboardReviewToast")
+    static let toggleCiderPanel = Notification.Name("cider.toggleCiderPanel")
+    static let dismissCiderPanel = Notification.Name("cider.dismissCiderPanel")
+    static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")
 }
 
 enum CiderBorder {
@@ -260,6 +263,60 @@ enum BookmarksToastDesign {
 
     static var reviewPanelHeight: CGFloat {
         reviewHeight + shadowPadding * 2
+    }
+}
+
+enum SearchPaletteDesign {
+    static let paletteWidth: CGFloat = 560
+    static let paletteMaxHeight: CGFloat = 480
+    static let resultsMaxHeight: CGFloat = 400
+    static let searchFieldHeight: CGFloat = 52
+    static let backdropOpacity: CGFloat = 0.28
+    static let paletteVerticalOffset: CGFloat = 60
+    static let recentBookmarkCount = 3
+    static let recentNoteCount = 2
+}
+
+enum CiderPanelDesign {
+    static let defaultWidth: CGFloat = 780
+    static let defaultHeight: CGFloat = 640
+    static let minWidth: CGFloat = 540
+    static let minHeight: CGFloat = 440
+    static let cornerRadius: CGFloat = Radius.lg
+    static let shadowPadding: CGFloat = 40
+    static let topPadding: CGFloat = 20
+    static let bottomPadding: CGFloat = 15
+    static let collapsedBottomPadding: CGFloat = topPadding
+    static let titleBarHeight: CGFloat = 40
+    static let tabBarHeight: CGFloat = 34
+    static let collapsedContentHeight: CGFloat = titleBarHeight
+    static let trafficLightDiameter: CGFloat = 12
+    static let trafficLightTapTarget: CGFloat = Spacing.lg
+    static let trafficLightSpacing: CGFloat = Spacing.xs
+    static let trafficLightSymbolSize: CGFloat = 7
+    static let collapseToggleAnimationDuration: TimeInterval = 0.18
+    static let tabBadgePadding: CGFloat = Spacing.xs
+    static let tabHorizontalPadding: CGFloat = Spacing.md
+    static let tabSpacing: CGFloat = Spacing.xxs
+
+    static var panelContentWidth: CGFloat {
+        defaultWidth + shadowPadding * 2
+    }
+
+    static var panelContentHeight: CGFloat {
+        defaultHeight + topPadding + shadowPadding + bottomPadding
+    }
+
+    static var panelMinWidth: CGFloat {
+        minWidth + shadowPadding * 2
+    }
+
+    static var panelMinHeight: CGFloat {
+        minHeight + topPadding + shadowPadding + bottomPadding
+    }
+
+    static var panelCollapsedHeight: CGFloat {
+        collapsedContentHeight + topPadding + collapsedBottomPadding
     }
 }
 

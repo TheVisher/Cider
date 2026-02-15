@@ -54,6 +54,11 @@ final class NotesViewModel: ObservableObject {
         NotesStorage.shared.notes
     }
 
+    @discardableResult
+    func assignNote(_ note: Note, toFolder folderID: UUID?) -> Bool {
+        NotesStorage.shared.assignNote(note.id, toFolder: folderID)
+    }
+
     var filteredNotes: [Note] {
         guard !searchText.isEmpty else { return notes }
         let query = searchText.lowercased()

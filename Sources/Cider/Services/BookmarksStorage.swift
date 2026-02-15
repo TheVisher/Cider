@@ -4,12 +4,12 @@ import Foundation
 
 private struct BookmarksDiskSnapshot {
     var bookmarks: [Bookmark]
-    var folders: [BookmarkFolder]
+    var folders: [Folder]
 }
 
 private struct BookmarksMetadataSnapshot: Codable {
     var bookmarks: [Bookmark]
-    var folders: [BookmarkFolder]
+    var folders: [Folder]
 }
 
 @MainActor
@@ -17,7 +17,7 @@ final class BookmarksStorage: ObservableObject {
     static let shared = BookmarksStorage()
 
     @Published private(set) var bookmarks: [Bookmark] = []
-    @Published private(set) var folders: [BookmarkFolder] = []
+    @Published private(set) var folders: [Folder] = []
 
     private let legacyDefaultsKey = "CiderBookmarks"
     private let htmlFileName = "bookmarks.html"
@@ -197,7 +197,7 @@ final class BookmarksStorage: ObservableObject {
     }
 
     @discardableResult
-    func createFolder(name rawName: String, parentID: UUID?) -> BookmarkFolder? {
+    func createFolder(name rawName: String, parentID: UUID?) -> Folder? {
         let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return nil }
 
@@ -206,7 +206,7 @@ final class BookmarksStorage: ObservableObject {
         }
 
         let resolvedName = uniqueFolderName(baseName: trimmedName, parentID: parentID)
-        let folder = BookmarkFolder(name: resolvedName, parentID: parentID)
+        let folder = Folder(name: resolvedName, parentID: parentID)
         folders.append(folder)
         folders.sort(by: folderSortOrder)
         persist()
@@ -962,7 +962,7 @@ final class BookmarksStorage: ObservableObject {
         return visited
     }
 
-    private func folderSortOrder(_ lhs: BookmarkFolder, _ rhs: BookmarkFolder) -> Bool {
+    private func folderSortOrder(_ lhs: Folder, _ rhs: Folder) -> Bool {
         switch (lhs.parentID, rhs.parentID) {
         case (nil, nil):
             break
@@ -988,10 +988,10 @@ final class BookmarksStorage: ObservableObject {
         return lhs.id.uuidString < rhs.id.uuidString
     }
 
-    private func sanitizedFolders(from rawFolders: [BookmarkFolder]) -> [BookmarkFolder] {
+    private func sanitizedFolders(from rawFolders: [Folder]) -> [Folder] {
         guard !rawFolders.isEmpty else { return [] }
 
-        var uniqueFoldersByID: [UUID: BookmarkFolder] = [:]
+        var uniqueFoldersByID: [UUID: Folder] = [:]
         for folder in rawFolders where uniqueFoldersByID[folder.id] == nil {
             uniqueFoldersByID[folder.id] = folder
         }

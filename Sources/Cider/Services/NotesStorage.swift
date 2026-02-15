@@ -27,8 +27,14 @@ final class NotesStorage: ObservableObject {
     private let attachmentCleanupDelaySeconds: TimeInterval = 2
     private let orphanAttachmentGracePeriodSeconds: TimeInterval = 5 * 60
 
-    /// UUID-to-filename mapping persisted on disk
-    private var index: [UUID: String] = [:]
+    /// Per-note metadata persisted in the index file.
+    private struct NoteIndexEntry: Codable {
+        var filename: String
+        var folderID: UUID?
+    }
+
+    /// UUID-to-metadata mapping persisted on disk
+    private var index: [UUID: NoteIndexEntry] = [:]
 
     private init() {
         let config = CiderConfig.load()
@@ -72,15 +78,26 @@ final class NotesStorage: ObservableObject {
             index = [:]
             return
         }
-        do {
-            let decoded = try JSONDecoder().decode([String: String].self, from: data)
+
+        // Try new format first: [String: NoteIndexEntry]
+        if let decoded = try? JSONDecoder().decode([String: NoteIndexEntry].self, from: data) {
             index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
                 guard let uuid = UUID(uuidString: key) else { return nil }
                 return (uuid, value)
             })
-        } catch {
-            index = [:]
+            return
         }
+
+        // Fallback: legacy format [String: String] (UUID → filename)
+        if let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
+                guard let uuid = UUID(uuidString: key) else { return nil }
+                return (uuid, NoteIndexEntry(filename: value, folderID: nil))
+            })
+            return
+        }
+
+        index = [:]
     }
 
     private func saveIndex() {
@@ -103,9 +120,9 @@ final class NotesStorage: ObservableObject {
         // corrupted with duplicate filenames, keep the first UUID and ignore
         // the rest so scanning never crashes.
         var filenameToUUID: [String: UUID] = [:]
-        for (uuid, filename) in index.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
-            if filenameToUUID[filename] == nil {
-                filenameToUUID[filename] = uuid
+        for (uuid, entry) in index.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            if filenameToUUID[entry.filename] == nil {
+                filenameToUUID[entry.filename] = uuid
             }
         }
 
@@ -117,10 +134,11 @@ final class NotesStorage: ObservableObject {
 
             let title = String(filename.dropLast(3)) // Remove .md
             let uuid = filenameToUUID[filename] ?? UUID()
+            let folderID = index[uuid]?.folderID
 
             // Register in index if new
             if filenameToUUID[filename] == nil {
-                index[uuid] = filename
+                index[uuid] = NoteIndexEntry(filename: filename, folderID: nil)
             }
 
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
@@ -134,13 +152,16 @@ final class NotesStorage: ObservableObject {
                 content: "",
                 createdAt: createDate,
                 modifiedAt: modDate,
-                relativePath: filename
+                relativePath: filename,
+                folderID: folderID
             ))
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically.
-        index = Dictionary(uniqueKeysWithValues: scannedNotes.map { ($0.id, $0.relativePath) })
+        // cleaned up automatically. Preserve folderID from existing entries.
+        index = Dictionary(uniqueKeysWithValues: scannedNotes.map {
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID))
+        })
 
         // Sort by most recently modified
         scannedNotes.sort { $0.modifiedAt > $1.modifiedAt }
@@ -159,7 +180,7 @@ final class NotesStorage: ObservableObject {
         // Write empty file
         try? "".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        index[uuid] = filename
+        index[uuid] = NoteIndexEntry(filename: filename, folderID: nil)
         saveIndex()
 
         let note = Note(id: uuid, title: title, content: "", relativePath: filename)
@@ -227,7 +248,12 @@ final class NotesStorage: ObservableObject {
 
         do {
             try FileManager.default.moveItem(at: oldPath, to: newPath)
-            index[note.id] = newFilename
+            if var entry = index[note.id] {
+                entry.filename = newFilename
+                index[note.id] = entry
+            } else {
+                index[note.id] = NoteIndexEntry(filename: newFilename, folderID: note.folderID)
+            }
             saveIndex()
 
             if let idx = notes.firstIndex(where: { $0.id == note.id }) {
@@ -237,6 +263,20 @@ final class NotesStorage: ObservableObject {
         } catch {
             NSLog("[NotesStorage] Rename failed: \(error)")
         }
+    }
+
+    @discardableResult
+    func assignNote(_ noteID: UUID, toFolder folderID: UUID?) -> Bool {
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        guard notes[idx].folderID != folderID else { return true }
+
+        notes[idx].folderID = folderID
+        if var entry = index[noteID] {
+            entry.folderID = folderID
+            index[noteID] = entry
+        }
+        saveIndex()
+        return true
     }
 
     func delete(note: Note) {

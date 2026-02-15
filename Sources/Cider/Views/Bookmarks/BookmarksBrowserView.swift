@@ -18,7 +18,7 @@ private enum BookmarkDragPayload {
 
 struct BookmarksBrowserView: View {
     let bookmarks: [Bookmark]
-    var folders: [BookmarkFolder] = []
+    var folders: [Folder] = []
     @Binding var displayMode: BookmarkDisplayMode
     @Binding var cardSize: BookmarkCardSize
     var searchText: String = ""
@@ -33,9 +33,10 @@ struct BookmarksBrowserView: View {
     var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
     var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
     var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)? = nil
-    var onCreateFolder: ((String, UUID?) -> BookmarkFolder?)? = nil
+    var onCreateFolder: ((String, UUID?) -> Folder?)? = nil
     var onCaptureFromActiveBrowser: (() -> Bool)? = nil
     var onAddFromPasteboard: (() -> Bool)? = nil
+    var showsInternalFolderSidebar = true
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -71,10 +72,10 @@ struct BookmarksBrowserView: View {
     }
 
     private var shouldShowFolderSidebar: Bool {
-        supportsFolderShelf && (isFolderSidebarVisible || isDraggingBookmark)
+        showsInternalFolderSidebar && supportsFolderShelf && (isFolderSidebarVisible || isDraggingBookmark)
     }
 
-    private var topLevelFolders: [BookmarkFolder] {
+    private var topLevelFolders: [Folder] {
         childFolders(of: nil)
     }
 
@@ -190,7 +191,7 @@ struct BookmarksBrowserView: View {
                 )
             }
 
-            if supportsFolderShelf {
+            if showsInternalFolderSidebar && supportsFolderShelf {
                 Button(action: toggleFolderSidebar) {
                     Image(systemName: isFolderSidebarVisible ? "sidebar.left" : "sidebar.right")
                         .font(.system(size: 11 * textScale, weight: .semibold))
@@ -479,7 +480,7 @@ struct BookmarksBrowserView: View {
         )
     }
 
-    private func folderSidebarBranch(_ folder: BookmarkFolder, depth: Int) -> AnyView {
+    private func folderSidebarBranch(_ folder: Folder, depth: Int) -> AnyView {
         let children = childFolders(of: folder.id)
         let isExpanded = expandedFolderIDs.contains(folder.id)
         return AnyView(
@@ -599,7 +600,7 @@ struct BookmarksBrowserView: View {
         folders.contains(where: { $0.parentID == folderID })
     }
 
-    private func childFolders(of parentID: UUID?) -> [BookmarkFolder] {
+    private func childFolders(of parentID: UUID?) -> [Folder] {
         folders
             .filter { $0.parentID == parentID }
             .sorted { lhs, rhs in
@@ -614,9 +615,9 @@ struct BookmarksBrowserView: View {
             }
     }
 
-    private func folderPath(to folderID: UUID) -> [BookmarkFolder] {
+    private func folderPath(to folderID: UUID) -> [Folder] {
         let folderByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
-        var path: [BookmarkFolder] = []
+        var path: [Folder] = []
         var cursorID: UUID? = folderID
         var visited = Set<UUID>()
 

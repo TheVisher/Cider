@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var bookmarkClipboardReviewRemaining: TimeInterval = BookmarksToastDesign.reviewAutoHideDuration
     private var bookmarkClipboardReviewLastTick: Date?
 
+    // Main Cider panel
+    private var ciderPanel: CiderPanel?
+    private let ciderPanelPositionStore = CiderPanelPositionStore.shared
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -39,10 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureSettings()
         configureNotes()
         configureBookmarks()
+        configureCiderPanel()
         configureStatusItem()
         observeSettingsNotifications()
         observeNotesNotifications()
         observeBookmarksNotifications()
+        observeCiderPanelNotifications()
         observeConfigChanges()
         observeWorkspaceApplicationActivation()
         startDoubleTapDetection()
@@ -75,15 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Show Cider", action: #selector(toggleBookmarksPanelFromMenu), keyEquivalent: " "))
+        menu.addItem(NSMenuItem(title: "Show Cider", action: #selector(toggleCiderPanelFromMenu), keyEquivalent: " "))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Cider", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
     }
 
-    @objc private func toggleBookmarksPanelFromMenu() {
-        toggleBookmarksPanel()
+    @objc private func toggleCiderPanelFromMenu() {
+        toggleCiderPanel()
     }
 
     private func observeConfigChanges() {
@@ -169,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode: config.activationMode
         ) { [weak self] in
             Task { @MainActor in
-                self?.toggleBookmarksPanel()
+                self?.toggleCiderPanel()
             }
         }
         doubleTapDetector?.start()
@@ -694,6 +700,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let query = url.query.map { "?\($0)" } ?? ""
         let compact = "\(host)\(path)\(query)"
         return compact.count > 72 ? "\(compact.prefix(69))..." : compact
+    }
+
+    // MARK: - Cider Panel
+
+    private func configureCiderPanel() {
+        guard bookmarksViewModel != nil, notesViewModel != nil else { return }
+
+        let panel = CiderPanel()
+        self.ciderPanel = panel
+
+        updateCiderPanelView()
+    }
+
+    private func updateCiderPanelView() {
+        guard let panel = ciderPanel,
+              let bookmarksViewModel,
+              let notesViewModel else { return }
+
+        let panelView = CiderPanelView(
+            bookmarksViewModel: bookmarksViewModel,
+            notesViewModel: notesViewModel
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        let hostingView = CiderPanelHostingView(rootView: panelView)
+        panel.contentView = hostingView
+
+        panel.setContentSize(NSSize(
+            width: CiderPanelDesign.panelContentWidth,
+            height: CiderPanelDesign.panelContentHeight
+        ))
+    }
+
+    private func observeCiderPanelNotifications() {
+        NotificationCenter.default.publisher(for: .toggleCiderPanel)
+            .sink { [weak self] _ in
+                self?.toggleCiderPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .dismissCiderPanel)
+            .sink { [weak self] _ in
+                self?.hideCiderPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .toggleCiderPanelCollapse)
+            .sink { [weak self] _ in
+                self?.toggleCiderPanelCollapsed()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func toggleCiderPanel() {
+        guard let panel = ciderPanel else { return }
+
+        if panel.isVisible {
+            hideCiderPanel()
+        } else {
+            showCiderPanel()
+        }
+    }
+
+    private func showCiderPanel() {
+        guard let panel = ciderPanel else { return }
+
+        if panel.isVisible {
+            persistCurrentCiderPanelFrameIfNeeded()
+        }
+
+        panel.setCollapsed(false, animated: false)
+
+        if let savedFrame = ciderPanelPositionStore.frame() {
+            panel.show(frame: savedFrame)
+        } else {
+            panel.showAtMouse()
+        }
+    }
+
+    private func hideCiderPanel() {
+        persistCurrentCiderPanelFrameIfNeeded()
+        ciderPanel?.orderOut(nil)
+    }
+
+    private func toggleCiderPanelCollapsed() {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+        panel.toggleCollapsed()
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    private func persistCurrentCiderPanelFrameIfNeeded() {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+        ciderPanelPositionStore.setFrame(panel.persistableFrame)
     }
 
     // MARK: - Debug Logging

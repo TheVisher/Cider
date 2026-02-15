@@ -45,7 +45,7 @@ final class BookmarksViewModel: ObservableObject {
         BookmarksStorage.shared.bookmarks
     }
 
-    var folders: [BookmarkFolder] {
+    var folders: [Folder] {
         BookmarksStorage.shared.folders
     }
 
@@ -99,19 +99,24 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
-    func createFolder(name: String, parentID: UUID?) -> BookmarkFolder? {
+    func createFolder(name: String, parentID: UUID?) -> Folder? {
         BookmarksStorage.shared.createFolder(name: name, parentID: parentID)
     }
 
-    func folder(for bookmark: Bookmark) -> BookmarkFolder? {
+    @discardableResult
+    func deleteFolder(_ folderID: UUID) -> Bool {
+        BookmarksStorage.shared.deleteFolder(folderID)
+    }
+
+    func folder(for bookmark: Bookmark) -> Folder? {
         guard let folderID = bookmark.folderID else { return nil }
         return folders.first(where: { $0.id == folderID })
     }
 
-    func folderPath(to folderID: UUID?) -> [BookmarkFolder] {
+    func folderPath(to folderID: UUID?) -> [Folder] {
         guard let folderID else { return [] }
         let folderByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
-        var path: [BookmarkFolder] = []
+        var path: [Folder] = []
         var cursorID: UUID? = folderID
         var visited = Set<UUID>()
 
@@ -126,7 +131,7 @@ final class BookmarksViewModel: ObservableObject {
         return path.reversed()
     }
 
-    func childFolders(of parentID: UUID?) -> [BookmarkFolder] {
+    func childFolders(of parentID: UUID?) -> [Folder] {
         folders
             .filter { $0.parentID == parentID }
             .sorted { lhs, rhs in
