@@ -1094,11 +1094,7 @@ private struct BookmarkCard: View {
                 return cardSizing.masonryThumbnailHeightFallback * widthScale
             }
 
-            let proposedHeight = cardWidth * aspectRatio
-            return min(
-                max(proposedHeight, cardSizing.masonryThumbnailHeightMin * widthScale),
-                cardSizing.masonryThumbnailHeightMax * widthScale
-            )
+            return cardWidth * aspectRatio
         }
     }
 
@@ -1388,7 +1384,7 @@ private struct BookmarkThumbnailView: View {
             } else {
                 Image(nsImage: thumbnailImage)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .aspectRatio(contentMode: mode == .masonry ? .fit : .fill)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else if bookmark.isEnriching {
