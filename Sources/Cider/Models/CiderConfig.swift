@@ -144,6 +144,7 @@ struct CiderConfig: Codable {
     var bookmarksDirectory: String  // Directory for bookmark files
     var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
+    var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
 
     static let storageKey = "CiderConfig"
 
@@ -170,7 +171,8 @@ struct CiderConfig: Codable {
             confirmCopiedURLBeforeSave: false,
             bookmarksDirectory: "~/Documents/Cider/Bookmarks",
             rememberBookmarksPanelPosition: false,
-            bookmarksDefaultViewMode: .masonry
+            bookmarksDefaultViewMode: .masonry,
+            bookmarksCardSize: .comfortable
         )
     }
 
@@ -270,6 +272,10 @@ struct CiderConfig: Codable {
             BookmarkDisplayMode.self,
             forKey: .bookmarksDefaultViewMode
         ) ?? .masonry
+        bookmarksCardSize = try container.decodeIfPresent(
+            BookmarkCardSize.self,
+            forKey: .bookmarksCardSize
+        ) ?? .comfortable
     }
 
     init(
@@ -294,7 +300,8 @@ struct CiderConfig: Codable {
         confirmCopiedURLBeforeSave: Bool = false,
         bookmarksDirectory: String = "~/Documents/Cider/Bookmarks",
         rememberBookmarksPanelPosition: Bool = false,
-        bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry
+        bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
+        bookmarksCardSize: BookmarkCardSize = .comfortable
     ) {
         self.autoHideApps = autoHideApps
         self.showMenuBarIcon = showMenuBarIcon
@@ -318,5 +325,6 @@ struct CiderConfig: Codable {
         self.bookmarksDirectory = bookmarksDirectory
         self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
+        self.bookmarksCardSize = bookmarksCardSize
     }
 }

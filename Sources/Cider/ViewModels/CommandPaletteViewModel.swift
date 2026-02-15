@@ -10,6 +10,7 @@ final class CommandPaletteViewModel: ObservableObject {
     @Published var activeTab: PaletteTab = .windows
     @Published var isVisible = false
     @Published var bookmarkDisplayMode: BookmarkDisplayMode = CiderConfig.load().bookmarksDefaultViewMode
+    @Published var bookmarkCardSize: BookmarkCardSize = CiderConfig.load().bookmarksCardSize
     @Published var monitors: [MonitorInfo] = []
     @Published var focusState: PaletteFocusState = .initial
     @Published var searchText: String = ""
@@ -69,6 +70,13 @@ final class CommandPaletteViewModel: ObservableObject {
 
         // Re-render when bookmarks change.
         BookmarksStorage.shared.$bookmarks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        BookmarksStorage.shared.$folders
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -380,6 +388,10 @@ final class CommandPaletteViewModel: ObservableObject {
         BookmarksStorage.shared.bookmarks
     }
 
+    var bookmarkFolders: [BookmarkFolder] {
+        BookmarksStorage.shared.folders
+    }
+
     var filteredBookmarks: [Bookmark] {
         guard isSearching else { return bookmarks }
         let query = searchQuery
@@ -425,6 +437,16 @@ final class CommandPaletteViewModel: ObservableObject {
     }
 
     @discardableResult
+    func assignBookmark(_ bookmark: Bookmark, toFolder folderID: UUID?) -> Bool {
+        BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folderID)
+    }
+
+    @discardableResult
+    func createBookmarkFolder(name: String, parentID: UUID?) -> BookmarkFolder? {
+        BookmarksStorage.shared.createFolder(name: name, parentID: parentID)
+    }
+
+    @discardableResult
     func updateBookmarkDetails(_ bookmark: Bookmark, title: String, notes: String, tags: [String]) -> Bool {
         BookmarksStorage.shared.updateDetails(
             for: bookmark.id,
@@ -446,6 +468,16 @@ final class CommandPaletteViewModel: ObservableObject {
 
         var config = CiderConfig.load()
         config.bookmarksDefaultViewMode = mode
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+    }
+
+    func setBookmarkCardSize(_ size: BookmarkCardSize) {
+        guard bookmarkCardSize != size else { return }
+        bookmarkCardSize = size
+
+        var config = CiderConfig.load()
+        config.bookmarksCardSize = size
         config.save()
         NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
     }
@@ -619,6 +651,7 @@ final class CommandPaletteViewModel: ObservableObject {
 
         let config = CiderConfig.load()
         bookmarkDisplayMode = config.bookmarksDefaultViewMode
+        bookmarkCardSize = config.bookmarksCardSize
         if !config.rememberPaletteState {
             expandedFolderID = nil
         }

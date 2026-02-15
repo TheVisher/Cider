@@ -31,7 +31,9 @@ final class BookmarksPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
 
-        isMovableByWindowBackground = true
+        // Use explicit drag regions in the title bar so content drags
+        // (bookmark DnD) don't get interpreted as window moves.
+        isMovableByWindowBackground = false
         isReleasedWhenClosed = false
     }
 

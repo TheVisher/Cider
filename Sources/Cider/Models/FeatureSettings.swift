@@ -23,5 +23,6 @@ struct BookmarksFeatureSettings: FeatureSettings {
         "bookmarksDirectory": .string("~/Documents/Cider/Bookmarks"),
         "rememberBookmarksPanelPosition": .bool(false),
         "bookmarksDefaultViewMode": .string(BookmarkDisplayMode.masonry.rawValue),
+        "bookmarksCardSize": .string(BookmarkCardSize.comfortable.rawValue),
     ]
 }

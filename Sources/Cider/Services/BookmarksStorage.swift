@@ -2,11 +2,22 @@ import AppKit
 import Combine
 import Foundation
 
+private struct BookmarksDiskSnapshot {
+    var bookmarks: [Bookmark]
+    var folders: [BookmarkFolder]
+}
+
+private struct BookmarksMetadataSnapshot: Codable {
+    var bookmarks: [Bookmark]
+    var folders: [BookmarkFolder]
+}
+
 @MainActor
 final class BookmarksStorage: ObservableObject {
     static let shared = BookmarksStorage()
 
     @Published private(set) var bookmarks: [Bookmark] = []
+    @Published private(set) var folders: [BookmarkFolder] = []
 
     private let legacyDefaultsKey = "CiderBookmarks"
     private let htmlFileName = "bookmarks.html"
@@ -30,13 +41,15 @@ final class BookmarksStorage: ObservableObject {
         guard newDirectoryURL.path != directoryURL.path else { return }
 
         let previousBookmarks = bookmarks
+        let previousFolders = folders
         let previousDirectoryURL = directoryURL
         directoryURL = newDirectoryURL
         ensureDirectory()
         load()
 
-        if bookmarks.isEmpty, !previousBookmarks.isEmpty {
+        if bookmarks.isEmpty, folders.isEmpty, (!previousBookmarks.isEmpty || !previousFolders.isEmpty) {
             bookmarks = previousBookmarks
+            folders = previousFolders
             persist()
             copyThumbnailAssetsIfNeeded(from: previousDirectoryURL, bookmarks: previousBookmarks)
             scheduleEnrichmentForIncompleteBookmarks()
@@ -184,6 +197,87 @@ final class BookmarksStorage: ObservableObject {
     }
 
     @discardableResult
+    func createFolder(name rawName: String, parentID: UUID?) -> BookmarkFolder? {
+        let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return nil }
+
+        if let parentID, folders.first(where: { $0.id == parentID }) == nil {
+            return nil
+        }
+
+        let resolvedName = uniqueFolderName(baseName: trimmedName, parentID: parentID)
+        let folder = BookmarkFolder(name: resolvedName, parentID: parentID)
+        folders.append(folder)
+        folders.sort(by: folderSortOrder)
+        persist()
+        return folder
+    }
+
+    @discardableResult
+    func renameFolder(_ folderID: UUID, to rawName: String) -> Bool {
+        guard let index = folders.firstIndex(where: { $0.id == folderID }) else {
+            return false
+        }
+
+        let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return false }
+
+        let parentID = folders[index].parentID
+        let resolvedName = uniqueFolderName(
+            baseName: trimmedName,
+            parentID: parentID,
+            excluding: folderID
+        )
+        guard folders[index].name != resolvedName else { return true }
+
+        folders[index].name = resolvedName
+        folders[index].updatedAt = Date()
+        folders.sort(by: folderSortOrder)
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deleteFolder(_ folderID: UUID) -> Bool {
+        guard folders.contains(where: { $0.id == folderID }) else { return false }
+
+        let subtree = folderSubtreeIDs(rootID: folderID)
+        guard !subtree.isEmpty else { return false }
+
+        folders.removeAll { subtree.contains($0.id) }
+        for index in bookmarks.indices {
+            guard let assignedFolderID = bookmarks[index].folderID,
+                  subtree.contains(assignedFolderID) else {
+                continue
+            }
+            bookmarks[index].folderID = nil
+            bookmarks[index].updatedAt = Date()
+        }
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func assignBookmark(_ bookmarkID: UUID, toFolder folderID: UUID?) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else {
+            return false
+        }
+
+        if let folderID, folders.first(where: { $0.id == folderID }) == nil {
+            return false
+        }
+
+        if bookmarks[index].folderID == folderID {
+            return true
+        }
+
+        bookmarks[index].folderID = folderID
+        bookmarks[index].updatedAt = Date()
+        persist()
+        return true
+    }
+
+    @discardableResult
     func assignThumbnail(for bookmarkID: UUID, fromDroppedString rawValue: String) async -> Bool {
         guard let candidate = extractedURLCandidate(from: rawValue) else { return false }
         let sourceURL: URL
@@ -276,39 +370,53 @@ final class BookmarksStorage: ObservableObject {
         cancelAllEnrichmentTasks()
 
         if let loaded = loadFromDisk() {
-            bookmarks = loaded
+            bookmarks = loaded.bookmarks
+            folders = loaded.folders
             scheduleEnrichmentForIncompleteBookmarks()
             return
         }
 
         if let migrated = migrateLegacyUserDefaults() {
-            bookmarks = migrated
+            bookmarks = migrated.bookmarks
+            folders = migrated.folders
             persist()
             scheduleEnrichmentForIncompleteBookmarks()
             return
         }
 
         bookmarks = []
+        folders = []
     }
 
-    private func loadFromDisk() -> [Bookmark]? {
-        let metadataBookmarks = loadMetadataBookmarks()
+    private func loadFromDisk() -> BookmarksDiskSnapshot? {
+        let metadataSnapshot = loadMetadataSnapshot()
+        let metadataFolders = sanitizedFolders(from: metadataSnapshot.folders)
+        let metadataBookmarks = sanitizedBookmarks(
+            from: metadataSnapshot.bookmarks,
+            validFolderIDs: Set(metadataFolders.map(\.id))
+        )
         let metadataByURL = Dictionary(uniqueKeysWithValues: metadataBookmarks.map { ($0.urlString.lowercased(), $0) })
 
         guard let htmlData = try? Data(contentsOf: htmlFileURL),
               let html = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .utf16) else {
-            if metadataBookmarks.isEmpty {
+            if metadataBookmarks.isEmpty, metadataFolders.isEmpty {
                 return nil
             }
-            return metadataBookmarks.sorted { $0.updatedAt > $1.updatedAt }
+            return BookmarksDiskSnapshot(
+                bookmarks: metadataBookmarks.sorted { $0.updatedAt > $1.updatedAt },
+                folders: metadataFolders
+            )
         }
 
         let entries = NetscapeBookmarksCodec.decode(html)
         if entries.isEmpty {
-            if metadataBookmarks.isEmpty {
-                return []
+            if metadataBookmarks.isEmpty, metadataFolders.isEmpty {
+                return BookmarksDiskSnapshot(bookmarks: [], folders: [])
             }
-            return metadataBookmarks.sorted { $0.updatedAt > $1.updatedAt }
+            return BookmarksDiskSnapshot(
+                bookmarks: metadataBookmarks.sorted { $0.updatedAt > $1.updatedAt },
+                folders: metadataFolders
+            )
         }
 
         var loadedBookmarks: [Bookmark] = []
@@ -340,23 +448,36 @@ final class BookmarksStorage: ObservableObject {
             loadedBookmarks.append(bookmark)
         }
 
-        return loadedBookmarks
+        let sanitizedLoaded = sanitizedBookmarks(
+            from: loadedBookmarks,
+            validFolderIDs: Set(metadataFolders.map(\.id))
+        )
+        return BookmarksDiskSnapshot(
+            bookmarks: sanitizedLoaded,
+            folders: metadataFolders
+        )
     }
 
-    private func loadMetadataBookmarks() -> [Bookmark] {
+    private func loadMetadataSnapshot() -> BookmarksMetadataSnapshot {
         guard let data = try? Data(contentsOf: metadataFileURL) else {
-            return []
+            return BookmarksMetadataSnapshot(bookmarks: [], folders: [])
         }
 
         do {
-            return try JSONDecoder().decode([Bookmark].self, from: data)
+            return try JSONDecoder().decode(BookmarksMetadataSnapshot.self, from: data)
         } catch {
-            NSLog("[BookmarksStorage] Failed to decode metadata: \(error)")
-            return []
+            do {
+                // Legacy metadata format before folders support.
+                let bookmarks = try JSONDecoder().decode([Bookmark].self, from: data)
+                return BookmarksMetadataSnapshot(bookmarks: bookmarks, folders: [])
+            } catch {
+                NSLog("[BookmarksStorage] Failed to decode metadata: \(error)")
+                return BookmarksMetadataSnapshot(bookmarks: [], folders: [])
+            }
         }
     }
 
-    private func migrateLegacyUserDefaults() -> [Bookmark]? {
+    private func migrateLegacyUserDefaults() -> BookmarksDiskSnapshot? {
         guard let data = UserDefaults.standard.data(forKey: legacyDefaultsKey) else {
             return nil
         }
@@ -364,7 +485,10 @@ final class BookmarksStorage: ObservableObject {
         do {
             let decoded = try JSONDecoder().decode([Bookmark].self, from: data)
             UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
-            return decoded.sorted { $0.updatedAt > $1.updatedAt }
+            return BookmarksDiskSnapshot(
+                bookmarks: decoded.sorted { $0.updatedAt > $1.updatedAt },
+                folders: []
+            )
         } catch {
             NSLog("[BookmarksStorage] Failed to migrate legacy bookmarks: \(error)")
             return nil
@@ -380,7 +504,8 @@ final class BookmarksStorage: ObservableObject {
         }
 
         do {
-            let data = try JSONEncoder().encode(bookmarks)
+            let snapshot = BookmarksMetadataSnapshot(bookmarks: bookmarks, folders: folders)
+            let data = try JSONEncoder().encode(snapshot)
             try data.write(to: metadataFileURL, options: .atomic)
         } catch {
             NSLog("[BookmarksStorage] Failed to write bookmarks metadata: \(error)")
@@ -795,6 +920,145 @@ final class BookmarksStorage: ObservableObject {
         }
 
         return url.absoluteString
+    }
+
+    private func uniqueFolderName(baseName: String, parentID: UUID?, excluding excludedFolderID: UUID? = nil) -> String {
+        let trimmedBase = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBase.isEmpty else { return baseName }
+
+        let siblingNames = Set(
+            folders
+                .filter { folder in
+                    folder.parentID == parentID && folder.id != excludedFolderID
+                }
+                .map { $0.name.lowercased() }
+        )
+
+        if !siblingNames.contains(trimmedBase.lowercased()) {
+            return trimmedBase
+        }
+
+        var suffix = 2
+        while siblingNames.contains("\(trimmedBase) \(suffix)".lowercased()) {
+            suffix += 1
+        }
+        return "\(trimmedBase) \(suffix)"
+    }
+
+    private func folderSubtreeIDs(rootID: UUID) -> Set<UUID> {
+        let childrenByParent = Dictionary(grouping: folders, by: \.parentID)
+        var queue: [UUID] = [rootID]
+        var visited: Set<UUID> = [rootID]
+
+        while !queue.isEmpty {
+            let currentID = queue.removeFirst()
+            let children = childrenByParent[currentID] ?? []
+            for child in children where !visited.contains(child.id) {
+                visited.insert(child.id)
+                queue.append(child.id)
+            }
+        }
+
+        return visited
+    }
+
+    private func folderSortOrder(_ lhs: BookmarkFolder, _ rhs: BookmarkFolder) -> Bool {
+        switch (lhs.parentID, rhs.parentID) {
+        case (nil, nil):
+            break
+        case (nil, _):
+            return true
+        case (_, nil):
+            return false
+        case let (leftParent?, rightParent?) where leftParent != rightParent:
+            return leftParent.uuidString < rightParent.uuidString
+        default:
+            break
+        }
+
+        let nameComparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+        if nameComparison != .orderedSame {
+            return nameComparison == .orderedAscending
+        }
+
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func sanitizedFolders(from rawFolders: [BookmarkFolder]) -> [BookmarkFolder] {
+        guard !rawFolders.isEmpty else { return [] }
+
+        var uniqueFoldersByID: [UUID: BookmarkFolder] = [:]
+        for folder in rawFolders where uniqueFoldersByID[folder.id] == nil {
+            uniqueFoldersByID[folder.id] = folder
+        }
+
+        var sanitizedFolders = Array(uniqueFoldersByID.values)
+        let knownFolderIDs = Set(sanitizedFolders.map(\.id))
+
+        for index in sanitizedFolders.indices {
+            if let parentID = sanitizedFolders[index].parentID {
+                if parentID == sanitizedFolders[index].id || !knownFolderIDs.contains(parentID) {
+                    sanitizedFolders[index].parentID = nil
+                    sanitizedFolders[index].updatedAt = Date()
+                }
+            }
+        }
+
+        var parentByFolderID = Dictionary(
+            uniqueKeysWithValues: sanitizedFolders.map { ($0.id, $0.parentID) }
+        )
+        for index in sanitizedFolders.indices {
+            let folderID = sanitizedFolders[index].id
+            if hasParentCycle(startFolderID: folderID, parentByFolderID: parentByFolderID) {
+                sanitizedFolders[index].parentID = nil
+                sanitizedFolders[index].updatedAt = Date()
+                parentByFolderID[folderID] = nil
+            }
+        }
+
+        sanitizedFolders.sort(by: folderSortOrder)
+        return sanitizedFolders
+    }
+
+    private func hasParentCycle(
+        startFolderID: UUID,
+        parentByFolderID: [UUID: UUID?]
+    ) -> Bool {
+        var visited: Set<UUID> = [startFolderID]
+        var currentParentID = parentByFolderID[startFolderID] ?? nil
+
+        while let parentID = currentParentID {
+            if visited.contains(parentID) {
+                return true
+            }
+            visited.insert(parentID)
+            currentParentID = parentByFolderID[parentID] ?? nil
+        }
+
+        return false
+    }
+
+    private func sanitizedBookmarks(from rawBookmarks: [Bookmark], validFolderIDs: Set<UUID>) -> [Bookmark] {
+        guard !rawBookmarks.isEmpty else { return [] }
+        guard !validFolderIDs.isEmpty else {
+            return rawBookmarks.map { bookmark in
+                var normalized = bookmark
+                normalized.folderID = nil
+                return normalized
+            }
+        }
+
+        return rawBookmarks.map { bookmark in
+            var normalized = bookmark
+            if let folderID = normalized.folderID, !validFolderIDs.contains(folderID) {
+                normalized.folderID = nil
+            }
+            return normalized
+        }
     }
 
     private func deduplicatedTags(from rawTags: [String]) -> [String] {

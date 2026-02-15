@@ -290,6 +290,14 @@ struct SettingsView: View {
                         label: { $0.displayName }
                     )
 
+                    SettingsPickerRow(
+                        title: "Default card size",
+                        subtitle: "Set bookmark card scale for grid and masonry",
+                        selection: $viewModel.bookmarksCardSize,
+                        options: BookmarkCardSize.allCases,
+                        label: { $0.displayName }
+                    )
+
                     HStack {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Bookmarks directory")

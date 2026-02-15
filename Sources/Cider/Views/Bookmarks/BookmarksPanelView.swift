@@ -34,30 +34,35 @@ struct BookmarksPanelView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .focused($isSearchFieldFocused)
 
-                            ScrollView(showsIndicators: false) {
-                                BookmarksBrowserView(
-                                    bookmarks: viewModel.filteredBookmarks,
-                                    displayMode: Binding(
-                                        get: { viewModel.displayMode },
-                                        set: { viewModel.setDisplayMode($0) }
-                                    ),
-                                    onOpenBookmark: {
-                                        clearSearchFocus()
-                                        viewModel.open($0)
-                                    },
-                                    onShowBookmarkDetails: { presentDetails(for: $0) },
-                                    onDeleteBookmark: {
-                                        clearSearchFocus()
-                                        viewModel.delete($0)
-                                    },
-                                    onAddBookmark: { viewModel.addBookmark(urlString: $0, title: $1) },
-                                    onAssignThumbnailFromDroppedString: { viewModel.assignThumbnail(for: $0, droppedString: $1) },
-                                    onAssignThumbnailFromLocalFileURL: { viewModel.assignThumbnail(for: $0, fileURL: $1) },
-                                    onAssignThumbnailFromImageData: { viewModel.assignThumbnail(for: $0, imageData: $1, preferredFileExtension: $2) },
-                                    onCaptureFromActiveBrowser: { viewModel.captureBookmarkFromActiveBrowserOrClipboard() },
-                                    onAddFromPasteboard: { viewModel.addBookmarkFromPasteboard() }
-                                )
-                            }
+                            BookmarksBrowserView(
+                                bookmarks: viewModel.filteredBookmarks,
+                                folders: viewModel.folders,
+                                displayMode: Binding(
+                                    get: { viewModel.displayMode },
+                                    set: { viewModel.setDisplayMode($0) }
+                                ),
+                                cardSize: Binding(
+                                    get: { viewModel.cardSize },
+                                    set: { viewModel.setCardSize($0) }
+                                ),
+                                onOpenBookmark: {
+                                    clearSearchFocus()
+                                    viewModel.open($0)
+                                },
+                                onShowBookmarkDetails: { presentDetails(for: $0) },
+                                onDeleteBookmark: {
+                                    clearSearchFocus()
+                                    viewModel.delete($0)
+                                },
+                                onAddBookmark: { viewModel.addBookmark(urlString: $0, title: $1) },
+                                onAssignThumbnailFromDroppedString: { viewModel.assignThumbnail(for: $0, droppedString: $1) },
+                                onAssignThumbnailFromLocalFileURL: { viewModel.assignThumbnail(for: $0, fileURL: $1) },
+                                onAssignThumbnailFromImageData: { viewModel.assignThumbnail(for: $0, imageData: $1, preferredFileExtension: $2) },
+                                onAssignBookmarkToFolder: { viewModel.assign($0, toFolder: $1) },
+                                onCreateFolder: { viewModel.createFolder(name: $0, parentID: $1) },
+                                onCaptureFromActiveBrowser: { viewModel.captureBookmarkFromActiveBrowserOrClipboard() },
+                                onAddFromPasteboard: { viewModel.addBookmarkFromPasteboard() }
+                            )
                         }
                         .blur(radius: detailsDraft == nil ? 0 : BookmarksDesign.detailsContentBlurRadius)
                         .animation(reduceMotion ? .none : .snappy, value: detailsDraft != nil)
@@ -370,6 +375,7 @@ struct BookmarksPanelView: View {
             }
             .buttonStyle(.plain)
         }
+        .background(BookmarksTitleBarDragRegion())
         .padding(.horizontal, Spacing.md)
         .frame(height: BookmarksDesign.toolbarHeight)
     }
@@ -841,6 +847,22 @@ private struct BookmarksPanelWindowAccessor: NSViewRepresentable {
                 window = nsView.window
             }
         }
+    }
+}
+
+private struct BookmarksTitleBarDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> BookmarksTitleBarDragRegionNSView {
+        BookmarksTitleBarDragRegionNSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: BookmarksTitleBarDragRegionNSView, context: Context) {}
+}
+
+private final class BookmarksTitleBarDragRegionNSView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 

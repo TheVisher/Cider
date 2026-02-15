@@ -6,15 +6,25 @@ import Foundation
 final class BookmarksViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published var displayMode: BookmarkDisplayMode
+    @Published var cardSize: BookmarkCardSize
     @Published var isVisible = false
     @Published var isCollapsed = false
 
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        self.displayMode = CiderConfig.load().bookmarksDefaultViewMode
+        let config = CiderConfig.load()
+        self.displayMode = config.bookmarksDefaultViewMode
+        self.cardSize = config.bookmarksCardSize
 
         BookmarksStorage.shared.$bookmarks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        BookmarksStorage.shared.$folders
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -24,13 +34,19 @@ final class BookmarksViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .ciderConfigChanged)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.displayMode = CiderConfig.load().bookmarksDefaultViewMode
+                let config = CiderConfig.load()
+                self?.displayMode = config.bookmarksDefaultViewMode
+                self?.cardSize = config.bookmarksCardSize
             }
             .store(in: &cancellables)
     }
 
     var bookmarks: [Bookmark] {
         BookmarksStorage.shared.bookmarks
+    }
+
+    var folders: [BookmarkFolder] {
+        BookmarksStorage.shared.folders
     }
 
     var filteredBookmarks: [Bookmark] {
@@ -75,6 +91,54 @@ final class BookmarksViewModel: ObservableObject {
 
     func delete(_ bookmark: Bookmark) {
         BookmarksStorage.shared.remove(bookmark)
+    }
+
+    @discardableResult
+    func assign(_ bookmark: Bookmark, toFolder folderID: UUID?) -> Bool {
+        BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folderID)
+    }
+
+    @discardableResult
+    func createFolder(name: String, parentID: UUID?) -> BookmarkFolder? {
+        BookmarksStorage.shared.createFolder(name: name, parentID: parentID)
+    }
+
+    func folder(for bookmark: Bookmark) -> BookmarkFolder? {
+        guard let folderID = bookmark.folderID else { return nil }
+        return folders.first(where: { $0.id == folderID })
+    }
+
+    func folderPath(to folderID: UUID?) -> [BookmarkFolder] {
+        guard let folderID else { return [] }
+        let folderByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
+        var path: [BookmarkFolder] = []
+        var cursorID: UUID? = folderID
+        var visited = Set<UUID>()
+
+        while let currentID = cursorID,
+              !visited.contains(currentID),
+              let folder = folderByID[currentID] {
+            visited.insert(currentID)
+            path.append(folder)
+            cursorID = folder.parentID
+        }
+
+        return path.reversed()
+    }
+
+    func childFolders(of parentID: UUID?) -> [BookmarkFolder] {
+        folders
+            .filter { $0.parentID == parentID }
+            .sorted { lhs, rhs in
+                let nameComparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                if nameComparison != .orderedSame {
+                    return nameComparison == .orderedAscending
+                }
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
     }
 
     @discardableResult
@@ -150,6 +214,16 @@ final class BookmarksViewModel: ObservableObject {
 
         var config = CiderConfig.load()
         config.bookmarksDefaultViewMode = mode
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+    }
+
+    func setCardSize(_ size: BookmarkCardSize) {
+        guard cardSize != size else { return }
+        cardSize = size
+
+        var config = CiderConfig.load()
+        config.bookmarksCardSize = size
         config.save()
         NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
     }

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum BookmarkDisplayMode: String, Codable, CaseIterable {
@@ -28,6 +29,130 @@ enum BookmarkDisplayMode: String, Codable, CaseIterable {
     }
 }
 
+enum BookmarkCardSize: String, Codable, CaseIterable {
+    case compact
+    case comfortable
+    case large
+    case extraLarge
+
+    var displayName: String {
+        switch self {
+        case .compact:
+            "Compact"
+        case .comfortable:
+            "Comfortable"
+        case .large:
+            "Large"
+        case .extraLarge:
+            "Extra Large"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .compact:
+            "S"
+        case .comfortable:
+            "M"
+        case .large:
+            "L"
+        case .extraLarge:
+            "XL"
+        }
+    }
+
+    var cardMinWidth: CGFloat {
+        switch self {
+        case .compact:
+            196
+        case .comfortable:
+            220
+        case .large:
+            252
+        case .extraLarge:
+            286
+        }
+    }
+
+    var gridThumbnailHeight: CGFloat {
+        switch self {
+        case .compact:
+            124
+        case .comfortable:
+            140
+        case .large:
+            164
+        case .extraLarge:
+            188
+        }
+    }
+
+    var masonryThumbnailHeightMin: CGFloat {
+        switch self {
+        case .compact:
+            104
+        case .comfortable:
+            120
+        case .large:
+            144
+        case .extraLarge:
+            168
+        }
+    }
+
+    var masonryThumbnailHeightMax: CGFloat {
+        switch self {
+        case .compact:
+            320
+        case .comfortable:
+            360
+        case .large:
+            400
+        case .extraLarge:
+            440
+        }
+    }
+
+    var masonryThumbnailHeightFallback: CGFloat {
+        switch self {
+        case .compact:
+            154
+        case .comfortable:
+            180
+        case .large:
+            208
+        case .extraLarge:
+            236
+        }
+    }
+
+    var listThumbnailWidth: CGFloat {
+        switch self {
+        case .compact:
+            60
+        case .comfortable:
+            72
+        case .large:
+            84
+        case .extraLarge:
+            96
+        }
+    }
+
+    var listThumbnailHeight: CGFloat {
+        switch self {
+        case .compact:
+            44
+        case .comfortable:
+            52
+        case .large:
+            62
+        case .extraLarge:
+            72
+        }
+    }
+}
+
 struct Bookmark: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
@@ -36,6 +161,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var updatedAt: Date
     var notes: String
     var tags: [String]
+    var folderID: UUID?
     var thumbnailRemoteURLString: String?
     var thumbnailRelativePath: String?
     var metadataUpdatedAt: Date?
@@ -49,6 +175,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case updatedAt
         case notes
         case tags
+        case folderID
         case thumbnailRemoteURLString
         case thumbnailRelativePath
         case metadataUpdatedAt
@@ -62,6 +189,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         updatedAt: Date = Date(),
         notes: String = "",
         tags: [String] = [],
+        folderID: UUID? = nil,
         thumbnailRemoteURLString: String? = nil,
         thumbnailRelativePath: String? = nil,
         metadataUpdatedAt: Date? = nil,
@@ -74,6 +202,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.updatedAt = updatedAt
         self.notes = notes
         self.tags = tags
+        self.folderID = folderID
         self.thumbnailRemoteURLString = thumbnailRemoteURLString
         self.thumbnailRelativePath = thumbnailRelativePath
         self.metadataUpdatedAt = metadataUpdatedAt

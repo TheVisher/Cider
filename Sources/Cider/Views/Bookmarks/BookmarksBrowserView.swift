@@ -2,9 +2,25 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum BookmarkDragPayload {
+    static let typeIdentifier = "com.cider.bookmark-id"
+    static let textPrefix = "cider-bookmark-id:"
+
+    static func bookmarkID(from raw: String) -> UUID? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(textPrefix) {
+            let idPortion = String(trimmed.dropFirst(textPrefix.count))
+            return UUID(uuidString: idPortion)
+        }
+        return UUID(uuidString: trimmed)
+    }
+}
+
 struct BookmarksBrowserView: View {
     let bookmarks: [Bookmark]
+    var folders: [BookmarkFolder] = []
     @Binding var displayMode: BookmarkDisplayMode
+    @Binding var cardSize: BookmarkCardSize
     var searchText: String = ""
     var showsOpenWindowButton = false
     var onOpenWindow: (() -> Void)? = nil
@@ -16,6 +32,8 @@ struct BookmarksBrowserView: View {
     var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
     var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
     var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
+    var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)? = nil
+    var onCreateFolder: ((String, UUID?) -> BookmarkFolder?)? = nil
     var onCaptureFromActiveBrowser: (() -> Bool)? = nil
     var onAddFromPasteboard: (() -> Bool)? = nil
 
@@ -27,13 +45,60 @@ struct BookmarksBrowserView: View {
     @State private var draftURL = ""
     @State private var addErrorMessage: String?
     @State private var isDropTargeted = false
+    @State private var isFolderSidebarVisible = true
+    @State private var isFolderCreationFieldVisible = false
+    @State private var draftFolderName = ""
+    @State private var draggedBookmarkID: UUID?
+    @State private var selectedFolderID: UUID?
+    @State private var expandedFolderIDs: Set<UUID> = []
+    @State private var dragStateResetTask: DispatchWorkItem?
 
-    private var hasBookmarks: Bool {
-        !bookmarks.isEmpty
+    private var hasVisibleBookmarks: Bool {
+        !displayedBookmarks.isEmpty
+    }
+
+    private var displayedBookmarks: [Bookmark] {
+        guard let folderID = selectedFolderID else { return bookmarks }
+        return bookmarks.filter { $0.folderID == folderID }
+    }
+
+    private var supportsFolderShelf: Bool {
+        onAssignBookmarkToFolder != nil
+    }
+
+    private var isDraggingBookmark: Bool {
+        draggedBookmarkID != nil
+    }
+
+    private var shouldShowFolderSidebar: Bool {
+        supportsFolderShelf && (isFolderSidebarVisible || isDraggingBookmark)
+    }
+
+    private var topLevelFolders: [BookmarkFolder] {
+        childFolders(of: nil)
+    }
+
+    private var folderDropTypeIdentifiers: [String] {
+        [
+            BookmarkDragPayload.typeIdentifier,
+            UTType.text.identifier,
+            UTType.plainText.identifier,
+            UTType.utf8PlainText.identifier,
+        ]
+    }
+
+    private var foldersFingerprint: String {
+        folders
+            .map { "\($0.id.uuidString):\($0.parentID?.uuidString ?? "root"):\($0.name)" }
+            .joined(separator: "|")
+    }
+
+    private var cardMinWidth: CGFloat {
+        cardSize.cardMinWidth
     }
 
     private var cardColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: BookmarksDesign.cardMinWidth), spacing: Spacing.md)]
+        [GridItem(.adaptive(minimum: cardMinWidth), spacing: Spacing.md)]
     }
 
     var body: some View {
@@ -45,11 +110,22 @@ struct BookmarksBrowserView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            if hasBookmarks {
-                content
-            } else {
-                emptyState
+            HStack(alignment: .top, spacing: Spacing.md) {
+                if shouldShowFolderSidebar {
+                    folderSidebar
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+
+                if hasVisibleBookmarks {
+                    ScrollView(showsIndicators: false) {
+                        content
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    emptyState
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(Spacing.xxs)
         .background(
@@ -63,8 +139,15 @@ struct BookmarksBrowserView: View {
         .onDrop(
             of: [UTType.url.identifier, UTType.plainText.identifier],
             isTargeted: $isDropTargeted,
-            perform: handleDrop(providers:)
+            perform: handleBrowserDrop(providers:)
         )
+        .onChange(of: foldersFingerprint) { _, _ in
+            normalizeFolderState()
+        }
+        .onDisappear {
+            cancelDragStateReset()
+        }
+        .animation(reduceMotion ? .none : .snappy, value: shouldShowFolderSidebar)
         .help("Drop a URL to save bookmark")
     }
 
@@ -79,6 +162,16 @@ struct BookmarksBrowserView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: BookmarksDesign.layoutPickerMaxWidth)
+
+            Picker("Card Size", selection: $cardSize) {
+                ForEach(BookmarkCardSize.allCases, id: \.self) { size in
+                    Text(size.shortLabel)
+                        .tag(size)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: BookmarksDesign.cardSizePickerMaxWidth)
+            .help("Bookmark card size")
 
             Spacer(minLength: Spacing.sm)
 
@@ -95,6 +188,21 @@ struct BookmarksBrowserView: View {
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(CiderColors.controlAccent.opacity(0.14))
                 )
+            }
+
+            if supportsFolderShelf {
+                Button(action: toggleFolderSidebar) {
+                    Image(systemName: isFolderSidebarVisible ? "sidebar.left" : "sidebar.right")
+                        .font(.system(size: 11 * textScale, weight: .semibold))
+                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(isFolderSidebarVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isFolderSidebarVisible ? CiderColors.controlAccent.opacity(0.18) : Color.white.opacity(0.08))
+                )
+                .help(isFolderSidebarVisible ? "Hide folder sidebar" : "Show folder sidebar")
             }
 
             if let onAddFromPasteboard {
@@ -202,10 +310,12 @@ struct BookmarksBrowserView: View {
         switch displayMode {
         case .list:
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                ForEach(bookmarks) { bookmark in
+                ForEach(displayedBookmarks) { bookmark in
                     BookmarkListRow(
                         bookmark: bookmark,
                         searchText: searchText,
+                        cardSize: cardSize,
+                        dragProvider: bookmarkDragProvider(for: bookmark),
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) }
@@ -218,11 +328,13 @@ struct BookmarksBrowserView: View {
                 columns: cardColumns,
                 spacing: Spacing.md
             ) {
-                ForEach(bookmarks) { bookmark in
+                ForEach(displayedBookmarks) { bookmark in
                     BookmarkCard(
                         bookmark: bookmark,
                         searchText: searchText,
                         mode: .grid,
+                        cardSize: cardSize,
+                        dragProvider: bookmarkDragProvider(for: bookmark),
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
@@ -235,14 +347,16 @@ struct BookmarksBrowserView: View {
 
         case .masonry:
             BookmarkMasonryLayout(
-                minimumColumnWidth: BookmarksDesign.cardMinWidth,
+                minimumColumnWidth: cardMinWidth,
                 itemSpacing: Spacing.md
             ) {
-                ForEach(bookmarks) { bookmark in
+                ForEach(displayedBookmarks) { bookmark in
                     BookmarkCard(
                         bookmark: bookmark,
                         searchText: searchText,
                         mode: .masonry,
+                        cardSize: cardSize,
+                        dragProvider: bookmarkDragProvider(for: bookmark),
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
@@ -264,16 +378,337 @@ struct BookmarksBrowserView: View {
                 .font(.system(size: 32 * textScale))
                 .foregroundColor(CiderColors.tertiary)
 
-            Text("No bookmarks yet")
+            Text(selectedFolderID == nil ? "No bookmarks yet" : "No bookmarks in this folder")
                 .font(.system(size: 13 * textScale, weight: .medium))
                 .foregroundColor(CiderColors.secondary)
 
-            Text("Add one with the + button or paste from clipboard")
+            Text(selectedFolderID == nil
+                ? "Add one with the + button or paste from clipboard"
+                : "Try another folder or drag bookmarks into this one")
                 .font(.system(size: 11 * textScale))
                 .foregroundColor(CiderColors.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.xxl)
+    }
+
+    @ViewBuilder
+    private var folderSidebar: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                Label("Folders", systemImage: "folder")
+                    .font(.system(size: 11 * textScale, weight: .semibold))
+                    .foregroundColor(CiderColors.secondary)
+
+                Spacer(minLength: Spacing.sm)
+
+                Button(action: toggleFolderCreationField) {
+                    Image(systemName: isFolderCreationFieldVisible ? "xmark" : "folder.badge.plus")
+                        .font(.system(size: 11 * textScale, weight: .semibold))
+                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(CiderColors.secondary)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                )
+                .help(isFolderCreationFieldVisible ? "Cancel new folder" : "Create folder")
+            }
+
+            BookmarkFolderSidebarRow(
+                title: "All Bookmarks",
+                bookmarkCount: bookmarks.count,
+                depth: 0,
+                hasChildren: !topLevelFolders.isEmpty,
+                isExpanded: true,
+                isSelected: selectedFolderID == nil,
+                dropTypeIdentifiers: folderDropTypeIdentifiers,
+                onTap: { selectFolder(nil) },
+                onToggleExpand: nil,
+                onHoverChanged: { _ in },
+                onDropTargetChanged: { _ in },
+                onDropProviders: { providers in
+                    handleFolderDrop(providers: providers, targetFolderID: nil)
+                }
+            )
+
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
+                    ForEach(topLevelFolders) { folder in
+                        folderSidebarBranch(folder, depth: 0)
+                    }
+                }
+                .padding(.bottom, Spacing.xs)
+            }
+
+            if topLevelFolders.isEmpty {
+                Text("No folders yet. Create one and drag bookmarks into it.")
+                    .font(.system(size: 11 * textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.bottom, Spacing.xs)
+            }
+
+            if isFolderCreationFieldVisible {
+                HStack(spacing: Spacing.sm) {
+                    TextField("New folder name", text: $draftFolderName)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            commitFolderCreation()
+                        }
+
+                    Button("Create") {
+                        commitFolderCreation()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(CiderColors.controlAccent)
+                }
+            }
+        }
+        .padding(Spacing.sm)
+        .frame(width: BookmarksDesign.folderSidebarWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
+        )
+    }
+
+    private func folderSidebarBranch(_ folder: BookmarkFolder, depth: Int) -> AnyView {
+        let children = childFolders(of: folder.id)
+        let isExpanded = expandedFolderIDs.contains(folder.id)
+        return AnyView(
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                BookmarkFolderSidebarRow(
+                    title: folder.name,
+                    bookmarkCount: bookmarksInFolder(folder.id).count,
+                    depth: depth,
+                    hasChildren: !children.isEmpty,
+                    isExpanded: isExpanded,
+                    isSelected: selectedFolderID == folder.id,
+                    dropTypeIdentifiers: folderDropTypeIdentifiers,
+                    onTap: { selectFolder(folder.id) },
+                    onToggleExpand: !children.isEmpty ? {
+                        if isExpanded {
+                            expandedFolderIDs.remove(folder.id)
+                        } else {
+                            expandedFolderIDs.insert(folder.id)
+                        }
+                    } : nil,
+                    onHoverChanged: { hovering in
+                        guard hovering, isDraggingBookmark, !children.isEmpty else { return }
+                        expandedFolderIDs.insert(folder.id)
+                    },
+                    onDropTargetChanged: { targeted in
+                        guard targeted, !children.isEmpty else { return }
+                        expandedFolderIDs.insert(folder.id)
+                    },
+                    onDropProviders: { providers in
+                        handleFolderDrop(providers: providers, targetFolderID: folder.id)
+                    }
+                )
+
+                if isExpanded {
+                    ForEach(children) { child in
+                        folderSidebarBranch(child, depth: depth + 1)
+                    }
+                }
+            }
+        )
+    }
+
+    private func toggleFolderSidebar() {
+        guard supportsFolderShelf else { return }
+        withAnimation(reduceMotion ? .none : .snappy) {
+            isFolderSidebarVisible.toggle()
+            if !isFolderSidebarVisible {
+                isFolderCreationFieldVisible = false
+                draftFolderName = ""
+            }
+        }
+    }
+
+    private func toggleFolderCreationField() {
+        guard supportsFolderShelf else { return }
+        withAnimation(reduceMotion ? .none : .snappy) {
+            isFolderCreationFieldVisible.toggle()
+            if isFolderCreationFieldVisible {
+                isFolderSidebarVisible = true
+            } else {
+                draftFolderName = ""
+            }
+        }
+    }
+
+    private func scheduleDragStateReset() {
+        cancelDragStateReset()
+        let task = DispatchWorkItem {
+            draggedBookmarkID = nil
+        }
+        dragStateResetTask = task
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + BookmarksDesign.folderShelfDragStateTimeout,
+            execute: task
+        )
+    }
+
+    private func cancelDragStateReset() {
+        dragStateResetTask?.cancel()
+        dragStateResetTask = nil
+    }
+
+    private func normalizeFolderState() {
+        let validFolderIDs = Set(folders.map(\.id))
+        if let selectedFolderID, !validFolderIDs.contains(selectedFolderID) {
+            self.selectedFolderID = nil
+        }
+        expandedFolderIDs = expandedFolderIDs.filter { validFolderIDs.contains($0) }
+    }
+
+    private func selectFolder(_ folderID: UUID?) {
+        guard selectedFolderID != folderID else { return }
+        selectedFolderID = folderID
+        if let folderID {
+            expandPath(to: folderID)
+        }
+    }
+
+    private func commitFolderCreation() {
+        guard let onCreateFolder else { return }
+        let trimmed = draftFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let created = onCreateFolder(trimmed, selectedFolderID)
+        guard let created else { return }
+
+        draftFolderName = ""
+        isFolderCreationFieldVisible = false
+        selectFolder(created.id)
+    }
+
+    private func bookmarksInFolder(_ folderID: UUID) -> [Bookmark] {
+        bookmarks.filter { $0.folderID == folderID }
+    }
+
+    private func hasChildFolders(_ folderID: UUID) -> Bool {
+        folders.contains(where: { $0.parentID == folderID })
+    }
+
+    private func childFolders(of parentID: UUID?) -> [BookmarkFolder] {
+        folders
+            .filter { $0.parentID == parentID }
+            .sorted { lhs, rhs in
+                let nameComparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                if nameComparison != .orderedSame {
+                    return nameComparison == .orderedAscending
+                }
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
+    private func folderPath(to folderID: UUID) -> [BookmarkFolder] {
+        let folderByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
+        var path: [BookmarkFolder] = []
+        var cursorID: UUID? = folderID
+        var visited = Set<UUID>()
+
+        while let currentID = cursorID,
+              !visited.contains(currentID),
+              let folder = folderByID[currentID] {
+            visited.insert(currentID)
+            path.append(folder)
+            cursorID = folder.parentID
+        }
+
+        return path.reversed()
+    }
+
+    private func expandPath(to folderID: UUID) {
+        let path = folderPath(to: folderID)
+        for folder in path.dropLast() {
+            expandedFolderIDs.insert(folder.id)
+        }
+    }
+
+    private func bookmarkDragProvider(for bookmark: Bookmark) -> (() -> NSItemProvider)? {
+        guard supportsFolderShelf else { return nil }
+        return {
+            beginBookmarkDrag(for: bookmark.id)
+            let provider = NSItemProvider(
+                object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
+            )
+            let payload = Data(bookmark.id.uuidString.utf8)
+            provider.registerDataRepresentation(
+                forTypeIdentifier: BookmarkDragPayload.typeIdentifier,
+                visibility: .all
+            ) { completion in
+                completion(payload, nil)
+                return nil
+            }
+            return provider
+        }
+    }
+
+    private func beginBookmarkDrag(for bookmarkID: UUID) {
+        draggedBookmarkID = bookmarkID
+        scheduleDragStateReset()
+    }
+
+    private func handleFolderDrop(providers: [NSItemProvider], targetFolderID: UUID?) -> Bool {
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: BookmarkDragPayload.typeIdentifier) { data, _ in
+                guard let data,
+                      let rawID = String(data: data, encoding: .utf8),
+                      let bookmarkID = BookmarkDragPayload.bookmarkID(from: rawID) else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    assignDraggedBookmark(bookmarkID: bookmarkID, toFolder: targetFolderID)
+                }
+            }
+            return true
+        }
+
+        for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
+            provider.loadObject(ofClass: NSString.self) { item, _ in
+                guard let raw = item as? String,
+                      let bookmarkID = BookmarkDragPayload.bookmarkID(from: raw) else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    assignDraggedBookmark(bookmarkID: bookmarkID, toFolder: targetFolderID)
+                }
+            }
+            return true
+        }
+
+        if let draggedBookmarkID {
+            assignDraggedBookmark(bookmarkID: draggedBookmarkID, toFolder: targetFolderID)
+            return true
+        }
+
+        return false
+    }
+
+    private func assignDraggedBookmark(bookmarkID: UUID, toFolder targetFolderID: UUID?) {
+        guard let bookmark = bookmarks.first(where: { $0.id == bookmarkID }) else { return }
+        let assigned = onAssignBookmarkToFolder?(bookmark, targetFolderID) ?? false
+        guard assigned else {
+            addErrorMessage = "Could not move bookmark to folder."
+            return
+        }
+
+        addErrorMessage = nil
+        draggedBookmarkID = nil
+        cancelDragStateReset()
     }
 
     private func toggleAddForm() {
@@ -316,7 +751,19 @@ struct BookmarksBrowserView: View {
         return false
     }
 
+    private func handleBrowserDrop(providers: [NSItemProvider]) -> Bool {
+        // Internal bookmark drags should be owned by folder drop targets.
+        if isDraggingBookmark || providers.contains(where: { $0.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) }) {
+            return false
+        }
+        return handleDrop(providers: providers)
+    }
+
     private func loadDroppedValue(from provider: NSItemProvider) -> Bool {
+        if provider.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) {
+            return false
+        }
+
         if provider.canLoadObject(ofClass: NSURL.self) {
             provider.loadObject(ofClass: NSURL.self) { item, _ in
                 guard let droppedURL = item as? URL else {
@@ -403,6 +850,12 @@ struct BookmarksBrowserView: View {
     }
 
     private func saveDroppedString(_ rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(BookmarkDragPayload.textPrefix) {
+            // Internal bookmark drag payload; ignore when dropped outside folder targets.
+            return
+        }
+
         let saved = onAddBookmark(rawValue, nil)
         if saved {
             addErrorMessage = nil
@@ -412,9 +865,120 @@ struct BookmarksBrowserView: View {
     }
 }
 
+private struct BookmarkFolderSidebarRow: View {
+    let title: String
+    let bookmarkCount: Int
+    let depth: Int
+    let hasChildren: Bool
+    let isExpanded: Bool
+    let isSelected: Bool
+    let dropTypeIdentifiers: [String]
+    let onTap: () -> Void
+    let onToggleExpand: (() -> Void)?
+    let onHoverChanged: (Bool) -> Void
+    let onDropTargetChanged: (Bool) -> Void
+    let onDropProviders: ([NSItemProvider]) -> Bool
+
+    @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isDropTargeted = false
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            if hasChildren {
+                Button(action: { onToggleExpand?() }) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9 * textScale, weight: .semibold))
+                        .foregroundColor(CiderColors.quaternary)
+                        .frame(width: 12, height: 12)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear
+                    .frame(width: 12, height: 12)
+            }
+
+            Image(systemName: "folder")
+                .font(.system(size: 11 * textScale, weight: .semibold))
+                .foregroundColor(iconColor)
+
+            Text(title)
+                .font(.system(size: 11 * textScale, weight: .medium))
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: Spacing.xs)
+
+            Text("\(bookmarkCount)")
+                .font(.system(size: 10 * textScale, weight: .medium))
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(.leading, Spacing.xs + CGFloat(depth) * BookmarksDesign.folderSidebarIndent)
+        .padding(.trailing, Spacing.xs)
+        .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(borderColor, lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .animation(reduceMotion ? .none : .snappy, value: isDropTargeted)
+        .animation(reduceMotion ? .none : .snappy, value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+            onHoverChanged(hovering)
+        }
+        .onDrop(
+            of: dropTypeIdentifiers,
+            isTargeted: $isDropTargeted,
+            perform: onDropProviders
+        )
+        .onChange(of: isDropTargeted) { _, targeted in
+            onDropTargetChanged(targeted)
+        }
+    }
+
+    private var iconColor: Color {
+        if isDropTargeted || isSelected {
+            return CiderColors.controlAccent
+        }
+        return CiderColors.secondary
+    }
+
+    private var backgroundColor: Color {
+        if isDropTargeted {
+            return CiderColors.controlAccent.opacity(0.2)
+        }
+        if isSelected {
+            return CiderColors.controlAccent.opacity(0.14)
+        }
+        if isHovered {
+            return Color.white.opacity(0.1)
+        }
+        return Color.white.opacity(0.06)
+    }
+
+    private var borderColor: Color {
+        if isDropTargeted {
+            return CiderColors.controlAccent.opacity(0.72)
+        }
+        if isSelected {
+            return CiderColors.controlAccent.opacity(0.48)
+        }
+        return Color.white.opacity(0.12)
+    }
+}
+
 private struct BookmarkListRow: View {
     let bookmark: Bookmark
     var searchText: String
+    let cardSize: BookmarkCardSize
+    var dragProvider: (() -> NSItemProvider)? = nil
     let onShowDetails: () -> Void
     let onOpen: () -> Void
     let onDelete: () -> Void
@@ -427,7 +991,7 @@ private struct BookmarkListRow: View {
         HStack(spacing: Spacing.sm) {
             Button(action: onShowDetails) {
                 BookmarkThumbnailView(bookmark: bookmark, mode: .list)
-                    .frame(width: BookmarksDesign.thumbnailWidthList, height: BookmarksDesign.thumbnailHeightList)
+                    .frame(width: cardSize.listThumbnailWidth, height: cardSize.listThumbnailHeight)
             }
             .buttonStyle(.plain)
             .help("Show bookmark details")
@@ -478,7 +1042,7 @@ private struct BookmarkListRow: View {
             }
         }
         .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, Spacing.xs)
+        .padding(.vertical, cardSize == .extraLarge ? Spacing.sm : Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
@@ -491,6 +1055,9 @@ private struct BookmarkListRow: View {
         .contextMenu {
             Button("Open") { onOpen() }
             Button("Delete", role: .destructive) { onDelete() }
+        }
+        .bookmarkDraggable(dragProvider) {
+            BookmarkDragPreview(bookmark: bookmark)
         }
     }
 }
@@ -512,6 +1079,8 @@ private struct BookmarkCard: View {
     let bookmark: Bookmark
     var searchText: String
     let mode: CardMode
+    let cardSize: BookmarkCardSize
+    var dragProvider: (() -> NSItemProvider)? = nil
     let onShowDetails: () -> Void
     let onOpen: () -> Void
     let onDelete: () -> Void
@@ -523,7 +1092,7 @@ private struct BookmarkCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     @State private var isThumbnailDropTargeted = false
-    @State private var cardWidth: CGFloat = BookmarksDesign.cardMinWidth
+    @State private var cardWidth: CGFloat = 220
     @State private var resolvedThumbnailAspectRatio: CGFloat?
 
     private var supportsThumbnailDrops: Bool {
@@ -622,21 +1191,24 @@ private struct BookmarkCard: View {
             isTargeted: $isThumbnailDropTargeted,
             perform: handleThumbnailDrop(providers:)
         )
+        .bookmarkDraggable(dragProvider) {
+            BookmarkDragPreview(bookmark: bookmark)
+        }
     }
 
     private var resolvedThumbnailHeight: CGFloat {
         switch mode {
         case .grid:
-            return BookmarksDesign.thumbnailHeightGrid
+            return cardSize.gridThumbnailHeight
         case .masonry:
             guard let aspectRatio = resolvedThumbnailAspectRatio else {
-                return BookmarksDesign.thumbnailHeightMasonryFallback
+                return cardSize.masonryThumbnailHeightFallback
             }
 
             let proposedHeight = cardWidth * aspectRatio
             return min(
-                max(proposedHeight, BookmarksDesign.thumbnailHeightMasonryMin),
-                BookmarksDesign.thumbnailHeightMasonryMax
+                max(proposedHeight, cardSize.masonryThumbnailHeightMin),
+                cardSize.masonryThumbnailHeightMax
             )
         }
     }
@@ -790,6 +1362,101 @@ private extension NSImage {
             return nil
         }
         return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
+private struct BookmarkDragPreview: View {
+    let bookmark: Bookmark
+
+    private var previewShape: some Shape {
+        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+    }
+
+    private var thumbnailShape: some Shape {
+        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+    }
+
+    private var gradientPair: (Color, Color) {
+        BookmarkVisualStyle.gradient(for: bookmark)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Group {
+                if let image = loadedThumbnail {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .antialiased(true)
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(
+                        colors: [gradientPair.0, gradientPair.1],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .overlay {
+                        Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.white.opacity(0.92))
+                    }
+                }
+            }
+            .frame(height: BookmarksDesign.dragPreviewThumbnailHeight)
+            .clipShape(thumbnailShape)
+
+            Text(bookmark.title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+        }
+        .padding(Spacing.xs)
+        .frame(width: BookmarksDesign.dragPreviewWidth)
+        .background(
+            previewShape
+                .fill(Color.black.opacity(0.72))
+        )
+        .overlay(
+            previewShape
+                .stroke(Color.white.opacity(0.2), lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .shadow(color: Color.black.opacity(0.28), radius: 8, x: 0, y: 3)
+        .scaleEffect(BookmarksDesign.dragPreviewScale)
+        .rotationEffect(.degrees(BookmarksDesign.dragPreviewRotation))
+        .offset(
+            x: BookmarksDesign.dragPreviewXOffset,
+            y: BookmarksDesign.dragPreviewYOffset
+        )
+    }
+
+    private var loadedThumbnail: NSImage? {
+        guard let filePath = bookmark.thumbnailFileURL?.path else { return nil }
+        return NSImage(contentsOfFile: filePath)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func bookmarkDraggable<Preview: View>(
+        _ provider: (() -> NSItemProvider)?,
+        @ViewBuilder preview: @escaping () -> Preview
+    ) -> some View {
+        if let provider {
+            onDrag(provider, preview: preview)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func bookmarkDraggable(_ provider: (() -> NSItemProvider)?) -> some View {
+        if let provider {
+            onDrag {
+                provider()
+            }
+        } else {
+            self
+        }
     }
 }
 

@@ -45,12 +45,17 @@ struct PaletteContentArea: View {
     var onDeleteNotes: (([Note]) -> Void)? = nil
     // Bookmarks
     var bookmarks: [Bookmark] = []
+    var bookmarkFolders: [BookmarkFolder] = []
     var bookmarkDisplayMode: BookmarkDisplayMode = .masonry
+    var bookmarkCardSize: BookmarkCardSize = .comfortable
     var onBookmarkDisplayModeChange: ((BookmarkDisplayMode) -> Void)? = nil
+    var onBookmarkCardSizeChange: ((BookmarkCardSize) -> Void)? = nil
     var onBookmarkClick: ((Bookmark) -> Void)? = nil
     var onDeleteBookmark: ((Bookmark) -> Void)? = nil
     var onAddBookmark: ((String, String?) -> Bool)? = nil
     var onUpdateBookmarkDetails: ((Bookmark, String, String, [String]) -> Bool)? = nil
+    var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)? = nil
+    var onCreateBookmarkFolder: ((String, UUID?) -> BookmarkFolder?)? = nil
     var onCaptureBookmarkFromActiveBrowser: (() -> Bool)? = nil
     var onAddBookmarkFromPasteboard: (() -> Bool)? = nil
     var onOpenBookmarksWindow: (() -> Void)? = nil
@@ -405,9 +410,14 @@ struct PaletteContentArea: View {
     private var bookmarksContent: some View {
         BookmarksBrowserView(
             bookmarks: bookmarks,
+            folders: bookmarkFolders,
             displayMode: Binding(
                 get: { bookmarkDisplayMode },
                 set: { onBookmarkDisplayModeChange?($0) }
+            ),
+            cardSize: Binding(
+                get: { bookmarkCardSize },
+                set: { onBookmarkCardSizeChange?($0) }
             ),
             searchText: searchText,
             showsOpenWindowButton: true,
@@ -419,6 +429,12 @@ struct PaletteContentArea: View {
             },
             onUpdateBookmarkDetails: { bookmark, title, notes, tags in
                 onUpdateBookmarkDetails?(bookmark, title, notes, tags) ?? false
+            },
+            onAssignBookmarkToFolder: { bookmark, folderID in
+                onAssignBookmarkToFolder?(bookmark, folderID) ?? false
+            },
+            onCreateFolder: { name, parentID in
+                onCreateBookmarkFolder?(name, parentID)
             },
             onCaptureFromActiveBrowser: { onCaptureBookmarkFromActiveBrowser?() ?? false },
             onAddFromPasteboard: { onAddBookmarkFromPasteboard?() ?? false }
