@@ -34,9 +34,9 @@ struct BookmarksTabContent: View {
                         get: { viewModel.displayMode },
                         set: { viewModel.setDisplayMode($0) }
                     ),
-                    cardSize: Binding(
-                        get: { viewModel.cardSize },
-                        set: { viewModel.setCardSize($0) }
+                    cardSizeScale: Binding(
+                        get: { viewModel.cardSizeScale },
+                        set: { viewModel.setCardSizeScale($0) }
                     ),
                     onOpenBookmark: {
                         clearSearchFocus()
@@ -53,8 +53,6 @@ struct BookmarksTabContent: View {
                     onAssignThumbnailFromImageData: { viewModel.assignThumbnail(for: $0, imageData: $1, preferredFileExtension: $2) },
                     onAssignBookmarkToFolder: { viewModel.assign($0, toFolder: $1) },
                     onCreateFolder: { viewModel.createFolder(name: $0, parentID: $1) },
-                    onCaptureFromActiveBrowser: { viewModel.captureBookmarkFromActiveBrowserOrClipboard() },
-                    onAddFromPasteboard: { viewModel.addBookmarkFromPasteboard() },
                     showsInternalFolderSidebar: false
                 )
             }

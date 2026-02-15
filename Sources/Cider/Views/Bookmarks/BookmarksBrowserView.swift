@@ -20,10 +20,8 @@ struct BookmarksBrowserView: View {
     let bookmarks: [Bookmark]
     var folders: [Folder] = []
     @Binding var displayMode: BookmarkDisplayMode
-    @Binding var cardSize: BookmarkCardSize
+    @Binding var cardSizeScale: Double
     var searchText: String = ""
-    var showsOpenWindowButton = false
-    var onOpenWindow: (() -> Void)? = nil
     var onOpenBookmark: (Bookmark) -> Void
     var onShowBookmarkDetails: ((Bookmark) -> Void)? = nil
     var onDeleteBookmark: ((Bookmark) -> Void)? = nil
@@ -34,8 +32,6 @@ struct BookmarksBrowserView: View {
     var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
     var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)? = nil
     var onCreateFolder: ((String, UUID?) -> Folder?)? = nil
-    var onCaptureFromActiveBrowser: (() -> Bool)? = nil
-    var onAddFromPasteboard: (() -> Bool)? = nil
     var showsInternalFolderSidebar = true
 
     @Environment(\.textScale) private var textScale
@@ -94,18 +90,16 @@ struct BookmarksBrowserView: View {
             .joined(separator: "|")
     }
 
-    private var cardMinWidth: CGFloat {
-        cardSize.cardMinWidth
+    private var cardSizing: CardSizing {
+        CardSizing(scale: cardSizeScale)
     }
 
     private var cardColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: cardMinWidth), spacing: Spacing.md)]
+        [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            toolbar
-
             if isAddFormVisible {
                 addForm
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -149,121 +143,12 @@ struct BookmarksBrowserView: View {
             cancelDragStateReset()
         }
         .animation(reduceMotion ? .none : .snappy, value: shouldShowFolderSidebar)
-        .help("Drop a URL to save bookmark")
-    }
-
-    @ViewBuilder
-    private var toolbar: some View {
-        HStack(spacing: Spacing.sm) {
-            Picker("Bookmark Layout", selection: $displayMode) {
-                ForEach(BookmarkDisplayMode.allCases, id: \.self) { mode in
-                    Label(mode.displayName, systemImage: mode.icon)
-                        .tag(mode)
-                }
+        .onReceive(NotificationCenter.default.publisher(for: .showBookmarkAddForm)) { _ in
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isAddFormVisible = true
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: BookmarksDesign.layoutPickerMaxWidth)
-
-            Picker("Card Size", selection: $cardSize) {
-                ForEach(BookmarkCardSize.allCases, id: \.self) { size in
-                    Text(size.shortLabel)
-                        .tag(size)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: BookmarksDesign.cardSizePickerMaxWidth)
-            .help("Bookmark card size")
-
-            Spacer(minLength: Spacing.sm)
-
-            if showsOpenWindowButton {
-                Button(action: { onOpenWindow?() }) {
-                    Label("Open Window", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11 * textScale, weight: .medium))
-                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(CiderColors.controlAccent)
-                .padding(.horizontal, Spacing.sm)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.14))
-                )
-            }
-
-            if showsInternalFolderSidebar && supportsFolderShelf {
-                Button(action: toggleFolderSidebar) {
-                    Image(systemName: isFolderSidebarVisible ? "sidebar.left" : "sidebar.right")
-                        .font(.system(size: 11 * textScale, weight: .semibold))
-                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(isFolderSidebarVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(isFolderSidebarVisible ? CiderColors.controlAccent.opacity(0.18) : Color.white.opacity(0.08))
-                )
-                .help(isFolderSidebarVisible ? "Hide folder sidebar" : "Show folder sidebar")
-            }
-
-            if let onAddFromPasteboard {
-                if let onCaptureFromActiveBrowser {
-                    Button(action: {
-                        let added = onCaptureFromActiveBrowser()
-                        if !added {
-                            addErrorMessage = "Could not capture active browser tab."
-                        } else {
-                            addErrorMessage = nil
-                        }
-                    }) {
-                        Image(systemName: "safari")
-                            .font(.system(size: 11 * textScale, weight: .semibold))
-                            .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(CiderColors.secondary)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                    )
-                    .help("Capture active browser tab")
-                }
-
-                Button(action: {
-                    let added = onAddFromPasteboard()
-                    if !added {
-                        addErrorMessage = "Clipboard does not contain a valid URL."
-                    } else {
-                        addErrorMessage = nil
-                    }
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 11 * textScale, weight: .semibold))
-                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(CiderColors.secondary)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                )
-                .help("Add bookmark from clipboard")
-            }
-
-            Button(action: toggleAddForm) {
-                Image(systemName: isAddFormVisible ? "xmark" : "plus")
-                    .font(.system(size: 11 * textScale, weight: .semibold))
-                    .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(CiderColors.secondary)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-            )
-            .help(isAddFormVisible ? "Close add bookmark" : "Add bookmark")
         }
-        .frame(minHeight: BookmarksDesign.toolbarHeight)
+        .help("Drop a URL to save bookmark")
     }
 
     @ViewBuilder
@@ -315,7 +200,7 @@ struct BookmarksBrowserView: View {
                     BookmarkListRow(
                         bookmark: bookmark,
                         searchText: searchText,
-                        cardSize: cardSize,
+                        cardSizing: cardSizing,
                         dragProvider: bookmarkDragProvider(for: bookmark),
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
@@ -334,7 +219,7 @@ struct BookmarksBrowserView: View {
                         bookmark: bookmark,
                         searchText: searchText,
                         mode: .grid,
-                        cardSize: cardSize,
+                        cardSizing: cardSizing,
                         dragProvider: bookmarkDragProvider(for: bookmark),
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
@@ -348,7 +233,7 @@ struct BookmarksBrowserView: View {
 
         case .masonry:
             BookmarkMasonryLayout(
-                minimumColumnWidth: cardMinWidth,
+                minimumColumnWidth: cardSizing.cardMinWidth,
                 itemSpacing: Spacing.md
             ) {
                 ForEach(displayedBookmarks) { bookmark in
@@ -356,7 +241,7 @@ struct BookmarksBrowserView: View {
                         bookmark: bookmark,
                         searchText: searchText,
                         mode: .masonry,
-                        cardSize: cardSize,
+                        cardSizing: cardSizing,
                         dragProvider: bookmarkDragProvider(for: bookmark),
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
@@ -978,7 +863,7 @@ private struct BookmarkFolderSidebarRow: View {
 private struct BookmarkListRow: View {
     let bookmark: Bookmark
     var searchText: String
-    let cardSize: BookmarkCardSize
+    let cardSizing: CardSizing
     var dragProvider: (() -> NSItemProvider)? = nil
     let onShowDetails: () -> Void
     let onOpen: () -> Void
@@ -992,7 +877,7 @@ private struct BookmarkListRow: View {
         HStack(spacing: Spacing.sm) {
             Button(action: onShowDetails) {
                 BookmarkThumbnailView(bookmark: bookmark, mode: .list)
-                    .frame(width: cardSize.listThumbnailWidth, height: cardSize.listThumbnailHeight)
+                    .frame(width: cardSizing.listThumbnailWidth, height: cardSizing.listThumbnailHeight)
             }
             .buttonStyle(.plain)
             .help("Show bookmark details")
@@ -1043,7 +928,7 @@ private struct BookmarkListRow: View {
             }
         }
         .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, cardSize == .extraLarge ? Spacing.sm : Spacing.xs)
+        .padding(.vertical, cardSizing.isExtraLarge ? Spacing.sm : Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
@@ -1080,7 +965,7 @@ private struct BookmarkCard: View {
     let bookmark: Bookmark
     var searchText: String
     let mode: CardMode
-    let cardSize: BookmarkCardSize
+    let cardSizing: CardSizing
     var dragProvider: (() -> NSItemProvider)? = nil
     let onShowDetails: () -> Void
     let onOpen: () -> Void
@@ -1198,18 +1083,21 @@ private struct BookmarkCard: View {
     }
 
     private var resolvedThumbnailHeight: CGFloat {
+        let idealWidth = max(cardSizing.cardMinWidth, 1)
+        let widthScale = cardWidth / idealWidth
+
         switch mode {
         case .grid:
-            return cardSize.gridThumbnailHeight
+            return cardWidth * (cardSizing.gridThumbnailHeight / idealWidth)
         case .masonry:
             guard let aspectRatio = resolvedThumbnailAspectRatio else {
-                return cardSize.masonryThumbnailHeightFallback
+                return cardSizing.masonryThumbnailHeightFallback * widthScale
             }
 
             let proposedHeight = cardWidth * aspectRatio
             return min(
-                max(proposedHeight, cardSize.masonryThumbnailHeightMin),
-                cardSize.masonryThumbnailHeightMax
+                max(proposedHeight, cardSizing.masonryThumbnailHeightMin * widthScale),
+                cardSizing.masonryThumbnailHeightMax * widthScale
             )
         }
     }
@@ -1500,7 +1388,7 @@ private struct BookmarkThumbnailView: View {
             } else {
                 Image(nsImage: thumbnailImage)
                     .resizable()
-                    .aspectRatio(contentMode: mode == .masonry ? .fit : .fill)
+                    .aspectRatio(contentMode: .fill)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else if bookmark.isEnriching {
@@ -1745,6 +1633,10 @@ private struct BookmarkMasonryLayout: Layout {
         subviews: Subviews,
         cache: inout Cache
     ) {
+        if cache.frames.count == subviews.count && cache.measuredWidth == availableWidth {
+            return
+        }
+
         if cache.frames.count != subviews.count {
             cache.frames = Array(repeating: .zero, count: subviews.count)
         }
@@ -1794,7 +1686,7 @@ private struct BookmarkMasonryLayout: Layout {
     private func resolvedLayoutWidth(_ proposedWidth: CGFloat?) -> CGFloat {
         let rawWidth = proposedWidth ?? minimumColumnWidth
         guard rawWidth.isFinite, rawWidth > 0 else { return minimumColumnWidth }
-        return max(minimumColumnWidth, rawWidth)
+        return rawWidth
     }
 }
 

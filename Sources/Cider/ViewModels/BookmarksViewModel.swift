@@ -7,6 +7,7 @@ final class BookmarksViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published var displayMode: BookmarkDisplayMode
     @Published var cardSize: BookmarkCardSize
+    @Published var cardSizeScale: Double
     @Published var isVisible = false
     @Published var isCollapsed = false
 
@@ -16,6 +17,7 @@ final class BookmarksViewModel: ObservableObject {
         let config = CiderConfig.load()
         self.displayMode = config.bookmarksDefaultViewMode
         self.cardSize = config.bookmarksCardSize
+        self.cardSizeScale = config.bookmarksCardSizeScale ?? config.bookmarksCardSize.sliderValue
 
         BookmarksStorage.shared.$bookmarks
             .receive(on: DispatchQueue.main)
@@ -34,9 +36,14 @@ final class BookmarksViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .ciderConfigChanged)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                guard let self else { return }
                 let config = CiderConfig.load()
-                self?.displayMode = config.bookmarksDefaultViewMode
-                self?.cardSize = config.bookmarksCardSize
+                let newMode = config.bookmarksDefaultViewMode
+                let newCardSize = config.bookmarksCardSize
+                let newScale = config.bookmarksCardSizeScale ?? newCardSize.sliderValue
+                if self.displayMode != newMode { self.displayMode = newMode }
+                if self.cardSize != newCardSize { self.cardSize = newCardSize }
+                if self.cardSizeScale != newScale { self.cardSizeScale = newScale }
             }
             .store(in: &cancellables)
     }
@@ -226,11 +233,25 @@ final class BookmarksViewModel: ObservableObject {
     func setCardSize(_ size: BookmarkCardSize) {
         guard cardSize != size else { return }
         cardSize = size
+        cardSizeScale = size.sliderValue
 
         var config = CiderConfig.load()
         config.bookmarksCardSize = size
+        config.bookmarksCardSizeScale = size.sliderValue
         config.save()
         NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+    }
+
+    func setCardSizeScale(_ scale: Double) {
+        let clamped = min(max(scale, 0), 3)
+        cardSizeScale = clamped
+        let nearest = BookmarkCardSize(sliderValue: clamped)
+        if cardSize != nearest { cardSize = nearest }
+
+        var config = CiderConfig.load()
+        config.bookmarksCardSizeScale = clamped
+        config.bookmarksCardSize = nearest
+        config.save()
     }
 
     func show() {

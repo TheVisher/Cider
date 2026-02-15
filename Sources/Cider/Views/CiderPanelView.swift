@@ -14,6 +14,7 @@ struct CiderPanelView: View {
     @State private var dynamicTabs: [CiderTab] = []
     @State private var isCompactMode = false
     @State private var sidebarAutoCollapsed = false
+    @State private var isViewOptionsVisible = false
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -121,6 +122,38 @@ struct CiderPanelView: View {
                 onCloseTab: closeTab
             )
             .frame(maxWidth: .infinity)
+
+            if selectedTab == .bookmarks {
+                Image(systemName: "safari")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
+                    }
+                    .help("Capture active browser tab")
+
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .onTapGesture { isViewOptionsVisible.toggle() }
+                    .help("View options")
+                    .popover(isPresented: $isViewOptionsVisible) {
+                        ViewOptionsDropdown(
+                            displayMode: Binding(
+                                get: { bookmarksViewModel.displayMode },
+                                set: { bookmarksViewModel.setDisplayMode($0) }
+                            ),
+                            cardSizeScale: Binding(
+                                get: { bookmarksViewModel.cardSizeScale },
+                                set: { bookmarksViewModel.setCardSizeScale($0) }
+                            )
+                        )
+                    }
+            }
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: CiderPanelDesign.titleBarHeight)
@@ -230,7 +263,27 @@ struct CiderPanelView: View {
             onDeleteProject: deleteProject,
             onRenameProject: renameProject,
             onDeleteFolder: deleteFolder,
-            onTriggerSearch: { isSearchPaletteVisible = true }
+            onTriggerSearch: { isSearchPaletteVisible = true },
+            onCreateBookmark: {
+                selectedTab = .bookmarks
+                selectedFolderID = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    NotificationCenter.default.post(name: .showBookmarkAddForm, object: nil)
+                }
+            },
+            onCreateNote: {
+                selectedTab = .notes
+                selectedFolderID = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    NotificationCenter.default.post(name: .triggerNewNoteInTab, object: nil)
+                }
+            },
+            onCaptureBrowserTab: {
+                _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
+            },
+            onPasteFromClipboard: {
+                _ = bookmarksViewModel.addBookmarkFromPasteboard()
+            }
         )
     }
 

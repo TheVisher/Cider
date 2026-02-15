@@ -116,6 +116,7 @@ struct CiderConfig: Codable {
     var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
+    var bookmarksCardSizeScale: Double?  // Continuous card size scale (0.0–3.0), overrides bookmarksCardSize
     var detailModalMode: DetailModalMode  // How detail modals appear: expand panel or popover window
 
     static let storageKey = "CiderConfig"
@@ -233,6 +234,10 @@ struct CiderConfig: Codable {
             BookmarkCardSize.self,
             forKey: .bookmarksCardSize
         ) ?? .comfortable
+        bookmarksCardSizeScale = try container.decodeIfPresent(
+            Double.self,
+            forKey: .bookmarksCardSizeScale
+        )
         detailModalMode = try container.decodeIfPresent(
             DetailModalMode.self,
             forKey: .detailModalMode
@@ -255,6 +260,7 @@ struct CiderConfig: Codable {
         rememberBookmarksPanelPosition: Bool = false,
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
         bookmarksCardSize: BookmarkCardSize = .comfortable,
+        bookmarksCardSizeScale: Double? = nil,
         detailModalMode: DetailModalMode = .expand
     ) {
         self.showMenuBarIcon = showMenuBarIcon
@@ -272,6 +278,7 @@ struct CiderConfig: Codable {
         self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize
+        self.bookmarksCardSizeScale = bookmarksCardSizeScale
         self.detailModalMode = detailModalMode
     }
 }

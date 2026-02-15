@@ -112,6 +112,7 @@ final class SettingsViewModel: ObservableObject {
         config.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.bookmarksCardSize = bookmarksCardSize
+        config.bookmarksCardSizeScale = bookmarksCardSize.sliderValue
         config.detailModalMode = detailModalMode
         config.save()
 

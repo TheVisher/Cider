@@ -151,6 +151,47 @@ enum BookmarkCardSize: String, Codable, CaseIterable {
             72
         }
     }
+
+    var sliderValue: Double {
+        switch self {
+        case .compact: 0
+        case .comfortable: 1
+        case .large: 2
+        case .extraLarge: 3
+        }
+    }
+
+    init(sliderValue: Double) {
+        switch Int(sliderValue.rounded()) {
+        case 0: self = .compact
+        case 1: self = .comfortable
+        case 2: self = .large
+        default: self = .extraLarge
+        }
+    }
+}
+
+struct CardSizing {
+    let scale: Double
+
+    var cardMinWidth: CGFloat { interpolate(196, 240, 340, 520) }
+    var gridThumbnailHeight: CGFloat { interpolate(124, 160, 220, 360) }
+    var masonryThumbnailHeightMin: CGFloat { interpolate(104, 140, 200, 300) }
+    var masonryThumbnailHeightMax: CGFloat { interpolate(320, 400, 540, 720) }
+    var masonryThumbnailHeightFallback: CGFloat { interpolate(154, 200, 300, 420) }
+    var listThumbnailWidth: CGFloat { interpolate(60, 80, 120, 180) }
+    var listThumbnailHeight: CGFloat { interpolate(44, 60, 88, 130) }
+
+    var isExtraLarge: Bool { scale > 2.5 }
+
+    private func interpolate(_ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ d: CGFloat) -> CGFloat {
+        let stops = [a, b, c, d]
+        let clamped = min(max(scale, 0), 3)
+        let lower = Int(clamped)
+        let upper = min(lower + 1, 3)
+        let frac = CGFloat(clamped - Double(lower))
+        return stops[lower] + frac * (stops[upper] - stops[lower])
+    }
 }
 
 struct Bookmark: Identifiable, Hashable, Codable {

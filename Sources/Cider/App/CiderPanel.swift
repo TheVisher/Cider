@@ -264,10 +264,13 @@ final class CiderPanelHostingView<Content: View>: NSHostingView<Content> {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        // Prevent NSHostingView from computing and setting contentMinSize/contentMaxSize
-        // on the window. Our borderless panel manages its own sizing via the resize handle.
-        // Without this, tab switches can trigger unsatisfiable constraint exceptions when
-        // the window is near its minimum size.
-        sizingOptions = [.intrinsicContentSize]
+        // Prevent NSHostingView from influencing window sizing at all.
+        // Our borderless panel manages its own min/max via the resize handle.
+        // .intrinsicContentSize was causing Auto Layout compression resistance
+        // that prevented the window from shrinking past the content's ideal width,
+        // blocking the compact-mode sidebar auto-hide on content-heavy tabs.
+        sizingOptions = []
+        setContentCompressionResistancePriority(.fittingSizeCompression, for: .horizontal)
+        setContentCompressionResistancePriority(.fittingSizeCompression, for: .vertical)
     }
 }

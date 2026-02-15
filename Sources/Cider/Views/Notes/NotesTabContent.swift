@@ -43,6 +43,12 @@ struct NotesTabContent: View {
                 noteEditorOverlay
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .triggerNewNoteInTab)) { _ in
+            viewModel.createNewNote()
+            if let note = viewModel.selectedNote {
+                openNote(note)
+            }
+        }
     }
 
     // MARK: - Toolbar
@@ -50,18 +56,6 @@ struct NotesTabContent: View {
     private var notesToolbar: some View {
         HStack(spacing: Spacing.sm) {
             Spacer(minLength: 0)
-
-            Button {
-                viewModel.createNewNote()
-                if let note = viewModel.selectedNote {
-                    openNote(note)
-                }
-            } label: {
-                Label("New Note", systemImage: "plus")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(CiderColors.controlAccent)
-            }
-            .buttonStyle(.plain)
         }
     }
 

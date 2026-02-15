@@ -18,6 +18,10 @@ struct FolderSidebarView: View {
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
     var onTriggerSearch: (() -> Void)?
+    var onCreateBookmark: (() -> Void)?
+    var onCreateNote: (() -> Void)?
+    var onCaptureBrowserTab: (() -> Void)?
+    var onPasteFromClipboard: (() -> Void)?
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -75,26 +79,9 @@ struct FolderSidebarView: View {
                 .buttonStyle(.plain)
             }
 
-            HStack(spacing: Spacing.sm) {
-                Label("Folders", systemImage: "folder")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(CiderColors.secondary)
-
-                Spacer(minLength: Spacing.sm)
-
-                Button(action: toggleFolderCreationField) {
-                    Image(systemName: isFolderCreationFieldVisible ? "xmark" : "folder.badge.plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                }
-                .buttonStyle(.plain)
+            Label("Folders", systemImage: "folder")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(CiderColors.secondary)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                )
-                .help(isFolderCreationFieldVisible ? "Cancel new folder" : "Create folder")
-            }
 
             FolderSidebarAllItemsRow(
                 itemCount: bookmarks.count + notes.count,
@@ -146,25 +133,68 @@ struct FolderSidebarView: View {
 
             Spacer(minLength: 0)
 
-            // Settings button
             Divider()
                 .background(CiderColors.separator)
 
-            Button {
-                NotificationCenter.default.post(name: .openCiderSettings, object: nil)
-            } label: {
-                HStack(spacing: Spacing.xs) {
+            HStack(spacing: Spacing.sm) {
+                Button {
+                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+                } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(CiderColors.secondary)
-
-                    Text("Settings")
-                        .font(.system(size: 12))
-                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
+                        .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help("Settings")
+
+                Spacer(minLength: 0)
+
+                Menu {
+                    Button(action: toggleFolderCreationField) {
+                        Label("New Folder", systemImage: "folder.badge.plus")
+                    }
+                    if let onCreateProject {
+                        Button(action: onCreateProject) {
+                            Label("New Project", systemImage: "tray.full")
+                        }
+                    }
+                    if let onCreateBookmark {
+                        Button(action: onCreateBookmark) {
+                            Label("New Bookmark", systemImage: "bookmark")
+                        }
+                    }
+                    if let onCreateNote {
+                        Button(action: onCreateNote) {
+                            Label("New Note", systemImage: "note.text")
+                        }
+                    }
+                    if onCaptureBrowserTab != nil || onPasteFromClipboard != nil {
+                        Divider()
+                    }
+                    if let onCaptureBrowserTab {
+                        Button(action: onCaptureBrowserTab) {
+                            Label("Capture Browser Tab", systemImage: "safari")
+                        }
+                    }
+                    if let onPasteFromClipboard {
+                        Button(action: onPasteFromClipboard) {
+                            Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Create new item")
             }
-            .buttonStyle(.plain)
         }
         .padding(Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
@@ -187,29 +217,9 @@ struct FolderSidebarView: View {
                 .background(CiderColors.separator)
                 .padding(.vertical, Spacing.xxs)
 
-            HStack(spacing: Spacing.sm) {
-                Label("Projects", systemImage: "tray.full")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(CiderColors.secondary)
-
-                Spacer(minLength: Spacing.sm)
-
-                if let onCreateProject {
-                    Button(action: onCreateProject) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(CiderColors.secondary)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                    )
-                    .help("New project")
-                }
-            }
+            Label("Projects", systemImage: "tray.full")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(CiderColors.secondary)
 
             ForEach(projects) { project in
                 projectSidebarRow(project)
