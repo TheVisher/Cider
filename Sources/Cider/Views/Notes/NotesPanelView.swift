@@ -6,7 +6,7 @@ struct NotesPanelView: View {
 
     var body: some View {
         ZStack {
-            PaletteBackgroundView(
+            AcrylicPanelBackground(
                 cornerRadius: NotesDesign.cornerRadius,
                 shadowStyle: viewModel.isCollapsed ? .compact : .full
             )

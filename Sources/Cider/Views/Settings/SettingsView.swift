@@ -2,12 +2,9 @@ import SwiftUI
 import AppKit
 
 struct SettingsView: View {
-    @ObservedObject var pinnedAppsViewModel: PinnedAppsViewModel
-    @ObservedObject var commandPaletteViewModel: CommandPaletteViewModel
     @StateObject private var viewModel = SettingsViewModel()
     @State private var selectedCategory: SettingsCategory = .general
     @State private var selectedSubcategory: SettingsSubcategory = .startup
-    @State private var showOnScreen: ShowOnScreenOption = .mouseScreen
 
     var body: some View {
         ZStack {
@@ -48,8 +45,6 @@ struct SettingsView: View {
         }
         .frame(width: SettingsDesign.width, height: SettingsDesign.height)
         .environmentObject(viewModel)
-        .environmentObject(pinnedAppsViewModel)
-        .environmentObject(commandPaletteViewModel)
         .onAppear {
             syncSelectedSubcategory(reset: true)
         }
@@ -79,7 +74,7 @@ struct SettingsView: View {
                 SettingsSection(title: "Activation") {
                     SettingsPickerRow(
                         title: "Option key activation",
-                        subtitle: "How to open the command palette",
+                        subtitle: "How to open Cider",
                         selection: $viewModel.activationMode,
                         options: ActivationMode.allCases,
                         label: { $0.displayName }
@@ -93,19 +88,6 @@ struct SettingsView: View {
                             labels: ("Fast", "Slow")
                         )
                     }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .paletteBehavior:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Palette Behavior") {
-                    SettingsToggleRow(
-                        title: "Remember palette state",
-                        subtitle: "Keep folders open between palette sessions",
-                        isOn: $viewModel.rememberPaletteState
-                    )
                 }
                 Spacer(minLength: 0)
             }
@@ -167,81 +149,6 @@ struct SettingsView: View {
                         }
                         .controlSize(.small)
                     }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .windowCycling:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Window Cycling") {
-                    SettingsToggleRow(
-                        title: "Option+Tab to cycle windows",
-                        subtitle: "Quick window switching like Cmd+Tab",
-                        isOn: $viewModel.enableOptionTabCycling
-                    )
-
-                    if viewModel.enableOptionTabCycling {
-                        SettingsToggleRow(
-                            title: "Cycle windows on all screens",
-                            subtitle: "Include windows from all displays",
-                            isOn: $viewModel.optionTabCycleAllScreens
-                        )
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .windowBehavior:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Window Behavior") {
-                    SettingsToggleRow(
-                        title: "Auto-hide inactive apps",
-                        subtitle: "Hide other apps when focusing a window (like Stage Manager)",
-                        isOn: $viewModel.autoHideApps
-                    )
-
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        Text("Show Cider on")
-                            .font(.body)
-                            .foregroundColor(CiderColors.primary)
-
-                        Picker("", selection: $showOnScreen) {
-                            ForEach(ShowOnScreenOption.allCases, id: \.self) { option in
-                                Text(option.rawValue).tag(option)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(maxWidth: SettingsDesign.displayPickerMaxWidth, alignment: .leading)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .tilingHotkeys:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Tiling Shortcuts") {
-                    SettingsToggleRow(
-                        title: "Tiling hotkeys (Ctrl+Option)",
-                        subtitle: "Rectangle-style shortcuts to tile windows",
-                        isOn: $viewModel.enableTilingHotkeys
-                    )
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .tilingDynamic:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Dynamic Tiling") {
-                    SettingsToggleRow(
-                        title: "Dynamic tiling",
-                        subtitle: "Auto-pair windows when tiling to half zones",
-                        isOn: $viewModel.enableDynamicTiling
-                    )
                 }
                 Spacer(minLength: 0)
             }
@@ -336,30 +243,6 @@ struct SettingsView: View {
                             )
                         }
                     }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .appearanceWindow:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Window Size") {
-                    HStack(spacing: Spacing.md) {
-                        ForEach(PaletteSize.allCases, id: \.self) { size in
-                            SettingsSizeOptionButton(
-                                title: size.displayName,
-                                preview: nil,
-                                previewSize: nil,
-                                isSelected: viewModel.paletteSize == size,
-                                action: { viewModel.paletteSize = size },
-                                icon: windowIcon(for: size)
-                            )
-                        }
-                    }
-
-                    Text("Changes apply when you reopen the command palette")
-                        .font(.caption)
-                        .foregroundColor(CiderColors.tertiary)
                 }
                 Spacer(minLength: 0)
             }
@@ -477,23 +360,11 @@ struct SettingsView: View {
         }
     }
 
-    private func windowIcon(for size: PaletteSize) -> String {
-        switch size {
-        case .small:
-            "rectangle.portrait"
-        case .medium:
-            "rectangle"
-        case .large:
-            "rectangle.expand.vertical"
-        }
-    }
 }
 
 private enum SettingsCategory: String, CaseIterable {
     case general = "General"
     case notes = "Notes"
-    case windowing = "Windowing"
-    case tiling = "Tiling"
     case bookmarks = "Bookmarks"
     case appearance = "Appearance"
     case advanced = "Advanced"
@@ -501,7 +372,7 @@ private enum SettingsCategory: String, CaseIterable {
     case account = "Account"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .notes, .windowing, .tiling, .bookmarks, .appearance, .advanced, .about]
+        [.general, .notes, .bookmarks, .appearance, .advanced, .about]
     }
 
     var icon: String {
@@ -510,10 +381,6 @@ private enum SettingsCategory: String, CaseIterable {
             "gearshape"
         case .notes:
             "note.text"
-        case .windowing:
-            "macwindow.on.rectangle"
-        case .tiling:
-            "rectangle.split.2x1"
         case .bookmarks:
             "square.grid.2x2"
         case .appearance:
@@ -530,17 +397,13 @@ private enum SettingsCategory: String, CaseIterable {
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation, .paletteBehavior]
+            [.startup, .activation]
         case .notes:
             [.notesBehavior, .notesEditor, .notesStorage]
-        case .windowing:
-            [.windowCycling, .windowBehavior]
-        case .tiling:
-            [.tilingHotkeys, .tilingDynamic]
         case .bookmarks:
             [.bookmarksManage]
         case .appearance:
-            [.appearanceText, .appearanceWindow, .appearanceMenuBar]
+            [.appearanceText, .appearanceMenuBar]
         case .advanced:
             [.advancedAccessibility, .advancedReset]
         case .about:
@@ -554,17 +417,11 @@ private enum SettingsCategory: String, CaseIterable {
 private enum SettingsSubcategory: Hashable {
     case startup
     case activation
-    case paletteBehavior
     case notesBehavior
     case notesEditor
     case notesStorage
-    case windowCycling
-    case windowBehavior
-    case tilingHotkeys
-    case tilingDynamic
     case bookmarksManage
     case appearanceText
-    case appearanceWindow
     case appearanceMenuBar
     case advancedAccessibility
     case advancedReset
@@ -577,28 +434,16 @@ private enum SettingsSubcategory: Hashable {
             "Startup"
         case .activation:
             "Activation"
-        case .paletteBehavior:
-            "Palette Behavior"
         case .notesBehavior:
             "Behavior"
         case .notesEditor:
             "Editor"
         case .notesStorage:
             "Storage"
-        case .windowCycling:
-            "Cycling"
-        case .windowBehavior:
-            "Behavior"
-        case .tilingHotkeys:
-            "Shortcuts"
-        case .tilingDynamic:
-            "Dynamic Tiling"
         case .bookmarksManage:
             "Manage"
         case .appearanceText:
             "Text"
-        case .appearanceWindow:
-            "Window Size"
         case .appearanceMenuBar:
             "Menu Bar"
         case .advancedAccessibility:

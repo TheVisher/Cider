@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct PaletteBackgroundView: View {
+struct AcrylicPanelBackground: View {
     let cornerRadius: CGFloat
     var shadowStyle: ShadowStyle = .full
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency

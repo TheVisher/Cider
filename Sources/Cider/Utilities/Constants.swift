@@ -1,15 +1,25 @@
 import SwiftUI
 import Foundation
 
+// MARK: - Text Scale Environment Key
+
+private struct TextScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1.0
+}
+
+extension EnvironmentValues {
+    var textScale: CGFloat {
+        get { self[TextScaleKey.self] }
+        set { self[TextScaleKey.self] = newValue }
+    }
+}
+
+// MARK: - Notification Names
+
 extension Notification.Name {
-    static let ciderMinimizedStateChanged = Notification.Name("ciderMinimizedStateChanged")
-    static let dismissCommandPalette = Notification.Name("cider.dismissCommandPalette")
-    static let toggleCommandPalette = Notification.Name("cider.toggleCommandPalette")
     static let openCiderSettings = Notification.Name("cider.openCiderSettings")
     static let dismissSettings = Notification.Name("cider.dismissSettings")
     static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
-    static let ciderTileActionCompleted = Notification.Name("cider.tileActionCompleted")
-    static let ciderDynamicTileGroupChanged = Notification.Name("cider.dynamicTileGroupChanged")
     static let toggleNotes = Notification.Name("cider.toggleNotes")
     static let dismissNotes = Notification.Name("cider.dismissNotes")
     static let openNoteInPanel = Notification.Name("cider.openNoteInPanel")
@@ -81,16 +91,6 @@ enum CiderDesign {
     // Specific visual elements
     static let runningIndicatorSize: CGFloat = 6
     static let runningIndicatorOffset: CGFloat = 6
-
-    // Dynamic tiling
-    static let tileGap: CGFloat = 5
-
-    // Edge detection
-    static let edgeDetectionThreshold: CGFloat = 3
-
-    // Hover weights
-    static let hoverExpandWeight: CGFloat = 2.5
-    static let hoverContractWeight: CGFloat = 0.55
 
     // Shadow padding - extra space in window for shadow to render
     static let shadowPaddingHorizontal: CGFloat = 70

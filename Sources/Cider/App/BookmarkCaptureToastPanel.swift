@@ -45,7 +45,7 @@ struct BookmarkCaptureToastView: View {
 
     var body: some View {
         ZStack {
-            PaletteBackgroundView(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
+            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
 
             HStack(spacing: Spacing.sm) {
                 Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
@@ -76,7 +76,7 @@ struct BookmarkClipboardReviewToastView: View {
 
     var body: some View {
         ZStack {
-            PaletteBackgroundView(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
+            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.sm) {

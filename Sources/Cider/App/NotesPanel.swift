@@ -35,7 +35,7 @@ final class NotesPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false  // We draw custom shadow via PaletteBackgroundView
+        hasShadow = false  // We draw custom shadow via AcrylicPanelBackground
 
         isMovableByWindowBackground = true
         isReleasedWhenClosed = false

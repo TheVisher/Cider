@@ -19,7 +19,7 @@ struct BookmarksPanelView: View {
 
     var body: some View {
         ZStack {
-            PaletteBackgroundView(cornerRadius: BookmarksDesign.panelCornerRadius)
+            AcrylicPanelBackground(cornerRadius: BookmarksDesign.panelCornerRadius)
 
             VStack(spacing: 0) {
                 titleBar
@@ -365,15 +365,6 @@ struct BookmarksPanelView: View {
             }
             .buttonStyle(.plain)
             .help("Capture active browser tab (Option+Shift+B)")
-
-            Button {
-                NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
-            } label: {
-                Label("Palette", systemImage: "command")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(CiderColors.secondary)
-            }
-            .buttonStyle(.plain)
         }
         .background(BookmarksTitleBarDragRegion())
         .padding(.horizontal, Spacing.md)

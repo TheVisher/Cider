@@ -17,40 +17,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var textSize: TextSize {
         didSet { saveConfig() }
     }
-    @Published var paletteSize: PaletteSize {
-        didSet { saveConfig() }
-    }
-
-    // Advanced settings
-    @Published var autoHideApps: Bool {
-        didSet { saveConfig() }
-    }
 
     // Activation settings
     @Published var activationMode: ActivationMode {
-        didSet { saveConfig() }
-    }
-
-    // Window cycling settings
-    @Published var enableOptionTabCycling: Bool {
-        didSet { saveConfig() }
-    }
-    @Published var optionTabCycleAllScreens: Bool {
-        didSet { saveConfig() }
-    }
-
-    // Palette behavior
-    @Published var rememberPaletteState: Bool {
-        didSet { saveConfig() }
-    }
-
-    // Tiling hotkeys
-    @Published var enableTilingHotkeys: Bool {
-        didSet { saveConfig() }
-    }
-
-    // Dynamic tiling
-    @Published var enableDynamicTiling: Bool {
         didSet { saveConfig() }
     }
 
@@ -101,14 +70,7 @@ final class SettingsViewModel: ObservableObject {
         self.config = CiderConfig.load()
         self.showMenuBarIcon = config.showMenuBarIcon
         self.textSize = config.textSize
-        self.paletteSize = config.paletteSize
-        self.autoHideApps = config.autoHideApps
         self.activationMode = config.activationMode
-        self.enableOptionTabCycling = config.enableOptionTabCycling
-        self.optionTabCycleAllScreens = config.optionTabCycleAllScreens
-        self.rememberPaletteState = config.rememberPaletteState
-        self.enableTilingHotkeys = config.enableTilingHotkeys
-        self.enableDynamicTiling = config.enableDynamicTiling
         self.enableNotesHotkey = config.enableNotesHotkey
         self.notesDirectory = config.notesDirectory
         self.rememberNotesPanelPositionPerNote = config.rememberNotesPanelPositionPerNote
@@ -133,14 +95,7 @@ final class SettingsViewModel: ObservableObject {
     private func saveConfig() {
         config.showMenuBarIcon = showMenuBarIcon
         config.textSize = textSize
-        config.paletteSize = paletteSize
-        config.autoHideApps = autoHideApps
         config.activationMode = activationMode
-        config.enableOptionTabCycling = enableOptionTabCycling
-        config.optionTabCycleAllScreens = optionTabCycleAllScreens
-        config.rememberPaletteState = rememberPaletteState
-        config.enableTilingHotkeys = enableTilingHotkeys
-        config.enableDynamicTiling = enableDynamicTiling
         config.enableNotesHotkey = enableNotesHotkey
         config.notesDirectory = notesDirectory
         config.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
