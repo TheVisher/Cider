@@ -34,6 +34,9 @@ extension Notification.Name {
     static let toggleCiderPanel = Notification.Name("cider.toggleCiderPanel")
     static let dismissCiderPanel = Notification.Name("cider.dismissCiderPanel")
     static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")
+    static let maximizeCiderPanel = Notification.Name("cider.maximizeCiderPanel")
+    static let showDetailPopover = Notification.Name("cider.showDetailPopover")
+    static let dismissDetailPopover = Notification.Name("cider.dismissDetailPopover")
 }
 
 enum CiderBorder {
@@ -284,7 +287,7 @@ enum CiderPanelDesign {
     static let minHeight: CGFloat = 440
     static let cornerRadius: CGFloat = Radius.lg
     static let shadowPadding: CGFloat = 40
-    static let topPadding: CGFloat = 20
+    static let topPadding: CGFloat = 28
     static let bottomPadding: CGFloat = 15
     static let collapsedBottomPadding: CGFloat = topPadding
     static let titleBarHeight: CGFloat = 40
@@ -318,6 +321,10 @@ enum CiderPanelDesign {
     static var panelCollapsedHeight: CGFloat {
         collapsedContentHeight + topPadding + collapsedBottomPadding
     }
+
+    static let resizeEdgeThickness: CGFloat = 6
+    static let resizeCornerSize: CGFloat = 20
+    static let sidebarCompactThreshold: CGFloat = 680
 }
 
 enum CiderColors {

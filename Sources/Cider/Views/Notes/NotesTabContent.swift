@@ -20,6 +20,10 @@ struct NotesTabContent: View {
         }
     }
 
+    private var isExpandMode: Bool {
+        CiderConfig.load().detailModalMode == .expand
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -34,7 +38,7 @@ struct NotesTabContent: View {
                 }
             }
 
-            if isEditing, let noteID = selectedNoteID,
+            if isExpandMode, isEditing, let noteID = selectedNoteID,
                viewModel.notes.contains(where: { $0.id == noteID }) {
                 noteEditorOverlay
             }
@@ -50,8 +54,7 @@ struct NotesTabContent: View {
             Button {
                 viewModel.createNewNote()
                 if let note = viewModel.selectedNote {
-                    selectedNoteID = note.id
-                    isEditing = true
+                    openNote(note)
                 }
             } label: {
                 Label("New Note", systemImage: "plus")
@@ -76,12 +79,62 @@ struct NotesTabContent: View {
         }
     }
 
+    private func openNote(_ note: Note) {
+        selectedNoteID = note.id
+        viewModel.selectNote(note)
+        isEditing = true
+        isEditingTitle = false
+
+        if !isExpandMode {
+            showNotePopover(note)
+        }
+    }
+
+    private func showNotePopover(_ note: Note) {
+        let popoverContent = AnyView(
+            VStack(spacing: 0) {
+                HStack(spacing: Spacing.sm) {
+                    Text(note.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Button {
+                        viewModel.flushSave()
+                        isEditing = false
+                        isEditingTitle = false
+                        NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(CiderColors.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+
+                Divider()
+                    .background(CiderColors.separator)
+
+                TipTapEditorView(viewModel: viewModel)
+            }
+        )
+
+        NotificationCenter.default.post(
+            name: .showDetailPopover,
+            object: nil,
+            userInfo: ["view": popoverContent]
+        )
+    }
+
     private func noteRow(_ note: Note) -> some View {
         Button {
-            selectedNoteID = note.id
-            viewModel.selectNote(note)
-            isEditing = true
-            isEditingTitle = false
+            openNote(note)
         } label: {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(note.title)
@@ -136,8 +189,7 @@ struct NotesTabContent: View {
                 Button("Create New Note") {
                     viewModel.createNewNote()
                     if let note = viewModel.selectedNote {
-                        selectedNoteID = note.id
-                        isEditing = true
+                        openNote(note)
                     }
                 }
                 .buttonStyle(.plain)

@@ -93,6 +93,21 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .panelBehavior:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Panel") {
+                    SettingsPickerRow(
+                        title: "Detail modal style",
+                        subtitle: "How bookmark details and note editors appear",
+                        selection: $viewModel.detailModalMode,
+                        options: DetailModalMode.allCases,
+                        label: { $0.displayName }
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
         case .notesBehavior:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Notes Behavior") {
@@ -397,7 +412,7 @@ private enum SettingsCategory: String, CaseIterable {
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation]
+            [.startup, .activation, .panelBehavior]
         case .notes:
             [.notesBehavior, .notesEditor, .notesStorage]
         case .bookmarks:
@@ -417,6 +432,7 @@ private enum SettingsCategory: String, CaseIterable {
 private enum SettingsSubcategory: Hashable {
     case startup
     case activation
+    case panelBehavior
     case notesBehavior
     case notesEditor
     case notesStorage
@@ -434,6 +450,8 @@ private enum SettingsSubcategory: Hashable {
             "Startup"
         case .activation:
             "Activation"
+        case .panelBehavior:
+            "Panel"
         case .notesBehavior:
             "Behavior"
         case .notesEditor:

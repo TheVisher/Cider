@@ -4,8 +4,15 @@ import QuartzCore
 
 final class CiderPanel: NSPanel {
     private(set) var isCollapsed = false
+    var isMaximized = false
     private var expandedFrameBeforeCollapse: NSRect?
+    var frameBeforeMaximize: NSRect?
     private var lastCollapseToggleDate: Date = .distantPast
+
+    // Window dragging state
+    private var dragStartOrigin: NSPoint?
+    private var dragStartMouse: NSPoint?
+    private var isDragging = false
 
     init() {
         let initialFrame = NSRect(
@@ -33,10 +40,88 @@ final class CiderPanel: NSPanel {
 
         isMovableByWindowBackground = true
         isReleasedWhenClosed = false
+
+        self.minSize = NSSize(
+            width: CiderPanelDesign.panelMinWidth,
+            height: CiderPanelDesign.panelMinHeight
+        )
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    // MARK: - Window Dragging via Title Bar
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            if isInDraggableArea(event.locationInWindow) {
+                dragStartOrigin = frame.origin
+                dragStartMouse = NSEvent.mouseLocation
+                isDragging = false
+            }
+            super.sendEvent(event)
+
+        case .leftMouseDragged:
+            if let startOrigin = dragStartOrigin,
+               let startMouse = dragStartMouse {
+                let currentMouse = NSEvent.mouseLocation
+                let dx = currentMouse.x - startMouse.x
+                let dy = currentMouse.y - startMouse.y
+
+                if !isDragging && (abs(dx) > 3 || abs(dy) > 3) {
+                    isDragging = true
+                }
+
+                if isDragging {
+                    setFrameOrigin(NSPoint(
+                        x: startOrigin.x + dx,
+                        y: startOrigin.y + dy
+                    ))
+                    return
+                }
+            }
+            super.sendEvent(event)
+
+        case .leftMouseUp:
+            dragStartOrigin = nil
+            dragStartMouse = nil
+            isDragging = false
+            super.sendEvent(event)
+
+        default:
+            super.sendEvent(event)
+        }
+    }
+
+    private func isInDraggableArea(_ locationInWindow: NSPoint) -> Bool {
+        guard let contentView = contentView else { return false }
+        let bounds = contentView.bounds
+
+        // Allow dragging from anywhere within the visible content area
+        let hPad = CiderPanelDesign.shadowPadding
+        let topPad = CiderPanelDesign.topPadding
+        let bottomPad = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
+
+        guard locationInWindow.x >= hPad && locationInWindow.x <= bounds.width - hPad else {
+            return false
+        }
+        guard locationInWindow.y >= bottomPad && locationInWindow.y <= bounds.height - topPad else {
+            return false
+        }
+
+        // Check if the hit view is an interactive control or our resize view
+        if let hitView = contentView.hitTest(locationInWindow) {
+            var view: NSView? = hitView
+            while let v = view, v !== contentView {
+                if v is NSControl { return false }
+                if v is PanelEdgeResizeNSView { return false }
+                view = v.superview
+            }
+        }
+
+        return true
+    }
 
     var persistableFrame: NSRect {
         guard isCollapsed else { return frame }
@@ -175,5 +260,14 @@ private extension NSRect {
 final class CiderPanelHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Prevent NSHostingView from computing and setting contentMinSize/contentMaxSize
+        // on the window. Our borderless panel manages its own sizing via the resize handle.
+        // Without this, tab switches can trigger unsatisfiable constraint exceptions when
+        // the window is near its minimum size.
+        sizingOptions = [.intrinsicContentSize]
     }
 }

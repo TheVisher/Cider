@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ciderPanel: CiderPanel?
     private let ciderPanelPositionStore = CiderPanelPositionStore.shared
 
+    // Detail popover
+    private var detailPopoverPanel: DetailPopoverPanel?
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -751,6 +754,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.toggleCiderPanelCollapsed()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .maximizeCiderPanel)
+            .sink { [weak self] _ in
+                self?.maximizeCiderPanel()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .showDetailPopover)
+            .sink { [weak self] notification in
+                self?.showDetailPopover(notification)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .dismissDetailPopover)
+            .sink { [weak self] _ in
+                self?.dismissDetailPopover()
+            }
+            .store(in: &cancellables)
     }
 
     private func toggleCiderPanel() {
@@ -781,12 +802,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideCiderPanel() {
         persistCurrentCiderPanelFrameIfNeeded()
+        dismissDetailPopover()
         ciderPanel?.orderOut(nil)
     }
 
     private func toggleCiderPanelCollapsed() {
         guard let panel = ciderPanel, panel.isVisible else { return }
         panel.toggleCollapsed()
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    private func showDetailPopover(_ notification: Notification) {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+        guard let contentView = notification.userInfo?["view"] as? AnyView else { return }
+
+        let popover = detailPopoverPanel ?? DetailPopoverPanel()
+        detailPopoverPanel = popover
+
+        let wrappedContent = ZStack {
+            AcrylicPanelBackground(
+                cornerRadius: CiderPanelDesign.cornerRadius,
+                shadowStyle: .full
+            )
+            contentView
+                .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+        }
+        .padding(CiderPanelDesign.shadowPadding)
+
+        popover.showAdjacent(to: panel, content: wrappedContent)
+    }
+
+    private func dismissDetailPopover() {
+        detailPopoverPanel?.orderOut(nil)
+    }
+
+    private func maximizeCiderPanel() {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+
+        if panel.isMaximized, let restoreFrame = panel.frameBeforeMaximize {
+            // Restore to previous size
+            panel.isMaximized = false
+            panel.frameBeforeMaximize = nil
+            panel.setCollapsed(false, animated: false)
+            panel.setFrame(restoreFrame, display: true)
+            persistCurrentCiderPanelFrameIfNeeded()
+            return
+        }
+
+        // Save current frame for restore
+        panel.frameBeforeMaximize = panel.frame
+
+        let panelCenter = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(panelCenter) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let screen else { return }
+
+        let visibleFrame = screen.visibleFrame
+        let padding = CiderPanelDesign.shadowPadding
+
+        let maximizedFrame = NSRect(
+            x: visibleFrame.minX - padding,
+            y: visibleFrame.minY - CiderPanelDesign.bottomPadding - padding,
+            width: visibleFrame.width + padding * 2,
+            height: visibleFrame.height + CiderPanelDesign.topPadding + CiderPanelDesign.bottomPadding + padding
+        )
+
+        panel.setCollapsed(false, animated: false)
+        panel.setFrame(maximizedFrame, display: true)
+        panel.isMaximized = true
         persistCurrentCiderPanelFrameIfNeeded()
     }
 

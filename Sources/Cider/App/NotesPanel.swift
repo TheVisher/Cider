@@ -201,4 +201,9 @@ final class NotesPanelHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         return true
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        sizingOptions = [.intrinsicContentSize]
+    }
 }

@@ -1,5 +1,17 @@
 import Foundation
 
+enum DetailModalMode: String, Codable, CaseIterable {
+    case expand
+    case popover
+
+    var displayName: String {
+        switch self {
+        case .expand: return "Expand panel"
+        case .popover: return "Popover window"
+        }
+    }
+}
+
 enum ActivationMode: String, Codable, CaseIterable {
     case doubleTap
     case singleTap
@@ -104,6 +116,7 @@ struct CiderConfig: Codable {
     var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
+    var detailModalMode: DetailModalMode  // How detail modals appear: expand panel or popover window
 
     static let storageKey = "CiderConfig"
 
@@ -123,7 +136,8 @@ struct CiderConfig: Codable {
             bookmarksDirectory: "~/Documents/Cider/Bookmarks",
             rememberBookmarksPanelPosition: false,
             bookmarksDefaultViewMode: .masonry,
-            bookmarksCardSize: .comfortable
+            bookmarksCardSize: .comfortable,
+            detailModalMode: .expand
         )
     }
 
@@ -219,6 +233,10 @@ struct CiderConfig: Codable {
             BookmarkCardSize.self,
             forKey: .bookmarksCardSize
         ) ?? .comfortable
+        detailModalMode = try container.decodeIfPresent(
+            DetailModalMode.self,
+            forKey: .detailModalMode
+        ) ?? .expand
     }
 
     init(
@@ -236,7 +254,8 @@ struct CiderConfig: Codable {
         bookmarksDirectory: String = "~/Documents/Cider/Bookmarks",
         rememberBookmarksPanelPosition: Bool = false,
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
-        bookmarksCardSize: BookmarkCardSize = .comfortable
+        bookmarksCardSize: BookmarkCardSize = .comfortable,
+        detailModalMode: DetailModalMode = .expand
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -253,5 +272,6 @@ struct CiderConfig: Codable {
         self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize
+        self.detailModalMode = detailModalMode
     }
 }

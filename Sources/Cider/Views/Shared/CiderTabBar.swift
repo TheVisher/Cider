@@ -9,13 +9,14 @@ struct CiderTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: CiderPanelDesign.tabSpacing) {
-            ForEach(tabs) { tab in
-                tabButton(for: tab)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: CiderPanelDesign.tabSpacing) {
+                ForEach(tabs) { tab in
+                    tabButton(for: tab)
+                }
             }
-            Spacer()
+            .padding(.horizontal, CiderPanelDesign.tabHorizontalPadding)
         }
-        .padding(.horizontal, CiderPanelDesign.tabHorizontalPadding)
         .frame(height: CiderPanelDesign.tabBarHeight)
     }
 

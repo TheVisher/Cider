@@ -12,6 +12,8 @@ struct CiderPanelView: View {
     @State private var expandedFolderIDs: Set<UUID> = []
     @State private var isSearchPaletteVisible = false
     @State private var dynamicTabs: [CiderTab] = []
+    @State private var isCompactMode = false
+    @State private var sidebarAutoCollapsed = false
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -56,7 +58,7 @@ struct CiderPanelView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if !isCollapsed {
-                CiderPanelResizeHandle()
+                CiderPanelResizeIcon()
             }
         }
         .padding(.horizontal, CiderPanelDesign.shadowPadding)
@@ -67,6 +69,11 @@ struct CiderPanelView: View {
                 ? CiderPanelDesign.collapsedBottomPadding
                 : CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
         )
+        .overlay {
+            if !isCollapsed {
+                PanelEdgeResizeView()
+            }
+        }
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
@@ -88,45 +95,14 @@ struct CiderPanelView: View {
                 ) {
                     NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil)
                 }
-            }
-
-            CiderTabBar(
-                selectedTab: $selectedTab,
-                tabs: allTabs,
-                bookmarkCount: bookmarksViewModel.bookmarks.count,
-                noteCount: notesViewModel.notes.count,
-                onCloseTab: closeTab
-            )
-
-            Spacer(minLength: Spacing.sm)
-
-            Button(action: { isSearchPaletteVisible = true }) {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(CiderColors.tertiary)
-
-                    Text("Search")
-                        .font(.system(size: 12))
-                        .foregroundColor(CiderColors.tertiary)
-
-                    Spacer(minLength: 0)
-
-                    Text("\u{2318}K")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(CiderColors.quaternary)
+                CiderTrafficLightButton(
+                    color: .systemGreen,
+                    symbol: "arrow.up.left.and.arrow.down.right",
+                    help: "Maximize panel"
+                ) {
+                    NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil)
                 }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .frame(maxWidth: 180)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.separator.opacity(0.25))
-                )
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut("k", modifiers: .command)
 
             Button(action: toggleFolderSidebar) {
                 Image(systemName: isFolderSidebarVisible ? "sidebar.left" : "sidebar.right")
@@ -137,132 +113,209 @@ struct CiderPanelView: View {
             .foregroundColor(isFolderSidebarVisible ? CiderColors.controlAccent : CiderColors.secondary)
             .help(isFolderSidebarVisible ? "Hide folder sidebar" : "Show folder sidebar")
 
-            Button {
-                NotificationCenter.default.post(name: .openCiderSettings, object: nil)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(CiderColors.secondary)
-            }
-            .buttonStyle(.plain)
-            .frame(width: 24)
-            .help("Settings")
+            CiderTabBar(
+                selectedTab: $selectedTab,
+                tabs: allTabs,
+                bookmarkCount: bookmarksViewModel.bookmarks.count,
+                noteCount: notesViewModel.notes.count,
+                onCloseTab: closeTab
+            )
+            .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: CiderPanelDesign.titleBarHeight)
+        .background {
+            Button("") { isSearchPaletteVisible = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
+        }
     }
 
     // MARK: - Tab Content
 
     @ViewBuilder
     private var tabContent: some View {
+        ZStack(alignment: .leading) {
+            // Main content — always fills full width
+            mainContentArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+
+            // Side-by-side sidebar (non-compact)
+            // Handled inside mainContentArea via HStack when !isCompactMode
+
+            // Overlay sidebar (compact mode)
+            if isCompactMode && isFolderSidebarVisible {
+                Color.black.opacity(0.28)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.snappy) {
+                            isFolderSidebarVisible = false
+                        }
+                    }
+
+                folderSidebar
+                    .padding(.leading, Spacing.md)
+                    .padding(.vertical, Spacing.md)
+                    .background(
+                        ZStack {
+                            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+                            Color.black.opacity(0.45)
+                        }
+                        .clipShape(
+                            UnevenRoundedRectangle(
+                                topLeadingRadius: 0,
+                                bottomLeadingRadius: 0,
+                                bottomTrailingRadius: Radius.md,
+                                topTrailingRadius: Radius.md,
+                                style: .continuous
+                            )
+                        )
+                    )
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        let compact = newWidth < CiderPanelDesign.sidebarCompactThreshold
+                        if compact != isCompactMode {
+                            isCompactMode = compact
+                            if compact && isFolderSidebarVisible {
+                                sidebarAutoCollapsed = true
+                                isFolderSidebarVisible = false
+                            } else if !compact && sidebarAutoCollapsed {
+                                sidebarAutoCollapsed = false
+                                isFolderSidebarVisible = true
+                            }
+                        }
+                    }
+                    .onAppear {
+                        isCompactMode = proxy.size.width < CiderPanelDesign.sidebarCompactThreshold
+                    }
+            }
+        )
+        .animation(.snappy, value: isFolderSidebarVisible)
+    }
+
+    @ViewBuilder
+    private var mainContentArea: some View {
         HStack(spacing: 0) {
-            if isFolderSidebarVisible {
-                FolderSidebarView(
+            if !isCompactMode && isFolderSidebarVisible {
+                folderSidebar
+                    .padding(.leading, Spacing.md)
+                    .padding(.vertical, Spacing.md)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
+            tabContentBody
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var folderSidebar: some View {
+        FolderSidebarView(
+            folders: bookmarksViewModel.folders,
+            bookmarks: bookmarksViewModel.bookmarks,
+            notes: notesViewModel.notes,
+            projects: projectStorage.activeProjects(),
+            selectedFolderID: $selectedFolderID,
+            expandedFolderIDs: $expandedFolderIDs,
+            onCreateFolder: { bookmarksViewModel.createFolder(name: $0, parentID: $1) },
+            onAssignBookmarkToFolder: { bookmarksViewModel.assign($0, toFolder: $1) },
+            onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
+            onOpenProject: openProjectTab,
+            onCreateProject: createProject,
+            onDeleteProject: deleteProject,
+            onRenameProject: renameProject,
+            onDeleteFolder: deleteFolder,
+            onTriggerSearch: { isSearchPaletteVisible = true }
+        )
+    }
+
+    @ViewBuilder
+    private var tabContentBody: some View {
+        if let folderID = selectedFolderID, selectedTab.isFixed {
+            if isRootFolder(folderID) {
+                RootFolderOverviewView(
+                    folderID: folderID,
                     folders: bookmarksViewModel.folders,
                     bookmarks: bookmarksViewModel.bookmarks,
                     notes: notesViewModel.notes,
-                    projects: projectStorage.activeProjects(),
-                    selectedFolderID: $selectedFolderID,
-                    expandedFolderIDs: $expandedFolderIDs,
-                    onCreateFolder: { bookmarksViewModel.createFolder(name: $0, parentID: $1) },
-                    onAssignBookmarkToFolder: { bookmarksViewModel.assign($0, toFolder: $1) },
-                    onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
-                    onOpenProject: openProjectTab,
-                    onCreateProject: createProject,
-                    onDeleteProject: deleteProject,
-                    onRenameProject: renameProject,
-                    onDeleteFolder: deleteFolder
+                    onOpenBookmark: { bookmarksViewModel.open($0) },
+                    onOpenNote: { note in
+                        notesViewModel.selectNote(note)
+                        NotificationCenter.default.post(name: .openNoteInPanel, object: note)
+                    },
+                    onSelectSubFolder: { subFolderID in
+                        selectedFolderID = subFolderID
+                        expandPathToFolder(subFolderID)
+                    }
                 )
-                .padding(.leading, Spacing.md)
-                .padding(.vertical, Spacing.md)
-                .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-
-            Group {
-                if let folderID = selectedFolderID, selectedTab.isFixed {
-                    if isRootFolder(folderID) {
-                        RootFolderOverviewView(
-                            folderID: folderID,
-                            folders: bookmarksViewModel.folders,
-                            bookmarks: bookmarksViewModel.bookmarks,
-                            notes: notesViewModel.notes,
-                            onOpenBookmark: { bookmarksViewModel.open($0) },
-                            onOpenNote: { note in
-                                notesViewModel.selectNote(note)
-                                NotificationCenter.default.post(name: .openNoteInPanel, object: note)
-                            },
-                            onSelectSubFolder: { subFolderID in
-                                selectedFolderID = subFolderID
-                                expandPathToFolder(subFolderID)
-                            }
-                        )
-                    } else {
-                        FolderContentView(
-                            folderID: folderID,
-                            bookmarks: bookmarksViewModel.bookmarks,
-                            notes: notesViewModel.notes,
-                            onOpenBookmark: { bookmarksViewModel.open($0) },
-                            onOpenNote: { note in
-                                notesViewModel.selectNote(note)
-                                NotificationCenter.default.post(name: .openNoteInPanel, object: note)
-                            }
-                        )
+            } else {
+                FolderContentView(
+                    folderID: folderID,
+                    bookmarks: bookmarksViewModel.bookmarks,
+                    notes: notesViewModel.notes,
+                    onOpenBookmark: { bookmarksViewModel.open($0) },
+                    onOpenNote: { note in
+                        notesViewModel.selectNote(note)
+                        NotificationCenter.default.post(name: .openNoteInPanel, object: note)
                     }
-                } else {
-                    switch selectedTab {
-                    case .home:
-                        HomeDashboardView(
-                            bookmarksViewModel: bookmarksViewModel,
-                            notesViewModel: notesViewModel
-                        )
-                    case .bookmarks:
-                        BookmarksTabContent(
-                            viewModel: bookmarksViewModel,
-                            selectedFolderID: nil
-                        )
-                    case .notes:
-                        NotesTabContent(
-                            viewModel: notesViewModel,
-                            searchText: "",
-                            selectedFolderID: nil
-                        )
-                    case .search(_, let query):
-                        SearchTabContent(
-                            query: query,
-                            bookmarks: bookmarksViewModel.bookmarks,
-                            notes: notesViewModel.notes,
-                            onOpenBookmark: { bookmarksViewModel.open($0) },
-                            onOpenNote: { note in
-                                notesViewModel.selectNote(note)
-                                selectedTab = .notes
-                            },
-                            onSaveAsProject: { name, results in
-                                saveSearchAsProject(name: name, results: results)
-                            }
-                        )
-                    case .project(let id, _):
-                        ProjectTabContent(
-                            projectID: id,
-                            bookmarks: bookmarksViewModel.bookmarks,
-                            notes: notesViewModel.notes,
-                            onOpenBookmark: { bookmarksViewModel.open($0) },
-                            onOpenNote: { note in
-                                notesViewModel.selectNote(note)
-                                selectedTab = .notes
-                            }
-                        )
-                    }
-                }
+                )
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            switch selectedTab {
+            case .home:
+                HomeDashboardView(
+                    bookmarksViewModel: bookmarksViewModel,
+                    notesViewModel: notesViewModel
+                )
+            case .bookmarks:
+                BookmarksTabContent(
+                    viewModel: bookmarksViewModel,
+                    selectedFolderID: nil
+                )
+            case .notes:
+                NotesTabContent(
+                    viewModel: notesViewModel,
+                    searchText: "",
+                    selectedFolderID: nil
+                )
+            case .search(_, let query):
+                SearchTabContent(
+                    query: query,
+                    bookmarks: bookmarksViewModel.bookmarks,
+                    notes: notesViewModel.notes,
+                    onOpenBookmark: { bookmarksViewModel.open($0) },
+                    onOpenNote: { note in
+                        notesViewModel.selectNote(note)
+                        selectedTab = .notes
+                    },
+                    onSaveAsProject: { name, results in
+                        saveSearchAsProject(name: name, results: results)
+                    }
+                )
+            case .project(let id, _):
+                ProjectTabContent(
+                    projectID: id,
+                    bookmarks: bookmarksViewModel.bookmarks,
+                    notes: notesViewModel.notes,
+                    onOpenBookmark: { bookmarksViewModel.open($0) },
+                    onOpenNote: { note in
+                        notesViewModel.selectNote(note)
+                        selectedTab = .notes
+                    }
+                )
+            }
         }
-        .animation(.snappy, value: isFolderSidebarVisible)
     }
 
     private func toggleFolderSidebar() {
         withAnimation(.snappy) {
             isFolderSidebarVisible.toggle()
+            sidebarAutoCollapsed = false
         }
     }
 
@@ -390,96 +443,14 @@ private struct CiderTrafficLightButton: View {
     }
 }
 
-// MARK: - Resize Handle
+// MARK: - Resize Icon (decoration only)
 
-private struct CiderPanelResizeHandle: NSViewRepresentable {
-    func makeNSView(context: Context) -> CiderPanelResizeHandleNSView {
-        let view = CiderPanelResizeHandleNSView()
-        view.setContentHuggingPriority(.required, for: .horizontal)
-        view.setContentHuggingPriority(.required, for: .vertical)
-        return view
-    }
-
-    func updateNSView(_ nsView: CiderPanelResizeHandleNSView, context: Context) {}
-}
-
-private final class CiderPanelResizeHandleNSView: NSView {
-    private var trackingArea: NSTrackingArea?
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: 16, height: 16)
-    }
-
-    override var isFlipped: Bool { false }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = trackingArea { removeTrackingArea(existing) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways],
-            owner: self, userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let symbol = NSImage(
-            systemSymbolName: "arrow.down.backward.and.arrow.up.forward",
-            accessibilityDescription: "Resize"
-        )?.withSymbolConfiguration(.init(pointSize: 9, weight: .medium))
-        if let symbol {
-            let size = symbol.size
-            let origin = NSPoint(
-                x: (bounds.width - size.width) / 2,
-                y: (bounds.height - size.height) / 2
-            )
-            symbol.draw(at: origin, from: .zero, operation: .sourceOver, fraction: 0.35)
-        }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        NSCursor.frameResize(position: .bottomRight, directions: [.inward, .outward]).push()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        NSCursor.pop()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let window = self.window else { return }
-
-        let initialFrame = window.frame
-        let initialMouse = NSEvent.mouseLocation
-
-        var keepRunning = true
-        while keepRunning {
-            guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
-
-            switch next.type {
-            case .leftMouseDragged:
-                let mouse = NSEvent.mouseLocation
-                let dx = mouse.x - initialMouse.x
-                let dy = mouse.y - initialMouse.y
-
-                let w = max(CiderPanelDesign.panelMinWidth, initialFrame.width + dx)
-                let h = max(CiderPanelDesign.panelMinHeight, initialFrame.height - dy)
-                let y = initialFrame.origin.y + (initialFrame.height - h)
-
-                window.setFrame(
-                    NSRect(x: initialFrame.origin.x, y: y, width: w, height: h),
-                    display: true
-                )
-
-            case .leftMouseUp:
-                keepRunning = false
-
-            default:
-                break
-            }
-        }
+private struct CiderPanelResizeIcon: View {
+    var body: some View {
+        Image(systemName: "arrow.down.backward.and.arrow.up.forward")
+            .font(.system(size: 9, weight: .medium))
+            .foregroundColor(CiderColors.quaternary)
+            .frame(width: 16, height: 16)
+            .allowsHitTesting(false)
     }
 }

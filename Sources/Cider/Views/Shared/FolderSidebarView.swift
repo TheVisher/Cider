@@ -17,6 +17,7 @@ struct FolderSidebarView: View {
     var onRenameProject: ((UUID, String) -> Void)?
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
+    var onTriggerSearch: (() -> Void)?
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,6 +46,35 @@ struct FolderSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
+            // Search trigger
+            if let onTriggerSearch {
+                Button(action: onTriggerSearch) {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(CiderColors.tertiary)
+
+                        Text("Search")
+                            .font(.system(size: 12))
+                            .foregroundColor(CiderColors.tertiary)
+
+                        Spacer(minLength: 0)
+
+                        Text("\u{2318}K")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(CiderColors.quaternary)
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.separator.opacity(0.25))
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
             HStack(spacing: Spacing.sm) {
                 Label("Folders", systemImage: "folder")
                     .font(.system(size: 11, weight: .semibold))
@@ -113,6 +143,28 @@ struct FolderSidebarView: View {
             if !projects.isEmpty || onCreateProject != nil {
                 projectsSection
             }
+
+            Spacer(minLength: 0)
+
+            // Settings button
+            Divider()
+                .background(CiderColors.separator)
+
+            Button {
+                NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(CiderColors.secondary)
+
+                    Text("Settings")
+                        .font(.system(size: 12))
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)

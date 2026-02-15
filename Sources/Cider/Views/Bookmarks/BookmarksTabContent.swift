@@ -20,6 +20,10 @@ struct BookmarksTabContent: View {
         return viewModel.bookmarks.first(where: { $0.id == detailsDraft.id })
     }
 
+    private var isExpandMode: Bool {
+        CiderConfig.load().detailModalMode == .expand
+    }
+
     var body: some View {
         ZStack {
             VStack(alignment: .leading, spacing: Spacing.md) {
@@ -54,12 +58,12 @@ struct BookmarksTabContent: View {
                     showsInternalFolderSidebar: false
                 )
             }
-            .blur(radius: detailsDraft == nil ? 0 : BookmarksDesign.detailsContentBlurRadius)
+            .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
             .animation(reduceMotion ? .none : .snappy, value: detailsDraft != nil)
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.md)
 
-            if detailsDraft != nil {
+            if isExpandMode && detailsDraft != nil {
                 detailsOverlay
             }
         }
@@ -120,14 +124,53 @@ struct BookmarksTabContent: View {
 
     private func presentDetails(for bookmark: Bookmark) {
         clearSearchFocus()
-        detailsDraft = BookmarkDetailsDraft(bookmark: bookmark)
+        let draft = BookmarkDetailsDraft(bookmark: bookmark)
+        detailsDraft = draft
         detailsErrorMessage = nil
+
+        let config = CiderConfig.load()
+        if config.detailModalMode == .popover {
+            showDetailsPopover(draft: draft)
+        }
     }
 
     private func closeDetails() {
         clearSearchFocus()
+        let config = CiderConfig.load()
+        if config.detailModalMode == .popover {
+            NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
+        }
         detailsDraft = nil
         detailsErrorMessage = nil
+    }
+
+    private func showDetailsPopover(draft: BookmarkDetailsDraft) {
+        let draftBinding = Binding<BookmarkDetailsDraft>(
+            get: { self.detailsDraft ?? draft },
+            set: { next in
+                self.detailsDraft = next
+                self.detailsErrorMessage = nil
+            }
+        )
+
+        let popoverContent = AnyView(
+            BookmarkDetailsSheet(
+                draft: draftBinding,
+                bookmark: selectedDetailsBookmark,
+                errorMessage: detailsErrorMessage,
+                onOpenURL: openDetailsURL,
+                onCopyURL: copyDetailsURL,
+                onSave: saveDetails,
+                onCancel: { closeDetails() }
+            )
+            .padding(Spacing.xl)
+        )
+
+        NotificationCenter.default.post(
+            name: .showDetailPopover,
+            object: nil,
+            userInfo: ["view": popoverContent]
+        )
     }
 
     private func saveDetails() {

@@ -62,6 +62,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var bookmarksCardSize: BookmarkCardSize {
         didSet { saveConfig() }
     }
+    @Published var detailModalMode: DetailModalMode {
+        didSet { saveConfig() }
+    }
 
     private var config: CiderConfig
 
@@ -83,6 +86,7 @@ final class SettingsViewModel: ObservableObject {
         self.rememberBookmarksPanelPosition = config.rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
+        self.detailModalMode = config.detailModalMode
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -108,6 +112,7 @@ final class SettingsViewModel: ObservableObject {
         config.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.bookmarksCardSize = bookmarksCardSize
+        config.detailModalMode = detailModalMode
         config.save()
 
         // Post notification so AppDelegate can respond
