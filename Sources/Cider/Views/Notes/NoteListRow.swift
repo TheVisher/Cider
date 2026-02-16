@@ -62,7 +62,7 @@ struct NoteListRow: View {
                                 .foregroundColor(CiderColors.accentText)
                                 .lineLimit(1)
                                 .padding(.horizontal, Spacing.xs)
-                                .padding(.vertical, 1)
+                                .padding(.vertical, Spacing.hairline)
                                 .background(
                                     RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                                         .fill(CiderColors.accentLight)

@@ -247,7 +247,7 @@ struct CiderPanelShell<
             CiderColors.backdrop
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    withAnimation(.snappy) {
+                    withAnimation(reduceMotion ? .none : .snappy) {
                         isSidebarVisible = false
                     }
                 }
@@ -275,13 +275,13 @@ struct CiderPanelShell<
             .transition(.move(edge: .leading).combined(with: .opacity))
         }
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
-        .animation(.snappy, value: isSidebarVisible)
+        .animation(reduceMotion ? .none : .snappy, value: isSidebarVisible)
     }
 
     // MARK: - Sidebar Toggle
 
     private func toggleSidebar() {
-        withAnimation(.snappy) {
+        withAnimation(reduceMotion ? .none : .snappy) {
             isSidebarVisible.toggle()
             sidebarAutoCollapsed = false
         }

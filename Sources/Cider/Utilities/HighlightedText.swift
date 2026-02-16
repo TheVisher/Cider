@@ -16,41 +16,25 @@ struct HighlightedText: View {
         if searchText.isEmpty {
             Text(text)
         } else {
-            highlightedTextView
+            Text(highlightedAttributedString)
         }
     }
 
-    private var highlightedTextView: some View {
+    private var highlightedAttributedString: AttributedString {
+        var attributed = AttributedString(text)
         let query = searchText.lowercased()
         let textLower = text.lowercased()
+        var searchStart = textLower.startIndex
 
-        // Find all ranges where the search text matches
-        var result = Text("")
-        var currentIndex = text.startIndex
-
-        while let range = textLower.range(of: query, range: currentIndex..<textLower.endIndex) {
-            // Add non-matching text before this match
-            if currentIndex < range.lowerBound {
-                let beforeText = String(text[currentIndex..<range.lowerBound])
-                result = result + Text(beforeText)
-            }
-
-            // Add highlighted matching text
-            let matchText = String(text[range])
-            result = result + Text(matchText)
-                .fontWeight(.semibold)
-                .foregroundColor(highlightColor)
-
-            currentIndex = range.upperBound
+        while let range = textLower.range(of: query, range: searchStart..<textLower.endIndex) {
+            let attrRange = AttributedString.Index(range.lowerBound, within: attributed)!
+                ..< AttributedString.Index(range.upperBound, within: attributed)!
+            attributed[attrRange].font = .body.weight(.semibold)
+            attributed[attrRange].foregroundColor = highlightColor
+            searchStart = range.upperBound
         }
 
-        // Add remaining text after last match
-        if currentIndex < text.endIndex {
-            let afterText = String(text[currentIndex...])
-            result = result + Text(afterText)
-        }
-
-        return result
+        return attributed
     }
 }
 

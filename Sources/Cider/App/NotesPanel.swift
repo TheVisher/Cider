@@ -164,7 +164,7 @@ final class NotesPanel: NSPanel {
     }
 
     private func applyFrame(_ frame: NSRect, animated: Bool) {
-        guard animated else {
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             setFrame(frame, display: true)
             return
         }

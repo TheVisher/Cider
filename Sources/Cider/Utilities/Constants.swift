@@ -50,6 +50,7 @@ enum CiderBorder {
 // MARK: - Spacing Tokens
 
 enum Spacing {
+    static let hairline: CGFloat = 1
     static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
@@ -199,6 +200,8 @@ enum BookmarksDesign {
     static let detailsSidebarWidthRatio: CGFloat = 0.34
     static let detailsHeroMinHeight: CGFloat = 280
     static let detailsHeroMaxHeight: CGFloat = 520
+    static let cardFallbackLetterSize: CGFloat = 26
+    static let listFallbackLetterSize: CGFloat = 16
     static let detailsHeroFallbackLetterSize: CGFloat = 54
     static let detailsSheetPreferredWidthRatio: CGFloat = 0.96
     static let detailsSheetPreferredHeightRatio: CGFloat = 0.97

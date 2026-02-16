@@ -648,24 +648,10 @@ struct BookmarkDetailsSheet: View {
                 Spacer(minLength: 0)
 
                 Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                    .padding(.horizontal, Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
+                    .buttonStyle(CiderSecondaryButtonStyle())
 
                 Button("Save", action: onSave)
-                    .buttonStyle(.plain)
-                    .foregroundColor(CiderColors.controlAccent)
-                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                    .padding(.horizontal, Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.selectedFill)
-                    )
+                    .buttonStyle(CiderAccentButtonStyle())
             }
         }
         .padding(Spacing.md)

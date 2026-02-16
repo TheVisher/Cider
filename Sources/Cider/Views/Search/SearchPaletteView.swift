@@ -133,7 +133,7 @@ struct SearchPaletteView: View {
                 .font(CiderFont.captionMedium)
                 .foregroundColor(CiderColors.quaternary)
                 .padding(.horizontal, Spacing.xs)
-                .padding(.vertical, 2)
+                .padding(.vertical, Spacing.xxs)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                         .fill(CiderColors.surfaceInput)

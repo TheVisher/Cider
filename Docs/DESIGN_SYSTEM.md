@@ -46,7 +46,8 @@ All tokens are defined in `Sources/Cider/Utilities/Constants.swift`.
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `Spacing.xxs` | 2pt | Hairline gaps, BrowserView inner padding |
+| `Spacing.hairline` | 1pt | Sub-pixel vertical padding for badges and tags |
+| `Spacing.xxs` | 2pt | Tight vertical padding, BrowserView inner padding |
 | `Spacing.xs` | 4pt | Tight internal padding, traffic light spacing |
 | `Spacing.sm` | 8pt | Standard element spacing, sidebar internal padding |
 | `Spacing.md` | 12pt | Section padding, tab content wrapper padding |

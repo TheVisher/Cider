@@ -7,7 +7,7 @@ import SwiftUI
 struct CiderAccentButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body)
+            .font(CiderFont.body)
             .foregroundColor(CiderColors.controlAccent)
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
@@ -23,7 +23,7 @@ struct CiderAccentButtonStyle: ButtonStyle {
 struct CiderDestructiveButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body)
+            .font(CiderFont.body)
             .foregroundColor(CiderColors.destructive)
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
@@ -39,7 +39,7 @@ struct CiderDestructiveButtonStyle: ButtonStyle {
 struct CiderSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body)
+            .font(CiderFont.body)
             .foregroundColor(CiderColors.secondary)
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)

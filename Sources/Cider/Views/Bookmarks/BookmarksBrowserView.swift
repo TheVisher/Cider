@@ -206,7 +206,7 @@ struct BookmarksBrowserView: View {
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
-                        onMoveToFolder: { onAssignBookmarkToFolder?(bookmark, $0) }
+                        onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) }
                     )
                 }
             }
@@ -227,7 +227,7 @@ struct BookmarksBrowserView: View {
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
-                        onMoveToFolder: { onAssignBookmarkToFolder?(bookmark, $0) },
+                        onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
                         onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
                         onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
                         onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
@@ -251,7 +251,7 @@ struct BookmarksBrowserView: View {
                         onShowDetails: { onShowBookmarkDetails?(bookmark) },
                         onOpen: { onOpenBookmark(bookmark) },
                         onDelete: { onDeleteBookmark?(bookmark) },
-                        onMoveToFolder: { onAssignBookmarkToFolder?(bookmark, $0) },
+                        onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
                         onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
                         onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
                         onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
@@ -1428,7 +1428,7 @@ private struct BookmarkThumbnailView: View {
                 Spacer(minLength: 0)
 
                 Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
-                    .font(.system(size: mode == .list ? 16 * textScale : 26 * textScale, weight: .black))
+                    .font(.system(size: (mode == .list ? BookmarksDesign.listFallbackLetterSize : BookmarksDesign.cardFallbackLetterSize) * textScale, weight: .black))
                     .foregroundColor(CiderColors.textOnColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

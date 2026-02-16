@@ -697,8 +697,8 @@ struct RootFolderHeaderRow: View {
         chevronRevertTask?.cancel()
         showChevronIcon = true
 
-        let task = DispatchWorkItem {
-            withAnimation(.smooth) {
+        let task = DispatchWorkItem { [reduceMotion] in
+            withAnimation(reduceMotion ? .none : .smooth) {
                 showChevronIcon = false
             }
         }

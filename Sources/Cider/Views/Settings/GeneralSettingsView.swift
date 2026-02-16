@@ -10,8 +10,7 @@ struct SettingsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text(title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
+                .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.secondary)
 
             VStack(alignment: .leading, spacing: Spacing.md) {
@@ -36,12 +35,12 @@ struct SettingsToggleRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body)
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)
 
                 if let subtitle {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                 }
             }
@@ -74,12 +73,12 @@ struct SettingsPickerRow<T: Hashable>: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body)
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)
 
                 if let subtitle {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                 }
             }
@@ -106,19 +105,19 @@ struct SettingsSliderRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(title)
-                .font(.body)
+                .font(CiderFont.body)
                 .foregroundColor(CiderColors.primary)
 
             HStack(spacing: Spacing.md) {
                 Text(labels.0)
-                    .font(.caption)
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
 
                 Slider(value: $value, in: range)
                     .tint(CiderColors.controlAccent)
 
                 Text(labels.1)
-                    .font(.caption)
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
             }
         }

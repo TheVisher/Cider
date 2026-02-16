@@ -148,11 +148,11 @@ struct SettingsView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Notes directory")
-                                .font(.body)
+                                .font(CiderFont.body)
                                 .foregroundColor(CiderColors.primary)
 
                             Text(viewModel.notesDirectory)
-                                .font(.caption)
+                                .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                                 .lineLimit(1)
                         }
@@ -223,11 +223,11 @@ struct SettingsView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Bookmarks directory")
-                                .font(.body)
+                                .font(CiderFont.body)
                                 .foregroundColor(CiderColors.primary)
 
                             Text(viewModel.bookmarksDirectory)
-                                .font(.caption)
+                                .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                                 .lineLimit(1)
                         }
@@ -286,7 +286,7 @@ struct SettingsView: View {
                         .buttonStyle(CiderAccentButtonStyle())
 
                         Text("Cider requires accessibility permissions to manage windows.")
-                            .font(.caption)
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
                 }
@@ -304,7 +304,7 @@ struct SettingsView: View {
                         .buttonStyle(CiderDestructiveButtonStyle())
 
                         Text("This will reset all settings to their default values.")
-                            .font(.caption)
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
                 }
@@ -692,7 +692,7 @@ private struct SettingsAccountOverviewView: View {
                 }
 
                 Text("Account sync, profile details, and connected services will appear here.")
-                    .font(.caption)
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
 
                 HStack(spacing: Spacing.sm) {
@@ -736,7 +736,7 @@ private struct SettingsSizeOptionButton: View {
                 }
 
                 Text(title)
-                    .font(.caption)
+                    .font(CiderFont.caption)
             }
             .foregroundColor(isSelected ? CiderColors.primary : CiderColors.secondary)
             .padding(.horizontal, Spacing.md)

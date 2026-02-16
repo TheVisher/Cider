@@ -6,9 +6,10 @@ Cider is a native macOS **floating panel** app for capturing and organizing book
 
 - **Never steal focus** - All floating surfaces use `NSPanel` with `.nonactivatingPanel`
 - **No hardcoded colors** - Use `CiderColors.*` tokens from Constants.swift
-- **No hardcoded fonts** - Use `CiderFont.*` tokens from CiderFont.swift
+- **No hardcoded fonts** - Use `CiderFont.*` tokens from CiderFont.swift (no `.font(.body)`, `.font(.caption)`, etc.)
 - **No magic numbers** - Use spacing/animation tokens from Constants.swift
 - **Spring animations only** - No `.easeIn`, `.easeOut`, `.linear` for UI motion
+- **Respect Reduce Motion** - Every `withAnimation` and `.animation()` must use `reduceMotion ? .none : .spring`
 - **Acrylic style** - Use `NSVisualEffectView` with `.underWindowBackground`, NOT `.glassEffect()`
 
 ## Primary Interface: Floating Panel
@@ -102,9 +103,15 @@ ContainerStyles → Utilities/ContainerStyles.swift (.sectionContainer, .cardCon
 HoverState   → Utilities/HoverState.swift  (.hoverState modifier)
 ```
 
+### Strict Build Check
+```
+swift build -Xswiftc -warnings-as-errors
+```
+Normal `swift build` hides deprecation warnings and unused-result diagnostics. Use strict mode to verify clean hygiene.
+
 ### Spacing Tokens
 ```
-xxs: 2pt | xs: 4pt | sm: 8pt | md: 12pt | lg: 16pt | xl: 20pt | xxl: 24pt | xxxl: 32pt
+hairline: 1pt | xxs: 2pt | xs: 4pt | sm: 8pt | md: 12pt | lg: 16pt | xl: 20pt | xxl: 24pt | xxxl: 32pt
 ```
 
 ### Animation Presets
@@ -246,4 +253,8 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **NSView overlays:** When overlaying `NSViewRepresentable`, override `hitTest` to return `nil` for non-target events — otherwise the overlay blocks left clicks, hovers, and drags from reaching SwiftUI content underneath.
 - **@FocusState in NSPanel:** Non-activating panels need a delay before focus takes effect — use `.task { try? await Task.sleep(for: .milliseconds(150)); focused = true }`
 - **Card data refresh:** Use `.task(id: note.modifiedAt)` not `.task(id: note.id)` so card data reloads after edits
+- **Text concatenation:** `Text("a") + Text("b")` is deprecated in macOS 26. Use `Text(AttributedString)` with per-range attributes instead.
 - **Compact mode GeometryReader:** Measure panel width (HStack), NOT content area width. Content width changes when sidebar toggles, causing infinite collapse/expand feedback loop. Panel width is stable.
+- **SourceKit false positives:** "Cannot find 'CiderFont' in scope" (and similar cross-file type errors) are SourceKit indexing noise, not real build errors. Ignore them — verify with `swift build` instead.
+- **Shadow shapes use literal `Color.black`** — this is correct, not a CiderColors violation. The custom shadow pattern (blurred black RoundedRectangle) is intentional.
+- **AppKit Reduce Motion:** For `NSAnimationContext` code (panel collapse), check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` — `@Environment(\.accessibilityReduceMotion)` is SwiftUI-only.

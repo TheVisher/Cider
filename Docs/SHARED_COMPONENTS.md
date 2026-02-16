@@ -40,6 +40,14 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **Used by:** CiderPanelView
 - **What:** Horizontal scrollable tab bar with badge counts
 
+### CiderPanelShell
+- **File:** `Views/Shared/CiderPanelShell.swift`
+- **Used by:** CiderPanelView, BookmarksPanelView, NotesPanelView
+- **What:** Generic structural shell for all panel windows — encapsulates two-column layout, sidebar container, traffic lights, title bar, divider, compact mode logic, resize handles, and shadow padding
+- **Generic params:** `SidebarContent`, `SidebarFooter`, `TitleBarContent`, `Content`, `PanelOverlay`
+- **Init params:** `isCollapsed`, `onClose`, `onCollapse`, `onMaximize`, plus `@ViewBuilder` closures for each generic slot
+- **Handles:** Sidebar show/hide animation, compact mode auto-collapse at `CiderPanelDesign.sidebarCompactThreshold` (680pt), title bar toggle appearance, panel edge resize, acrylic background + shadow
+
 ### PanelEdgeResizeView
 - **File:** `Views/Shared/PanelEdgeResizeView.swift`
 - **Used by:** CiderPanelView
@@ -65,7 +73,7 @@ When building a new feature, check this doc first. If a component or pattern alr
 ### CiderFont
 - **File:** `Utilities/CiderFont.swift`
 - **Used by:** All views with text
-- **What:** Semantic typography tokens replacing all `.font(.system(size:weight:))` declarations. ~30 fixed tokens + ~13 responsive `(scale:)` function variants for textScale views.
+- **What:** Semantic typography tokens replacing all `.font(.system(size:weight:))` declarations. 29 fixed tokens + 13 responsive `(scale:)` function variants for textScale views.
 - **Pattern:** `CiderFont.body`, `CiderFont.captionMedium`, `CiderFont.subheadingSemibold`, etc.
 - **Responsive:** `CiderFont.body(scale: textScale)` for views with continuous card size slider
 - **When NOT to use:** Design constants (`CiderPanelDesign.trafficLightSymbolSize`), dynamic weights (`isSelected ? .semibold : .regular`), Apple semantic styles in Settings views
@@ -123,7 +131,7 @@ These aren't single components but established patterns that should be followed 
   - `CiderAccentButtonStyle` — primary action (accent text on `accentSubtle` bg, `accentLight` on press)
   - `CiderDestructiveButtonStyle` — destructive action (red text on `destructiveSubtle` bg, `destructiveLight` on press)
   - `CiderSecondaryButtonStyle` — cancel/dismiss (secondary text on `surfaceInput` bg, `surfaceHover` on press)
-- **All three share:** `.font(.body)` + `.padding(.horizontal: Spacing.md, .vertical: Spacing.sm)` + `RoundedRectangle(Radius.sm)` background
+- **All three share:** `.font(CiderFont.body)` + `.padding(.horizontal: Spacing.md, .vertical: Spacing.sm)` + `RoundedRectangle(Radius.sm)` background
 - **When NOT to use:** Icon-only toolbar buttons (use `.buttonStyle(.plain)`) or buttons that need `textScale` multipliers (style inline)
 
 ### Hover State Modifier
@@ -133,7 +141,7 @@ These aren't single components but established patterns that should be followed 
 - **Usage:**
   - `.hoverState($isHovered)` — plain binding (use when view has `.animation(_, value: isHovered)`)
   - `.hoverState($isHovered, animation: .snappy)` — animated (use when no `.animation()` on view)
-- **Only remaining `.onHover`:** `BookmarksBrowserView` bookmark list row — has custom `onHoverChanged` callback, can't use shared modifier
+- **Remaining `.onHover`:** `BookmarksBrowserView` list row (custom hover callback) and `BookmarkCaptureToastPanel` (toast dismiss logic) — both have custom `onHoverChanged` callbacks, can't use shared modifier
 
 ### Inline Rename
 - **Used by:** Notes (NoteCardView, NoteListRow)

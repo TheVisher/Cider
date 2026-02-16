@@ -35,7 +35,7 @@ struct CiderTabBar: View {
                     .font(CiderFont.bodyMedium)
 
                 Text(tab.displayName)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(isSelected ? CiderFont.labelSemibold : CiderFont.label)
                     .lineLimit(1)
 
                 if count > 0 {
@@ -43,7 +43,7 @@ struct CiderTabBar: View {
                         .font(CiderFont.captionMedium)
                         .foregroundColor(isSelected ? CiderColors.primary : CiderColors.tertiary)
                         .padding(.horizontal, CiderPanelDesign.tabBadgePadding)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, Spacing.hairline)
                         .background(
                             Capsule(style: .continuous)
                                 .fill(isSelected ? CiderColors.separatorFirm : CiderColors.separatorLight)

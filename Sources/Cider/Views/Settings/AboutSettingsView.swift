@@ -12,18 +12,17 @@ struct AboutSettingsView: View {
                     .foregroundColor(CiderColors.controlAccent)
 
                 Text("Cider")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+                    .font(CiderFont.displayBold)
                     .foregroundColor(CiderColors.primary)
 
                 Text("Version \(appVersion)")
-                    .font(.body)
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.secondary)
             }
 
             // Description
             Text("A command palette for macOS that replaces\nDock, Stage Manager, and Spotlight.")
-                .font(.body)
+                .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)
 
@@ -38,7 +37,7 @@ struct AboutSettingsView: View {
 
             // Copyright
             Text("Made with care for macOS")
-                .font(.caption)
+                .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
         }
         .frame(maxWidth: .infinity)
@@ -63,7 +62,7 @@ private struct AboutLink: View {
                     .font(CiderFont.title)
 
                 Text(title)
-                    .font(.caption)
+                    .font(CiderFont.caption)
             }
             .foregroundColor(CiderColors.secondary)
             .frame(width: 70, height: 50)
