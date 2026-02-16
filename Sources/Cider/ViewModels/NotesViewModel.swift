@@ -41,8 +41,9 @@ final class NotesViewModel: ObservableObject {
         }
     }
 
-    /// Reference to the WKWebView for Swift → JS calls
-    var editorWebView: WKWebView?
+    /// The singleton editor WebView, created on first access via `ensureEditorWebView()`.
+    private(set) var editorWebView: WKWebView?
+    private var editorCoordinator: TipTapEditorCoordinator?
     private var editorIsReady = false
 
     private var saveWorkItem: DispatchWorkItem?
@@ -157,6 +158,56 @@ final class NotesViewModel: ObservableObject {
                 self.applyNotesEditorTextSize()
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - WebView Lifecycle
+
+    /// Creates the singleton WKWebView on first access. Subsequent calls return
+    /// the same instance. The WebView is owned by this ViewModel and outlives
+    /// any individual TipTapEditorView mount.
+    @discardableResult
+    func ensureEditorWebView() -> WKWebView {
+        if let existing = editorWebView {
+            return existing
+        }
+
+        let coordinator = TipTapEditorCoordinator(viewModel: self)
+        editorCoordinator = coordinator
+
+        let config = WKWebViewConfiguration()
+        let contentController = config.userContentController
+        contentController.add(coordinator, name: "contentChanged")
+        contentController.add(coordinator, name: "editorReady")
+        contentController.add(coordinator, name: "imageDropped")
+        contentController.add(coordinator, name: "slashCommandImage")
+        contentController.add(coordinator, name: "slashPopupState")
+        contentController.add(coordinator, name: "floatingToolbarState")
+        contentController.add(coordinator, name: "editorError")
+
+        let webView = TipTapWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = coordinator
+        webView.viewModel = self
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.onFindRequested = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleFindShortcut()
+            }
+        }
+
+        if let resourceURL = Bundle.module.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
+            let readAccessRoot = URL(fileURLWithPath: "/", isDirectory: true)
+            webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
+        }
+
+        editorWebView = webView
+        return webView
+    }
+
+    /// Called when a .md/.txt file is dropped onto the editor. Reads the content
+    /// with correct UTF-8 encoding (bypassing WKWebView's DOM drop handler which
+    /// may interpret files as Latin-1).
+    func handleDroppedTextFileContent(_ content: String) {
+        pushContentToEditor(content)
     }
 
     // MARK: - Editor Bridge

@@ -2,150 +2,131 @@ import SwiftUI
 import WebKit
 import Carbon.HIToolbox
 
+// MARK: - TipTapEditorView (container pattern)
+
+/// A thin container that borrows the singleton WKWebView from the ViewModel.
+/// Only one surface displays the editor at a time — when a new surface mounts,
+/// its `makeNSView` steals the WebView. When a surface is dismantled the WebView
+/// becomes parentless and the surviving surface re-adopts it via `updateNSView`.
 struct TipTapEditorView: NSViewRepresentable {
     @ObservedObject var viewModel: NotesViewModel
 
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        let contentController = config.userContentController
-
-        // Register message handlers for JS → Swift communication
-        let handler = context.coordinator
-        contentController.add(handler, name: "contentChanged")
-        contentController.add(handler, name: "editorReady")
-        contentController.add(handler, name: "imageDropped")
-        contentController.add(handler, name: "slashCommandImage")
-        contentController.add(handler, name: "slashPopupState")
-        contentController.add(handler, name: "floatingToolbarState")
-        contentController.add(handler, name: "editorError")
-
-        let webView = TipTapWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.setValue(false, forKey: "drawsBackground")
-        webView.onFindRequested = { [weak viewModel] in
-            Task { @MainActor [weak viewModel] in
-                viewModel?.handleFindShortcut()
-            }
-        }
-
-        // Load editor.html from the bundled resources
-        if let resourceURL = Bundle.module.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
-            // Editor content can include local note attachments from arbitrary
-            // user directories, so use a broad file read root.
-            let readAccessRoot = URL(fileURLWithPath: "/", isDirectory: true)
-            webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
-        }
-
-        // Store reference on viewModel for Swift → JS calls
-        viewModel.editorWebView = webView
-
-        return webView
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView()
+        let webView = viewModel.ensureEditorWebView()
+        webView.removeFromSuperview()
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.width, .height]
+        container.addSubview(webView)
+        return container
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        // Content updates are pushed via JS bridge, not through SwiftUI updates
+    func updateNSView(_ container: NSView, context: Context) {
+        let webView = viewModel.ensureEditorWebView()
+        // Only re-parent if the WebView has no home (its previous container
+        // was dismantled). Never steal from another live container.
+        if webView.superview == nil {
+            webView.frame = container.bounds
+            webView.autoresizingMask = [.width, .height]
+            container.addSubview(webView)
+        }
+    }
+}
+
+// MARK: - Coordinator
+
+/// Handles WKScriptMessage routing and navigation policy for the editor WebView.
+/// Owned by NotesViewModel so it outlives any individual TipTapEditorView mount.
+final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    let viewModel: NotesViewModel
+
+    init(viewModel: NotesViewModel) {
+        self.viewModel = viewModel
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(viewModel: viewModel)
+    nonisolated func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        Task { @MainActor [viewModel] in
+            switch message.name {
+            case "editorReady":
+                viewModel.editorDidBecomeReady()
+
+            case "contentChanged":
+                if let markdown = message.body as? String {
+                    viewModel.contentChanged(markdown)
+                }
+
+            case "imageDropped":
+                if let jsonString = message.body as? String,
+                   let data = jsonString.data(using: .utf8),
+                   let payload = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+                   let base64 = payload["data"],
+                   let name = payload["name"],
+                   let imageData = Data(base64Encoded: base64) {
+                    viewModel.handleImageDrop(data: imageData, filename: name)
+                }
+
+            case "slashCommandImage":
+                viewModel.openImagePicker()
+
+            case "slashPopupState":
+                if let payload = message.body as? [String: Any],
+                   let webView = viewModel.editorWebView as? TipTapWebView {
+                    webView.updateSlashPopupState(payload)
+                }
+
+            case "floatingToolbarState":
+                if let payload = message.body as? [String: Any],
+                   let webView = viewModel.editorWebView as? TipTapWebView {
+                    webView.updateFloatingToolbarState(payload)
+                }
+
+            case "editorError":
+                if let payload = message.body as? [String: Any],
+                   let kind = payload["kind"] as? String,
+                   let detail = payload["message"] as? String {
+                    NSLog("[TipTapEditor][\(kind)] \(detail)")
+                } else if let detail = message.body as? String {
+                    NSLog("[TipTapEditor] \(detail)")
+                } else {
+                    NSLog("[TipTapEditor] Unknown editor diagnostic payload")
+                }
+
+            default:
+                break
+            }
+        }
     }
 
-    // MARK: - Coordinator
-
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        let viewModel: NotesViewModel
-
-        init(viewModel: NotesViewModel) {
-            self.viewModel = viewModel
-        }
-
-        nonisolated func userContentController(
-            _ userContentController: WKUserContentController,
-            didReceive message: WKScriptMessage
-        ) {
-            Task { @MainActor [viewModel] in
-                switch message.name {
-                case "editorReady":
-                    viewModel.editorDidBecomeReady()
-
-                case "contentChanged":
-                    if let markdown = message.body as? String {
-                        viewModel.contentChanged(markdown)
-                    }
-
-                case "imageDropped":
-                    if let jsonString = message.body as? String,
-                       let data = jsonString.data(using: .utf8),
-                       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-                       let base64 = payload["data"],
-                       let name = payload["name"],
-                       let imageData = Data(base64Encoded: base64) {
-                        viewModel.handleImageDrop(data: imageData, filename: name)
-                    }
-
-                case "slashCommandImage":
-                    viewModel.openImagePicker()
-
-                case "slashPopupState":
-                    if let payload = message.body as? [String: Any],
-                       let webView = viewModel.editorWebView as? TipTapWebView {
-                        webView.updateSlashPopupState(payload)
-                    }
-
-                case "floatingToolbarState":
-                    if let payload = message.body as? [String: Any],
-                       let webView = viewModel.editorWebView as? TipTapWebView {
-                        webView.updateFloatingToolbarState(payload)
-                    }
-
-                case "editorError":
-                    if let payload = message.body as? [String: Any],
-                       let kind = payload["kind"] as? String,
-                       let detail = payload["message"] as? String {
-                        NSLog("[TipTapEditor][\(kind)] \(detail)")
-                    } else if let detail = message.body as? String {
-                        NSLog("[TipTapEditor] \(detail)")
-                    } else {
-                        NSLog("[TipTapEditor] Unknown editor diagnostic payload")
-                    }
-
-                default:
-                    break
-                }
+    // Allow file:// URLs for local image loading
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        if let url = navigationAction.request.url {
+            if url.isFileURL || url.scheme == "about" {
+                return .allow
+            }
+            // Block external navigation (links in editor content)
+            if navigationAction.navigationType == .linkActivated {
+                NSWorkspace.shared.open(url)
+                return .cancel
             }
         }
-
-        // Allow file:// URLs for local image loading
-        func webView(
-            _ webView: WKWebView,
-            decidePolicyFor navigationAction: WKNavigationAction
-        ) async -> WKNavigationActionPolicy {
-            if let url = navigationAction.request.url {
-                if url.isFileURL || url.scheme == "about" {
-                    return .allow
-                }
-                // Block external navigation (links in editor content)
-                if navigationAction.navigationType == .linkActivated {
-                    NSWorkspace.shared.open(url)
-                    return .cancel
-                }
-            }
-            return .allow
-        }
+        return .allow
     }
 }
 
 // MARK: - Custom WKWebView subclass
 
 /// Prevents window drag when interacting with the editor.
-private final class TipTapWebView: WKWebView {
+final class TipTapWebView: WKWebView {
     override var mouseDownCanMoveWindow: Bool { false }
     override var acceptsFirstResponder: Bool { true }
     var onFindRequested: (() -> Void)?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        return true
-    }
+    weak var viewModel: NotesViewModel?
 
     private var slashPopupFrame: CGRect?
     private var slashPopupActive = false
@@ -153,6 +134,22 @@ private final class TipTapWebView: WKWebView {
     private var floatingToolbarActive = false
     private var localMouseDownMonitor: Any?
     private var localKeyDownMonitor: Any?
+
+    private static let textFileExtensions: Set<String> = ["md", "markdown", "txt", "text"]
+
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -206,7 +203,10 @@ private final class TipTapWebView: WKWebView {
         )
     }
 
+    // MARK: - Mouse / Key Handling
+
     override func mouseDown(with event: NSEvent) {
+        window?.makeKey()
         _ = window?.makeFirstResponder(self)
 
         if handleFloatingToolbarMouseDown(event) {
@@ -249,6 +249,59 @@ private final class TipTapWebView: WKWebView {
 
         return super.performKeyEquivalent(with: event)
     }
+
+    // MARK: - Drag & Drop (UTF-8 text file interception)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if hasTextFileDrop(sender) {
+            return .copy
+        }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if hasTextFileDrop(sender) {
+            return .copy
+        }
+        return super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if let content = readTextFileDrop(sender) {
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleDroppedTextFileContent(content)
+            }
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    private func hasTextFileDrop(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] else {
+            return false
+        }
+        return urls.contains { Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
+    }
+
+    private func readTextFileDrop(_ sender: NSDraggingInfo) -> String? {
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] else {
+            return nil
+        }
+        guard let fileURL = urls.first(where: {
+            Self.textFileExtensions.contains($0.pathExtension.lowercased())
+        }) else {
+            return nil
+        }
+        return try? String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    // MARK: - Slash Popup / Floating Toolbar Hit Testing
 
     private func handleSlashPopupMouseDown(_ event: NSEvent) -> Bool {
         guard slashPopupActive,
@@ -357,12 +410,15 @@ private final class TipTapWebView: WKWebView {
         return true
     }
 
+    // MARK: - Event Monitors
+
     private func installEventMonitorsIfNeeded() {
         if localMouseDownMonitor == nil {
             localMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
                 guard let self else { return event }
                 guard event.window === self.window else { return event }
 
+                self.window?.makeKey()
                 _ = self.window?.makeFirstResponder(self)
                 if self.handleFloatingToolbarMouseDown(event) {
                     return nil
