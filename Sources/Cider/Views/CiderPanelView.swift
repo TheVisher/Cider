@@ -16,6 +16,8 @@ struct CiderPanelView: View {
     @State private var sidebarAutoCollapsed = false
     @State private var isViewOptionsVisible = false
     @State private var isNoteViewOptionsVisible = false
+    @State private var showTitleBarToggle = false
+    @State private var toggleAppearTask: Task<Void, Never>?
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -97,20 +99,49 @@ struct CiderPanelView: View {
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
         }
+        .onChange(of: isFolderSidebarVisible) { _, visible in
+            toggleAppearTask?.cancel()
+            if !visible {
+                // Sidebar closing — after a short delay, show title bar toggle
+                if reduceMotion {
+                    showTitleBarToggle = true
+                } else {
+                    toggleAppearTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(150))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.bouncy) {
+                            showTitleBarToggle = true
+                        }
+                    }
+                }
+            } else {
+                // Sidebar opening — immediately hide title bar toggle
+                if reduceMotion {
+                    showTitleBarToggle = false
+                } else {
+                    withAnimation(.snappy) {
+                        showTitleBarToggle = false
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Title Bar
 
     private var titleBar: some View {
         HStack(spacing: Spacing.sm) {
-            Button(action: toggleFolderSidebar) {
-                Image(systemName: isFolderSidebarVisible ? "sidebar.left" : "sidebar.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 24, height: 24)
+            if showTitleBarToggle {
+                Button(action: toggleFolderSidebar) {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(CiderColors.secondary)
+                .help("Show folder sidebar")
+                .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            .buttonStyle(.plain)
-            .foregroundColor(isFolderSidebarVisible ? CiderColors.controlAccent : CiderColors.secondary)
-            .help(isFolderSidebarVisible ? "Hide folder sidebar" : "Show folder sidebar")
 
             CiderTabBar(
                 selectedTab: $selectedTab,
@@ -158,11 +189,9 @@ struct CiderPanelView: View {
 
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            // Traffic lights inside the rounded sidebar
             sidebarHeader
-
-            // Folder content (no background — wrapper handles it)
             folderSidebar
+            sidebarFooter
         }
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
@@ -198,52 +227,165 @@ struct CiderPanelView: View {
 
             Spacer(minLength: 0)
 
-            if selectedTab == .bookmarks {
-                Image(systemName: "slider.horizontal.3")
+            Button(action: toggleFolderSidebar) {
+                Image(systemName: "sidebar.left")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                    .foregroundColor(CiderColors.secondary)
                     .frame(width: 28, height: CiderPanelDesign.trafficLightTapTarget)
                     .contentShape(Rectangle())
-                    .onTapGesture { isViewOptionsVisible.toggle() }
-                    .help("View options")
-                    .popover(isPresented: $isViewOptionsVisible) {
-                        ViewOptionsDropdown(
-                            displayMode: Binding(
-                                get: { bookmarksViewModel.displayMode },
-                                set: { bookmarksViewModel.setDisplayMode($0) }
-                            ),
-                            cardSizeScale: Binding(
-                                get: { bookmarksViewModel.cardSizeScale },
-                                set: { bookmarksViewModel.setCardSizeScale($0) }
-                            )
-                        )
-                    }
-            } else if selectedTab == .notes {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: 28, height: CiderPanelDesign.trafficLightTapTarget)
-                    .contentShape(Rectangle())
-                    .onTapGesture { isNoteViewOptionsVisible.toggle() }
-                    .help("View options")
-                    .popover(isPresented: $isNoteViewOptionsVisible) {
-                        ViewOptionsDropdown(
-                            displayMode: Binding(
-                                get: { notesViewModel.displayMode },
-                                set: { notesViewModel.setDisplayMode($0) }
-                            ),
-                            cardSizeScale: Binding(
-                                get: { notesViewModel.cardSizeScale },
-                                set: { notesViewModel.setCardSizeScale($0) }
-                            )
-                        )
-                    }
             }
+            .buttonStyle(.plain)
+            .help("Hide sidebar")
         }
         .frame(height: BookmarksDesign.buttonTapTarget, alignment: .top)
         .padding(.horizontal, Spacing.sm)
         .padding(.top, Spacing.sm)
         .frame(maxWidth: BookmarksDesign.folderSidebarWidth, alignment: .leading)
+    }
+
+    // MARK: - Sidebar Footer
+
+    private var sidebarFooter: some View {
+        VStack(spacing: Spacing.sm) {
+            Divider()
+                .background(CiderColors.separator)
+                .padding(.bottom, Spacing.xs)
+
+            HStack(spacing: Spacing.sm) {
+                // Settings gear
+                Button {
+                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+
+                Spacer(minLength: 0)
+
+                // + pill menu
+                Menu {
+                    Button {
+                        NotificationCenter.default.post(name: .showFolderCreationField, object: nil)
+                    } label: {
+                        Label("New Folder", systemImage: "folder.badge.plus")
+                    }
+                    Button(action: createProject) {
+                        Label("New Project", systemImage: "tray.full")
+                    }
+                    Button {
+                        selectedTab = .bookmarks
+                        selectedFolderID = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            NotificationCenter.default.post(name: .showBookmarkAddForm, object: nil)
+                        }
+                    } label: {
+                        Label("New Bookmark", systemImage: "bookmark")
+                    }
+                    Button {
+                        selectedTab = .notes
+                        selectedFolderID = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            NotificationCenter.default.post(name: .triggerNewNoteInTab, object: nil)
+                        }
+                    } label: {
+                        Label("New Note", systemImage: "note.text")
+                    }
+                    Divider()
+                    Button {
+                        _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
+                    } label: {
+                        Label("Capture Browser Tab", systemImage: "safari")
+                    }
+                    Button {
+                        _ = bookmarksViewModel.addBookmarkFromPasteboard()
+                    } label: {
+                        Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
+                    }
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("New")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(CiderColors.secondary)
+                    .padding(.horizontal, Spacing.sm)
+                    .frame(height: CiderPanelDesign.trafficLightTapTarget)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .contentShape(Capsule())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Create new item")
+
+                Spacer(minLength: 0)
+
+                // View options
+                viewOptionsButton
+            }
+        }
+        .padding(.top, Spacing.sm)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.bottom, Spacing.sm)
+        .frame(width: BookmarksDesign.folderSidebarWidth)
+    }
+
+    @ViewBuilder
+    private var viewOptionsButton: some View {
+        if selectedTab == .bookmarks {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .contentShape(Rectangle())
+                .onTapGesture { isViewOptionsVisible.toggle() }
+                .help("View options")
+                .popover(isPresented: $isViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: Binding(
+                            get: { bookmarksViewModel.displayMode },
+                            set: { bookmarksViewModel.setDisplayMode($0) }
+                        ),
+                        cardSizeScale: Binding(
+                            get: { bookmarksViewModel.cardSizeScale },
+                            set: { bookmarksViewModel.setCardSizeScale($0) }
+                        )
+                    )
+                }
+        } else if selectedTab == .notes {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .contentShape(Rectangle())
+                .onTapGesture { isNoteViewOptionsVisible.toggle() }
+                .help("View options")
+                .popover(isPresented: $isNoteViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: Binding(
+                            get: { notesViewModel.displayMode },
+                            set: { notesViewModel.setDisplayMode($0) }
+                        ),
+                        cardSizeScale: Binding(
+                            get: { notesViewModel.cardSizeScale },
+                            set: { notesViewModel.setCardSizeScale($0) }
+                        )
+                    )
+                }
+        } else {
+            // Invisible spacer to keep layout stable
+            Color.clear
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+        }
     }
 
     // MARK: - Content Area
@@ -288,8 +430,8 @@ struct CiderPanelView: View {
 
             VStack(spacing: 0) {
                 sidebarHeader
-
                 folderSidebar
+                sidebarFooter
             }
             .background(
                 ZStack {
@@ -328,26 +470,6 @@ struct CiderPanelView: View {
             onRenameProject: renameProject,
             onDeleteFolder: deleteFolder,
             onTriggerSearch: { isSearchPaletteVisible = true },
-            onCreateBookmark: {
-                selectedTab = .bookmarks
-                selectedFolderID = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    NotificationCenter.default.post(name: .showBookmarkAddForm, object: nil)
-                }
-            },
-            onCreateNote: {
-                selectedTab = .notes
-                selectedFolderID = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    NotificationCenter.default.post(name: .triggerNewNoteInTab, object: nil)
-                }
-            },
-            onCaptureBrowserTab: {
-                _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
-            },
-            onPasteFromClipboard: {
-                _ = bookmarksViewModel.addBookmarkFromPasteboard()
-            },
             showBackground: false
         )
     }

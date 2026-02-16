@@ -161,13 +161,14 @@ Sources/Cider/
 CiderPanelView
 ├── HStack(spacing: 0)
 │   ├── sidebarColumn (floating rounded-rect, full panel height)
-│   │   ├── sidebarHeader (traffic lights + view options, top-aligned)
-│   │   └── FolderSidebarView(showBackground: false)
-│   │       ├── Search field (top aligned with divider line)
-│   │       ├── Folders section (hierarchical tree)
-│   │       └── Projects section
+│   │   ├── sidebarHeader (traffic lights + collapse toggle, top-aligned)
+│   │   ├── FolderSidebarView(showBackground: false)
+│   │   │   ├── Search field (top aligned with divider line)
+│   │   │   ├── Folders section (hierarchical tree)
+│   │   │   └── Projects section
+│   │   └── sidebarFooter (gear + "New" pill menu + view options)
 │   └── VStack (right column, top padding aligns title bar center with traffic lights)
-│       ├── titleBar (sidebar toggle + CiderTabBar + capture button)
+│       ├── titleBar (animated sidebar toggle + CiderTabBar + capture button)
 │       ├── Divider (14pt horizontal inset, aligned with card content edges)
 │       └── contentArea (switches by selectedTab)
 │           ├── HomeDashboardView

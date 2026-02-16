@@ -39,6 +39,7 @@ extension Notification.Name {
     static let dismissDetailPopover = Notification.Name("cider.dismissDetailPopover")
     static let showBookmarkAddForm = Notification.Name("cider.showBookmarkAddForm")
     static let triggerNewNoteInTab = Notification.Name("cider.triggerNewNoteInTab")
+    static let showFolderCreationField = Notification.Name("cider.showFolderCreationField")
 }
 
 enum CiderBorder {

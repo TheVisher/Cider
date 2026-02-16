@@ -18,10 +18,6 @@ struct FolderSidebarView: View {
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
     var onTriggerSearch: (() -> Void)?
-    var onCreateBookmark: (() -> Void)?
-    var onCreateNote: (() -> Void)?
-    var onCaptureBrowserTab: (() -> Void)?
-    var onPasteFromClipboard: (() -> Void)?
     var showBackground: Bool = true
 
     @Environment(\.textScale) private var textScale
@@ -133,74 +129,13 @@ struct FolderSidebarView: View {
             }
 
             Spacer(minLength: 0)
-
-            Divider()
-                .background(CiderColors.separator)
-
-            HStack(spacing: Spacing.sm) {
-                Button {
-                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Settings")
-
-                Spacer(minLength: 0)
-
-                Menu {
-                    Button(action: toggleFolderCreationField) {
-                        Label("New Folder", systemImage: "folder.badge.plus")
-                    }
-                    if let onCreateProject {
-                        Button(action: onCreateProject) {
-                            Label("New Project", systemImage: "tray.full")
-                        }
-                    }
-                    if let onCreateBookmark {
-                        Button(action: onCreateBookmark) {
-                            Label("New Bookmark", systemImage: "bookmark")
-                        }
-                    }
-                    if let onCreateNote {
-                        Button(action: onCreateNote) {
-                            Label("New Note", systemImage: "note.text")
-                        }
-                    }
-                    if onCaptureBrowserTab != nil || onPasteFromClipboard != nil {
-                        Divider()
-                    }
-                    if let onCaptureBrowserTab {
-                        Button(action: onCaptureBrowserTab) {
-                            Label("Capture Browser Tab", systemImage: "safari")
-                        }
-                    }
-                    if let onPasteFromClipboard {
-                        Button(action: onPasteFromClipboard) {
-                            Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Create new item")
-            }
         }
         .padding(.horizontal, Spacing.sm)
-        .padding(.bottom, Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
+        .onReceive(NotificationCenter.default.publisher(for: .showFolderCreationField)) { _ in
+            toggleFolderCreationField()
+        }
         .background {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)

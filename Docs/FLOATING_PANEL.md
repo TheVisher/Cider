@@ -144,16 +144,16 @@ The main CiderPanel uses a full-height sidebar column alongside the right conten
 
 ```
 HStack(spacing: 0) {
-    sidebarColumn          // Full-height floating sidebar (if visible & !compact)
+    sidebarColumn          // Full-height floating sidebar with header/footer
     VStack(spacing: 0) {   // Right column
-        titleBar           // Sidebar toggle + tab bar + capture button
+        titleBar           // Animated sidebar toggle + tab bar + capture button
         Divider            // Inset horizontally
         contentArea        // Tab content
     }
 }
 ```
 
-The sidebar column wraps `sidebarHeader` (traffic lights + view options) and `FolderSidebarView(showBackground: false)` in a single rounded-rect container with padding — creating a floating appearance over the acrylic background. Traffic lights disappear when sidebar is collapsed; right-click context menu on the title bar provides fallback window controls.
+The sidebar column wraps `sidebarHeader` (traffic lights + collapse toggle), `FolderSidebarView(showBackground: false)`, and `sidebarFooter` (gear + "New" pill menu + view options) in a single rounded-rect container with padding — creating a floating appearance over the acrylic background. Traffic lights disappear when sidebar is collapsed; right-click context menu on the title bar provides fallback window controls. When the sidebar closes, a toggle button appears in the title bar after a 150ms delay (bouncy spring); when the sidebar opens, the title bar toggle slides out immediately (snappy spring).
 
 ### Generic Panel View
 
