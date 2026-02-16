@@ -254,8 +254,7 @@ Available: `body`, `bodyMedium`, `bodySemibold`, `caption`, `captionMedium`, `ca
 
 - **Design constants:** `CiderPanelDesign.trafficLightSymbolSize`, `NotesDesign.toolbarIconSize` — sizes tied to specific component dimensions
 - **Dynamic weights:** `CiderTabBar` uses `isSelected ? .semibold : .regular` — weight toggles at runtime
-- **Complex conditionals:** `mode == .list ? 16 * textScale : 26 * textScale` — multi-dimension variation
-- **Apple semantic styles:** Settings views use `.font(.body)`, `.font(.caption)` to match system preferences UI
+- **Settings dynamic preview:** Settings views use `CiderFont` tokens throughout (dynamic preview sizing excepted)
 
 ### 3.6 Animations
 
