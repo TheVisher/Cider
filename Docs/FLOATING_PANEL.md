@@ -138,6 +138,25 @@ private func updateMyPanelView() {
 
 ## View Structure
 
+### CiderPanel Sidebar Column
+
+The main CiderPanel uses a full-height sidebar column alongside the right content column:
+
+```
+HStack(spacing: 0) {
+    sidebarColumn          // Full-height floating sidebar (if visible & !compact)
+    VStack(spacing: 0) {   // Right column
+        titleBar           // Sidebar toggle + tab bar + capture button
+        Divider            // Inset horizontally
+        contentArea        // Tab content
+    }
+}
+```
+
+The sidebar column wraps `sidebarHeader` (traffic lights + view options) and `FolderSidebarView(showBackground: false)` in a single rounded-rect container with padding — creating a floating appearance over the acrylic background. Traffic lights disappear when sidebar is collapsed; right-click context menu on the title bar provides fallback window controls.
+
+### Generic Panel View
+
 ```swift
 struct MyPanelView: View {
     @ObservedObject var viewModel: MyViewModel

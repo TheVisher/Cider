@@ -30,17 +30,32 @@ struct CiderPanelView: View {
                 shadowStyle: isCollapsed ? .compact : .full
             )
 
-            VStack(spacing: 0) {
-                titleBar
-
-                if !isCollapsed {
-                    Divider()
-                        .background(CiderColors.separator)
-
-                    tabContent
+            HStack(spacing: 0) {
+                // Left: full-height sidebar column
+                if !isCollapsed && !isCompactMode && isFolderSidebarVisible {
+                    sidebarColumn
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
+
+                // Right: title bar + content
+                VStack(spacing: 0) {
+                    titleBar
+
+                    if !isCollapsed {
+                        Divider()
+                            .background(CiderColors.separator)
+                            .padding(.horizontal, Spacing.md)
+
+                        contentArea
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            // Compact overlay sidebar
+            if !isCollapsed && isCompactMode && isFolderSidebarVisible {
+                compactOverlaySidebar
+            }
 
             if isSearchPaletteVisible {
                 SearchPaletteView(
@@ -76,6 +91,7 @@ struct CiderPanelView: View {
                 PanelEdgeResizeView()
             }
         }
+        .animation(reduceMotion ? .none : .snappy, value: isFolderSidebarVisible)
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
@@ -86,26 +102,6 @@ struct CiderPanelView: View {
 
     private var titleBar: some View {
         HStack(spacing: Spacing.sm) {
-            HStack(spacing: CiderPanelDesign.trafficLightSpacing) {
-                CiderTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close panel") {
-                    NotificationCenter.default.post(name: .dismissCiderPanel, object: nil)
-                }
-                CiderTrafficLightButton(
-                    color: .systemYellow,
-                    symbol: "minus",
-                    help: isCollapsed ? "Expand panel" : "Collapse to header"
-                ) {
-                    NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil)
-                }
-                CiderTrafficLightButton(
-                    color: .systemGreen,
-                    symbol: "arrow.up.left.and.arrow.down.right",
-                    help: "Maximize panel"
-                ) {
-                    NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil)
-                }
-            }
-
             Button(action: toggleFolderSidebar) {
                 Image(systemName: isFolderSidebarVisible ? "sidebar.left" : "sidebar.right")
                     .font(.system(size: 11, weight: .semibold))
@@ -134,7 +130,74 @@ struct CiderPanelView: View {
                         _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
                     }
                     .help("Capture active browser tab")
+            }
+        }
+        .padding(.horizontal, Spacing.md)
+        .frame(height: CiderPanelDesign.titleBarHeight)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Close") {
+                NotificationCenter.default.post(name: .dismissCiderPanel, object: nil)
+            }
+            Button(isCollapsed ? "Expand" : "Minimize") {
+                NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil)
+            }
+            Button("Maximize") {
+                NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil)
+            }
+        }
+        .background {
+            Button("") { isSearchPaletteVisible = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
+        }
+    }
 
+    // MARK: - Sidebar Column
+
+    private var sidebarColumn: some View {
+        VStack(spacing: 0) {
+            // Traffic lights inside the rounded sidebar
+            sidebarHeader
+
+            // Folder content (no background — wrapper handles it)
+            folderSidebar
+        }
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .padding(.leading, Spacing.md)
+        .padding(.vertical, Spacing.md)
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: CiderPanelDesign.trafficLightSpacing) {
+            CiderTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close panel") {
+                NotificationCenter.default.post(name: .dismissCiderPanel, object: nil)
+            }
+            CiderTrafficLightButton(
+                color: .systemYellow,
+                symbol: "minus",
+                help: isCollapsed ? "Expand panel" : "Collapse to header"
+            ) {
+                NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil)
+            }
+            CiderTrafficLightButton(
+                color: .systemGreen,
+                symbol: "arrow.up.left.and.arrow.down.right",
+                help: "Maximize panel"
+            ) {
+                NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil)
+            }
+
+            Spacer(minLength: 0)
+
+            if selectedTab == .bookmarks {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
@@ -154,9 +217,7 @@ struct CiderPanelView: View {
                             )
                         )
                     }
-            }
-
-            if selectedTab == .notes {
+            } else if selectedTab == .notes {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
@@ -178,96 +239,75 @@ struct CiderPanelView: View {
                     }
             }
         }
-        .padding(.horizontal, Spacing.md)
-        .frame(height: CiderPanelDesign.titleBarHeight)
-        .background {
-            Button("") { isSearchPaletteVisible = true }
-                .keyboardShortcut("k", modifiers: .command)
-                .hidden()
-        }
+        .frame(height: BookmarksDesign.buttonTapTarget)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.top, Spacing.sm)
+        .frame(maxWidth: BookmarksDesign.folderSidebarWidth, alignment: .leading)
     }
 
-    // MARK: - Tab Content
+    // MARK: - Content Area
 
-    @ViewBuilder
-    private var tabContent: some View {
-        ZStack(alignment: .leading) {
-            // Main content — always fills full width
-            mainContentArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-
-            // Side-by-side sidebar (non-compact)
-            // Handled inside mainContentArea via HStack when !isCompactMode
-
-            // Overlay sidebar (compact mode)
-            if isCompactMode && isFolderSidebarVisible {
-                Color.black.opacity(0.28)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.snappy) {
-                            isFolderSidebarVisible = false
-                        }
-                    }
-
-                folderSidebar
-                    .padding(.leading, Spacing.md)
-                    .padding(.vertical, Spacing.md)
-                    .background(
-                        ZStack {
-                            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                            Color.black.opacity(0.45)
-                        }
-                        .clipShape(
-                            UnevenRoundedRectangle(
-                                topLeadingRadius: 0,
-                                bottomLeadingRadius: 0,
-                                bottomTrailingRadius: Radius.md,
-                                topTrailingRadius: Radius.md,
-                                style: .continuous
-                            )
-                        )
-                    )
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-        }
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    .onChange(of: proxy.size.width) { _, newWidth in
-                        let compact = newWidth < CiderPanelDesign.sidebarCompactThreshold
-                        if compact != isCompactMode {
-                            isCompactMode = compact
-                            if compact && isFolderSidebarVisible {
-                                sidebarAutoCollapsed = true
-                                isFolderSidebarVisible = false
-                            } else if !compact && sidebarAutoCollapsed {
-                                sidebarAutoCollapsed = false
-                                isFolderSidebarVisible = true
+    private var contentArea: some View {
+        tabContentBody
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.size.width) { _, newWidth in
+                            let compact = newWidth < CiderPanelDesign.sidebarCompactThreshold
+                            if compact != isCompactMode {
+                                isCompactMode = compact
+                                if compact && isFolderSidebarVisible {
+                                    sidebarAutoCollapsed = true
+                                    isFolderSidebarVisible = false
+                                } else if !compact && sidebarAutoCollapsed {
+                                    sidebarAutoCollapsed = false
+                                    isFolderSidebarVisible = true
+                                }
                             }
                         }
-                    }
-                    .onAppear {
-                        isCompactMode = proxy.size.width < CiderPanelDesign.sidebarCompactThreshold
-                    }
-            }
-        )
-        .animation(.snappy, value: isFolderSidebarVisible)
+                        .onAppear {
+                            isCompactMode = proxy.size.width < CiderPanelDesign.sidebarCompactThreshold
+                        }
+                }
+            )
     }
 
-    @ViewBuilder
-    private var mainContentArea: some View {
-        HStack(spacing: 0) {
-            if !isCompactMode && isFolderSidebarVisible {
-                folderSidebar
-                    .padding(.leading, Spacing.md)
-                    .padding(.vertical, Spacing.md)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
+    // MARK: - Compact Overlay Sidebar
 
-            tabContentBody
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private var compactOverlaySidebar: some View {
+        ZStack(alignment: .leading) {
+            Color.black.opacity(0.28)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.snappy) {
+                        isFolderSidebarVisible = false
+                    }
+                }
+
+            VStack(spacing: 0) {
+                sidebarHeader
+
+                folderSidebar
+            }
+            .background(
+                ZStack {
+                    VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+                    Color.black.opacity(0.45)
+                }
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: CiderPanelDesign.cornerRadius,
+                        bottomLeadingRadius: CiderPanelDesign.cornerRadius,
+                        bottomTrailingRadius: Radius.md,
+                        topTrailingRadius: Radius.md,
+                        style: .continuous
+                    )
+                )
+            )
+            .transition(.move(edge: .leading).combined(with: .opacity))
         }
+        .animation(.snappy, value: isFolderSidebarVisible)
     }
 
     private var folderSidebar: some View {
@@ -306,7 +346,8 @@ struct CiderPanelView: View {
             },
             onPasteFromClipboard: {
                 _ = bookmarksViewModel.addBookmarkFromPasteboard()
-            }
+            },
+            showBackground: false
         )
     }
 

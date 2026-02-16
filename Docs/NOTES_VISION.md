@@ -81,6 +81,12 @@ Add the same view options button to the Notes tab title bar area:
 
 ---
 
+## Bug Fix: Standalone Panel Resize Handles
+
+The standalone notes panel (`NotesPanelView`) still uses the old single-corner resize handle (`NotesResizeHandle`). Needs to be updated to use all-edge resize handles matching the main panel's `PanelEdgeResizeView` pattern. Currently only resizes from the bottom-right corner.
+
+---
+
 ## Phase 2: Interactive Checkboxes & Pinning
 
 ### Interactive Checkboxes on Cards
@@ -178,6 +184,76 @@ Notes and Bookmarks share card infrastructure but should feel visually distinct:
 - **Fanned/angled image stacks:** When a card has 2-3 images, the additional images fan out at slight angles behind the primary image, creating a layered stack effect
 - **Click-to-cycle:** Clicking the image stack cycles through images in the fan
 - **Image zoom preview:** Hover or long-press on card images for a larger preview
+
+---
+
+## Compact Formatting Toolbar (Upcoming)
+
+Replace the current flat icon strip (15+ icons in a scrollable row) with a compact grouped toolbar inspired by Apple Notes. 5-6 icon buttons in the title bar area, each opening a dropdown/popover with related actions.
+
+### Toolbar Layout (left to right)
+
+1. **Undo / Redo** — two small buttons, always visible (no dropdown)
+2. **Aa (Text Style)** — dropdown showing:
+   - Top row: **B** / *I* / U / ~~S~~ / highlight marker / text color dot
+   - Below: Title, Heading, Subheading, Body, Monostyled (checkmark on the active style)
+   - Below: Bulleted List, Dashed List, Numbered List
+   - Below: Block Quote
+   - **Active state indicator:** When text is selected, the dropdown shows which styles are currently applied (checkmark next to "Title" if it's an H1, bold icon highlighted if bold is active, etc.)
+3. **Lists** — task list, bullet list, numbered list (or fold into Aa dropdown)
+4. **Table** — insert table (with row/column controls in a sub-menu or inline after insertion)
+5. **Attach** — insert image from file picker, attach files
+6. **Link** — add/remove link (or fold into Aa dropdown)
+
+### Key Feature: Active Formatting State
+
+The Aa dropdown must reflect the current selection's formatting. When the user selects text and opens the dropdown:
+- Checkmark appears next to the active paragraph style (Title / Heading / Body)
+- Inline style icons (B, I, U, S) show highlighted/active state
+- This helps users understand what formatting is applied, especially distinguishing heading levels
+
+### Missing Formatting (add alongside toolbar)
+
+- **Block quotes** — the TipTap extension and CSS exist but no toolbar button currently
+- **Strikethrough** — standard text decoration, missing from toolbar
+- **Highlight** — background color on selected text
+- **Horizontal rule / divider** — useful for section breaks
+
+### Relationship to Pinned Toolbar
+
+The current "pin toolbar" toggle becomes unnecessary — the compact toolbar is always visible in the title bar since it's only 5-6 icons wide. The old scrollable strip is removed entirely.
+
+---
+
+## Standalone Panel Sidebar (Upcoming)
+
+**Prerequisite:** Redesign the main app's sidebar first, then reuse the same component in the standalone notes panel.
+
+Replace the dropdown note-switcher menu in the standalone panel with a proper collapsible sidebar, matching the main app's sidebar pattern.
+
+### Sidebar Layout
+
+- **Toggle:** Show/hide button in the title bar (same pattern as main panel)
+- **Search bar** at top — searches within the open note first (incremental/in-note find), but also shows contextual results from other notes that match the query (with preview snippets showing matching text in context)
+- **Notes list** — all notes, sorted by modified date (or user preference)
+- **Selected state** — current note highlighted in the sidebar
+- **Create new** — button or keyboard shortcut to create a note
+
+### Tree Structure (future enhancement)
+
+Notes expand in a tree to show:
+- **Attachments** — images and files embedded in that note, listed as children
+- **Backlinks** — other notes that reference this note (e.g., contain a `[[Note Title]]` link), shown as linked children
+
+This makes the sidebar a quick-reference navigation tool, not just a flat list.
+
+### Search Behavior
+
+The search bar in the standalone sidebar has two modes:
+1. **In-note search** (primary) — highlights matches within the currently open note, with next/previous navigation
+2. **Cross-note search** — below the in-note results, shows other notes containing the query with context snippets (the matching line with surrounding text). Clicking a result switches to that note and scrolls to the match.
+
+This is sometimes called "universal search" or "omnisearch" (Obsidian's pattern).
 
 ---
 

@@ -327,6 +327,8 @@ enum CiderPanelDesign {
     static let resizeEdgeThickness: CGFloat = 6
     static let resizeCornerSize: CGFloat = 20
     static let sidebarCompactThreshold: CGFloat = 680
+    static let sidebarBackgroundOpacity: CGFloat = 0.04
+    static let sidebarDividerOpacity: CGFloat = 0.2
 }
 
 enum CiderColors {

@@ -22,6 +22,7 @@ struct FolderSidebarView: View {
     var onCreateNote: (() -> Void)?
     var onCaptureBrowserTab: (() -> Void)?
     var onPasteFromClipboard: (() -> Void)?
+    var showBackground: Bool = true
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -199,14 +200,18 @@ struct FolderSidebarView: View {
         .padding(Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
-        )
+        .background {
+            if showBackground {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            }
+        }
+        .overlay {
+            if showBackground {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
+            }
+        }
     }
 
     // MARK: - Projects Section

@@ -14,7 +14,7 @@ When building a new feature, check this doc first. If a component or pattern alr
 
 ### ViewOptionsDropdown
 - **File:** `Views/Shared/ViewOptionsDropdown.swift`
-- **Used by:** Bookmarks, Notes (title bar popover)
+- **Used by:** Bookmarks, Notes (sidebar header popover in CiderPanelView)
 - **What:** Generic dropdown for display mode toggle (list/grid/masonry icons) + continuous card size slider
 - **Pattern:** Generic over `DisplayModeOption` protocol — any tab with display modes can use it by conforming its enum
 
@@ -22,6 +22,7 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **File:** `Views/Shared/FolderSidebarView.swift`
 - **Used by:** All tabs (universal sidebar in CiderPanelView)
 - **What:** Hierarchical folder tree + projects list + search trigger + quick action buttons
+- **Params:** `showBackground: Bool = true` — set `false` when a wrapper provides the background (e.g., CiderPanelView's sidebar column)
 - **Note:** Folders are shared across bookmarks and notes — both content types can be assigned to any folder
 
 ### FolderContentView / RootFolderOverviewView

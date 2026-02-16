@@ -15,6 +15,12 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Window behavior parity improvements (resizing, tiling shortcuts, snap padding consistency).
 - Context menus on cards/rows with Open in Browser, Show Details, Move to Folder, Delete (shared CardContextMenu component).
 
+## Bug Fix: Standalone Panel Resize Handles
+
+The standalone bookmarks panel (`BookmarksPanelView`) uses a single-corner resize handle (`BookmarksResizeHandle`). Needs to be updated to use all-edge resize handles matching the main panel's `PanelEdgeResizeView` pattern.
+
+---
+
 ## Phase 1: Capture Quality and Reliability (Next)
 1. Harden metadata extraction quality.
 2. Improve source-specific handling for Reddit/X edge cases.

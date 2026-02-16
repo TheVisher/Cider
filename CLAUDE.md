@@ -159,21 +159,22 @@ Sources/Cider/
 ## Panel Structure
 ```
 CiderPanelView
-├── titleBar
-│   ├── Sidebar toggle button
-│   ├── CiderTabBar (Home, Bookmarks, Notes)
-│   ├── Capture button (bookmarks tab only)
-│   └── View options button + popover (bookmarks & notes tabs)
-│       └── ViewOptionsDropdown (card size slider + view mode icons)
-├── HStack
-│   ├── FolderSidebarView (universal, auto-hides at compact width)
-│   │   ├── Search field
-│   │   ├── Folders section (hierarchical tree)
-│   │   └── Projects section
-│   └── Content area (switches by selectedTab)
-│       ├── HomeDashboardView
-│       ├── BookmarksTabContent → BookmarksBrowserView
-│       └── NotesTabContent → NotesBrowserView
+├── HStack(spacing: 0)
+│   ├── sidebarColumn (floating rounded-rect, full panel height)
+│   │   ├── sidebarHeader (traffic lights + view options button)
+│   │   └── FolderSidebarView(showBackground: false)
+│   │       ├── Search field
+│   │       ├── Folders section (hierarchical tree)
+│   │       └── Projects section
+│   └── VStack (right column)
+│       ├── titleBar (sidebar toggle + CiderTabBar + capture button)
+│       ├── Divider (inset horizontally)
+│       └── contentArea (switches by selectedTab)
+│           ├── HomeDashboardView
+│           ├── BookmarksTabContent → BookmarksBrowserView
+│           └── NotesTabContent → NotesBrowserView
+├── compactOverlaySidebar (< 680pt, slides over content)
+├── SearchPaletteView (overlay)
 └── PanelEdgeResizeView (all-edge resize handles)
 ```
 
@@ -187,7 +188,7 @@ Card sizing: Continuous slider (0-3 scale) via CardSizing struct
 - Masonry: thumbnail height = exact image aspect ratio (no clamping)
 - List: thumbnail width/height scale with slider
 
-View options: Dropdown popover in title bar (ViewOptionsDropdown.swift)
+View options: Dropdown popover in sidebar header (ViewOptionsDropdown.swift)
 ```
 
 ## Note Display Modes
@@ -202,6 +203,16 @@ Card sizing: Continuous slider (0-3 scale) via NoteCardSizing struct
 
 ViewOptionsDropdown is generic over DisplayModeOption protocol
 ```
+
+## TipTap Editor Architecture
+
+The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
+
+- **Singleton WebView** — `NotesViewModel` owns the WKWebView (created via `ensureEditorWebView()`). `TipTapEditorView` is a thin NSView container that borrows it. Only one surface displays the editor at a time; the WebView moves between containers.
+- **Coordinator** — `TipTapEditorCoordinator` handles JS→Swift message routing. Owned by the ViewModel, not by SwiftUI.
+- **Editor resources** — `Resources/TipTapEditor/editor.html` + `editor.css` + `editor.js` (minified bundle)
+- **CSS gotcha** — `line-height` on `<pre>` (block) controls code block spacing, NOT on `<code>` (inline child). The `<pre>` inherits body's `line-height` if not explicitly set.
+- **Table CSS** — `width:auto; table-layout:auto` for content-sized tables (not `width:100%` which stretches to fill)
 
 ## SwiftUI + NSPanel Gotchas
 
