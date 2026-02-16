@@ -54,6 +54,30 @@ struct CiderPanelView: View {
                 .padding(.top, Spacing.sm - 1)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.size.width) { _, newWidth in
+                            let compact = newWidth < CiderPanelDesign.sidebarCompactThreshold
+                            if compact && !isCompactMode {
+                                isCompactMode = true
+                                if isFolderSidebarVisible {
+                                    sidebarAutoCollapsed = true
+                                    isFolderSidebarVisible = false
+                                }
+                            } else if !compact && isCompactMode {
+                                isCompactMode = false
+                                if sidebarAutoCollapsed {
+                                    sidebarAutoCollapsed = false
+                                    isFolderSidebarVisible = true
+                                }
+                            }
+                        }
+                        .onAppear {
+                            isCompactMode = proxy.size.width < CiderPanelDesign.sidebarCompactThreshold
+                        }
+                }
+            )
 
             // Compact overlay sidebar
             if !isCollapsed && isCompactMode && isFolderSidebarVisible {
@@ -393,27 +417,6 @@ struct CiderPanelView: View {
     private var contentArea: some View {
         tabContentBody
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onChange(of: proxy.size.width) { _, newWidth in
-                            let compact = newWidth < CiderPanelDesign.sidebarCompactThreshold
-                            if compact != isCompactMode {
-                                isCompactMode = compact
-                                if compact && isFolderSidebarVisible {
-                                    sidebarAutoCollapsed = true
-                                    isFolderSidebarVisible = false
-                                } else if !compact && sidebarAutoCollapsed {
-                                    sidebarAutoCollapsed = false
-                                    isFolderSidebarVisible = true
-                                }
-                            }
-                        }
-                        .onAppear {
-                            isCompactMode = proxy.size.width < CiderPanelDesign.sidebarCompactThreshold
-                        }
-                }
-            )
     }
 
     // MARK: - Compact Overlay Sidebar

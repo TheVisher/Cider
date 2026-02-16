@@ -155,6 +155,19 @@ HStack(spacing: 0) {
 
 The sidebar column wraps `sidebarHeader` (traffic lights + collapse toggle), `FolderSidebarView(showBackground: false)`, and `sidebarFooter` (gear + "New" pill menu + view options) in a single rounded-rect container with padding — creating a floating appearance over the acrylic background. Traffic lights disappear when sidebar is collapsed; right-click context menu on the title bar provides fallback window controls. When the sidebar closes, a toggle button appears in the title bar after a 150ms delay (bouncy spring); when the sidebar opens, the title bar toggle slides out immediately (snappy spring).
 
+### Sidebar Compact Mode
+
+When the panel width drops below `sidebarCompactThreshold` (680pt), the
+sidebar auto-collapses to an overlay. When the panel widens past the
+threshold again, the sidebar auto-reopens (if it was auto-collapsed, not
+manually collapsed).
+
+**Critical:** Measure the full panel width (HStack), NOT the content area
+width. Content width changes when the sidebar toggles, creating a feedback
+loop: collapse → content widens → threshold no longer met → expand →
+content shrinks → threshold met → collapse → ∞. Panel width is stable
+across sidebar state changes.
+
 ### Generic Panel View
 
 ```swift
