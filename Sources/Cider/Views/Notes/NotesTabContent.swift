@@ -3,6 +3,7 @@ import SwiftUI
 struct NotesTabContent: View {
     @ObservedObject var viewModel: NotesViewModel
     let searchText: String
+    var folders: [Folder] = []
     var selectedFolderID: UUID?
     @State private var selectedNoteID: UUID?
     @State private var isEditing = false
@@ -26,16 +27,33 @@ struct NotesTabContent: View {
 
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                notesToolbar
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-
-                if filteredNotes.isEmpty {
-                    emptyState
-                } else {
-                    notesList
-                }
+            if filteredNotes.isEmpty {
+                emptyState
+            } else {
+                NotesBrowserView(
+                    notes: filteredNotes,
+                    folders: folders,
+                    displayMode: Binding(
+                        get: { viewModel.displayMode },
+                        set: { viewModel.setDisplayMode($0) }
+                    ),
+                    cardSizeScale: Binding(
+                        get: { viewModel.cardSizeScale },
+                        set: { viewModel.setCardSizeScale($0) }
+                    ),
+                    searchText: searchText,
+                    selectedNoteID: selectedNoteID,
+                    onOpenNote: { openNote($0) },
+                    onRenameNote: { note, newTitle in
+                        NotesStorage.shared.rename(note: note, to: newTitle)
+                    },
+                    onDeleteNote: { note in
+                        viewModel.deleteNotes([note])
+                    },
+                    onMoveNoteToFolder: { note, folderID in
+                        viewModel.assignNote(note, toFolder: folderID)
+                    }
+                )
             }
 
             if isExpandMode, isEditing, let noteID = selectedNoteID,
@@ -48,28 +66,6 @@ struct NotesTabContent: View {
             if let note = viewModel.selectedNote {
                 openNote(note)
             }
-        }
-    }
-
-    // MARK: - Toolbar
-
-    private var notesToolbar: some View {
-        HStack(spacing: Spacing.sm) {
-            Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: - Notes List
-
-    private var notesList: some View {
-        ScrollView {
-            LazyVStack(spacing: Spacing.xxs) {
-                ForEach(filteredNotes) { note in
-                    noteRow(note)
-                }
-            }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
         }
     }
 
@@ -124,47 +120,6 @@ struct NotesTabContent: View {
             object: nil,
             userInfo: ["view": popoverContent]
         )
-    }
-
-    private func noteRow(_ note: Note) -> some View {
-        Button {
-            openNote(note)
-        } label: {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(note.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                HStack(spacing: Spacing.xs) {
-                    Text(note.modifiedAt.formatted(.relative(presentation: .named)))
-                        .font(.system(size: 11))
-                        .foregroundColor(CiderColors.tertiary)
-
-                    Text(notePreview(for: note))
-                        .font(.system(size: 11))
-                        .foregroundColor(CiderColors.quaternary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.separator.opacity(selectedNoteID == note.id ? 0.3 : 0))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func notePreview(for note: Note) -> String {
-        let content = NotesStorage.shared.loadContent(for: note)
-        let stripped = content
-            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return String(stripped.prefix(80))
     }
 
     // MARK: - Empty State

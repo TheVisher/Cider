@@ -1,4 +1,4 @@
-# Bookmarks Roadmap
+# Bookmarks Tab Vision
 
 ## Goal
 Build a fast, low-friction bookmarking system in Cider with strong capture flows, high-quality metadata, and a polished visual browsing experience (List/Grid/Masonry + standalone panel).
@@ -13,6 +13,7 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Manual thumbnail assignment by dropping image/image URL/file onto a bookmark card.
 - Clipboard review toast flow (save/discard), plus capture success/error toasts.
 - Window behavior parity improvements (resizing, tiling shortcuts, snap padding consistency).
+- Context menus on cards/rows with Open in Browser, Show Details, Move to Folder, Delete (shared CardContextMenu component).
 
 ## Phase 1: Capture Quality and Reliability (Next)
 1. Harden metadata extraction quality.

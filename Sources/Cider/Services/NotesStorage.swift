@@ -31,6 +31,7 @@ final class NotesStorage: ObservableObject {
     private struct NoteIndexEntry: Codable {
         var filename: String
         var folderID: UUID?
+        var createdAt: Date?
     }
 
     /// UUID-to-metadata mapping persisted on disk
@@ -45,6 +46,9 @@ final class NotesStorage: ObservableObject {
         scanNotes()
         startDirectoryWatcher()
     }
+
+    /// The base directory URL where notes are stored.
+    var notesDirectoryURL: URL { directoryURL }
 
     // MARK: - Directory Management
 
@@ -136,14 +140,19 @@ final class NotesStorage: ObservableObject {
             let uuid = filenameToUUID[filename] ?? UUID()
             let folderID = index[uuid]?.folderID
 
-            // Register in index if new
-            if filenameToUUID[filename] == nil {
-                index[uuid] = NoteIndexEntry(filename: filename, folderID: nil)
-            }
-
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             let modDate = attrs?[.modificationDate] as? Date ?? Date()
-            let createDate = attrs?[.creationDate] as? Date ?? Date()
+            let fsCreateDate = attrs?[.creationDate] as? Date ?? Date()
+
+            // Use persisted createdAt from index (survives atomic file writes).
+            // Fall back to filesystem creation date for legacy notes without it.
+            let existingEntry = index[uuid]
+            let createDate = existingEntry?.createdAt ?? fsCreateDate
+
+            // Register in index if new, or backfill createdAt if missing
+            if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
+                index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, createdAt: createDate)
+            }
 
             // Lazy: don't load content during scan
             scannedNotes.append(Note(
@@ -158,13 +167,13 @@ final class NotesStorage: ObservableObject {
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID from existing entries.
+        // cleaned up automatically. Preserve folderID and createdAt from existing entries.
         index = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID))
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, createdAt: $0.createdAt))
         })
 
-        // Sort by most recently modified
-        scannedNotes.sort { $0.modifiedAt > $1.modifiedAt }
+        // Sort by newest created first
+        scannedNotes.sort { $0.createdAt > $1.createdAt }
         notes = scannedNotes
         saveIndex()
     }
@@ -176,14 +185,15 @@ final class NotesStorage: ObservableObject {
         let filename = "\(title).md"
         let fileURL = directoryURL.appendingPathComponent(filename)
         let uuid = UUID()
+        let now = Date()
 
         // Write empty file
         try? "".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        index[uuid] = NoteIndexEntry(filename: filename, folderID: nil)
+        index[uuid] = NoteIndexEntry(filename: filename, folderID: nil, createdAt: now)
         saveIndex()
 
-        let note = Note(id: uuid, title: title, content: "", relativePath: filename)
+        let note = Note(id: uuid, title: title, content: "", createdAt: now, modifiedAt: now, relativePath: filename)
         notes.insert(note, at: 0)
         return note
     }
@@ -252,7 +262,7 @@ final class NotesStorage: ObservableObject {
                 entry.filename = newFilename
                 index[note.id] = entry
             } else {
-                index[note.id] = NoteIndexEntry(filename: newFilename, folderID: note.folderID)
+                index[note.id] = NoteIndexEntry(filename: newFilename, folderID: note.folderID, createdAt: note.createdAt)
             }
             saveIndex()
 

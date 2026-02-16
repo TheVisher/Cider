@@ -55,6 +55,11 @@ The floating panel is the main way users interact with Cider:
 - UserDefaults + Codable storage
 
 ### When Adding a New Feature
+**Read:** `Docs/SHARED_COMPONENTS.md`
+- Check for reusable components and cross-tab patterns before building new ones
+- If a new feature creates something reusable, add it to this doc
+- Interview the user: could this component benefit other tabs?
+
 **Read:** `Docs/USER_PREFERENCES.md`
 - Settings patterns
 - CiderConfig for persistent settings
@@ -62,6 +67,16 @@ The floating panel is the main way users interact with Cider:
 ### For Workspace / Folder Design
 **Read:** `Docs/WORKSPACES_VISION.md` - Folders, projects, search vision
 **Read:** `Docs/WORKSPACES_IMPLEMENTATION_PLAN.md` - Phased implementation
+
+### For Tab-Specific Features & Ideas
+Each tab has its own vision doc capturing features, roadmaps, and brainstorming. Always add tab-specific ideas to the relevant doc rather than general docs.
+- **Home:** `Docs/HOME_VISION.md`
+- **Bookmarks:** `Docs/BOOKMARKS_VISION.md`
+- **Notes:** `Docs/NOTES_VISION.md`
+- **Whiteboard:** `Docs/WHITEBOARD_VISION.md` (future tab)
+- **Documents:** `Docs/DOCUMENTS_VISION.md` (future tab)
+- **Books:** `Docs/BOOKS_VISION.md` (future tab)
+- **Todos:** `Docs/TODOS_VISION.md` (future tab)
 
 ### For Bookmark Display Issues
 **Read:** `Docs/TROUBLESHOOTING.md`
@@ -148,7 +163,7 @@ CiderPanelView
 │   ├── Sidebar toggle button
 │   ├── CiderTabBar (Home, Bookmarks, Notes)
 │   ├── Capture button (bookmarks tab only)
-│   └── View options button + popover (bookmarks tab only)
+│   └── View options button + popover (bookmarks & notes tabs)
 │       └── ViewOptionsDropdown (card size slider + view mode icons)
 ├── HStack
 │   ├── FolderSidebarView (universal, auto-hides at compact width)
@@ -158,7 +173,7 @@ CiderPanelView
 │   └── Content area (switches by selectedTab)
 │       ├── HomeDashboardView
 │       ├── BookmarksTabContent → BookmarksBrowserView
-│       └── NotesTabContent
+│       └── NotesTabContent → NotesBrowserView
 └── PanelEdgeResizeView (all-edge resize handles)
 ```
 
@@ -174,3 +189,23 @@ Card sizing: Continuous slider (0-3 scale) via CardSizing struct
 
 View options: Dropdown popover in title bar (ViewOptionsDropdown.swift)
 ```
+
+## Note Display Modes
+```
+NoteDisplayMode: .list | .grid | .masonry
+
+Card sizing: Continuous slider (0-3 scale) via NoteCardSizing struct
+- Text-forward cards: wider min widths, side images instead of top images
+- Images downsampled to 240px thumbnails via CGImageSource (not full NSImage)
+- Card data (preview, word count, images) loaded async via NoteCardData.load()
+- Sorted by persisted createdAt (stored in notes index, not filesystem)
+
+ViewOptionsDropdown is generic over DisplayModeOption protocol
+```
+
+## SwiftUI + NSPanel Gotchas
+
+- **Context menus:** Never use SwiftUI `.contextMenu` in lazy containers — it caches content and goes stale after data changes. Use the shared `CardContextMenu` (`Utilities/CardContextMenu.swift`) which builds a fresh native `NSMenu` on every right-click.
+- **NSView overlays:** When overlaying `NSViewRepresentable`, override `hitTest` to return `nil` for non-target events — otherwise the overlay blocks left clicks, hovers, and drags from reaching SwiftUI content underneath.
+- **@FocusState in NSPanel:** Non-activating panels need a delay before focus takes effect — use `.task { try? await Task.sleep(for: .milliseconds(150)); focused = true }`
+- **Card data refresh:** Use `.task(id: note.modifiedAt)` not `.task(id: note.id)` so card data reloads after edits

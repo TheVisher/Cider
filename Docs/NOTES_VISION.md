@@ -1,0 +1,229 @@
+# Notes Tab Vision
+
+This document captures the full vision for the Notes tab, broken into phases. Phase 1 is the current focus. Later phases are documented here for future context.
+
+---
+
+## Phase 1: Note Cards & View Modes (Current)
+
+Bring the Notes tab up to parity with Bookmarks in terms of browse experience. Notes get their own card design that's visually distinct from bookmark cards — text-forward with side images instead of top images.
+
+### Card Layout
+
+Each note card displays:
+- **Title** (bold header)
+- **Sub-header line** — folder name for now, tags later (see Phase 3)
+- **Preview text** — first few lines of plain text, stripped of markdown/HTML formatting
+- **Images** — extracted from note content, alternating left/right layout, max 3
+- **Footer** — modified date (relative) + word count
+- **Empty state** — notes with no content show italic "Empty note" placeholder
+
+### Context Menu
+
+Right-click any card or list row for:
+- **Open** — opens the note in the editor
+- **Rename** — inline rename directly on the card (title swaps to a focused text field, Enter to save, Escape to cancel)
+- **Move to Folder** — submenu listing all folders + "No Folder" option
+- **Delete** — destructive, removes the note
+
+Design decision: Rename edits inline on the card rather than opening the editor. This matches user expectations for a "Rename" action.
+
+### Image Extraction & Display
+
+Notes embed images via `![alt](./.attachments/filename.png)` in markdown. Cards parse these references and resolve them to file URLs for display.
+
+**Image placement rules (grid & masonry):**
+- **1 image:** Always on the right side of the card, text fills the left (~65/35 split)
+- **2 images:** First image on the right. Second row: image on the left, text on the right (alternating sides)
+- **3 images (max):** Alternating continues — right, left, right
+- **0 images:** Text preview fills the full card width
+
+Image area is roughly 30-35% of card width. Images are displayed with aspect-fit, rounded corners matching the design system.
+
+### View Modes
+
+Same three modes as Bookmarks, adapted for text-forward cards:
+
+**List mode:**
+- Compact horizontal row
+- Small square thumbnail on the left (first image from note, if any)
+- Title, date, and preview text to the right
+- Notes without images skip the thumbnail column
+
+**Grid mode:**
+- Fixed-height cards in adaptive columns
+- Title + sub-header at top
+- Text preview on the left, first image on the right
+- Footer with date + word count at bottom
+- Text truncated to fit standardized card height
+
+**Masonry mode:**
+- Variable-height cards based on content
+- Full alternating image layout (up to 3 images)
+- More preview text visible alongside images
+- Card height grows with image count but capped at 3 images
+- Notes without images are shorter, text-only cards — creates visual variety
+
+### Card Size Slider
+
+Reuse the same `CardSizing` infrastructure and `ViewOptionsDropdown` from Bookmarks. The slider scales:
+- Card width (column count adjusts)
+- Preview text area size
+- Image dimensions
+- Typography sizes
+
+### Title Bar Integration
+
+Add the same view options button to the Notes tab title bar area:
+- Card size slider
+- View mode toggle (list / grid / masonry icons)
+- Same `ViewOptionsDropdown` component, configured for notes
+
+---
+
+## Phase 2: Interactive Checkboxes & Pinning
+
+### Interactive Checkboxes on Cards
+
+Notes containing TODO items (markdown checkboxes `- [ ]` / `- [x]`) display them directly on the card. Users can check/uncheck items without opening the note.
+
+**Implementation considerations:**
+- Parse markdown for checkbox patterns
+- Render as native SwiftUI toggles on the card
+- On toggle: update the specific checkbox line in the note's markdown content
+- Save the modified content back to disk
+- Limit display to first N checkboxes to avoid overwhelming the card
+
+### Note Pinning
+
+- Pin notes to the top of the list/grid/masonry view
+- Pinned notes always appear first, regardless of sort order
+- Visual indicator (pin icon) on pinned cards
+- Toggle via right-click context menu (add "Pin" / "Unpin" to existing context menu)
+
+### Drag Reorder
+
+- Drag notes to manually reorder within the view
+- Pinned notes can be reordered among themselves
+- Persist custom sort order
+
+### Drag to Folder
+
+- Drag note cards onto folders in the sidebar to assign them, matching the bookmark drag-and-drop pattern
+- Primary method for folder organization — context menu "Move to Folder" is the secondary option
+- Reuse the same drag provider pattern from bookmarks
+
+---
+
+## Phase 3: Tags & Metadata
+
+### Multi-Folder Membership
+
+Notes should support belonging to multiple folders simultaneously. This requires changing `folderID: UUID?` to `folderIDs: [UUID]` on the Note model.
+
+**Card display options (needs design decision):**
+- **Compact row with overflow:** Show first 2-3 folder pills inline, then a "+N" badge for remaining folders
+- **Tags-style row at bottom:** Move folders to the card footer area, displayed as pills in a wrapping row — similar to how tags would appear
+- **Open question:** If both folders and tags are shown on cards, how do they coexist? Separate rows? Mixed pills with different styling? Folders may need a folder icon prefix to distinguish from tags.
+
+**Clickable folder pills:** Clicking a folder name on a card should navigate to that folder in the sidebar (select the folder, scroll sidebar to it). Provides quick navigation without right-click menus.
+
+### Tags on Notes
+
+Add a `tags: [String]` field to the Note model. Tags appear as the sub-header line on cards (replacing folder name as the sole sub-header content).
+
+**Tag features:**
+- Assign tags when editing a note
+- Filter notes by tag in the sidebar or via search
+- Tag pills displayed on cards with subtle color coding
+- Auto-suggest existing tags when adding new ones
+
+**Relationship with folders on cards:** Both folders and tags are metadata shown on cards. Design needs to decide whether they share the same visual row (mixed pills) or have distinct locations (folders in sub-header, tags in footer — or vice versa). Consider that folders are structural (where the note lives) while tags are descriptive (what the note is about).
+
+---
+
+## Phase 4: Split View & Advanced Layout
+
+### Split View (Panel Width Dependent)
+
+Once the Whiteboard tab is implemented as its own dedicated tab, the Notes tab focuses purely on structured note browsing and editing. The split view becomes the primary layout at wide widths.
+
+**Layout:**
+- **Left side:** Card browser (list/grid/masonry)
+- **Right side:** Inline note editor for the selected note
+
+Click a note in the browser to open it in the adjacent editor without leaving the panel. This provides a browse-and-edit workflow similar to Apple Notes / Bear / Obsidian.
+
+**Width behavior:**
+- **Narrow panel (< ~500pt):** Card browser only. Click opens note in expand modal or dedicated panel (Opt+B)
+- **Wide panel (> ~500pt):** Split view with resizable divider
+
+**Empty state (no note selected):**
+- Clean placeholder: "Select a note or create one" with a + button
+- No scratchpad or capture area — that's what the Whiteboard tab is for
+- The Notes tab stays focused on structured reading and writing
+
+This is distinct from the Opt+B dedicated notes panel, which remains available at any time for focused editing.
+
+### What Differentiates Notes Cards from Bookmark Cards
+
+Notes and Bookmarks share card infrastructure but should feel visually distinct:
+- **Bookmark cards:** Image-heavy, portrait-oriented, thumbnail dominates the card
+- **Note cards:** Text-heavy, wider/landscape-oriented, body preview dominates
+- **Color coding:** Subtle background tinting of note cards by folder, tag, or user-picked color (inspired by Google Keep). Helps visual scanning without adding UI clutter.
+- Notes without images should feel like the natural default, not a missing-thumbnail state
+
+### Advanced Image Treatment
+
+- **Fanned/angled image stacks:** When a card has 2-3 images, the additional images fan out at slight angles behind the primary image, creating a layered stack effect
+- **Click-to-cycle:** Clicking the image stack cycles through images in the fan
+- **Image zoom preview:** Hover or long-press on card images for a larger preview
+
+---
+
+## Future Ideas (Not Yet Prioritized)
+
+### UX Ideas from Note App Research
+
+Patterns worth stealing from other note apps:
+- **Bear's search tokens** — typing `@todo`, `@today`, `@images` in the search bar instantly filters notes by type. Zero UI footprint, very power-user friendly.
+- **Ulysses auto-titling** — first line of the note automatically becomes the title. Reduces friction when creating notes quickly.
+- **Per-folder sort persistence** (Evernote, UpNote) — each folder remembers its own preferred sort order and view mode independently.
+- **Agenda's "flagged" concept** — a single-bit flag that creates a cross-folder "active now" virtual list. Could be a "Starred" or "Flagged" filter in the sidebar.
+
+### Relationship to Whiteboard Tab
+
+The Notes and Whiteboard tabs serve different mental modes:
+
+| Aspect | Notes | Whiteboard |
+|--------|-------|------------|
+| Structure | Linear documents with titles | Freeform spatial canvas |
+| Creation | Deliberate — create, title, write | Impulsive — click and dump |
+| Organization | Folders and tags | Spatial positioning |
+| Content | Long-form text, rich formatting | Fragments: short text, images, links, quotes |
+| Output | Finished thoughts | Raw material that becomes notes |
+
+The promotion flow: **Whiteboard blocks → select → "Create Note" → Notes tab**
+
+### Todos / Planner Tab
+
+Now has its own vision doc: `Docs/TODOS_VISION.md`. The core idea remains: separate actionable items (todos) from captured thoughts (notes) and freeform brainstorming (whiteboard).
+
+---
+
+## Model Changes Required
+
+### Phase 1
+- Add computed properties to `Note` for image extraction (parse markdown for image references)
+- Add `NoteDisplayMode` enum (`.list`, `.grid`, `.masonry`)
+- Add note-specific card sizing to `CiderConfig` persistence
+- Word count computed property on `Note`
+
+### Phase 2
+- Add `isPinned: Bool` to `Note` model
+- Add `sortOrder: Int?` to `Note` model for manual ordering
+- Checkbox parsing utilities for markdown content
+
+### Phase 3
+- Add `tags: [String]` to `Note` model
+- Tag storage and indexing in `NotesStorage`

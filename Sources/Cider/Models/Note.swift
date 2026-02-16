@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct Note: Identifiable, Hashable {
@@ -18,5 +19,174 @@ struct Note: Identifiable, Hashable {
         self.modifiedAt = modifiedAt
         self.relativePath = relativePath
         self.folderID = folderID
+    }
+
+    // MARK: - Computed Properties for Card Display
+
+    /// The raw content to use for display — loads from disk if the in-memory field is empty.
+    private var resolvedContent: String {
+        if !content.isEmpty { return content }
+        guard !relativePath.isEmpty else { return "" }
+        let config = CiderConfig.load()
+        let expanded = NSString(string: config.notesDirectory).expandingTildeInPath
+        let fileURL = URL(fileURLWithPath: expanded).appendingPathComponent(relativePath)
+        return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+    }
+
+    /// Extract image URLs from markdown/HTML content, resolved to absolute file URLs.
+    var imageURLs: [URL] {
+        let text = resolvedContent
+        guard !text.isEmpty else { return [] }
+        var urls: [URL] = []
+        let config = CiderConfig.load()
+        let expanded = NSString(string: config.notesDirectory).expandingTildeInPath
+        let baseURL = URL(fileURLWithPath: expanded)
+
+        // Markdown images: ![alt](./.attachments/file.png) or ![alt](path)
+        if let mdRegex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^\)]+)\)"#) {
+            let matches = mdRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: text) {
+                    let path = String(text[range])
+                        .removingPercentEncoding ?? String(text[range])
+                    let resolved = resolveImagePath(path, base: baseURL)
+                    if let resolved { urls.append(resolved) }
+                }
+            }
+        }
+
+        // HTML images: <img src="path">
+        if let htmlRegex = try? NSRegularExpression(pattern: #"<img\s[^>]*src=[\"']([^\"']+)[\"']"#, options: .caseInsensitive) {
+            let matches = htmlRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: text) {
+                    let path = String(text[range])
+                        .removingPercentEncoding ?? String(text[range])
+                    let resolved = resolveImagePath(path, base: baseURL)
+                    if let resolved, !urls.contains(resolved) { urls.append(resolved) }
+                }
+            }
+        }
+
+        return urls
+    }
+
+    /// Word count from plain text content (HTML stripped).
+    var wordCount: Int {
+        let plain = strippedContent
+        guard !plain.isEmpty else { return 0 }
+        var count = 0
+        plain.enumerateSubstrings(in: plain.startIndex..., options: [.byWords, .substringNotRequired]) { _, _, _, _ in
+            count += 1
+        }
+        return count
+    }
+
+    /// Plain text preview for card display.
+    var contentPreview: String {
+        let plain = strippedContent
+        guard !plain.isEmpty else { return "" }
+        return String(plain.prefix(300))
+    }
+
+    // MARK: - Private Helpers
+
+    private var strippedContent: String {
+        let text = resolvedContent
+        guard !text.isEmpty else { return "" }
+        return text
+            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"!\[[^\]]*\]\([^\)]+\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\[([^\]]*)\]\([^\)]+\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"[#*_~`>]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolveImagePath(_ path: String, base: URL) -> URL? {
+        if path.hasPrefix("./") {
+            let relative = String(path.dropFirst(2))
+            let url = base.appendingPathComponent(relative)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        if path.hasPrefix(".attachments/") {
+            let url = base.appendingPathComponent(path)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        if path.hasPrefix("/") {
+            let url = URL(fileURLWithPath: path)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        return nil
+    }
+}
+
+// MARK: - Cached Display Data
+
+/// Pre-computed display data for a note card/row. Computed once off the main
+/// render path so views don't hit disk or run regex on every SwiftUI layout pass.
+struct NoteCardData: Equatable {
+    let preview: String
+    let wordCount: Int
+    let imageURLs: [URL]
+    /// Downsampled thumbnail images keyed by URL, ready to display.
+    let thumbnails: [URL: NSImage]
+
+    static let empty = NoteCardData(preview: "", wordCount: 0, imageURLs: [], thumbnails: [:])
+
+    static func load(for note: Note) -> NoteCardData {
+        let preview = note.contentPreview
+        let wordCount = note.wordCount
+        let imageURLs = note.imageURLs
+
+        var thumbnails: [URL: NSImage] = [:]
+        for url in imageURLs.prefix(3) {
+            if let image = downsampledImage(at: url, maxDimension: 240) {
+                thumbnails[url] = image
+            }
+        }
+
+        return NoteCardData(
+            preview: preview,
+            wordCount: wordCount,
+            imageURLs: imageURLs,
+            thumbnails: thumbnails
+        )
+    }
+
+    private static func downsampledImage(at url: URL, maxDimension: CGFloat) -> NSImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary) else {
+            return nil
+        }
+
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+}
+
+// MARK: - Date Formatting
+
+extension Date {
+    /// Shows relative time for dates within 14 days ("2 hours ago", "yesterday",
+    /// "2 weeks ago"), then switches to an absolute date ("Feb 1, 2026").
+    var noteCardDate: String {
+        let daysSince = Calendar.current.dateComponents([.day], from: self, to: Date()).day ?? 0
+        if daysSince <= 14 {
+            return formatted(.relative(presentation: .named))
+        }
+        return formatted(.dateTime.month(.abbreviated).day().year())
     }
 }

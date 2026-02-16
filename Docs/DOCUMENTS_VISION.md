@@ -1,4 +1,4 @@
-# Documents Tab Roadmap
+# Documents Tab Vision
 
 ## Goal
 Introduce a dedicated Documents surface for non-URL assets (PDFs, images, files) so Bookmarks remains URL-first and predictable.

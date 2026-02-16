@@ -1,7 +1,15 @@
 import SwiftUI
 
-struct ViewOptionsDropdown: View {
-    @Binding var displayMode: BookmarkDisplayMode
+protocol DisplayModeOption: Hashable, CaseIterable {
+    var displayName: String { get }
+    var icon: String { get }
+}
+
+extension BookmarkDisplayMode: DisplayModeOption {}
+extension NoteDisplayMode: DisplayModeOption {}
+
+struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
+    @Binding var displayMode: Mode
     @Binding var cardSizeScale: Double
 
     var body: some View {
@@ -36,9 +44,10 @@ struct ViewOptionsDropdown: View {
                     .foregroundColor(CiderColors.secondary)
 
                 HStack(spacing: Spacing.sm) {
-                    ForEach(BookmarkDisplayMode.allCases, id: \.self) { mode in
+                    ForEach(Array(Mode.allCases), id: \.self) { mode in
                         ViewModeIcon(
-                            mode: mode,
+                            icon: mode.icon,
+                            displayName: mode.displayName,
                             isSelected: displayMode == mode,
                             onTap: {
                                 var transaction = Transaction()
@@ -58,14 +67,15 @@ struct ViewOptionsDropdown: View {
 }
 
 private struct ViewModeIcon: View {
-    let mode: BookmarkDisplayMode
+    let icon: String
+    let displayName: String
     let isSelected: Bool
     let onTap: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
-        Image(systemName: mode.icon)
+        Image(systemName: icon)
             .font(.system(size: 13, weight: .semibold))
             .foregroundColor(isSelected ? CiderColors.controlAccent : isHovered ? CiderColors.primary : CiderColors.secondary)
             .frame(width: 32, height: 28)
@@ -76,6 +86,6 @@ private struct ViewModeIcon: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
             .onHover { isHovered = $0 }
-            .help(mode.displayName)
+            .help(displayName)
     }
 }

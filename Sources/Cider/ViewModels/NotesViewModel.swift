@@ -16,6 +16,8 @@ struct NotesRecoverySnapshotChoice: Identifiable, Hashable {
 @MainActor
 final class NotesViewModel: ObservableObject {
     @Published private(set) var hasPendingSave: Bool = false
+    @Published var displayMode: NoteDisplayMode
+    @Published var cardSizeScale: Double
     @Published var selectedNote: Note?
     @Published var editingContent: String = ""
     @Published var searchText: String = ""
@@ -123,6 +125,8 @@ final class NotesViewModel: ObservableObject {
 
     init() {
         let config = CiderConfig.load()
+        self.displayMode = config.notesDefaultViewMode
+        self.cardSizeScale = config.notesCardSizeScale ?? 1.0
         self.notesEditorTextSize = config.notesEditorTextSize
         self.isFormattingToolbarPinned = UserDefaults.standard.bool(
             forKey: Self.formattingToolbarPinnedStorageKey
@@ -144,6 +148,10 @@ final class NotesViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
                 let config = CiderConfig.load()
+                let newMode = config.notesDefaultViewMode
+                let newScale = config.notesCardSizeScale ?? 1.0
+                if self.displayMode != newMode { self.displayMode = newMode }
+                if self.cardSizeScale != newScale { self.cardSizeScale = newScale }
                 guard self.notesEditorTextSize != config.notesEditorTextSize else { return }
                 self.notesEditorTextSize = config.notesEditorTextSize
                 self.applyNotesEditorTextSize()
@@ -778,6 +786,28 @@ final class NotesViewModel: ObservableObject {
     private func normalizeLinkURL(_ value: String) -> String {
         guard !value.contains("://") else { return value }
         return "https://\(value)"
+    }
+
+    // MARK: - Display Options
+
+    func setDisplayMode(_ mode: NoteDisplayMode) {
+        guard displayMode != mode else { return }
+        displayMode = mode
+
+        var config = CiderConfig.load()
+        config.notesDefaultViewMode = mode
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+    }
+
+    func setCardSizeScale(_ scale: Double) {
+        let clamped = min(max(scale, 0), 3)
+        cardSizeScale = clamped
+
+        var config = CiderConfig.load()
+        config.notesCardSizeScale = clamped
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
     }
 
     // MARK: - Panel State

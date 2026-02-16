@@ -309,12 +309,11 @@ struct FolderSidebarView: View {
     private func rootFolderGroup(_ folder: Folder) -> some View {
         let children = childFolders(of: folder.id)
         let isExpanded = expandedFolderIDs.contains(folder.id)
-        let subFolderCount = children.count
 
         return VStack(alignment: .leading, spacing: 0) {
             RootFolderHeaderRow(
                 title: folder.name,
-                subFolderCount: subFolderCount,
+                itemCount: itemsInFolder(folder.id),
                 isExpanded: isExpanded,
                 isSelected: selectedFolderID == folder.id,
                 dropTypeIdentifiers: folderDropTypeIdentifiers,
@@ -652,7 +651,7 @@ private struct FolderSidebarAllItemsRow: View {
 
 struct RootFolderHeaderRow: View {
     let title: String
-    let subFolderCount: Int
+    let itemCount: Int
     let isExpanded: Bool
     let isSelected: Bool
     let dropTypeIdentifiers: [String]
@@ -700,8 +699,8 @@ struct RootFolderHeaderRow: View {
 
             Spacer(minLength: Spacing.xs)
 
-            if subFolderCount > 0 {
-                Text("\(subFolderCount)")
+            if itemCount > 0 {
+                Text("\(itemCount)")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(CiderColors.tertiary)
             }

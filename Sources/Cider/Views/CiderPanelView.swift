@@ -15,6 +15,7 @@ struct CiderPanelView: View {
     @State private var isCompactMode = false
     @State private var sidebarAutoCollapsed = false
     @State private var isViewOptionsVisible = false
+    @State private var isNoteViewOptionsVisible = false
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -150,6 +151,28 @@ struct CiderPanelView: View {
                             cardSizeScale: Binding(
                                 get: { bookmarksViewModel.cardSizeScale },
                                 set: { bookmarksViewModel.setCardSizeScale($0) }
+                            )
+                        )
+                    }
+            }
+
+            if selectedTab == .notes {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .onTapGesture { isNoteViewOptionsVisible.toggle() }
+                    .help("View options")
+                    .popover(isPresented: $isNoteViewOptionsVisible) {
+                        ViewOptionsDropdown(
+                            displayMode: Binding(
+                                get: { notesViewModel.displayMode },
+                                set: { notesViewModel.setDisplayMode($0) }
+                            ),
+                            cardSizeScale: Binding(
+                                get: { notesViewModel.cardSizeScale },
+                                set: { notesViewModel.setCardSizeScale($0) }
                             )
                         )
                     }
@@ -334,6 +357,7 @@ struct CiderPanelView: View {
                 NotesTabContent(
                     viewModel: notesViewModel,
                     searchText: "",
+                    folders: bookmarksViewModel.folders,
                     selectedFolderID: nil
                 )
             case .search(_, let query):

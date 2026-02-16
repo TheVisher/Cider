@@ -117,6 +117,8 @@ struct CiderConfig: Codable {
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
     var bookmarksCardSizeScale: Double?  // Continuous card size scale (0.0–3.0), overrides bookmarksCardSize
+    var notesDefaultViewMode: NoteDisplayMode  // Default notes layout mode
+    var notesCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for notes
     var detailModalMode: DetailModalMode  // How detail modals appear: expand panel or popover window
 
     static let storageKey = "CiderConfig"
@@ -138,6 +140,7 @@ struct CiderConfig: Codable {
             rememberBookmarksPanelPosition: false,
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
+            notesDefaultViewMode: .list,
             detailModalMode: .expand
         )
     }
@@ -238,6 +241,14 @@ struct CiderConfig: Codable {
             Double.self,
             forKey: .bookmarksCardSizeScale
         )
+        notesDefaultViewMode = try container.decodeIfPresent(
+            NoteDisplayMode.self,
+            forKey: .notesDefaultViewMode
+        ) ?? .list
+        notesCardSizeScale = try container.decodeIfPresent(
+            Double.self,
+            forKey: .notesCardSizeScale
+        )
         detailModalMode = try container.decodeIfPresent(
             DetailModalMode.self,
             forKey: .detailModalMode
@@ -261,6 +272,8 @@ struct CiderConfig: Codable {
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
         bookmarksCardSize: BookmarkCardSize = .comfortable,
         bookmarksCardSizeScale: Double? = nil,
+        notesDefaultViewMode: NoteDisplayMode = .list,
+        notesCardSizeScale: Double? = nil,
         detailModalMode: DetailModalMode = .expand
     ) {
         self.showMenuBarIcon = showMenuBarIcon
@@ -279,6 +292,8 @@ struct CiderConfig: Codable {
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize
         self.bookmarksCardSizeScale = bookmarksCardSizeScale
+        self.notesDefaultViewMode = notesDefaultViewMode
+        self.notesCardSizeScale = notesCardSizeScale
         self.detailModalMode = detailModalMode
     }
 }
