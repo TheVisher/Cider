@@ -52,24 +52,24 @@ struct FolderSidebarView: View {
                 Button(action: onTriggerSearch) {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(CiderFont.captionMedium)
                             .foregroundColor(CiderColors.tertiary)
 
                         Text("Search")
-                            .font(.system(size: 12))
+                            .font(CiderFont.label)
                             .foregroundColor(CiderColors.tertiary)
 
                         Spacer(minLength: 0)
 
                         Text("\u{2318}K")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(CiderFont.captionMedium)
                             .foregroundColor(CiderColors.quaternary)
                     }
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, Spacing.xs)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.separator.opacity(0.25))
+                            .fill(CiderColors.separatorLight)
                     )
                     .contentShape(Rectangle())
                 }
@@ -77,8 +77,9 @@ struct FolderSidebarView: View {
             }
 
             Label("Folders", systemImage: "folder")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.secondary)
+                .padding(.top, Spacing.xs)
 
             FolderSidebarAllItemsRow(
                 itemCount: bookmarks.count + notes.count,
@@ -102,7 +103,7 @@ struct FolderSidebarView: View {
 
             if topLevelFolders.isEmpty {
                 Text("No folders yet. Create one to organize your items.")
-                    .font(.system(size: 11))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
                     .padding(.horizontal, Spacing.xs)
                     .padding(.bottom, Spacing.xs)
@@ -139,13 +140,13 @@ struct FolderSidebarView: View {
         .background {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(CiderColors.surfaceElevated)
             }
         }
         .overlay {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
             }
         }
     }
@@ -153,13 +154,13 @@ struct FolderSidebarView: View {
     // MARK: - Projects Section
 
     private var projectsSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Divider()
                 .background(CiderColors.separator)
-                .padding(.vertical, Spacing.xxs)
+                .padding(.vertical, Spacing.xs)
 
             Label("Projects", systemImage: "tray.full")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.secondary)
 
             ForEach(projects) { project in
@@ -168,7 +169,7 @@ struct FolderSidebarView: View {
 
             if projects.isEmpty {
                 Text("No projects yet.")
-                    .font(.system(size: 11))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
                     .padding(.horizontal, Spacing.xs)
             }
@@ -180,19 +181,19 @@ struct FolderSidebarView: View {
         let isRenaming = renamingProjectID == project.id
         return HStack(spacing: Spacing.xs) {
             Image(systemName: "tray.full")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.controlAccent)
 
             if isRenaming {
                 TextField("Project name", text: $renamingProjectName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.primary)
                     .onSubmit { commitProjectRename() }
                     .onExitCommand { renamingProjectID = nil }
             } else {
                 Text(project.name)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
             }
@@ -201,7 +202,7 @@ struct FolderSidebarView: View {
 
             if count > 0 {
                 Text("\(count)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
             }
         }
@@ -209,11 +210,11 @@ struct FolderSidebarView: View {
         .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(CiderColors.surfaceElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
+                .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -370,26 +371,26 @@ struct FolderSidebarView: View {
     private func subFolderCreationField(depth: Int) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: "folder.badge.plus")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.controlAccent)
 
             TextField("Sub folder name", text: $draftSubFolderName)
                 .textFieldStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.primary)
                 .onSubmit { commitSubFolderCreation() }
                 .onExitCommand { cancelSubFolderCreation() }
 
             Button(action: commitSubFolderCreation) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(CiderFont.microBold)
                     .foregroundColor(CiderColors.controlAccent)
             }
             .buttonStyle(.plain)
 
             Button(action: cancelSubFolderCreation) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(CiderFont.microBold)
                     .foregroundColor(CiderColors.tertiary)
             }
             .buttonStyle(.plain)
@@ -398,11 +399,11 @@ struct FolderSidebarView: View {
         .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(CiderColors.controlAccent.opacity(0.08))
+                .fill(CiderColors.accentSubtle)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(CiderColors.controlAccent.opacity(0.3), lineWidth: CiderBorder.innerStrokeWidth)
+                .stroke(CiderColors.accentBorder, lineWidth: CiderBorder.innerStrokeWidth)
         )
     }
 
@@ -554,36 +555,36 @@ private struct FolderSidebarAllItemsRow: View {
     var body: some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: "tray.2")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
 
             Text("All Items")
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(1)
 
             Spacer(minLength: Spacing.xs)
 
             Text("\(itemCount)")
-                .font(.system(size: 10, weight: .medium))
+                .font(CiderFont.captionMedium)
                 .foregroundColor(CiderColors.tertiary)
         }
         .padding(.horizontal, Spacing.sm)
         .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(isSelected ? CiderColors.controlAccent.opacity(0.14)
-                      : isHovered ? Color.white.opacity(0.1)
-                      : Color.white.opacity(0.06))
+                .fill(isSelected ? CiderColors.selectedFill
+                      : isHovered ? CiderColors.surfaceHover
+                      : CiderColors.surfaceElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(isSelected ? CiderColors.controlAccent.opacity(0.48) : Color.white.opacity(0.12),
+                .stroke(isSelected ? CiderColors.selectedBorder : CiderColors.borderDefault,
                         lineWidth: CiderBorder.innerStrokeWidth)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
-        .onHover { isHovered = $0 }
+        .hoverState($isHovered)
         .onDrop(of: dropTypeIdentifiers, isTargeted: $isDropTargeted, perform: onDropProviders)
     }
 }
@@ -615,12 +616,12 @@ struct RootFolderHeaderRow: View {
             // Icon area: click here to toggle collapse
             ZStack {
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(iconColor)
                     .opacity(shouldShowChevron ? 0 : 1)
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(CiderFont.captionBold)
                     .foregroundColor(iconColor)
                     .rotationEffect(.degrees(isExpanded ? 0 : -90))
                     .opacity(shouldShowChevron ? 1 : 0)
@@ -630,11 +631,11 @@ struct RootFolderHeaderRow: View {
             .onTapGesture {
                 onToggleCollapse()
             }
-            .onHover { isIconHovered = $0 }
+            .hoverState($isIconHovered)
             .animation(reduceMotion ? .none : .smooth, value: shouldShowChevron)
 
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(CiderFont.labelSemibold)
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(1)
 
@@ -642,7 +643,7 @@ struct RootFolderHeaderRow: View {
 
             if itemCount > 0 {
                 Text("\(itemCount)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
             }
         }
@@ -665,9 +666,7 @@ struct RootFolderHeaderRow: View {
         .animation(reduceMotion ? .none : .snappy, value: isDropTargeted)
         .animation(reduceMotion ? .none : .snappy, value: isHovered)
         .animation(reduceMotion ? .none : .snappy, value: isExpanded)
-        .onHover { hovering in
-            isHovered = hovering
-        }
+        .hoverState($isHovered)
         .onDrop(
             of: dropTypeIdentifiers,
             isTargeted: $isDropTargeted,
@@ -716,25 +715,25 @@ struct RootFolderHeaderRow: View {
 
     private var backgroundColor: Color {
         if isDropTargeted {
-            return CiderColors.controlAccent.opacity(0.2)
+            return CiderColors.dropTargetFill
         }
         if isSelected {
-            return CiderColors.controlAccent.opacity(0.14)
+            return CiderColors.selectedFill
         }
         if isHovered {
-            return Color.white.opacity(0.1)
+            return CiderColors.surfaceHover
         }
-        return Color.white.opacity(0.06)
+        return CiderColors.surfaceElevated
     }
 
     private var borderColor: Color {
         if isDropTargeted {
-            return CiderColors.controlAccent.opacity(0.72)
+            return CiderColors.dropTargetBorder
         }
         if isSelected {
-            return CiderColors.controlAccent.opacity(0.48)
+            return CiderColors.selectedBorder
         }
-        return Color.white.opacity(0.12)
+        return CiderColors.borderDefault
     }
 }
 
@@ -763,7 +762,7 @@ struct SubFolderRow: View {
             if hasChildren {
                 Button(action: { onToggleExpand?() }) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(CiderFont.micro)
                         .foregroundColor(CiderColors.quaternary)
                         .frame(width: 14, height: 14)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
@@ -775,18 +774,18 @@ struct SubFolderRow: View {
             }
 
             Image(systemName: "folder")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(iconColor)
 
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(1)
 
             Spacer(minLength: Spacing.xs)
 
             Text("\(itemCount)")
-                .font(.system(size: 10, weight: .medium))
+                .font(CiderFont.captionMedium)
                 .foregroundColor(CiderColors.tertiary)
         }
         .padding(.horizontal, Spacing.sm)
@@ -804,9 +803,7 @@ struct SubFolderRow: View {
         .animation(reduceMotion ? .none : .snappy, value: isDropTargeted)
         .animation(reduceMotion ? .none : .snappy, value: isHovered)
         .animation(reduceMotion ? .none : .snappy, value: isExpanded)
-        .onHover { hovering in
-            isHovered = hovering
-        }
+        .hoverState($isHovered)
         .onDrop(
             of: dropTypeIdentifiers,
             isTargeted: $isDropTargeted,
@@ -838,24 +835,24 @@ struct SubFolderRow: View {
 
     private var backgroundColor: Color {
         if isDropTargeted {
-            return CiderColors.controlAccent.opacity(0.2)
+            return CiderColors.dropTargetFill
         }
         if isSelected {
-            return CiderColors.controlAccent.opacity(0.14)
+            return CiderColors.selectedFill
         }
         if isHovered {
-            return Color.white.opacity(0.1)
+            return CiderColors.surfaceHover
         }
-        return Color.white.opacity(0.06)
+        return CiderColors.surfaceElevated
     }
 
     private var borderColor: Color {
         if isDropTargeted {
-            return CiderColors.controlAccent.opacity(0.72)
+            return CiderColors.dropTargetBorder
         }
         if isSelected {
-            return CiderColors.controlAccent.opacity(0.48)
+            return CiderColors.selectedBorder
         }
-        return Color.white.opacity(0.12)
+        return CiderColors.borderDefault
     }
 }

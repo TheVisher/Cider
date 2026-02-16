@@ -49,11 +49,11 @@ struct BookmarkCaptureToastView: View {
 
             HStack(spacing: Spacing.sm) {
                 Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(isSuccess ? Color(NSColor.systemGreen) : Color(NSColor.systemYellow))
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(isSuccess ? CiderColors.success : CiderColors.warning)
 
                 Text(message)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(2)
 
@@ -81,44 +81,44 @@ struct BookmarkClipboardReviewToastView: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "link.badge.plus")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(CiderFont.labelSemibold)
                         .foregroundColor(CiderColors.controlAccent)
 
                     Text("Save copied URL?")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(CiderFont.labelSemibold)
                         .foregroundColor(CiderColors.primary)
 
                     Spacer(minLength: Spacing.sm)
                 }
 
                 Text(urlDisplay)
-                    .font(.system(size: 11, weight: .regular))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.secondary)
                     .lineLimit(1)
 
                 HStack(spacing: Spacing.sm) {
                     Button(action: onDiscard) {
                         Text("Discard")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(CiderFont.bodyMedium)
                             .foregroundColor(CiderColors.secondary)
                             .padding(.horizontal, Spacing.sm)
                             .frame(minHeight: BookmarksDesign.buttonTapTarget)
                             .background(
                                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(CiderColors.surfaceInput)
                             )
                     }
                     .buttonStyle(.plain)
 
                     Button(action: onSave) {
                         Text("Save")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(CiderFont.bodySemibold)
                             .foregroundColor(CiderColors.controlAccent)
                             .padding(.horizontal, Spacing.sm)
                             .frame(minHeight: BookmarksDesign.buttonTapTarget)
                             .background(
                                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                    .fill(CiderColors.controlAccent.opacity(0.15))
+                                    .fill(CiderColors.selectedFill)
                             )
                     }
                     .buttonStyle(.plain)
@@ -129,10 +129,10 @@ struct BookmarkClipboardReviewToastView: View {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                            .fill(Color.white.opacity(0.14))
+                            .fill(CiderColors.borderSelected)
 
                         RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                            .fill(CiderColors.controlAccent.opacity(0.88))
+                            .fill(CiderColors.accentSolid)
                             .frame(width: proxy.size.width * max(0, min(1, model.progress)))
                     }
                 }

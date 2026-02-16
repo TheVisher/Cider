@@ -45,6 +45,13 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **Used by:** CiderPanelView
 - **What:** All-edge resize handles with cursor tracking
 
+### EmptyStateView
+- **File:** `Views/Shared/EmptyStateView.swift`
+- **Used by:** NotesTabContent, NotesPanelView, SearchTabContent, ProjectTabContent, FolderContentView, RootFolderOverviewView
+- **What:** Vertically centered empty state with icon (36pt), title, optional subtitle, optional action button
+- **Params:** `icon: String`, `title: String`, `subtitle: String?`, `actionLabel: String?`, `action: (() -> Void)?`
+- **Note:** BookmarksBrowserView has its own inline empty state that scales with `textScale` — don't use this shared component there
+
 ---
 
 ## Shared Utilities (`Utilities/`)
@@ -54,6 +61,14 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **Used by:** Notes cards/rows (titles and previews)
 - **What:** SwiftUI `Text` view with search match highlighting — preserves all Text modifiers (font, color, lineLimit)
 - **Reuse opportunity:** Bookmark cards, search results, any list with filtering
+
+### CiderFont
+- **File:** `Utilities/CiderFont.swift`
+- **Used by:** All views with text
+- **What:** Semantic typography tokens replacing all `.font(.system(size:weight:))` declarations. ~30 fixed tokens + ~13 responsive `(scale:)` function variants for textScale views.
+- **Pattern:** `CiderFont.body`, `CiderFont.captionMedium`, `CiderFont.subheadingSemibold`, etc.
+- **Responsive:** `CiderFont.body(scale: textScale)` for views with continuous card size slider
+- **When NOT to use:** Design constants (`CiderPanelDesign.trafficLightSymbolSize`), dynamic weights (`isSelected ? .semibold : .regular`), Apple semantic styles in Settings views
 
 ### Constants (Spacing, Radius, Animation)
 - **File:** `Utilities/Constants.swift`
@@ -90,6 +105,35 @@ These aren't single components but established patterns that should be followed 
 - **Adding a new context menu:** Create a new View extension that returns `CardContextMenuModifier` with the desired `CardMenuItem` list
 - **Key detail:** `RightClickView.hitTest()` returns nil for non-right-click events so left clicks, hovers, and drags pass through to SwiftUI content underneath
 - **Why not `.contextMenu`:** SwiftUI caches `.contextMenu` content inside lazy containers (`LazyVStack`, `LazyVGrid`). After any data change (moving items to folders, creating folders), the menu shows stale content. No workaround (`.id()`, removing conditionals) reliably fixes it.
+
+### Container Style Modifiers
+- **File:** `Utilities/ContainerStyles.swift`
+- **Used by:** CiderPanelShell, BookmarksBrowserView, RootFolderOverviewView, NoteCardView
+- **What:** Two `ViewModifier`s for common container background + border patterns
+- **Modifiers:**
+  - `.sectionContainer(cornerRadius:)` — static elevated container: `surfaceElevated` fill + `borderDefault` stroke + `innerStrokeWidth`. Default radius: `Radius.md`. For sidebar columns, panel sections, folder cards.
+  - `.cardContainer(isHovered:, cornerRadius:)` — hover-aware card: `surfaceElevated`/`surfaceHover` fill + `borderSubtle`/`borderHover` stroke + clipShape + contentShape. Default radius: `BookmarksDesign.cardCornerRadius`. For masonry/grid cards.
+- **When NOT to use:** Containers with conditional backgrounds (FolderSidebarView's `showBackground` flag) or cards with custom stroke logic (BookmarksBrowserView's drop-target border)
+
+### Button Styles
+- **File:** `Utilities/ButtonStyles.swift`
+- **Used by:** Settings views (currently), any view needing pill-shaped action buttons
+- **What:** Three shared `ButtonStyle` variants for pill-shaped action buttons with rounded backgrounds and press states
+- **Styles:**
+  - `CiderAccentButtonStyle` — primary action (accent text on `accentSubtle` bg, `accentLight` on press)
+  - `CiderDestructiveButtonStyle` — destructive action (red text on `destructiveSubtle` bg, `destructiveLight` on press)
+  - `CiderSecondaryButtonStyle` — cancel/dismiss (secondary text on `surfaceInput` bg, `surfaceHover` on press)
+- **All three share:** `.font(.body)` + `.padding(.horizontal: Spacing.md, .vertical: Spacing.sm)` + `RoundedRectangle(Radius.sm)` background
+- **When NOT to use:** Icon-only toolbar buttons (use `.buttonStyle(.plain)`) or buttons that need `textScale` multipliers (style inline)
+
+### Hover State Modifier
+- **File:** `Utilities/HoverState.swift`
+- **Used by:** All interactive views with hover effects
+- **What:** `.hoverState($isHovered)` — binds hover to a `@State` Bool. Optional `animation:` parameter wraps state change in `withAnimation` with automatic Reduce Motion respect.
+- **Usage:**
+  - `.hoverState($isHovered)` — plain binding (use when view has `.animation(_, value: isHovered)`)
+  - `.hoverState($isHovered, animation: .snappy)` — animated (use when no `.animation()` on view)
+- **Only remaining `.onHover`:** `BookmarksBrowserView` bookmark list row — has custom `onHoverChanged` callback, can't use shared modifier
 
 ### Inline Rename
 - **Used by:** Notes (NoteCardView, NoteListRow)

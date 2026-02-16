@@ -5,7 +5,8 @@ Cider is a native macOS **floating panel** app for capturing and organizing book
 ## Critical Rules (Always Follow)
 
 - **Never steal focus** - All floating surfaces use `NSPanel` with `.nonactivatingPanel`
-- **No hardcoded colors** - Use semantic system colors only
+- **No hardcoded colors** - Use `CiderColors.*` tokens from Constants.swift
+- **No hardcoded fonts** - Use `CiderFont.*` tokens from CiderFont.swift
 - **No magic numbers** - Use spacing/animation tokens from Constants.swift
 - **Spring animations only** - No `.easeIn`, `.easeOut`, `.linear` for UI motion
 - **Acrylic style** - Use `NSVisualEffectView` with `.underWindowBackground`, NOT `.glassEffect()`
@@ -78,16 +79,28 @@ Each tab has its own vision doc capturing features, roadmaps, and brainstorming.
 - **Books:** `Docs/BOOKS_VISION.md` (future tab)
 - **Todos:** `Docs/TODOS_VISION.md` (future tab)
 
-### For Bookmark Display Issues
+### For Display Issues or Performance Problems
 **Read:** `Docs/TROUBLESHOOTING.md`
 - Card sizing and masonry layout fixes
 - Width pressure and panel resize issues
 - Thumbnail rendering patterns
+- CPU/performance fixes (filesystem watcher loops, view switching)
 
 ### Before Release
 **Read:** `Docs/RELEASE_CHECKLIST.md` - QA verification
 
 ## Quick Reference
+
+### Design Token Files
+```
+CiderColors  → Utilities/Constants.swift   (color palette)
+CiderFont    → Utilities/CiderFont.swift   (typography)
+Spacing      → Utilities/Constants.swift   (spacing scale)
+Radius       → Utilities/Constants.swift   (corner radii)
+ButtonStyles → Utilities/ButtonStyles.swift (pill button styles)
+ContainerStyles → Utilities/ContainerStyles.swift (.sectionContainer, .cardContainer)
+HoverState   → Utilities/HoverState.swift  (.hoverState modifier)
+```
 
 ### Spacing Tokens
 ```
@@ -144,7 +157,7 @@ Sources/Cider/
 ├── App/              # Entry point, AppDelegate, Panels (CiderPanel, Bookmarks, Notes, Settings)
 ├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, CiderTab)
 ├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, etc.)
-├── Utilities/        # Constants, extensions, helpers (HighlightedText, etc.)
+├── Utilities/        # Constants, CiderFont, CiderColors, ButtonStyles, ContainerStyles, HoverState, helpers
 ├── ViewModels/       # ObservableObject view models (BookmarksViewModel, NotesViewModel, SettingsViewModel)
 └── Views/
     ├── Bookmarks/         # Bookmark browser, cards, masonry layout, panel view
@@ -152,7 +165,7 @@ Sources/Cider/
     ├── Notes/             # Notes editor, tab content, panel view
     ├── Projects/          # Project tab content
     ├── Search/            # Search palette and tab content
-    ├── Settings/          # Settings views (General, Advanced, About)
+    ├── Settings/          # Settings views (General, About)
     └── Shared/            # Reusable: CiderTabBar, FolderSidebarView, ViewOptionsDropdown, etc.
 ```
 
@@ -228,6 +241,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 
 ## SwiftUI + NSPanel Gotchas
 
+- **Animated content clipping:** Content with slide transitions (`.move(edge:)`) must have `.clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))` — otherwise animations overflow into the shadow area drawn by `AcrylicPanelBackground`. The shadow sits underneath in the ZStack and is unaffected by clipping the content layers above it.
 - **Context menus:** Never use SwiftUI `.contextMenu` in lazy containers — it caches content and goes stale after data changes. Use the shared `CardContextMenu` (`Utilities/CardContextMenu.swift`) which builds a fresh native `NSMenu` on every right-click.
 - **NSView overlays:** When overlaying `NSViewRepresentable`, override `hitTest` to return `nil` for non-target events — otherwise the overlay blocks left clicks, hovers, and drags from reaching SwiftUI content underneath.
 - **@FocusState in NSPanel:** Non-activating panels need a delay before focus takes effect — use `.task { try? await Task.sleep(for: .milliseconds(150)); focused = true }`

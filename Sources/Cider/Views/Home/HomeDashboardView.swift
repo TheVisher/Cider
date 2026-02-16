@@ -62,15 +62,15 @@ struct HomeDashboardView: View {
     private func statCard(icon: String, label: String, count: Int) -> some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(CiderFont.titleMedium)
                 .foregroundColor(CiderColors.controlAccent)
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("\(count)")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(CiderFont.displayBold)
                     .foregroundColor(CiderColors.primary)
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.secondary)
             }
         }
@@ -78,7 +78,7 @@ struct HomeDashboardView: View {
         .padding(Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(CiderColors.separator.opacity(0.2))
+                .fill(CiderColors.separatorSubtle)
         )
     }
 
@@ -121,18 +121,18 @@ struct HomeDashboardView: View {
         Button(action: action) {
             VStack(spacing: Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(CiderFont.headingMedium)
                     .foregroundColor(CiderColors.controlAccent)
 
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.secondary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.separator.opacity(0.18))
+                    .fill(CiderColors.separatorSubtle)
             )
             .contentShape(Rectangle())
         }
@@ -159,18 +159,18 @@ struct HomeDashboardView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "bookmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.tertiary)
                     .frame(width: 16)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(bookmark.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(CiderFont.labelMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
                     Text(bookmark.hostDisplay)
-                        .font(.system(size: 10))
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
                 }
@@ -178,7 +178,7 @@ struct HomeDashboardView: View {
                 Spacer(minLength: Spacing.sm)
 
                 Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -208,19 +208,19 @@ struct HomeDashboardView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "note.text")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.tertiary)
                     .frame(width: 16)
 
                 Text(note.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
 
                 Spacer(minLength: Spacing.sm)
 
                 Text(note.modifiedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -234,7 +234,7 @@ struct HomeDashboardView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(CiderFont.bodySemibold)
             .foregroundColor(CiderColors.tertiary)
             .textCase(.uppercase)
     }

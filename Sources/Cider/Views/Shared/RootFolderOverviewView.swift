@@ -57,16 +57,16 @@ struct RootFolderOverviewView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "folder")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Text("Sub Folders")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
 
                 Text("\(childFolders.count)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
             }
 
@@ -92,57 +92,50 @@ struct RootFolderOverviewView: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: "folder.fill")
-                        .font(.system(size: 20))
+                        .font(CiderFont.display)
                         .foregroundColor(CiderColors.controlAccent)
 
                     Spacer()
 
                     if totalItems > 0 {
                         Text("\(totalItems)")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(CiderFont.captionMedium)
                             .foregroundColor(CiderColors.tertiary)
                             .padding(.horizontal, Spacing.xs)
                             .padding(.vertical, Spacing.xxs)
                             .background(
                                 Capsule()
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(CiderColors.surfaceInput)
                             )
                     }
                 }
 
                 Text(folder.name)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(2)
 
                 HStack(spacing: Spacing.sm) {
                     if bookmarkCount > 0 {
                         Label("\(bookmarkCount)", systemImage: "bookmark")
-                            .font(.system(size: 10))
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.quaternary)
                     }
                     if noteCount > 0 {
                         Label("\(noteCount)", systemImage: "note.text")
-                            .font(.system(size: 10))
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.quaternary)
                     }
                     if totalItems == 0 {
                         Text("Empty")
-                            .font(.system(size: 10))
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.quaternary)
                     }
                 }
             }
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
-            )
+            .sectionContainer()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -154,16 +147,16 @@ struct RootFolderOverviewView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "tray")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Text("Unsorted")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
 
                 Text("\(unsortedBookmarks.count + unsortedNotes.count)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
             }
 
@@ -185,18 +178,18 @@ struct RootFolderOverviewView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "bookmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(bookmark.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
                     Text(bookmark.hostDisplay)
-                        .font(.system(size: 11))
+                        .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
                 }
@@ -204,7 +197,7 @@ struct RootFolderOverviewView: View {
                 Spacer(minLength: Spacing.sm)
 
                 Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -214,7 +207,7 @@ struct RootFolderOverviewView: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
@@ -224,19 +217,19 @@ struct RootFolderOverviewView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "note.text")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
                 Text(note.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(CiderFont.subheadingMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
 
                 Spacer(minLength: Spacing.sm)
 
                 Text(note.modifiedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -246,28 +239,17 @@ struct RootFolderOverviewView: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Image(systemName: "folder")
-                .font(.system(size: 36))
-                .foregroundColor(CiderColors.tertiary)
-
-            Text("This folder is empty")
-                .font(.system(size: 13))
-                .foregroundColor(CiderColors.secondary)
-
-            Text("Add sub folders or drop items here")
-                .font(.system(size: 11))
-                .foregroundColor(CiderColors.tertiary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "folder",
+            title: "This folder is empty",
+            subtitle: "Add sub folders or drop items here"
+        )
     }
 }

@@ -20,7 +20,7 @@ struct SettingsView: View {
                 .frame(maxHeight: .infinity, alignment: .topLeading)
 
                 Divider()
-                    .opacity(0.28)
+                    .opacity(CiderColors.dividerPrimaryOpacity)
 
                 VStack(spacing: 0) {
                     SettingsSubcategoryHeader(
@@ -31,7 +31,7 @@ struct SettingsView: View {
                     .frame(height: SettingsDesign.headerHeight)
 
                     Divider()
-                        .opacity(0.22)
+                        .opacity(CiderColors.dividerSecondaryOpacity)
 
                     ScrollView {
                         selectedSubcategoryContent
@@ -196,7 +196,7 @@ struct SettingsView: View {
                         isOn: $viewModel.confirmCopiedURLBeforeSave
                     )
                     .disabled(!viewModel.autoCaptureCopiedURLs)
-                    .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : 0.55)
+                    .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : CiderColors.disabledOpacity)
 
                     SettingsToggleRow(
                         title: "Remember bookmarks window position",
@@ -283,7 +283,7 @@ struct SettingsView: View {
                         Button(action: openAccessibilityPreferences) {
                             Label("Open Accessibility Settings", systemImage: "hand.raised")
                         }
-                        .buttonStyle(SettingsButtonStyle())
+                        .buttonStyle(CiderAccentButtonStyle())
 
                         Text("Cider requires accessibility permissions to manage windows.")
                             .font(.caption)
@@ -301,7 +301,7 @@ struct SettingsView: View {
                         Button(action: {}) {
                             Label("Reset All Settings", systemImage: "arrow.counterclockwise")
                         }
-                        .buttonStyle(SettingsDestructiveButtonStyle())
+                        .buttonStyle(CiderDestructiveButtonStyle())
 
                         Text("This will reset all settings to their default values.")
                             .font(.caption)
@@ -502,22 +502,22 @@ private struct SettingsPrimarySidebar: View {
             Button(action: onSelectAccount) {
                 HStack(spacing: Spacing.sm) {
                     Circle()
-                        .fill(CiderColors.controlAccent.opacity(0.22))
+                        .fill(CiderColors.accentMedium)
                         .frame(width: 36, height: 36)
                         .overlay {
                             Image(systemName: "person.fill")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(CiderFont.navTitle)
                                 .foregroundColor(CiderColors.controlAccent)
                         }
 
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         Text("Local Account")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(CiderFont.labelSemibold)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
 
                         Text("Profile settings")
-                            .font(.system(size: 11))
+                            .font(CiderFont.body)
                             .foregroundColor(CiderColors.secondary)
                             .lineLimit(1)
                     }
@@ -528,11 +528,11 @@ private struct SettingsPrimarySidebar: View {
                 .padding(.vertical, Spacing.xs)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .fill(selectedCategory == .account ? Color.white.opacity(0.11) : Color.white.opacity(0.04))
+                        .fill(selectedCategory == .account ? CiderColors.surfaceHover : CiderColors.surfaceSubtle)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .stroke(Color.white.opacity(selectedCategory == .account ? 0.14 : 0), lineWidth: 1)
+                        .stroke(selectedCategory == .account ? CiderColors.borderSelected : Color.clear, lineWidth: 1)
                 )
                 .contentShape(Rectangle())
             }
@@ -556,18 +556,18 @@ private struct SettingsPrimarySidebar: View {
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Cider")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(CiderFont.labelSemibold)
                     .foregroundColor(CiderColors.secondary)
 
                 Text("Settings")
-                    .font(.system(size: 11))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
             }
         }
         .padding(.horizontal, Spacing.md)
         .padding(.top, Spacing.sm)
         .padding(.bottom, Spacing.md)
-        .background(Color.white.opacity(0.035))
+        .background(CiderColors.surfaceSubtle)
     }
 }
 
@@ -597,9 +597,9 @@ private struct SettingsPrimaryCategoryButton: View {
         Button(action: action) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: category.icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                 Text(category.rawValue)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -608,11 +608,11 @@ private struct SettingsPrimaryCategoryButton: View {
             .padding(.vertical, Spacing.xs)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+                    .fill(isSelected ? CiderColors.surfaceHover : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .stroke(Color.white.opacity(isSelected ? 0.14 : 0), lineWidth: 1)
+                    .stroke(isSelected ? CiderColors.borderSelected : Color.clear, lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
@@ -648,18 +648,18 @@ private struct SettingsSubcategoryChip: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .medium))
+                .font(CiderFont.labelMedium)
                 .foregroundColor(isSelected ? CiderColors.primary : CiderColors.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, Spacing.sm)
                 .frame(minHeight: 30)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+                        .fill(isSelected ? CiderColors.surfaceHover : Color.clear)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .stroke(Color.white.opacity(isSelected ? 0.14 : 0), lineWidth: 1)
+                        .stroke(isSelected ? CiderColors.borderSelected : Color.clear, lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -672,21 +672,21 @@ private struct SettingsAccountOverviewView: View {
             SettingsSection(title: "Account") {
                 HStack(spacing: Spacing.md) {
                     Circle()
-                        .fill(CiderColors.controlAccent.opacity(0.2))
+                        .fill(CiderColors.accentMedium)
                         .frame(width: 52, height: 52)
                         .overlay {
                             Image(systemName: "person.fill")
-                                .font(.system(size: 20, weight: .semibold))
+                                .font(CiderFont.displaySemibold)
                                 .foregroundColor(CiderColors.controlAccent)
                         }
 
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         Text("Local Account")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(CiderFont.headingSemibold)
                             .foregroundColor(CiderColors.primary)
 
                         Text("Not signed in")
-                            .font(.system(size: 12))
+                            .font(CiderFont.label)
                             .foregroundColor(CiderColors.secondary)
                     }
                 }
@@ -699,14 +699,14 @@ private struct SettingsAccountOverviewView: View {
                     Button(action: {}) {
                         Label("Sign In", systemImage: "person.crop.circle.badge.plus")
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(CiderAccentButtonStyle())
 
                     Button(action: {}) {
                         Label("Manage Account", systemImage: "slider.horizontal.3")
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(CiderAccentButtonStyle())
                     .disabled(true)
-                    .opacity(0.55)
+                    .opacity(CiderColors.disabledOpacity)
                 }
             }
             Spacer(minLength: 0)
@@ -731,7 +731,7 @@ private struct SettingsSizeOptionButton: View {
                         .frame(width: 50, height: 32)
                 } else if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 20))
+                        .font(CiderFont.display)
                         .frame(width: 50, height: 32)
                 }
 
@@ -743,11 +743,11 @@ private struct SettingsSizeOptionButton: View {
             .padding(.vertical, Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Color.white.opacity(isSelected ? 0.08 : 0.03))
+                    .fill(isSelected ? CiderColors.surfaceInput : CiderColors.surfaceHighlight)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(isSelected ? CiderColors.controlAccent : Color.white.opacity(0.1), lineWidth: 1)
+                    .strokeBorder(isSelected ? CiderColors.controlAccent : CiderColors.surfaceHover, lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
@@ -774,17 +774,17 @@ struct SettingsBackgroundView: View {
                 .fill(Color.black)
                 .blur(radius: 18)
                 .offset(y: 18)
-                .opacity(0.7)
+                .opacity(CiderColors.shadowShapeFullOpacity)
 
             ZStack {
                 VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                Color.black.opacity(0.45)
-                Color.white.opacity(0.03)
+                CiderColors.acrylicTint
+                CiderColors.surfaceHighlight
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
         }
@@ -796,7 +796,7 @@ struct SettingsBackgroundView: View {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.separatorStrong, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
     }

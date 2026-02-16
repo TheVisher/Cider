@@ -50,3 +50,15 @@ With Home showing cards too, the view options button in the sidebar header is al
 - Customizable widget layout (choose which sections appear)
 - Streak / activity indicators
 - Quick-capture inline text field (type and hit enter to create a note or bookmark)
+
+### AI GIF Finder (Requires AI + OCR)
+
+A contextual GIF search tool powered by AI. Instead of guessing keywords in Discord/iMessage/Slack's built-in GIF search, screenshot any conversation and let AI find the perfect reaction GIF.
+
+**Flow:** Screenshot a conversation (using Cider's planned OCR/capture features) → AI reads the context and tone → generates smart search queries → hits GIPHY/Tenor APIs → returns ranked results in a panel → click to copy, paste into any chat app.
+
+**Why it fits Cider:** Cider is already a floating panel open while browsing, and OCR/screenshot capture is planned. This makes it app-agnostic — works with any chat platform since it reads from screenshots, not platform APIs. Results could also be saved to the Whiteboard as image blocks.
+
+**The value is in tone detection:** AI understands that "sure, that's fine" is passive-aggressive and returns the right GIF, not a literal thumbs up. Built-in GIF search can't do this because it's keyword-only.
+
+Full concept doc: `~/Documents/GifGenius-App-Concept.md`

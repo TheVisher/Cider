@@ -32,7 +32,7 @@ struct CiderTabBar: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: tab.systemImage)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
 
                 Text(tab.displayName)
                     .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
@@ -40,13 +40,13 @@ struct CiderTabBar: View {
 
                 if count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(CiderFont.captionMedium)
                         .foregroundColor(isSelected ? CiderColors.primary : CiderColors.tertiary)
                         .padding(.horizontal, CiderPanelDesign.tabBadgePadding)
                         .padding(.vertical, 1)
                         .background(
                             Capsule(style: .continuous)
-                                .fill(CiderColors.separator.opacity(isSelected ? 0.4 : 0.25))
+                                .fill(isSelected ? CiderColors.separatorFirm : CiderColors.separatorLight)
                         )
                 }
 
@@ -55,7 +55,7 @@ struct CiderTabBar: View {
                         onCloseTab?(tab)
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(CiderFont.badge)
                             .foregroundColor(CiderColors.tertiary)
                             .frame(width: 14, height: 14)
                             .contentShape(Rectangle())
@@ -68,7 +68,7 @@ struct CiderTabBar: View {
             .padding(.vertical, Spacing.xs)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.separator.opacity(isSelected ? 0.3 : 0))
+                    .fill(isSelected ? CiderColors.separatorMedium : Color.clear)
             )
             .contentShape(Rectangle())
         }

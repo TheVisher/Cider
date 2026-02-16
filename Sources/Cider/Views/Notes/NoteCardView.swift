@@ -17,7 +17,6 @@ struct NoteCardView: View {
         case masonry
     }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     @State private var cardData: NoteCardData = .empty
     @State private var isRenaming = false
@@ -30,7 +29,7 @@ struct NoteCardView: View {
             if isRenaming {
                 TextField("Note title", text: $renamingTitle)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(CiderFont.subheadingSemibold)
                     .foregroundColor(CiderColors.primary)
                     .focused($isRenameFocused)
                     .task {
@@ -46,7 +45,7 @@ struct NoteCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 HighlightedText(note.title, highlight: searchText)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(CiderFont.subheadingSemibold)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,8 +54,8 @@ struct NoteCardView: View {
             // Folder sub-header
             if let folderName, !folderName.isEmpty {
                 Text(folderName)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(CiderColors.controlAccent.opacity(0.8))
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.accentText)
                     .lineLimit(1)
             }
 
@@ -65,7 +64,7 @@ struct NoteCardView: View {
                 contentArea
             } else {
                 Text("Empty note")
-                    .font(.system(size: 11).italic())
+                    .font(CiderFont.bodyItalic)
                     .foregroundColor(CiderColors.quaternary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -76,22 +75,9 @@ struct NoteCardView: View {
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: mode == .grid ? gridMinHeight : nil)
-        .background(
-            RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.1 : 0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(isHovered ? 0.18 : 0.08), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous))
+        .cardContainer(isHovered: isHovered)
         .onTapGesture(perform: onOpen)
-        .onHover { hovering in
-            withAnimation(reduceMotion ? .none : .snappy) {
-                isHovered = hovering
-            }
-        }
+        .hoverState($isHovered, animation: .snappy)
         .noteContextMenu(
             note: note,
             folders: folders,
@@ -128,7 +114,7 @@ struct NoteCardView: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             if !cardData.preview.isEmpty {
                 HighlightedText(cardData.preview, highlight: searchText)
-                    .font(.system(size: 11))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.secondary)
                     .lineLimit(mode == .grid ? gridPreviewLineLimit : nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,7 +140,7 @@ struct NoteCardView: View {
 
                     if index == 0 && !cardData.preview.isEmpty {
                         HighlightedText(cardData.preview, highlight: searchText)
-                            .font(.system(size: 11))
+                            .font(CiderFont.body)
                             .foregroundColor(CiderColors.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
@@ -173,7 +159,7 @@ struct NoteCardView: View {
 
     private var textOnlyContent: some View {
         HighlightedText(cardData.preview, highlight: searchText)
-            .font(.system(size: 11))
+            .font(CiderFont.body)
             .foregroundColor(CiderColors.secondary)
             .lineLimit(mode == .grid ? gridPreviewLineLimit : nil)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,16 +170,16 @@ struct NoteCardView: View {
     private var footer: some View {
         HStack(spacing: Spacing.xs) {
             Text(note.createdAt.noteCardDate)
-                .font(.system(size: 10))
+                .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
 
             if cardData.wordCount > 0 {
                 Text("\u{00B7}")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.quaternary)
 
                 Text("\(cardData.wordCount) words")
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
 
@@ -211,7 +197,7 @@ struct NoteCardView: View {
                 .aspectRatio(contentMode: .fill)
         } else {
             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(CiderColors.surfaceSubtle)
         }
     }
 

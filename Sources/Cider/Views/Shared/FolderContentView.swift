@@ -54,16 +54,16 @@ struct FolderContentView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
 
                 Text("\(count)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
             }
 
@@ -77,18 +77,18 @@ struct FolderContentView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "bookmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(bookmark.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
                     Text(bookmark.hostDisplay)
-                        .font(.system(size: 11))
+                        .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
                 }
@@ -96,7 +96,7 @@ struct FolderContentView: View {
                 Spacer(minLength: Spacing.sm)
 
                 Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -106,7 +106,7 @@ struct FolderContentView: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
@@ -116,19 +116,19 @@ struct FolderContentView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "note.text")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
                 Text(note.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(CiderFont.subheadingMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
 
                 Spacer(minLength: Spacing.sm)
 
                 Text(note.modifiedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -138,22 +138,11 @@ struct FolderContentView: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Image(systemName: "folder")
-                .font(.system(size: 36))
-                .foregroundColor(CiderColors.tertiary)
-
-            Text("This folder is empty")
-                .font(.system(size: 13))
-                .foregroundColor(CiderColors.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "folder", title: "This folder is empty")
     }
 }

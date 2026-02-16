@@ -126,7 +126,7 @@ struct BookmarksBrowserView: View {
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .strokeBorder(
-                    isDropTargeted ? CiderColors.controlAccent.opacity(0.65) : Color.clear,
+                    isDropTargeted ? CiderColors.dropTargetBorderStrong : Color.clear,
                     lineWidth: CiderBorder.innerStrokeWidth
                 )
         )
@@ -178,7 +178,7 @@ struct BookmarksBrowserView: View {
 
                 if let addErrorMessage {
                     Text(addErrorMessage)
-                        .font(.system(size: 11 * textScale))
+                        .font(CiderFont.body(scale: textScale))
                         .foregroundColor(CiderColors.destructive)
                         .lineLimit(1)
                 }
@@ -187,7 +187,7 @@ struct BookmarksBrowserView: View {
         .padding(Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Color.white.opacity(0.07))
+                .fill(CiderColors.surfaceElevated)
         )
     }
 
@@ -267,17 +267,17 @@ struct BookmarksBrowserView: View {
     private var emptyState: some View {
         VStack(spacing: Spacing.md) {
             Image(systemName: "bookmark")
-                .font(.system(size: 32 * textScale))
+                .font(CiderFont.heroDisplay(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
 
             Text(selectedFolderID == nil ? "No bookmarks yet" : "No bookmarks in this folder")
-                .font(.system(size: 13 * textScale, weight: .medium))
+                .font(CiderFont.subheadingMedium(scale: textScale))
                 .foregroundColor(CiderColors.secondary)
 
             Text(selectedFolderID == nil
                 ? "Add one with the + button or paste from clipboard"
                 : "Try another folder or drag bookmarks into this one")
-                .font(.system(size: 11 * textScale))
+                .font(CiderFont.body(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
         }
         .frame(maxWidth: .infinity)
@@ -289,21 +289,21 @@ struct BookmarksBrowserView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Label("Folders", systemImage: "folder")
-                    .font(.system(size: 11 * textScale, weight: .semibold))
+                    .font(CiderFont.bodySemibold(scale: textScale))
                     .foregroundColor(CiderColors.secondary)
 
                 Spacer(minLength: Spacing.sm)
 
                 Button(action: toggleFolderCreationField) {
                     Image(systemName: isFolderCreationFieldVisible ? "xmark" : "folder.badge.plus")
-                        .font(.system(size: 11 * textScale, weight: .semibold))
+                        .font(CiderFont.bodySemibold(scale: textScale))
                         .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(CiderColors.secondary)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(CiderColors.surfaceInput)
                 )
                 .help(isFolderCreationFieldVisible ? "Cancel new folder" : "Create folder")
             }
@@ -336,7 +336,7 @@ struct BookmarksBrowserView: View {
 
             if topLevelFolders.isEmpty {
                 Text("No folders yet. Create one and drag bookmarks into it.")
-                    .font(.system(size: 11 * textScale))
+                    .font(CiderFont.body(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
                     .padding(.horizontal, Spacing.xs)
                     .padding(.bottom, Spacing.xs)
@@ -361,14 +361,7 @@ struct BookmarksBrowserView: View {
         .padding(Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
-        )
+        .sectionContainer()
     }
 
     private func folderSidebarBranch(_ folder: Folder, depth: Int) -> AnyView {
@@ -781,7 +774,7 @@ private struct BookmarkFolderSidebarRow: View {
             if hasChildren {
                 Button(action: { onToggleExpand?() }) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9 * textScale, weight: .semibold))
+                        .font(CiderFont.micro(scale: textScale))
                         .foregroundColor(CiderColors.quaternary)
                         .frame(width: 12, height: 12)
                 }
@@ -792,18 +785,18 @@ private struct BookmarkFolderSidebarRow: View {
             }
 
             Image(systemName: "folder")
-                .font(.system(size: 11 * textScale, weight: .semibold))
+                .font(CiderFont.bodySemibold(scale: textScale))
                 .foregroundColor(iconColor)
 
             Text(title)
-                .font(.system(size: 11 * textScale, weight: .medium))
+                .font(CiderFont.bodyMedium(scale: textScale))
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(1)
 
             Spacer(minLength: Spacing.xs)
 
             Text("\(bookmarkCount)")
-                .font(.system(size: 10 * textScale, weight: .medium))
+                .font(CiderFont.captionMedium(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
         }
         .padding(.leading, Spacing.xs + CGFloat(depth) * BookmarksDesign.folderSidebarIndent)
@@ -844,25 +837,25 @@ private struct BookmarkFolderSidebarRow: View {
 
     private var backgroundColor: Color {
         if isDropTargeted {
-            return CiderColors.controlAccent.opacity(0.2)
+            return CiderColors.dropTargetFill
         }
         if isSelected {
-            return CiderColors.controlAccent.opacity(0.14)
+            return CiderColors.selectedFill
         }
         if isHovered {
-            return Color.white.opacity(0.1)
+            return CiderColors.surfaceHover
         }
-        return Color.white.opacity(0.06)
+        return CiderColors.surfaceElevated
     }
 
     private var borderColor: Color {
         if isDropTargeted {
-            return CiderColors.controlAccent.opacity(0.72)
+            return CiderColors.dropTargetBorder
         }
         if isSelected {
-            return CiderColors.controlAccent.opacity(0.48)
+            return CiderColors.selectedBorder
         }
-        return Color.white.opacity(0.12)
+        return CiderColors.borderDefault
     }
 }
 
@@ -893,7 +886,7 @@ private struct BookmarkListRow: View {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Button(action: onOpen) {
                     HighlightedText(bookmark.title, highlight: searchText)
-                        .font(.system(size: 12 * textScale, weight: .semibold))
+                        .font(CiderFont.labelSemibold(scale: textScale))
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -903,16 +896,16 @@ private struct BookmarkListRow: View {
                 Button(action: onOpen) {
                     HStack(spacing: Spacing.xs) {
                         Text(bookmark.hostDisplay)
-                            .font(.system(size: 11 * textScale))
+                            .font(CiderFont.body(scale: textScale))
                             .foregroundColor(CiderColors.secondary)
                             .lineLimit(1)
 
                         Text("•")
-                            .font(.system(size: 10 * textScale, weight: .semibold))
+                            .font(CiderFont.captionSemibold(scale: textScale))
                             .foregroundColor(CiderColors.tertiary)
 
                         Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                            .font(.system(size: 11 * textScale))
+                            .font(CiderFont.body(scale: textScale))
                             .foregroundColor(CiderColors.tertiary)
                             .lineLimit(1)
                     }
@@ -924,14 +917,14 @@ private struct BookmarkListRow: View {
             if isHovered {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
-                        .font(.system(size: 11 * textScale, weight: .semibold))
+                        .font(CiderFont.bodySemibold(scale: textScale))
                         .foregroundColor(CiderColors.destructive)
                         .frame(width: BookmarksDesign.buttonTapTarget, height: BookmarksDesign.buttonTapTarget)
                 }
                 .buttonStyle(.plain)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.destructive.opacity(0.14))
+                        .fill(CiderColors.destructiveLight)
                 )
             }
         }
@@ -939,13 +932,9 @@ private struct BookmarkListRow: View {
         .padding(.vertical, cardSizing.isExtraLarge ? Spacing.sm : Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+                .fill(isHovered ? CiderColors.surfaceInput : Color.clear)
         )
-        .onHover { hovering in
-            withAnimation(reduceMotion ? .none : .snappy) {
-                isHovered = hovering
-            }
-        }
+        .hoverState($isHovered, animation: .snappy)
         .bookmarkContextMenu(
             bookmark: bookmark,
             folders: folders,
@@ -1013,7 +1002,7 @@ private struct BookmarkCard: View {
                     .overlay(alignment: .topTrailing) {
                         if isHovered {
                             Image(systemName: "info.circle")
-                                .font(.system(size: 11 * textScale, weight: .semibold))
+                                .font(CiderFont.bodySemibold(scale: textScale))
                                 .foregroundColor(CiderColors.secondary)
                                 .padding(Spacing.xs)
                         }
@@ -1025,7 +1014,7 @@ private struct BookmarkCard: View {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Button(action: onOpen) {
                     HighlightedText(bookmark.title, highlight: searchText)
-                        .font(.system(size: 12 * textScale, weight: .semibold))
+                        .font(CiderFont.labelSemibold(scale: textScale))
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1035,14 +1024,14 @@ private struct BookmarkCard: View {
                 Button(action: onOpen) {
                     HStack(spacing: Spacing.xs) {
                         Text(bookmark.hostDisplay)
-                            .font(.system(size: 11 * textScale))
+                            .font(CiderFont.body(scale: textScale))
                             .foregroundColor(CiderColors.secondary)
                             .lineLimit(1)
 
                         Spacer(minLength: Spacing.xs)
 
                         Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                            .font(.system(size: 11 * textScale))
+                            .font(CiderFont.body(scale: textScale))
                             .foregroundColor(CiderColors.tertiary)
                             .lineLimit(1)
                     }
@@ -1053,14 +1042,14 @@ private struct BookmarkCard: View {
         .padding(Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.1 : 0.06))
+                .fill(isHovered ? CiderColors.surfaceHover : CiderColors.surfaceElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
                 .stroke(
                     supportsThumbnailDrops && isThumbnailDropTargeted
-                        ? CiderColors.controlAccent.opacity(0.65)
-                        : Color.white.opacity(isHovered ? 0.18 : 0.08),
+                        ? CiderColors.dropTargetBorderStrong
+                        : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle,
                     lineWidth: supportsThumbnailDrops && isThumbnailDropTargeted
                         ? CiderBorder.innerStrokeWidth
                         : 1
@@ -1077,11 +1066,7 @@ private struct BookmarkCard: View {
                     }
             }
         )
-        .onHover { hovering in
-            withAnimation(reduceMotion ? .none : .snappy) {
-                isHovered = hovering
-            }
-        }
+        .hoverState($isHovered, animation: .snappy)
         .bookmarkContextMenu(
             bookmark: bookmark,
             folders: folders,
@@ -1300,8 +1285,8 @@ private struct BookmarkDragPreview: View {
                     )
                     .overlay {
                         Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(.white.opacity(0.92))
+                            .font(CiderFont.heroFallback)
+                            .foregroundColor(CiderColors.textOnColor)
                     }
                 }
             }
@@ -1309,7 +1294,7 @@ private struct BookmarkDragPreview: View {
             .clipShape(thumbnailShape)
 
             Text(bookmark.title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(1)
         }
@@ -1317,13 +1302,13 @@ private struct BookmarkDragPreview: View {
         .frame(width: BookmarksDesign.dragPreviewWidth)
         .background(
             previewShape
-                .fill(Color.black.opacity(0.72))
+                .fill(CiderColors.overlayDark)
         )
         .overlay(
             previewShape
-                .stroke(Color.white.opacity(0.2), lineWidth: CiderBorder.innerStrokeWidth)
+                .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
         )
-        .shadow(color: Color.black.opacity(0.28), radius: 8, x: 0, y: 3)
+        .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 3)
         .scaleEffect(BookmarksDesign.dragPreviewScale)
         .rotationEffect(.degrees(BookmarksDesign.dragPreviewRotation))
         .offset(
@@ -1444,7 +1429,7 @@ private struct BookmarkThumbnailView: View {
 
                 Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
                     .font(.system(size: mode == .list ? 16 * textScale : 26 * textScale, weight: .black))
-                    .foregroundColor(Color.white.opacity(0.92))
+                    .foregroundColor(CiderColors.textOnColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(Spacing.sm)
@@ -1453,7 +1438,7 @@ private struct BookmarkThumbnailView: View {
 
     private var gradientBackground: some View {
         LinearGradient(
-            colors: [palette.0.opacity(0.8), palette.1.opacity(0.8)],
+            colors: [palette.0.opacity(CiderColors.gradientTint), palette.1.opacity(CiderColors.gradientTint)],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
@@ -1472,7 +1457,7 @@ private struct BookmarkThumbnailView: View {
                         height: iconOverlaySize * textScale
                     )
                     .padding(.top, mode == .list ? Spacing.xl : Spacing.sm)
-                    .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    .shadow(color: CiderColors.shadowLight, radius: 2, x: 0, y: 1)
             }
     }
 
@@ -1551,8 +1536,8 @@ private struct BookmarkShimmerPlaceholder: View {
             ZStack {
                 LinearGradient(
                     colors: [
-                        Color.white.opacity(0.08),
-                        Color.white.opacity(0.14),
+                        CiderColors.surfaceInput,
+                        CiderColors.borderSelected,
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -1566,9 +1551,9 @@ private struct BookmarkShimmerPlaceholder: View {
                     let travel = proxy.size.width + bandWidth
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.22),
-                            Color.white.opacity(0.0),
+                            Color.clear,
+                            CiderColors.shimmerPeak,
+                            Color.clear,
                         ],
                         startPoint: .top,
                         endPoint: .bottom

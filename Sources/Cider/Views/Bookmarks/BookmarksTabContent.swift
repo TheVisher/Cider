@@ -94,7 +94,7 @@ struct BookmarksTabContent: View {
                 let sheetHeight = resolvedDetailsSheetHeight(for: proxy.size.height)
 
                 ZStack {
-                    Color.black.opacity(BookmarksDesign.detailsBackdropOpacity)
+                    CiderColors.backdropSubtle
                         .contentShape(Rectangle())
                         .onTapGesture {
                             closeDetails()

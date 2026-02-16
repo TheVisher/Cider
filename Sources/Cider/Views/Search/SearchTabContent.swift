@@ -55,11 +55,11 @@ struct SearchTabContent: View {
     private var saveAsProjectBar: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "tray.full")
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.controlAccent)
 
             Text("\(results.count) results")
-                .font(.system(size: 12))
+                .font(CiderFont.label)
                 .foregroundColor(CiderColors.secondary)
 
             Spacer()
@@ -70,16 +70,16 @@ struct SearchTabContent: View {
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: "plus.rectangle.on.folder")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(CiderFont.bodyMedium)
                     Text("Save as Project")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(CiderFont.labelMedium)
                 }
                 .foregroundColor(CiderColors.controlAccent)
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.12))
+                        .fill(CiderColors.accentLight)
                 )
             }
             .buttonStyle(.plain)
@@ -88,7 +88,7 @@ struct SearchTabContent: View {
         .padding(.vertical, Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
@@ -96,16 +96,16 @@ struct SearchTabContent: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
 
                 Text("\(results.count)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
             }
 
@@ -130,18 +130,18 @@ struct SearchTabContent: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: result.type == .bookmark ? "bookmark" : "note.text")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(result.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
                     Text(result.subtitle)
-                        .font(.system(size: 11))
+                        .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
                 }
@@ -149,7 +149,7 @@ struct SearchTabContent: View {
                 Spacer(minLength: Spacing.sm)
 
                 Text(result.date.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -159,22 +159,11 @@ struct SearchTabContent: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 36))
-                .foregroundColor(CiderColors.tertiary)
-
-            Text("No results for \"\(query)\"")
-                .font(.system(size: 13))
-                .foregroundColor(CiderColors.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "magnifyingglass", title: "No results for \"\(query)\"")
     }
 }

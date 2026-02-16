@@ -32,13 +32,13 @@ struct AcrylicPanelBackground: View {
             // Main content
             ZStack {
                 VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                Color.black.opacity(0.45)
-                Color.white.opacity(0.03)
+                CiderColors.acrylicTint
+                CiderColors.surfaceHighlight
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
         }
@@ -47,9 +47,9 @@ struct AcrylicPanelBackground: View {
     private func shadowMetrics(for style: ShadowStyle) -> (blur: CGFloat, yOffset: CGFloat, opacity: Double) {
         switch style {
         case .full:
-            return (blur: 18, yOffset: 18, opacity: 0.7)
+            return (blur: 18, yOffset: 18, opacity: CiderColors.shadowShapeFullOpacity)
         case .compact:
-            return (blur: 10, yOffset: 8, opacity: 0.52)
+            return (blur: 10, yOffset: 8, opacity: CiderColors.shadowShapeCompactOpacity)
         }
     }
 
@@ -59,7 +59,7 @@ struct AcrylicPanelBackground: View {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.separatorStrong, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
     }

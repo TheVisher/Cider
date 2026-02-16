@@ -28,7 +28,7 @@ final class NotesStorage: ObservableObject {
     private let orphanAttachmentGracePeriodSeconds: TimeInterval = 5 * 60
 
     /// Per-note metadata persisted in the index file.
-    private struct NoteIndexEntry: Codable {
+private struct NoteIndexEntry: Codable, Equatable {
         var filename: String
         var folderID: UUID?
         var createdAt: Date?
@@ -168,14 +168,18 @@ final class NotesStorage: ObservableObject {
 
         // Rebuild the index from scanned files so duplicates/stale entries are
         // cleaned up automatically. Preserve folderID and createdAt from existing entries.
-        index = Dictionary(uniqueKeysWithValues: scannedNotes.map {
+        let previousIndex = index
+        let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
             ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, createdAt: $0.createdAt))
         })
+        index = rebuiltIndex
 
         // Sort by newest created first
         scannedNotes.sort { $0.createdAt > $1.createdAt }
         notes = scannedNotes
-        saveIndex()
+        if rebuiltIndex != previousIndex {
+            saveIndex()
+        }
     }
 
     // MARK: - CRUD

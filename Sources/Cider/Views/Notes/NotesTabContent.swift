@@ -87,7 +87,7 @@ struct NotesTabContent: View {
             VStack(spacing: 0) {
                 HStack(spacing: Spacing.sm) {
                     Text(note.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(CiderFont.subheadingSemibold)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
@@ -100,7 +100,7 @@ struct NotesTabContent: View {
                         NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(CiderFont.bodySemibold)
                             .foregroundColor(CiderColors.secondary)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
@@ -127,33 +127,21 @@ struct NotesTabContent: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Image(systemName: "note.text")
-                .font(.system(size: 36))
-                .foregroundColor(CiderColors.tertiary)
-
-            if searchText.isEmpty {
-                Text("No notes yet")
-                    .font(.system(size: 13))
-                    .foregroundColor(CiderColors.secondary)
-                Button("Create New Note") {
+        if searchText.isEmpty {
+            EmptyStateView(
+                icon: "note.text",
+                title: "No notes yet",
+                actionLabel: "Create New Note",
+                action: {
                     viewModel.createNewNote()
                     if let note = viewModel.selectedNote {
                         openNote(note)
                     }
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(CiderColors.controlAccent)
-            } else {
-                Text("No matching notes")
-                    .font(.system(size: 13))
-                    .foregroundColor(CiderColors.secondary)
-            }
-            Spacer()
+            )
+        } else {
+            EmptyStateView(icon: "note.text", title: "No matching notes")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Editor Overlay
@@ -161,7 +149,7 @@ struct NotesTabContent: View {
     @ViewBuilder
     private var noteEditorOverlay: some View {
         ZStack {
-            Color.black.opacity(BookmarksDesign.detailsBackdropOpacity)
+            CiderColors.backdropSubtle
                 .contentShape(Rectangle())
                 .onTapGesture {
                     viewModel.flushSave()
@@ -173,7 +161,7 @@ struct NotesTabContent: View {
                     if isEditingTitle {
                         TextField("Note title", text: $viewModel.editingTitle)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(CiderFont.subheadingSemibold)
                             .foregroundColor(CiderColors.primary)
                             .onSubmit {
                                 viewModel.renameCurrentNote(to: viewModel.editingTitle)
@@ -182,7 +170,7 @@ struct NotesTabContent: View {
                             .onExitCommand { isEditingTitle = false }
                     } else {
                         Text(viewModel.selectedNote?.title ?? "Note")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(CiderFont.subheadingSemibold)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
                             .onTapGesture(count: 2) {
@@ -200,7 +188,7 @@ struct NotesTabContent: View {
                         isEditingTitle = false
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(CiderFont.bodySemibold)
                             .foregroundColor(CiderColors.secondary)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
@@ -219,14 +207,14 @@ struct NotesTabContent: View {
             .background(
                 ZStack {
                     VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
-                    Color.black.opacity(0.38)
-                    Color.white.opacity(0.04)
+                    CiderColors.acrylicOverlayTint
+                    CiderColors.surfaceSubtle
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.lg - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(Color.white.opacity(0.24), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
             .padding(Spacing.xl)

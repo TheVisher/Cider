@@ -8,7 +8,7 @@ struct AboutSettingsView: View {
             // App icon and name
             VStack(spacing: Spacing.md) {
                 Image(systemName: "cube.fill")
-                    .font(.system(size: 64))
+                    .font(CiderFont.appIcon)
                     .foregroundColor(CiderColors.controlAccent)
 
                 Text("Cider")
@@ -60,7 +60,7 @@ private struct AboutLink: View {
         Button(action: openURL) {
             VStack(spacing: Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 16))
+                    .font(CiderFont.title)
 
                 Text(title)
                     .font(.caption)
@@ -69,7 +69,7 @@ private struct AboutLink: View {
             .frame(width: 70, height: 50)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(CiderColors.surfaceSubtle)
             )
         }
         .buttonStyle(.plain)

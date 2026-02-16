@@ -17,19 +17,19 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
             // Card Size
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("Card Size")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.secondary)
 
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.tertiary)
 
                     Slider(value: $cardSizeScale, in: 0...3)
                         .controlSize(.small)
 
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
             }
@@ -40,7 +40,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
             // View
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("View")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.secondary)
 
                 HStack(spacing: Spacing.sm) {
@@ -76,16 +76,16 @@ private struct ViewModeIcon: View {
 
     var body: some View {
         Image(systemName: icon)
-            .font(.system(size: 13, weight: .semibold))
+            .font(CiderFont.subheadingSemibold)
             .foregroundColor(isSelected ? CiderColors.controlAccent : isHovered ? CiderColors.primary : CiderColors.secondary)
             .frame(width: 32, height: 28)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? CiderColors.controlAccent.opacity(0.18) : isHovered ? Color.white.opacity(0.14) : Color.white.opacity(0.08))
+                    .fill(isSelected ? CiderColors.accentSelected : isHovered ? CiderColors.surfaceHover : CiderColors.surfaceInput)
             )
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
-            .onHover { isHovered = $0 }
+            .hoverState($isHovered)
             .help(displayName)
     }
 }

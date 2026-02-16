@@ -201,11 +201,11 @@ private struct NotesTitleBar: View {
                     isEditingTitle = false
                 })
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .semibold))
+                .font(CiderFont.subheadingSemibold)
                 .foregroundColor(CiderColors.primary)
             } else {
                 Text(viewModel.selectedNote?.title ?? "Notes")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(CiderFont.subheadingSemibold)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
                     .onTapGesture(count: 2) {
@@ -241,7 +241,7 @@ private struct NotesTitleBar: View {
                 }
             } label: {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 12))
+                    .font(CiderFont.label)
                     .foregroundColor(CiderColors.secondary)
             }
             .menuStyle(.borderlessButton)
@@ -456,7 +456,7 @@ private struct NotesTitleBar: View {
                 }
             } label: {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(CiderColors.secondary)
             }
             .menuStyle(.borderlessButton)
@@ -509,16 +509,14 @@ private struct NotesTrafficLightButton: View {
                     if isHovered {
                         Image(systemName: symbol)
                             .font(.system(size: NotesDesign.trafficLightSymbolSize, weight: .semibold))
-                            .foregroundColor(Color.black.opacity(0.65))
+                            .foregroundColor(CiderColors.trafficLightSymbol)
                     }
                 }
                 .frame(width: NotesDesign.trafficLightTapTarget, height: NotesDesign.trafficLightTapTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovered in
-            isHovered = hovered
-        }
+        .hoverState($isHovered)
         .help(help)
     }
 }
@@ -617,7 +615,7 @@ private struct NotesToolbarButton: View {
     var body: some View {
         Button(action: action) {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(CiderColors.separator.opacity(isHovered ? 0.45 : 0.22))
+                .fill(isHovered ? CiderColors.separatorFirm : CiderColors.separatorSubtle)
                 .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .overlay {
                     Image(systemName: symbol)
@@ -627,9 +625,7 @@ private struct NotesToolbarButton: View {
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
-        .onHover { hovered in
-            isHovered = hovered
-        }
+        .hoverState($isHovered)
         .help(help)
     }
 }
@@ -637,7 +633,7 @@ private struct NotesToolbarButton: View {
 private struct NotesToolbarDivider: View {
     var body: some View {
         Rectangle()
-            .fill(CiderColors.separator.opacity(0.7))
+            .fill(CiderColors.separatorSolid)
             .frame(width: 1, height: NotesDesign.toolbarDividerHeight)
             .padding(.horizontal, Spacing.xs)
     }
@@ -651,11 +647,11 @@ private struct NotesExternalChangeBanner: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.secondary)
 
             Text("This note changed outside Cider (\(state.modifiedAt.formatted(.relative(presentation: .named))))")
-                .font(.system(size: 11))
+                .font(CiderFont.body)
                 .foregroundColor(CiderColors.secondary)
                 .lineLimit(1)
 
@@ -665,14 +661,14 @@ private struct NotesExternalChangeBanner: View {
                 onReload()
             }
             .buttonStyle(.plain)
-            .font(.system(size: 11, weight: .semibold))
+            .font(CiderFont.bodySemibold)
             .foregroundColor(CiderColors.controlAccent)
 
             Button("Keep Mine") {
                 onKeepMine()
             }
             .buttonStyle(.plain)
-            .font(.system(size: 11, weight: .semibold))
+            .font(CiderFont.bodySemibold)
             .foregroundColor(CiderColors.secondary)
         }
         .padding(.horizontal, Spacing.md)
@@ -693,7 +689,7 @@ private struct NotesFindBar: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.tertiary)
 
             NotesFindTextField(
@@ -710,7 +706,7 @@ private struct NotesFindBar: View {
 
             if !statusText.isEmpty {
                 Text(statusText)
-                    .font(.system(size: 11))
+                    .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
                     .lineLimit(1)
             }
@@ -847,23 +843,12 @@ private struct NotesEmptyState: View {
     let onCreateNew: () -> Void
 
     var body: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Image(systemName: "note.text")
-                .font(.system(size: 36))
-                .foregroundColor(CiderColors.tertiary)
-            Text("No note selected")
-                .font(.system(size: 13))
-                .foregroundColor(CiderColors.secondary)
-            Button("Create New Note") {
-                onCreateNew()
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(CiderColors.controlAccent)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "note.text",
+            title: "No note selected",
+            actionLabel: "Create New Note",
+            action: onCreateNew
+        )
     }
 }
 
@@ -876,20 +861,20 @@ private struct NotesStatusBar: View {
         HStack(spacing: Spacing.sm) {
             if viewModel.selectedNote != nil {
                 Text("\(viewModel.charCount) chars")
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
             }
             Spacer()
             if viewModel.selectedNote != nil {
                 Image(systemName: viewModel.hasPendingSave ? "clock.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(
                         viewModel.hasPendingSave
                             ? CiderColors.tertiary
-                            : CiderColors.success.opacity(0.7)
+                            : CiderColors.successMuted
                     )
                 Text(viewModel.hasPendingSave ? "Saving..." : "Saved")
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
             }
         }

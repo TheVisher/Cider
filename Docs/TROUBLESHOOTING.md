@@ -158,6 +158,123 @@ struct CardSizing {
 
 ---
 
+## Performance
+
+### Problem: NotesStorage filesystem watcher causes ~100% CPU at idle
+
+**Symptom:** Cider uses ~100% CPU even when idle. Activity Monitor shows the main process pegged. The app becomes unresponsive and fans spin up.
+
+**Root cause:** An infinite feedback loop between `scanNotes()` and the filesystem watcher (`DispatchSource.makeFileSystemObjectSource`).
+
+The watcher monitors the notes directory for changes. When `scanNotes()` runs, it rebuilds the note index and calls `saveIndex()`, which writes `_cider_notes_index.json` into the watched directory. That write triggers the watcher, which calls `scanNotes()` again — infinite loop.
+
+```
+scanNotes() → saveIndex() → writes index file → watcher fires → scanNotes() → saveIndex() → ...
+```
+
+**Fix:** Make `NoteIndexEntry` conform to `Equatable`, then compare the rebuilt index against the previous snapshot before writing:
+
+```swift
+private struct NoteIndexEntry: Codable, Equatable {
+    let filename: String
+    let folderID: UUID?
+    let createdAt: Date
+}
+
+// In scanNotes():
+let previousIndex = index
+let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
+    ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, createdAt: $0.createdAt))
+})
+index = rebuiltIndex
+
+if rebuiltIndex != previousIndex {
+    saveIndex()
+}
+```
+
+**Result:** CPU drops from ~100% to 2-5% at idle. The watcher still fires on legitimate external changes (user edits a file outside Cider), but no-op scans no longer trigger a rewrite.
+
+**Key insight:** Any filesystem watcher that writes into its own watched directory must guard against feedback loops. The pattern is: **rebuild state → compare with previous → only write if changed.** This applies to any `DispatchSource` or `FSEvents` watcher that also persists metadata alongside the files it monitors.
+
+**Related test fix:** `NotesStorageRegressionTests` was updated to handle the richer `NoteIndexEntry` object format (previously the index was a flat `[String: String]` dictionary). Uses `JSONSerialization` for flexible decoding instead of `JSONDecoder` with a fixed type.
+
+---
+
+### Watch For: Memory growth with large bookmark/note collections
+
+**Status:** Not yet a problem, but worth monitoring as collections grow.
+
+**Current baseline:** ~270 MB with a small collection. Comparable to Messages (~249 MB), higher than typical utility apps (~140-175 MB). The WKWebView singleton for TipTap accounts for a chunk of this.
+
+**Known risk areas:**
+
+1. **Bookmark thumbnails** — if held at full resolution in memory, a large collection will balloon quickly. Notes already downsample to 240px via `CGImageSource` — bookmarks should follow the same pattern.
+2. **SwiftUI lazy container retention** — `LazyVGrid` and masonry layouts keep rendered views in memory longer than expected, especially with variable-height cards. Off-screen cards may not be deallocated promptly.
+3. **WKWebView** — the TipTap editor WebView is always alive (singleton pattern). WebKit processes are inherently memory-heavy.
+
+**Mitigation strategies when this becomes an issue:**
+
+- **`NSCache` for thumbnails** — auto-evicts under system memory pressure. Reload from disk on cache miss. This is the single biggest win.
+- **Downsample bookmark thumbnails on save** — store a 240-360px version on disk, never load the full-resolution image into the card grid.
+- **Limit prefetch distance** — only load thumbnails for cards within ~2 screens of the current scroll position.
+- **Profile with Instruments** — use the Allocations and Leaks instruments to identify the actual top consumers before optimizing. Don't guess.
+
+**Key insight:** Native Swift has the tools (`NSCache`, `CGImageSource` downsampling, `autoreleasepool` for batch operations) — the framework handles memory pressure gracefully as long as you use these patterns. The app should scale to hundreds of bookmarks without issue if thumbnails are properly managed.
+
+---
+
+### Watch For: Bookmark enrichment spikes during rapid capture
+
+**Status:** Not yet a problem, but relevant when batch-importing or rapid-firing captures.
+
+**Risk:** Each bookmark capture fires network requests for title, favicon, and thumbnail. Rapid captures (e.g., 20 URLs pasted quickly, or a future bulk import) could spike CPU and network simultaneously with unbounded concurrent requests.
+
+**Mitigation:** Use a `TaskGroup` with max concurrency (3-4 simultaneous enrichment tasks). Queue the rest. This smooths out CPU/network load without slowing down the perceived capture speed — the bookmark appears immediately, enrichment fills in progressively.
+
+---
+
+### Watch For: Image decoding on the main thread
+
+**Status:** Notes handle this correctly via async `NoteCardData.load()`. Bookmarks should follow the same pattern.
+
+**Risk:** If bookmark thumbnails are decoded on the main thread during scroll, frame drops will appear in masonry/grid views — especially with large images or fast scrolling. The symptom is visible jank or stuttering when scrolling through cards.
+
+**Mitigation:**
+- Decode and downsample via `CGImageSource` on a background queue.
+- Dispatch the final downsampled `NSImage`/`CGImage` back to main for display.
+- Notes already do this — bookmarks should follow the same `async` loading pattern.
+
+**Priority:** High. This is the single most likely source of scroll jank as the collection grows. Fix this before other optimizations.
+
+---
+
+### Watch For: Search performance at scale
+
+**Status:** Fine at current collection size. Monitor past ~300-500 items.
+
+**Risk:** If search filters by iterating the full in-memory array on every keystroke, it'll feel sluggish with large collections. Each character triggers a full scan, and SwiftUI re-renders the filtered results on every pass.
+
+**Mitigation:**
+- **Debounce search input** (200-300ms) so filtering only runs after the user pauses typing, not on every character.
+- **Pre-build a lightweight search index** if debouncing alone isn't enough — a simple inverted index of title/domain words mapped to item IDs.
+- **Cancel in-flight searches** when new input arrives (use `Task` cancellation).
+
+---
+
+### Watch For: Redundant SwiftUI re-renders from @Published properties
+
+**Status:** Not a problem at current scale. Becomes relevant past ~200-300 visible cards.
+
+**Risk:** With `@Published` on ViewModels, changing any property re-renders all subscribers. If a ViewModel has many published properties, an unrelated change (e.g., updating a loading flag) triggers card re-renders across the entire grid even though card data didn't change.
+
+**Mitigation:**
+- Add `Equatable` conformance to card data structs — SwiftUI can skip diffing unchanged cards.
+- Use the existing `didSet` guard pattern (`if self.value != newValue`) to prevent redundant `@Published` updates, especially in notification handlers.
+- Long-term: migrating to `@Observable` (Swift Observation framework) gives per-property tracking instead of whole-object invalidation. Not urgent.
+
+---
+
 ## General Layout Principles
 
 1. **Content should never demand more width than proposed.** Layouts should accept whatever width they're given and adapt (fewer columns, smaller items). Never floor a layout width at a content-derived minimum.

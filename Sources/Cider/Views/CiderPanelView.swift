@@ -7,17 +7,12 @@ struct CiderPanelView: View {
     @ObservedObject private var projectStorage = ProjectStorage.shared
     @State private var selectedTab: CiderTab = .home
     @State private var isCollapsed = false
-    @State private var isFolderSidebarVisible = true
     @State private var selectedFolderID: UUID?
     @State private var expandedFolderIDs: Set<UUID> = []
     @State private var isSearchPaletteVisible = false
     @State private var dynamicTabs: [CiderTab] = []
-    @State private var isCompactMode = false
-    @State private var sidebarAutoCollapsed = false
     @State private var isViewOptionsVisible = false
     @State private var isNoteViewOptionsVisible = false
-    @State private var showTitleBarToggle = false
-    @State private var toggleAppearTask: Task<Void, Never>?
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -26,64 +21,20 @@ struct CiderPanelView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            AcrylicPanelBackground(
-                cornerRadius: CiderPanelDesign.cornerRadius,
-                shadowStyle: isCollapsed ? .compact : .full
-            )
-
-            HStack(spacing: 0) {
-                // Left: full-height sidebar column
-                if !isCollapsed && !isCompactMode && isFolderSidebarVisible {
-                    sidebarColumn
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                }
-
-                // Right: title bar + content
-                VStack(spacing: 0) {
-                    titleBar
-
-                    if !isCollapsed {
-                        Divider()
-                            .background(CiderColors.separator)
-                            .padding(.horizontal, Spacing.md + Spacing.xxs)
-
-                        contentArea
-                    }
-                }
-                .padding(.top, Spacing.sm - 1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onChange(of: proxy.size.width) { _, newWidth in
-                            let compact = newWidth < CiderPanelDesign.sidebarCompactThreshold
-                            if compact && !isCompactMode {
-                                isCompactMode = true
-                                if isFolderSidebarVisible {
-                                    sidebarAutoCollapsed = true
-                                    isFolderSidebarVisible = false
-                                }
-                            } else if !compact && isCompactMode {
-                                isCompactMode = false
-                                if sidebarAutoCollapsed {
-                                    sidebarAutoCollapsed = false
-                                    isFolderSidebarVisible = true
-                                }
-                            }
-                        }
-                        .onAppear {
-                            isCompactMode = proxy.size.width < CiderPanelDesign.sidebarCompactThreshold
-                        }
-                }
-            )
-
-            // Compact overlay sidebar
-            if !isCollapsed && isCompactMode && isFolderSidebarVisible {
-                compactOverlaySidebar
-            }
-
+        CiderPanelShell(
+            isCollapsed: isCollapsed,
+            onClose: { NotificationCenter.default.post(name: .dismissCiderPanel, object: nil) },
+            onCollapse: { NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil) },
+            onMaximize: { NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil) }
+        ) {
+            folderSidebar
+        } sidebarFooter: {
+            sidebarFooterView
+        } titleBar: {
+            titleBarContent
+        } content: {
+            contentArea
+        } overlay: {
             if isSearchPaletteVisible {
                 SearchPaletteView(
                     bookmarks: bookmarksViewModel.bookmarks,
@@ -100,107 +51,9 @@ struct CiderPanelView: View {
                 )
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if !isCollapsed {
-                CiderPanelResizeIcon()
-            }
-        }
-        .padding(.horizontal, CiderPanelDesign.shadowPadding)
-        .padding(.top, CiderPanelDesign.topPadding)
-        .padding(
-            .bottom,
-            isCollapsed
-                ? CiderPanelDesign.collapsedBottomPadding
-                : CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
-        )
-        .overlay {
-            if !isCollapsed {
-                PanelEdgeResizeView()
-            }
-        }
-        .animation(reduceMotion ? .none : .snappy, value: isFolderSidebarVisible)
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
-        }
-        .onChange(of: isFolderSidebarVisible) { _, visible in
-            toggleAppearTask?.cancel()
-            if !visible {
-                // Sidebar closing — after a short delay, show title bar toggle
-                if reduceMotion {
-                    showTitleBarToggle = true
-                } else {
-                    toggleAppearTask = Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(150))
-                        guard !Task.isCancelled else { return }
-                        withAnimation(.bouncy) {
-                            showTitleBarToggle = true
-                        }
-                    }
-                }
-            } else {
-                // Sidebar opening — immediately hide title bar toggle
-                if reduceMotion {
-                    showTitleBarToggle = false
-                } else {
-                    withAnimation(.snappy) {
-                        showTitleBarToggle = false
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Title Bar
-
-    private var titleBar: some View {
-        HStack(spacing: Spacing.sm) {
-            if showTitleBarToggle {
-                Button(action: toggleFolderSidebar) {
-                    Image(systemName: "sidebar.left")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(CiderColors.secondary)
-                .help("Show folder sidebar")
-                .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-
-            CiderTabBar(
-                selectedTab: $selectedTab,
-                tabs: allTabs,
-                bookmarkCount: bookmarksViewModel.bookmarks.count,
-                noteCount: notesViewModel.notes.count,
-                onCloseTab: closeTab
-            )
-            .frame(maxWidth: .infinity)
-
-            if selectedTab == .bookmarks {
-                Image(systemName: "safari")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
-                    }
-                    .help("Capture active browser tab")
-            }
-        }
-        .padding(.horizontal, Spacing.md)
-        .frame(height: CiderPanelDesign.titleBarHeight)
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button("Close") {
-                NotificationCenter.default.post(name: .dismissCiderPanel, object: nil)
-            }
-            Button(isCollapsed ? "Expand" : "Minimize") {
-                NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil)
-            }
-            Button("Maximize") {
-                NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil)
-            }
         }
         .background {
             Button("") { isSearchPaletteVisible = true }
@@ -209,67 +62,58 @@ struct CiderPanelView: View {
         }
     }
 
-    // MARK: - Sidebar Column
+    // MARK: - Title Bar Content
 
-    private var sidebarColumn: some View {
-        VStack(spacing: 0) {
-            sidebarHeader
-            folderSidebar
-            sidebarFooter
+    @ViewBuilder
+    private var titleBarContent: some View {
+        CiderTabBar(
+            selectedTab: $selectedTab,
+            tabs: allTabs,
+            bookmarkCount: bookmarksViewModel.bookmarks.count,
+            noteCount: notesViewModel.notes.count,
+            onCloseTab: closeTab
+        )
+        .frame(maxWidth: .infinity)
+
+        if selectedTab == .bookmarks {
+            Image(systemName: "safari")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
+                }
+                .help("Capture active browser tab")
         }
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: CiderBorder.innerStrokeWidth)
-        )
-        .padding(.leading, Spacing.md)
-        .padding(.vertical, Spacing.md)
     }
 
-    private var sidebarHeader: some View {
-        HStack(alignment: .top, spacing: CiderPanelDesign.trafficLightSpacing) {
-            CiderTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close panel") {
-                NotificationCenter.default.post(name: .dismissCiderPanel, object: nil)
-            }
-            CiderTrafficLightButton(
-                color: .systemYellow,
-                symbol: "minus",
-                help: isCollapsed ? "Expand panel" : "Collapse to header"
-            ) {
-                NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil)
-            }
-            CiderTrafficLightButton(
-                color: .systemGreen,
-                symbol: "arrow.up.left.and.arrow.down.right",
-                help: "Maximize panel"
-            ) {
-                NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil)
-            }
+    // MARK: - Sidebar Content
 
-            Spacer(minLength: 0)
-
-            Button(action: toggleFolderSidebar) {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: CiderPanelDesign.trafficLightTapTarget)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Hide sidebar")
-        }
-        .frame(height: BookmarksDesign.buttonTapTarget, alignment: .top)
-        .padding(.horizontal, Spacing.sm)
-        .padding(.top, Spacing.sm)
-        .frame(maxWidth: BookmarksDesign.folderSidebarWidth, alignment: .leading)
+    private var folderSidebar: some View {
+        FolderSidebarView(
+            folders: bookmarksViewModel.folders,
+            bookmarks: bookmarksViewModel.bookmarks,
+            notes: notesViewModel.notes,
+            projects: projectStorage.activeProjects(),
+            selectedFolderID: $selectedFolderID,
+            expandedFolderIDs: $expandedFolderIDs,
+            onCreateFolder: { bookmarksViewModel.createFolder(name: $0, parentID: $1) },
+            onAssignBookmarkToFolder: { bookmarksViewModel.assign($0, toFolder: $1) },
+            onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
+            onOpenProject: openProjectTab,
+            onCreateProject: createProject,
+            onDeleteProject: deleteProject,
+            onRenameProject: renameProject,
+            onDeleteFolder: deleteFolder,
+            onTriggerSearch: { isSearchPaletteVisible = true },
+            showBackground: false
+        )
     }
 
     // MARK: - Sidebar Footer
 
-    private var sidebarFooter: some View {
+    private var sidebarFooterView: some View {
         VStack(spacing: Spacing.sm) {
             Divider()
                 .background(CiderColors.separator)
@@ -281,7 +125,7 @@ struct CiderPanelView: View {
                     NotificationCenter.default.post(name: .openCiderSettings, object: nil)
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.secondary)
                         .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
                         .contentShape(Rectangle())
@@ -333,16 +177,16 @@ struct CiderPanelView: View {
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(CiderFont.captionSemibold)
                         Text("New")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(CiderFont.bodyMedium)
                     }
                     .foregroundColor(CiderColors.secondary)
                     .padding(.horizontal, Spacing.sm)
                     .frame(height: CiderPanelDesign.trafficLightTapTarget)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(CiderColors.surfaceInput)
                     )
                     .contentShape(Capsule())
                 }
@@ -367,7 +211,7 @@ struct CiderPanelView: View {
     private var viewOptionsButton: some View {
         if selectedTab == .bookmarks {
             Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
                 .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
                 .contentShape(Rectangle())
@@ -387,7 +231,7 @@ struct CiderPanelView: View {
                 }
         } else if selectedTab == .notes {
             Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 11, weight: .semibold))
+                .font(CiderFont.bodySemibold)
                 .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
                 .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
                 .contentShape(Rectangle())
@@ -417,64 +261,6 @@ struct CiderPanelView: View {
     private var contentArea: some View {
         tabContentBody
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - Compact Overlay Sidebar
-
-    private var compactOverlaySidebar: some View {
-        ZStack(alignment: .leading) {
-            Color.black.opacity(0.28)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.snappy) {
-                        isFolderSidebarVisible = false
-                    }
-                }
-
-            VStack(spacing: 0) {
-                sidebarHeader
-                folderSidebar
-                sidebarFooter
-            }
-            .background(
-                ZStack {
-                    VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                    Color.black.opacity(0.45)
-                }
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: CiderPanelDesign.cornerRadius,
-                        bottomLeadingRadius: CiderPanelDesign.cornerRadius,
-                        bottomTrailingRadius: Radius.md,
-                        topTrailingRadius: Radius.md,
-                        style: .continuous
-                    )
-                )
-            )
-            .transition(.move(edge: .leading).combined(with: .opacity))
-        }
-        .animation(.snappy, value: isFolderSidebarVisible)
-    }
-
-    private var folderSidebar: some View {
-        FolderSidebarView(
-            folders: bookmarksViewModel.folders,
-            bookmarks: bookmarksViewModel.bookmarks,
-            notes: notesViewModel.notes,
-            projects: projectStorage.activeProjects(),
-            selectedFolderID: $selectedFolderID,
-            expandedFolderIDs: $expandedFolderIDs,
-            onCreateFolder: { bookmarksViewModel.createFolder(name: $0, parentID: $1) },
-            onAssignBookmarkToFolder: { bookmarksViewModel.assign($0, toFolder: $1) },
-            onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
-            onOpenProject: openProjectTab,
-            onCreateProject: createProject,
-            onDeleteProject: deleteProject,
-            onRenameProject: renameProject,
-            onDeleteFolder: deleteFolder,
-            onTriggerSearch: { isSearchPaletteVisible = true },
-            showBackground: false
-        )
     }
 
     @ViewBuilder
@@ -553,13 +339,6 @@ struct CiderPanelView: View {
                     }
                 )
             }
-        }
-    }
-
-    private func toggleFolderSidebar() {
-        withAnimation(.snappy) {
-            isFolderSidebarVisible.toggle()
-            sidebarAutoCollapsed = false
         }
     }
 
@@ -652,49 +431,5 @@ struct CiderPanelView: View {
 
     func setCollapsed(_ collapsed: Bool) {
         isCollapsed = collapsed
-    }
-}
-
-// MARK: - Traffic Light Button
-
-private struct CiderTrafficLightButton: View {
-    let color: NSColor
-    let symbol: String
-    let help: String
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Circle()
-                .fill(Color(color))
-                .frame(width: CiderPanelDesign.trafficLightDiameter, height: CiderPanelDesign.trafficLightDiameter)
-                .overlay {
-                    if isHovered {
-                        Image(systemName: symbol)
-                            .font(.system(size: CiderPanelDesign.trafficLightSymbolSize, weight: .semibold))
-                            .foregroundColor(Color.black.opacity(0.65))
-                    }
-                }
-                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered in
-            isHovered = hovered
-        }
-        .help(help)
-    }
-}
-
-// MARK: - Resize Icon (decoration only)
-
-private struct CiderPanelResizeIcon: View {
-    var body: some View {
-        Image(systemName: "arrow.down.backward.and.arrow.up.forward")
-            .font(.system(size: 9, weight: .medium))
-            .foregroundColor(CiderColors.quaternary)
-            .frame(width: 16, height: 16)
-            .allowsHitTesting(false)
     }
 }

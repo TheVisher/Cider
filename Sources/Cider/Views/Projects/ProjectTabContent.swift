@@ -51,18 +51,18 @@ struct ProjectTabContent: View {
             } label: {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "bookmark")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.controlAccent)
                         .frame(width: 16)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(bookmark.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(CiderFont.subheadingMedium)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
 
                         Text(bookmark.hostDisplay)
-                            .font(.system(size: 11))
+                            .font(CiderFont.body)
                             .foregroundColor(CiderColors.tertiary)
                             .lineLimit(1)
                     }
@@ -70,7 +70,7 @@ struct ProjectTabContent: View {
                     Spacer(minLength: Spacing.sm)
 
                     Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                        .font(.system(size: 10))
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.quaternary)
                 }
                 .contentShape(Rectangle())
@@ -83,7 +83,7 @@ struct ProjectTabContent: View {
         .padding(.vertical, Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
@@ -94,13 +94,13 @@ struct ProjectTabContent: View {
             } label: {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "note.text")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.controlAccent)
                         .frame(width: 16)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(note.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(CiderFont.subheadingMedium)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
                     }
@@ -108,7 +108,7 @@ struct ProjectTabContent: View {
                     Spacer(minLength: Spacing.sm)
 
                     Text(note.modifiedAt.formatted(.relative(presentation: .named)))
-                        .font(.system(size: 10))
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.quaternary)
                 }
                 .contentShape(Rectangle())
@@ -121,7 +121,7 @@ struct ProjectTabContent: View {
         .padding(.vertical, Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
@@ -130,7 +130,7 @@ struct ProjectTabContent: View {
             projectStorage.removeItem(itemID)
         } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold))
+                .font(CiderFont.microBold)
                 .foregroundColor(CiderColors.tertiary)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
@@ -140,23 +140,10 @@ struct ProjectTabContent: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Image(systemName: "tray")
-                .font(.system(size: 36))
-                .foregroundColor(CiderColors.tertiary)
-
-            Text("No items in this project")
-                .font(.system(size: 13))
-                .foregroundColor(CiderColors.secondary)
-
-            Text("Add bookmarks and notes from search or by dragging them here.")
-                .font(.system(size: 11))
-                .foregroundColor(CiderColors.tertiary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 240)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "tray",
+            title: "No items in this project",
+            subtitle: "Add bookmarks and notes from search or by dragging them here."
+        )
     }
 }

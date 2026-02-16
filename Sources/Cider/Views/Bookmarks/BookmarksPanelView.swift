@@ -132,7 +132,7 @@ struct BookmarksPanelView: View {
             let sheetHeight = resolvedDetailsSheetHeight(for: proxy.size.height)
 
             ZStack {
-                Color.black.opacity(BookmarksDesign.detailsBackdropOpacity)
+                CiderColors.backdropSubtle
                     .contentShape(Rectangle())
                     .onTapGesture {
                         closeDetails(restorePanel: true)
@@ -339,11 +339,11 @@ struct BookmarksPanelView: View {
             }
 
             Text("Bookmarks")
-                .font(.system(size: 13, weight: .semibold))
+                .font(CiderFont.subheadingSemibold)
                 .foregroundColor(CiderColors.primary)
 
             Text("\(viewModel.filteredBookmarks.count)")
-                .font(.system(size: 12, weight: .medium))
+                .font(CiderFont.labelMedium)
                 .foregroundColor(CiderColors.tertiary)
 
             Spacer(minLength: Spacing.sm)
@@ -352,13 +352,13 @@ struct BookmarksPanelView: View {
                 _ = viewModel.captureBookmarkFromActiveBrowserOrClipboard()
             } label: {
                 Label("Capture", systemImage: "safari")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .padding(.horizontal, Spacing.sm)
                     .frame(minHeight: BookmarksDesign.buttonTapTarget)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.controlAccent.opacity(0.14))
+                            .fill(CiderColors.selectedFill)
                     )
             }
             .buttonStyle(.plain)
@@ -414,14 +414,14 @@ struct BookmarkDetailsSheet: View {
         .background(
             ZStack {
                 VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
-                Color.black.opacity(0.38)
-                Color.white.opacity(0.04)
+                CiderColors.acrylicOverlayTint
+                CiderColors.surfaceSubtle
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg - CiderBorder.innerStrokeInset, style: .continuous)
-                .stroke(Color.white.opacity(0.24), lineWidth: CiderBorder.innerStrokeWidth)
+                .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                 .padding(CiderBorder.innerStrokeInset)
         )
     }
@@ -463,7 +463,7 @@ struct BookmarkDetailsSheet: View {
                     cornerRadius: BookmarksDesign.detailsCanvasCornerRadius,
                     style: .continuous
                 )
-                .fill(Color.white.opacity(0.03))
+                .fill(CiderColors.surfaceHighlight)
 
                 leftContent
                     .padding(.leading, Spacing.lg)
@@ -491,7 +491,7 @@ struct BookmarkDetailsSheet: View {
                     maxHeight: BookmarksDesign.detailsHeroMaxHeight
                 )
                 .shadow(
-                    color: Color.black.opacity(0.28),
+                    color: CiderColors.shadowMedium,
                     radius: BookmarksDesign.detailsFloatingLiftBlur,
                     x: 0,
                     y: BookmarksDesign.detailsFloatingLiftYOffset
@@ -499,19 +499,19 @@ struct BookmarkDetailsSheet: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(draft.title)
-                    .font(.system(size: 17 * textScale, weight: .semibold))
+                    .font(CiderFont.heroTitle(scale: textScale))
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(3)
 
                 HStack(spacing: Spacing.xs) {
                     Text(draft.hostDisplay)
-                        .font(.system(size: 12 * textScale, weight: .medium))
+                        .font(CiderFont.labelMedium(scale: textScale))
                         .foregroundColor(CiderColors.secondary)
                     Text("•")
-                        .font(.system(size: 10 * textScale, weight: .semibold))
+                        .font(CiderFont.captionSemibold(scale: textScale))
                         .foregroundColor(CiderColors.tertiary)
                     Text(draft.updatedAt.formatted(.relative(presentation: .named)))
-                        .font(.system(size: 12 * textScale))
+                        .font(CiderFont.label(scale: textScale))
                         .foregroundColor(CiderColors.tertiary)
                 }
             }
@@ -524,16 +524,16 @@ struct BookmarkDetailsSheet: View {
     private func sidebar(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Metadata")
-                .font(.system(size: 11 * textScale, weight: .semibold))
+                .font(CiderFont.bodySemibold(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("URL")
-                    .font(.system(size: 11 * textScale, weight: .medium))
+                    .font(CiderFont.bodyMedium(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(draft.urlString)
-                        .font(.system(size: 12 * textScale))
+                        .font(CiderFont.label(scale: textScale))
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
                         .textSelection(.enabled)
@@ -543,14 +543,14 @@ struct BookmarkDetailsSheet: View {
                 .padding(.horizontal, Spacing.sm)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(CiderColors.surfaceInput)
                 )
             }
 
             HStack(spacing: Spacing.sm) {
                 Button(action: onOpenURL) {
                     Label("Open", systemImage: "link")
-                        .font(.system(size: 11 * textScale, weight: .medium))
+                        .font(CiderFont.bodyMedium(scale: textScale))
                         .foregroundColor(CiderColors.secondary)
                         .frame(minHeight: BookmarksDesign.buttonTapTarget)
                         .padding(.horizontal, Spacing.sm)
@@ -558,12 +558,12 @@ struct BookmarkDetailsSheet: View {
                 .buttonStyle(.plain)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(CiderColors.surfaceInput)
                 )
 
                 Button(action: onCopyURL) {
                     Label("Copy URL", systemImage: "doc.on.doc")
-                        .font(.system(size: 11 * textScale, weight: .medium))
+                        .font(CiderFont.bodyMedium(scale: textScale))
                         .foregroundColor(CiderColors.secondary)
                         .frame(minHeight: BookmarksDesign.buttonTapTarget)
                         .padding(.horizontal, Spacing.sm)
@@ -571,13 +571,13 @@ struct BookmarkDetailsSheet: View {
                 .buttonStyle(.plain)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(CiderColors.surfaceInput)
                 )
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Title")
-                    .font(.system(size: 11 * textScale, weight: .medium))
+                    .font(CiderFont.bodyMedium(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
                 TextField("Bookmark title", text: $draft.title)
                     .textFieldStyle(.roundedBorder)
@@ -585,7 +585,7 @@ struct BookmarkDetailsSheet: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Tags")
-                    .font(.system(size: 11 * textScale, weight: .medium))
+                    .font(CiderFont.bodyMedium(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
                 TextField("Comma-separated tags", text: $draft.tagsText)
                     .textFieldStyle(.roundedBorder)
@@ -593,10 +593,10 @@ struct BookmarkDetailsSheet: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Notes")
-                    .font(.system(size: 11 * textScale, weight: .medium))
+                    .font(CiderFont.bodyMedium(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
                 TextEditor(text: $draft.notes)
-                    .font(.system(size: 12 * textScale))
+                    .font(CiderFont.label(scale: textScale))
                     .frame(
                         minHeight: BookmarksDesign.detailsSheetNotesMinHeight,
                         idealHeight: BookmarksDesign.detailsSheetNotesHeight,
@@ -605,7 +605,7 @@ struct BookmarkDetailsSheet: View {
                     .padding(Spacing.xxs)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(CiderColors.surfaceInput)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
@@ -628,7 +628,7 @@ struct BookmarkDetailsSheet: View {
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 11 * textScale, weight: .medium))
+                    .font(CiderFont.bodyMedium(scale: textScale))
                     .foregroundColor(CiderColors.destructive)
                     .lineLimit(2)
             }
@@ -637,10 +637,10 @@ struct BookmarkDetailsSheet: View {
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Updated \(draft.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.system(size: 10 * textScale))
+                    .font(CiderFont.caption(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
                 Text("Created \(draft.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.system(size: 10 * textScale))
+                    .font(CiderFont.caption(scale: textScale))
                     .foregroundColor(CiderColors.tertiary)
             }
 
@@ -654,7 +654,7 @@ struct BookmarkDetailsSheet: View {
                     .padding(.horizontal, Spacing.sm)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(CiderColors.surfaceInput)
                     )
 
                 Button("Save", action: onSave)
@@ -664,7 +664,7 @@ struct BookmarkDetailsSheet: View {
                     .padding(.horizontal, Spacing.md)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.controlAccent.opacity(0.15))
+                            .fill(CiderColors.selectedFill)
                     )
             }
         }
@@ -673,14 +673,14 @@ struct BookmarkDetailsSheet: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(CiderColors.surfaceInput)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .stroke(Color.white.opacity(0.2), lineWidth: CiderBorder.innerStrokeWidth)
+                .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .shadow(
-            color: Color.black.opacity(0.28),
+            color: CiderColors.shadowMedium,
             radius: BookmarksDesign.detailsFloatingLiftBlur,
             x: 0,
             y: BookmarksDesign.detailsFloatingLiftYOffset
@@ -726,7 +726,7 @@ struct BookmarkDetailsHeroPreview: View {
             }
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .stroke(Color.white.opacity(0.2), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
             )
             .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             .onAppear(perform: loadThumbnailIfNeeded)
@@ -745,13 +745,13 @@ struct BookmarkDetailsHeroPreview: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(Spacing.md)
-                .shadow(color: Color.black.opacity(0.28), radius: 8, x: 0, y: 3)
+                .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 3)
         } else {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Spacer(minLength: 0)
                 Text(String(draft.hostDisplay.prefix(1)).uppercased())
                     .font(.system(size: BookmarksDesign.detailsHeroFallbackLetterSize * textScale, weight: .black))
-                    .foregroundColor(Color.white.opacity(0.9))
+                    .foregroundColor(CiderColors.textOnColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(Spacing.md)
@@ -763,8 +763,8 @@ struct BookmarkDetailsHeroPreview: View {
             return AnyShapeStyle(
                 LinearGradient(
                     colors: [
-                        Color.black.opacity(0.34),
-                        Color.black.opacity(0.22),
+                        CiderColors.stageGradientStart,
+                        CiderColors.stageGradientEnd,
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -774,7 +774,7 @@ struct BookmarkDetailsHeroPreview: View {
 
         return AnyShapeStyle(
             LinearGradient(
-                colors: [palette.0.opacity(0.82), palette.1.opacity(0.82)],
+                colors: [palette.0.opacity(CiderColors.gradientTint), palette.1.opacity(CiderColors.gradientTint)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -804,11 +804,11 @@ struct BookmarkDetailsPlaceholderSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Label(title, systemImage: icon)
-                .font(.system(size: 10 * textScale, weight: .semibold))
+                .font(CiderFont.captionSemibold(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
 
             Text(subtitle)
-                .font(.system(size: 11 * textScale))
+                .font(CiderFont.body(scale: textScale))
                 .foregroundColor(CiderColors.quaternary)
                 .lineLimit(2)
         }
@@ -964,16 +964,14 @@ struct BookmarksTrafficLightButton: View {
                     if isHovered {
                         Image(systemName: symbol)
                             .font(.system(size: NotesDesign.trafficLightSymbolSize, weight: .semibold))
-                            .foregroundColor(Color.black.opacity(0.65))
+                            .foregroundColor(CiderColors.trafficLightSymbol)
                     }
                 }
                 .frame(width: NotesDesign.trafficLightTapTarget, height: NotesDesign.trafficLightTapTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovered in
-            isHovered = hovered
-        }
+        .hoverState($isHovered)
         .help(help)
     }
 }

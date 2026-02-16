@@ -52,9 +52,21 @@ struct NotesStorageRegressionTests {
         #expect(note.relativePath == duplicateFilename)
 
         let rewrittenData = try Data(contentsOf: indexURL)
-        let rewrittenIndex = try JSONDecoder().decode([String: String].self, from: rewrittenData)
-        #expect(rewrittenIndex.count == 1)
-        #expect(rewrittenIndex[expectedWinner.uuidString] == duplicateFilename)
-        #expect(rewrittenIndex[expectedLoser.uuidString] == nil)
+        let rawIndex = try JSONSerialization.jsonObject(with: rewrittenData, options: []) as? [String: Any]
+        #expect(rawIndex != nil)
+        #expect(rawIndex?.count == 1)
+        #expect(rawIndex?[expectedLoser.uuidString] == nil)
+
+        if let winnerValue = rawIndex?[expectedWinner.uuidString] {
+            if let filename = winnerValue as? String {
+                #expect(filename == duplicateFilename)
+            } else if let payload = winnerValue as? [String: Any] {
+                #expect(payload["filename"] as? String == duplicateFilename)
+            } else {
+                Issue.record("Unexpected index entry format for winner.")
+            }
+        } else {
+            Issue.record("Missing index entry for expected winner.")
+        }
     }
 }

@@ -343,7 +343,161 @@ enum CiderColors {
     static let selectedContent = Color(.selectedContentBackgroundColor)
     static let success = Color.green
     static let destructive = Color(.systemRed)
+    static let warning = Color(.systemYellow)
 
     // Backgrounds
     static let opaqueBackground = Color(.windowBackgroundColor)
+
+    // MARK: - Surfaces (white-based fills)
+
+    /// Acrylic shimmer layer
+    static let surfaceHighlight = Color.white.opacity(0.03)
+    /// Empty states, faint section backgrounds
+    static let surfaceSubtle = Color.white.opacity(0.04)
+    /// Cards, sidebar rows, raised surfaces
+    static let surfaceElevated = Color.white.opacity(0.06)
+    /// Buttons, pills, input fields, list row hover
+    static let surfaceInput = Color.white.opacity(0.08)
+    /// Hover state for elevated surfaces
+    static let surfaceHover = Color.white.opacity(0.1)
+
+    // MARK: - Borders (white-based strokes)
+
+    /// Faint borders (note card default)
+    static let borderSubtle = Color.white.opacity(0.08)
+    /// Standard element borders
+    static let borderDefault = Color.white.opacity(0.12)
+    /// Border on hover
+    static let borderHover = Color.white.opacity(0.18)
+    /// Emphasized borders (detail sheets)
+    static let borderStrong = Color.white.opacity(0.2)
+    /// Outer panel stroke
+    static let borderPanel = Color.white.opacity(0.25)
+
+    // MARK: - Backdrops & Overlays (black-based)
+
+    /// Dimming behind overlays and compact sidebar
+    static let backdrop = Color.black.opacity(0.28)
+    /// Main panel acrylic dark tint
+    static let acrylicTint = Color.black.opacity(0.45)
+    /// Overlay/palette acrylic tint (lighter than main)
+    static let acrylicOverlayTint = Color.black.opacity(0.38)
+    /// Traffic light hover icon color
+    static let trafficLightSymbol = Color.black.opacity(0.65)
+
+    // MARK: - Shadows (for .shadow() modifiers)
+
+    /// Subtle icon/element shadow
+    static let shadowLight = Color.black.opacity(0.2)
+    /// Standard card/sheet shadow
+    static let shadowMedium = Color.black.opacity(0.28)
+    /// Deep floating palette/modal shadow
+    static let shadowHeavy = Color.black.opacity(0.4)
+
+    // MARK: - Overlays
+
+    /// Dark overlay on drag preview / thumbnail
+    static let overlayDark = Color.black.opacity(0.72)
+    /// Subtle backdrop for in-panel overlays (details sheets)
+    static let backdropSubtle = Color.black.opacity(0.14)
+    /// Hero preview stage gradient (dark end)
+    static let stageGradientStart = Color.black.opacity(0.34)
+    /// Hero preview stage gradient (light end)
+    static let stageGradientEnd = Color.black.opacity(0.22)
+
+    // MARK: - Text on Color
+
+    /// Bright text on gradient/colored backgrounds
+    static let textOnColor = Color.white.opacity(0.9)
+
+    // MARK: - Shimmer Animation
+
+    /// Peak brightness of shimmer band
+    static let shimmerPeak = Color.white.opacity(0.22)
+
+    // MARK: - Additional Borders
+
+    /// Settings selected-row border / progress track
+    static let borderSelected = Color.white.opacity(0.14)
+
+    // MARK: - Selection & Drop Targets (accent-based)
+
+    /// Selected row/card fill
+    static let selectedFill = controlAccent.opacity(0.14)
+    /// Selected row/card border
+    static let selectedBorder = controlAccent.opacity(0.48)
+    /// Drag-over highlight fill
+    static let dropTargetFill = controlAccent.opacity(0.2)
+    /// Drag-over border
+    static let dropTargetBorder = controlAccent.opacity(0.72)
+    /// Strong drop target indicator
+    static let dropTargetBorderStrong = controlAccent.opacity(0.65)
+
+    // MARK: - Accent Tints
+
+    /// Barely-tinted accent backgrounds
+    static let accentSubtle = controlAccent.opacity(0.08)
+    /// Light accent (pressed states, subtle selection)
+    static let accentLight = controlAccent.opacity(0.12)
+    /// Accent-colored text and labels
+    static let accentText = controlAccent.opacity(0.8)
+    /// Selected interactive element (view option toggle)
+    static let accentSelected = controlAccent.opacity(0.18)
+    /// Medium accent fill (avatar circles)
+    static let accentMedium = controlAccent.opacity(0.2)
+    /// Accent-colored border (sidebar drop target)
+    static let accentBorder = controlAccent.opacity(0.3)
+    /// Near-solid accent (progress bar fill)
+    static let accentSolid = controlAccent.opacity(0.88)
+
+    // MARK: - Separator-based Fills (neutral gray scale)
+
+    /// Faint neutral fill (home sections, button rest states)
+    static let separatorSubtle = separator.opacity(0.2)
+    /// Light neutral fill (tab badge, search bar background)
+    static let separatorLight = separator.opacity(0.25)
+    /// Medium neutral fill (selected list row, tab border)
+    static let separatorMedium = separator.opacity(0.3)
+    /// Firm neutral fill (selected tab badge, hover button)
+    static let separatorFirm = separator.opacity(0.4)
+    /// Strong neutral border (panel inner stroke, settings sections)
+    static let separatorStrong = separator.opacity(0.5)
+    /// Solid neutral fill (toolbar divider, active indicator)
+    static let separatorSolid = separator.opacity(0.7)
+
+    // MARK: - Destructive Fills
+
+    /// Faint destructive background (button rest state)
+    static let destructiveSubtle = destructive.opacity(0.08)
+    /// Light destructive background (button hover/fill)
+    static let destructiveLight = destructive.opacity(0.14)
+
+    // MARK: - Success Fills
+
+    /// Muted success indicator
+    static let successMuted = success.opacity(0.7)
+
+    // MARK: - Gradient Tint
+
+    /// Palette/thumbnail gradient tint opacity
+    static let gradientTint: CGFloat = 0.8
+
+    // MARK: - View Opacity (for Divider/element dimming)
+
+    /// Primary settings divider opacity
+    static let dividerPrimaryOpacity: CGFloat = 0.28
+    /// Secondary settings divider opacity (lighter)
+    static let dividerSecondaryOpacity: CGFloat = 0.22
+
+    // MARK: - Shadow Shape Opacity (custom blurred shadow technique)
+
+    /// Full/expanded panel shadow shape opacity
+    static let shadowShapeFullOpacity: CGFloat = 0.7
+    /// Compact/collapsed panel shadow shape opacity
+    static let shadowShapeCompactOpacity: CGFloat = 0.52
+
+    // MARK: - View State Opacity
+
+    /// Disabled element opacity
+    static let disabledOpacity: CGFloat = 0.55
 }

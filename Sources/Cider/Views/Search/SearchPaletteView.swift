@@ -51,7 +51,7 @@ struct SearchPaletteView: View {
     var body: some View {
         GeometryReader { proxy in
         ZStack(alignment: .top) {
-            Color.black.opacity(SearchPaletteDesign.backdropOpacity)
+            CiderColors.backdrop
                 .contentShape(Rectangle())
                 .onTapGesture { onDismiss() }
 
@@ -75,17 +75,17 @@ struct SearchPaletteView: View {
             .background(
                 ZStack {
                     VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
-                    Color.black.opacity(0.38)
-                    Color.white.opacity(0.04)
+                    CiderColors.acrylicOverlayTint
+                    CiderColors.surfaceSubtle
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.lg - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(Color.white.opacity(0.24), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
-            .shadow(color: Color.black.opacity(0.4), radius: 24, x: 0, y: 12)
+            .shadow(color: CiderColors.shadowHeavy, radius: 24, x: 0, y: 12)
             .padding(.top, proxy.size.height * 0.22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -104,12 +104,12 @@ struct SearchPaletteView: View {
     private var searchField: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
+                .font(CiderFont.titleMedium)
                 .foregroundColor(CiderColors.tertiary)
 
             TextField("Search bookmarks and notes\u{2026}", text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(CiderFont.title)
                 .foregroundColor(CiderColors.primary)
                 .focused($isSearchFieldFocused)
                 .onSubmit {
@@ -123,20 +123,20 @@ struct SearchPaletteView: View {
                     query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(CiderFont.headingMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
                 .buttonStyle(.plain)
             }
 
             Text("esc")
-                .font(.system(size: 10, weight: .medium))
+                .font(CiderFont.captionMedium)
                 .foregroundColor(CiderColors.quaternary)
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(CiderColors.surfaceInput)
                 )
         }
         .padding(.horizontal, Spacing.lg)
@@ -159,11 +159,11 @@ struct SearchPaletteView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "clock")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Text("Recent")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
             }
@@ -204,19 +204,19 @@ struct SearchPaletteView: View {
     private func recentRowContent(icon: String, title: String, subtitle: String?, date: Date) -> some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.secondary)
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(CiderFont.subheadingMedium)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
 
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
                 }
@@ -225,7 +225,7 @@ struct SearchPaletteView: View {
             Spacer(minLength: Spacing.sm)
 
             Text(date.formatted(.relative(presentation: .named)))
-                .font(.system(size: 10))
+                .font(CiderFont.caption)
                 .foregroundColor(CiderColors.quaternary)
         }
         .padding(.horizontal, Spacing.sm)
@@ -263,16 +263,16 @@ struct SearchPaletteView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
 
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
 
                 Text("\(results.count)")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.quaternary)
             }
 
@@ -299,18 +299,18 @@ struct SearchPaletteView: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: result.type == .bookmark ? "bookmark" : "note.text")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(result.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
                     Text(result.subtitle)
-                        .font(.system(size: 11))
+                        .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
                         .lineLimit(1)
                 }
@@ -318,7 +318,7 @@ struct SearchPaletteView: View {
                 Spacer(minLength: Spacing.sm)
 
                 Text(result.date.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
             .padding(.horizontal, Spacing.sm)
@@ -328,7 +328,7 @@ struct SearchPaletteView: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CiderColors.surfaceSubtle)
         )
     }
 
@@ -337,11 +337,11 @@ struct SearchPaletteView: View {
     private var noResultsRow: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+                .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.tertiary)
 
             Text("No results for \"\(query)\"")
-                .font(.system(size: 13))
+                .font(CiderFont.subheading)
                 .foregroundColor(CiderColors.secondary)
         }
         .frame(maxWidth: .infinity)
