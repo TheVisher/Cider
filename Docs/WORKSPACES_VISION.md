@@ -138,6 +138,14 @@ PROJECTS
 
 The folder sidebar is **universal** — visible across views, not scoped to bookmarks only.
 
+### Design Principle: Sidebar = Organization, Tab Bar = Views
+
+- **Tab bar** shows *what you're looking at* — Home (library), Bookmarks, Notes, future content types
+- **Sidebar** shows *how you've organized it* — folders, projects
+- "All Items" was removed from the sidebar because it's a view, not a folder
+- Clicking a folder filters the current tab's content to that folder
+- Deselecting all folders returns to the full unfiltered tab view
+
 ```
 FOLDERS
   Restaurants          (3 bookmarks, 1 note)
