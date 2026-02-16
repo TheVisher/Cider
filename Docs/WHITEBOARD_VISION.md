@@ -214,6 +214,57 @@ The Whiteboard and Notes tabs serve different purposes:
 
 The promotion flow: **Whiteboard blocks → select → "Create Note" → Notes tab**
 
+## Clipboard Capture Flow
+
+The Whiteboard doubles as Cider's **clipboard inbox**. Instead of building a separate clipboard manager, clipboard captures route through the existing toast system — the same one that already handles URL bookmarking.
+
+### How It Works
+
+Every time you copy something, Cider detects it and shows a toast:
+
+**URLs** → "Save as bookmark?" toast (already exists, no change)
+
+**Everything else** (text, images, quotes, code snippets) → "Save to Whiteboard?" toast
+
+That's it. Two paths, both using the same toast pattern. Nothing is captured unless you confirm it.
+
+### Accepting a Toast: Keyboard Shortcuts
+
+When a toast is showing, Cider's existing hotkeys double as accept gestures:
+
+- **Double-tap Option** → save to **Whiteboard** (default — sort it later)
+- **Option+N** → save directly as a **Note** (skips Whiteboard, creates a new note)
+- **Option+B** → save directly as a **Bookmark** (skips Whiteboard, adds to bookmarks)
+- **Ignore / let it expire** → nothing is captured
+
+When no toast is showing, these hotkeys work as normal (open Cider, open Notes panel, open Bookmarks panel).
+
+This means:
+- No new hotkeys to learn — same gestures you already use for Cider
+- **Casual flow:** copy, double-tap Option, sort later on the Whiteboard
+- **Power-user flow:** copy, Option+N or Option+B to route directly — skip the Whiteboard entirely
+- Ignoring a capture is zero effort — just don't do anything, the toast expires
+
+### What Gets Created
+
+Accepted clipboard content lands on the Whiteboard as a styled block, auto-detected by type:
+- **Plain text** → sticky note block (random rotation, warm background)
+- **Quoted text** (text in quotes, or with attribution patterns) → quote block (vertical accent bar, italic)
+- **Image data** → image block (lifted corner, drop shadow)
+- **URL** → routed to bookmarks, not the Whiteboard (existing flow)
+
+### Why No Filtering Is Needed
+
+You copied a 2FA code? Ignore the toast. A password? Ignore it. A Discord username? Ignore. Only the things you actively accept with double-tap Option make it to the Whiteboard. No blocklists, no pattern matching, no settings to configure.
+
+### AI-Powered Sorting (Future)
+
+With AI integration, the Whiteboard could:
+- Auto-categorize captured blocks (research, quotes, tasks, references)
+- Suggest connections between related blocks (detective-board strings between related items)
+- Propose promotions ("These 4 blocks look like a note about X — create one?")
+- Cluster nearby blocks by topic automatically
+
 ## Implementation Phases
 
 ### Phase 1: Basic Canvas (MVP)
