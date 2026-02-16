@@ -35,9 +35,11 @@ struct HomeDashboardView: View {
                     recentNotesSection
                 }
             }
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(Spacing.xxs)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.md)
     }
 
     // MARK: - Stats Row

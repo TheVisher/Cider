@@ -122,6 +122,43 @@ All font sizes multiply by the `textScale` environment value.
 | `Spacing.xxl` | 24pt | Major areas |
 | `Spacing.xxxl` | 32pt | Page margins |
 
+### 4.1 Tab Content Area Padding
+
+All tab content areas (Home, Bookmarks, Notes) must use identical padding
+from the divider/sidebar/edges to content. The standard pattern:
+
+| Layer | Token | Value |
+|-------|-------|-------|
+| TabContent wrapper | `Spacing.md` (horizontal + vertical) | 12pt |
+| BrowserView inner | `Spacing.xxs` (all sides) | 2pt |
+| **Total inset** | | **14pt** |
+
+**Critical:** Padding must be applied **outside** the ScrollView so insets
+are fixed and don't scroll away. Content inside the ScrollView starts at
+position (0,0) with no additional padding.
+
+### 4.2 Panel Header Alignment
+
+The sidebar defines the layout reference — never move the sidebar to match
+the right column. All right-column elements align to the sidebar.
+
+**Horizontal center line:** Traffic lights, sidebar toggle, tabs, capture
+button, and view options icon must all share the same vertical center.
+The right column's top padding is tuned so the title bar center aligns
+with the traffic light circle center.
+
+**Divider inset:** 14pt (`Spacing.md + Spacing.xxs`) — matches card
+content edges exactly.
+
+**Search bar:** Top edge aligns with the divider line (no top padding
+on FolderSidebarView).
+
+**Asymmetric title bar spacing (intentional):** More space above the tabs
+than between tabs and divider. The top margin is panel chrome (breathing
+room from the rounded panel edge). The tight bottom gap makes the divider
+feel anchored to the header, not floating between sections. Do not
+equalize — this follows macOS toolbar convention.
+
 ---
 
 ## 5. Corner Radii

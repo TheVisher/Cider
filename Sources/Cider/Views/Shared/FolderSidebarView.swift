@@ -197,7 +197,8 @@ struct FolderSidebarView: View {
                 .help("Create new item")
             }
         }
-        .padding(Spacing.sm)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.bottom, Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .background {

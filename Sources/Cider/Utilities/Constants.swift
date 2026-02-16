@@ -301,7 +301,7 @@ enum CiderPanelDesign {
     static let trafficLightSymbolSize: CGFloat = 7
     static let collapseToggleAnimationDuration: TimeInterval = 0.18
     static let tabBadgePadding: CGFloat = Spacing.xs
-    static let tabHorizontalPadding: CGFloat = Spacing.md
+    static let tabHorizontalPadding: CGFloat = Spacing.xs
     static let tabSpacing: CGFloat = Spacing.xxs
 
     static var panelContentWidth: CGFloat {

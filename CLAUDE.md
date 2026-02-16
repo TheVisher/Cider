@@ -161,14 +161,14 @@ Sources/Cider/
 CiderPanelView
 ├── HStack(spacing: 0)
 │   ├── sidebarColumn (floating rounded-rect, full panel height)
-│   │   ├── sidebarHeader (traffic lights + view options button)
+│   │   ├── sidebarHeader (traffic lights + view options, top-aligned)
 │   │   └── FolderSidebarView(showBackground: false)
-│   │       ├── Search field
+│   │       ├── Search field (top aligned with divider line)
 │   │       ├── Folders section (hierarchical tree)
 │   │       └── Projects section
-│   └── VStack (right column)
+│   └── VStack (right column, top padding aligns title bar center with traffic lights)
 │       ├── titleBar (sidebar toggle + CiderTabBar + capture button)
-│       ├── Divider (inset horizontally)
+│       ├── Divider (14pt horizontal inset, aligned with card content edges)
 │       └── contentArea (switches by selectedTab)
 │           ├── HomeDashboardView
 │           ├── BookmarksTabContent → BookmarksBrowserView
@@ -177,6 +177,17 @@ CiderPanelView
 ├── SearchPaletteView (overlay)
 └── PanelEdgeResizeView (all-edge resize handles)
 ```
+
+## Panel Layout Alignment Rules
+
+**Sidebar is the source of truth** for panel layout. When aligning elements between columns, match the right column to the sidebar — never move the sidebar to match the tabs.
+
+- **Tab content padding:** 12pt (Spacing.md) at TabContent level + 2pt (Spacing.xxs) at BrowserView level = 14pt total. Applied OUTSIDE the ScrollView. See `Docs/DESIGN_SYSTEM.md` §4.1.
+- **Divider inset:** `Spacing.md + Spacing.xxs` (14pt) — matches card content edges exactly.
+- **Traffic lights:** sidebarHeader uses `HStack(alignment: .top)` + `.frame(height:, alignment: .top)` so lights stay pinned regardless of conditional content.
+- **View options button:** frame height = `trafficLightTapTarget` (16pt), not `buttonTapTarget` (28pt), to center with traffic lights.
+- **Search bar:** FolderSidebarView has no top padding — search bar top aligns with the divider line.
+- **Right column top padding:** `Spacing.sm - 1` (7pt) so title bar center aligns with traffic light circle center.
 
 ## Bookmark Display Modes
 ```

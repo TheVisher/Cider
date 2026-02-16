@@ -44,11 +44,12 @@ struct CiderPanelView: View {
                     if !isCollapsed {
                         Divider()
                             .background(CiderColors.separator)
-                            .padding(.horizontal, Spacing.md)
+                            .padding(.horizontal, Spacing.md + Spacing.xxs)
 
                         contentArea
                     }
                 }
+                .padding(.top, Spacing.sm - 1)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
 
@@ -176,7 +177,7 @@ struct CiderPanelView: View {
     }
 
     private var sidebarHeader: some View {
-        HStack(spacing: CiderPanelDesign.trafficLightSpacing) {
+        HStack(alignment: .top, spacing: CiderPanelDesign.trafficLightSpacing) {
             CiderTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close panel") {
                 NotificationCenter.default.post(name: .dismissCiderPanel, object: nil)
             }
@@ -201,7 +202,7 @@ struct CiderPanelView: View {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 28, height: CiderPanelDesign.trafficLightTapTarget)
                     .contentShape(Rectangle())
                     .onTapGesture { isViewOptionsVisible.toggle() }
                     .help("View options")
@@ -221,7 +222,7 @@ struct CiderPanelView: View {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 28, height: CiderPanelDesign.trafficLightTapTarget)
                     .contentShape(Rectangle())
                     .onTapGesture { isNoteViewOptionsVisible.toggle() }
                     .help("View options")
@@ -239,7 +240,7 @@ struct CiderPanelView: View {
                     }
             }
         }
-        .frame(height: BookmarksDesign.buttonTapTarget)
+        .frame(height: BookmarksDesign.buttonTapTarget, alignment: .top)
         .padding(.horizontal, Spacing.sm)
         .padding(.top, Spacing.sm)
         .frame(maxWidth: BookmarksDesign.folderSidebarWidth, alignment: .leading)

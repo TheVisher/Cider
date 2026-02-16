@@ -34,9 +34,9 @@ struct NotesBrowserView: View {
     var body: some View {
         ScrollView {
             content
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(Spacing.xxs)
     }
 
     @ViewBuilder

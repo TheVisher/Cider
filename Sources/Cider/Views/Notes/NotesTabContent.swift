@@ -54,6 +54,8 @@ struct NotesTabContent: View {
                         viewModel.assignNote(note, toFolder: folderID)
                     }
                 )
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.md)
             }
 
             if isExpandMode, isEditing, let noteID = selectedNoteID,
