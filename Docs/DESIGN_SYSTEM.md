@@ -273,6 +273,8 @@ Available: `body`, `bodyMedium`, `bodySemibold`, `caption`, `captionMedium`, `ca
 
 **Reduce Motion:** Check `@Environment(\.accessibilityReduceMotion)`. Replace springs with `.none` (instant) or `.linear(duration: 0.2)` opacity crossfade.
 
+**AppKit exception:** `NSAnimationContext` window-frame animations use `CAMediaTimingFunction(.easeInEaseOut)` — AppKit has no spring timing API. This applies to panel collapse/expand in `CiderPanel`, `BookmarksPanel`, and `NotesPanel`. Check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` for these (not `@Environment`).
+
 ---
 
 ## 4. Acrylic Material

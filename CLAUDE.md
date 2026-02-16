@@ -245,6 +245,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Editor resources** — `Resources/TipTapEditor/editor.html` + `editor.css` + `editor.js` (minified bundle)
 - **CSS gotcha** — `line-height` on `<pre>` (block) controls code block spacing, NOT on `<code>` (inline child). The `<pre>` inherits body's `line-height` if not explicitly set.
 - **Table CSS** — `width:auto; table-layout:auto` for content-sized tables (not `width:100%` which stretches to fill)
+- **Accepted risk:** `allowingReadAccessTo` is filesystem root (`/`) so the editor can load images from any local path the user drags in. Navigation delegate filters external URLs. This is appropriate for a local-only desktop app with bundled editor HTML and ProseMirror schema validation.
 
 ## SwiftUI + NSPanel Gotchas
 
