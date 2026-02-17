@@ -79,6 +79,7 @@ struct CiderPanelShell<
 
                         content
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                     }
                 }
                 .padding(.top, Spacing.sm - 1)
