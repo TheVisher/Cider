@@ -15,6 +15,7 @@ struct FolderSidebarView: View {
     var onCreateProject: (() -> Void)?
     var onDeleteProject: ((UUID) -> Void)?
     var onRenameProject: ((UUID, String) -> Void)?
+    var onRenameFolder: ((UUID, String) -> Void)?
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
     var onTriggerSearch: (() -> Void)?
@@ -29,6 +30,8 @@ struct FolderSidebarView: View {
     @State private var draftSubFolderName = ""
     @State private var renamingProjectID: UUID?
     @State private var renamingProjectName = ""
+    @State private var renamingFolderID: UUID?
+    @State private var renamingFolderName = ""
 
     private var topLevelFolders: [Folder] {
         childFolders(of: nil)
@@ -238,6 +241,15 @@ struct FolderSidebarView: View {
         renamingProjectID = nil
     }
 
+    private func commitFolderRename() {
+        guard let id = renamingFolderID else { return }
+        let trimmed = renamingFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            onRenameFolder?(id, trimmed)
+        }
+        renamingFolderID = nil
+    }
+
     // MARK: - Root Folder Group
 
     private func rootFolderGroup(_ folder: Folder) -> some View {
@@ -250,6 +262,8 @@ struct FolderSidebarView: View {
                 itemCount: itemsInFolder(folder.id),
                 isExpanded: isExpanded,
                 isSelected: selectedFolderID == folder.id,
+                isRenaming: renamingFolderID == folder.id,
+                renamingName: $renamingFolderName,
                 dropTypeIdentifiers: folderDropTypeIdentifiers,
                 onTap: {
                     selectFolder(folder.id)
@@ -275,6 +289,12 @@ struct FolderSidebarView: View {
                 onDropProviders: { providers in
                     handleFolderDrop(providers: providers, targetFolderID: folder.id)
                 },
+                onRename: {
+                    renamingFolderName = folder.name
+                    renamingFolderID = folder.id
+                },
+                onCommitRename: { commitFolderRename() },
+                onCancelRename: { renamingFolderID = nil },
                 onDelete: { onDeleteFolder?(folder.id) },
                 onAddSubFolder: {
                     subFolderParentID = folder.id
@@ -313,6 +333,8 @@ struct FolderSidebarView: View {
                 hasChildren: hasChildrenOrSubCreation,
                 isExpanded: isExpanded || subFolderParentID == folder.id,
                 isSelected: selectedFolderID == folder.id,
+                isRenaming: renamingFolderID == folder.id,
+                renamingName: $renamingFolderName,
                 dropTypeIdentifiers: folderDropTypeIdentifiers,
                 onTap: {
                     selectFolder(folder.id)
@@ -338,6 +360,12 @@ struct FolderSidebarView: View {
                 onDropProviders: { providers in
                     handleFolderDrop(providers: providers, targetFolderID: folder.id)
                 },
+                onRename: {
+                    renamingFolderName = folder.name
+                    renamingFolderID = folder.id
+                },
+                onCommitRename: { commitFolderRename() },
+                onCancelRename: { renamingFolderID = nil },
                 onDelete: { onDeleteFolder?(folder.id) },
                 onAddSubFolder: {
                     subFolderParentID = folder.id
@@ -562,11 +590,16 @@ struct RootFolderHeaderRow: View {
     let itemCount: Int
     let isExpanded: Bool
     let isSelected: Bool
+    let isRenaming: Bool
+    @Binding var renamingName: String
     let dropTypeIdentifiers: [String]
     let onTap: () -> Void
     let onToggleCollapse: () -> Void
     let onDropTargetChanged: (Bool) -> Void
     let onDropProviders: ([NSItemProvider]) -> Bool
+    var onRename: (() -> Void)?
+    var onCommitRename: (() -> Void)?
+    var onCancelRename: (() -> Void)?
     var onDelete: (() -> Void)?
     var onAddSubFolder: (() -> Void)?
 
@@ -576,6 +609,7 @@ struct RootFolderHeaderRow: View {
     @State private var isIconHovered = false
     @State private var showChevronIcon = false
     @State private var chevronRevertTask: DispatchWorkItem?
+    @FocusState private var isRenameFocused: Bool
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -600,14 +634,28 @@ struct RootFolderHeaderRow: View {
             .hoverState($isIconHovered)
             .animation(reduceMotion ? .none : .smooth, value: shouldShowChevron)
 
-            Text(title)
-                .font(CiderFont.labelSemibold)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
+            if isRenaming {
+                TextField("Folder name", text: $renamingName)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .focused($isRenameFocused)
+                    .onSubmit { onCommitRename?() }
+                    .onExitCommand { onCancelRename?() }
+                    .task {
+                        try? await Task.sleep(for: .milliseconds(150))
+                        isRenameFocused = true
+                    }
+            } else {
+                Text(title)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: Spacing.xs)
 
-            if itemCount > 0 {
+            if !isRenaming, itemCount > 0 {
                 Text("\(itemCount)")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
@@ -626,8 +674,10 @@ struct RootFolderHeaderRow: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            onTap()
-            triggerChevronFlash()
+            if !isRenaming {
+                onTap()
+                triggerChevronFlash()
+            }
         }
         .animation(reduceMotion ? .none : .snappy, value: isDropTargeted)
         .animation(reduceMotion ? .none : .snappy, value: isHovered)
@@ -642,6 +692,11 @@ struct RootFolderHeaderRow: View {
             onDropTargetChanged(targeted)
         }
         .contextMenu {
+            if let onRename {
+                Button(action: onRename) {
+                    Label("Rename", systemImage: "pencil")
+                }
+            }
             if let onAddSubFolder {
                 Button(action: onAddSubFolder) {
                     Label("Add Sub Folder", systemImage: "folder.badge.plus")
@@ -711,17 +766,23 @@ struct SubFolderRow: View {
     let hasChildren: Bool
     let isExpanded: Bool
     let isSelected: Bool
+    let isRenaming: Bool
+    @Binding var renamingName: String
     let dropTypeIdentifiers: [String]
     let onTap: () -> Void
     let onToggleExpand: (() -> Void)?
     let onDropTargetChanged: (Bool) -> Void
     let onDropProviders: ([NSItemProvider]) -> Bool
+    var onRename: (() -> Void)?
+    var onCommitRename: (() -> Void)?
+    var onCancelRename: (() -> Void)?
     var onDelete: (() -> Void)?
     var onAddSubFolder: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isDropTargeted = false
     @State private var isHovered = false
+    @FocusState private var isRenameFocused: Bool
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -743,16 +804,32 @@ struct SubFolderRow: View {
                 .font(CiderFont.bodySemibold)
                 .foregroundColor(iconColor)
 
-            Text(title)
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
+            if isRenaming {
+                TextField("Folder name", text: $renamingName)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .focused($isRenameFocused)
+                    .onSubmit { onCommitRename?() }
+                    .onExitCommand { onCancelRename?() }
+                    .task {
+                        try? await Task.sleep(for: .milliseconds(150))
+                        isRenameFocused = true
+                    }
+            } else {
+                Text(title)
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: Spacing.xs)
 
-            Text("\(itemCount)")
-                .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.tertiary)
+            if !isRenaming {
+                Text("\(itemCount)")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
         }
         .padding(.horizontal, Spacing.sm)
         .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
@@ -765,7 +842,11 @@ struct SubFolderRow: View {
                 .stroke(borderColor, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
+        .onTapGesture {
+            if !isRenaming {
+                onTap()
+            }
+        }
         .animation(reduceMotion ? .none : .snappy, value: isDropTargeted)
         .animation(reduceMotion ? .none : .snappy, value: isHovered)
         .animation(reduceMotion ? .none : .snappy, value: isExpanded)
@@ -779,6 +860,11 @@ struct SubFolderRow: View {
             onDropTargetChanged(targeted)
         }
         .contextMenu {
+            if let onRename {
+                Button(action: onRename) {
+                    Label("Rename", systemImage: "pencil")
+                }
+            }
             if let onAddSubFolder {
                 Button(action: onAddSubFolder) {
                     Label("Add Sub Folder", systemImage: "folder.badge.plus")

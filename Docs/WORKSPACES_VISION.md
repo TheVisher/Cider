@@ -214,6 +214,113 @@ PROJECTS
 
 ---
 
+## Folder Refinements (Planned)
+
+### Folder Rename
+Right-click context menu on folders in the sidebar should include "Rename." Uses inline editing pattern — folder name swaps to a focused text field, Enter to save, Escape to cancel. Same pattern as card inline rename.
+
+### Folder Header with Title + Breadcrumb
+FolderDetailView should have a header area showing:
+- **Folder title** in heading font
+- **Breadcrumb path** in smaller text below (e.g., "Work > Internal Tools > APIs")
+- Breadcrumb is most useful when the sidebar is collapsed — provides context about where you are
+- Each breadcrumb segment is clickable to navigate up
+
+### Folder Header Image
+Folders can have an optional hero/cover image displayed at the top of FolderDetailView, giving the folder a curated, personal feel (like Notion page covers).
+- Set via drag-and-drop onto the header area, or a picker in the context menu
+- Stored alongside folder metadata
+- When no image is set, the header area shows just the title/breadcrumb (no empty placeholder)
+
+### Sub-Folders Section in Folder View
+When viewing a folder that has sub-folders, show a collapsible "Sub Folders" section at the top of FolderDetailView (reusing the Continue section's collapse pattern):
+- Replaces the Continue section's toggle — "Sub Folders" button in the top-right instead of "Continue"
+- Expandable/collapsible with the same animation
+- Shows sub-folder cards in a compact layout (clickable to navigate deeper)
+- Below the sub-folders section: the folder's own items (bookmarks + notes)
+
+### Folder Sorting Options
+Folders need their own sort controls in the view options dropdown:
+- Sort by: creation date, recently modified, title A-Z/Z-A
+- Ascending/descending toggle
+- Per-folder sort persistence (each folder remembers its preferred sort)
+
+### Sidebar Folder Drag Reorder & Nesting
+Drag folders in the sidebar to:
+- **Reorder** — change the display order of sibling folders
+- **Nest** — drag a root folder onto another root folder to make it a child/sub-folder
+- Drop indicators (line between items for reorder, highlight on folder for nesting)
+- Hover-to-expand: hovering a collapsed folder during drag auto-expands it after a short delay
+
+---
+
+## Cross-Cutting Features (Planned)
+
+### Multi-Select
+Select multiple items across any view for bulk operations:
+- **Shift-click** for range selection
+- **Cmd-click** for individual toggle selection
+- **Cmd+A** to select all visible items
+- Selection state shown with a subtle highlight/check overlay on cards
+- Bulk actions: move to folder, delete, (future: tag, export)
+- Selection bar appears at the bottom or top with action buttons and count
+- Works in all display modes (list, grid, masonry) and all tabs (Home, Bookmarks, Notes, Folders)
+
+### Undo System
+Reversible actions should support undo via a transient toast:
+- Toast appears for ~5 seconds after destructive/organizational actions with an "Undo" button
+- Actions that support undo: delete, move to folder, move to trash, bulk operations
+- Single-level undo (undo the most recent action)
+- Toast dismisses on timeout or manual dismiss; clicking "Undo" reverses the action immediately
+
+### Trash System
+Deleted items go to a Trash instead of being permanently removed:
+- **30-day retention** — items auto-purge after 30 days in trash
+- Trash is accessible from the sidebar (below folders) or via a menu
+- Trash view shows items with their deletion date and days remaining
+- Actions in trash: Restore (moves back to original folder), Delete Permanently
+- "Empty Trash" option for manual purge
+- Items in trash don't appear in search results, Home feed, or folder views
+- Affects both bookmarks and notes
+
+### Keyboard Navigation
+Power-user keyboard shortcuts for the floating panel:
+- **Arrow keys** to move between cards in grid/masonry (left/right/up/down)
+- **Enter** to open the selected item
+- **Delete/Backspace** to trash the selected item
+- **Cmd+Shift+N** to create a new note
+- **/** to focus the search field
+- **Escape** to deselect or dismiss
+- Visual focus ring on the currently selected card
+
+### Sorting Options
+Global sort controls in ViewOptionsDropdown, available on all tabs:
+- Sort by: creation date, recently modified, title A-Z
+- Ascending/descending toggle
+- Sort preference persisted per-tab in CiderConfig
+
+### Group By (Future)
+Group items into visual sections within a view:
+- Group by: date (Today, Yesterday, This Week, This Month, Older), type (bookmarks vs notes), domain (for bookmarks), tags (when implemented)
+- Collapsible group headers
+- Works alongside sorting (sort within each group)
+
+### Search Refinement (Future)
+Enhance the search palette with:
+- Type filter chips (Bookmarks, Notes, or both)
+- Folder filter (search within a specific folder)
+- Date range filter
+- Fuzzy matching for typo tolerance
+- Recent searches list
+
+### Card Customization Sliders (Future)
+Additional sliders in ViewOptionsDropdown alongside the existing card size slider:
+- **Padding slider** — adjust internal card padding (content density)
+- **Spacing slider** — adjust gap between cards in grid/masonry (breathing room)
+- These compound with the card size slider for fine-grained visual tuning
+
+---
+
 ## Implementation Priority
 
 1. **Phase 1: Universal Folders** — Rename BookmarkFolder to Folder, add folderID to Notes, universal sidebar.
@@ -221,3 +328,16 @@ PROJECTS
 3. **Phase 3: Search Tabs** — Search results spawn tabs, tab management in tab bar.
 4. **Phase 4: Projects** — Project model, sidebar section, promote-from-search, project tabs.
 5. **Phase 5: Tear-off & Advanced** — Tear out project tabs as windows, kanban folder views, archiving.
+
+### Refinement Priority (Current Focus)
+
+1. **Folder rename** — right-click context menu + inline editing in sidebar
+2. **Multi-select** — shift/cmd-click selection with bulk operations
+3. **Undo system** — transient toast with "Undo" button
+4. **Trash system** — 30-day retention, restore/permanent delete
+5. **Sorting options** — per-tab sort controls
+6. **Folder header + breadcrumb** — title and navigation in FolderDetailView
+7. **Sub-folders section** — collapsible sub-folder cards at top of folder view
+8. **Sidebar drag reorder/nesting** — reorder and nest folders via drag
+9. **Keyboard navigation** — arrow keys, enter, delete shortcuts
+10. **Card customization sliders** — padding and spacing controls

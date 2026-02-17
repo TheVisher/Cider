@@ -157,6 +157,7 @@ struct CiderPanelView: View {
             onCreateProject: createProject,
             onDeleteProject: deleteProject,
             onRenameProject: renameProject,
+            onRenameFolder: { bookmarksViewModel.renameFolder($0, to: $1) },
             onDeleteFolder: deleteFolder,
             onTriggerSearch: { isSearchPaletteVisible = true },
             showBackground: false

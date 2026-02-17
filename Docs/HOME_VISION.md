@@ -54,6 +54,16 @@ The Home tab is the library — the unified view of all Cider content. A sticky 
   - First click inside the notes panel → removes the monitor, panel becomes a normal sticky panel
 - **Rejected approach:** Tab-switching on click (loses scroll position, feels disruptive)
 
+## Planned: Sorting Options
+
+Sort controls in ViewOptionsDropdown for the Home library feed:
+- Sort by: creation date, recently modified, title A-Z
+- Ascending/descending toggle
+- Persisted in CiderConfig as `homeSort` preference
+- Currently the feed sorts by `createdDate` descending — this becomes configurable
+
+---
+
 ## Future Ideas (Not Yet Prioritized)
 
 - Pinned items section (show pinned notes/bookmarks at the top)

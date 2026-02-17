@@ -50,13 +50,16 @@ The standalone bookmarks panel (`BookmarksPanelView`) uses a single-corner resiz
 - Keyboard navigation and accessibility behavior match existing panel standards.
 
 ## Phase 3: Library Management
-1. Bulk select/delete/edit tags.
-2. Sorting controls (newest, oldest, title, domain).
-3. Filter chips (has thumbnail, no thumbnail, recent, tagged).
-4. Duplicate management improvements.
+1. **Multi-select** — Shift-click range, Cmd-click toggle, Cmd+A select all. Bulk move to folder, bulk delete (to trash), bulk tag. See `WORKSPACES_VISION.md` for cross-cutting multi-select spec.
+2. **Sorting controls** — newest, oldest, title A-Z, domain. Per-tab persistence.
+3. **Trash integration** — Delete sends to trash (30-day retention), not permanent delete. See `WORKSPACES_VISION.md` for trash system spec.
+4. **Undo** — Transient toast with "Undo" button for destructive/organizational actions.
+5. Filter chips (has thumbnail, no thumbnail, recent, tagged).
+6. Duplicate management improvements.
 
 ### Acceptance Criteria
-- Bulk actions perform safely and are undo-friendly where practical.
+- Bulk actions perform safely with undo support.
+- Deleted items go to trash, not permanent deletion.
 - Sorting/filtering is stable across List/Grid/Masonry and search.
 
 ## Phase 4: Portability and Interop

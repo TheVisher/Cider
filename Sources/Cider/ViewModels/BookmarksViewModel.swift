@@ -112,6 +112,11 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
+    func renameFolder(_ folderID: UUID, to name: String) -> Bool {
+        BookmarksStorage.shared.renameFolder(folderID, to: name)
+    }
+
+    @discardableResult
     func deleteFolder(_ folderID: UUID) -> Bool {
         BookmarksStorage.shared.deleteFolder(folderID)
     }
