@@ -63,26 +63,24 @@ struct FolderDetailView: View {
                 if childFolders.isEmpty && folderItems.isEmpty {
                     emptyState
                 } else {
-                    if !childFolders.isEmpty {
-                        CollapsiblePinnedSection(isCollapsed: $subFoldersCollapsed) {
-                            subFolderCards
-                                .padding(.horizontal, Spacing.md + Spacing.xxs)
-                                .padding(.top, Spacing.md)
-                                .padding(.bottom, Spacing.sm)
-                        }
-                    }
-
-                    if !folderItems.isEmpty {
-                        ScrollView {
+                    ScrollView {
+                        if !folderItems.isEmpty {
                             libraryFeed
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, Spacing.md + Spacing.xxs)
+                                .padding(.bottom, Spacing.md)
                         }
-                        .scrollIndicators(.hidden)
-                        .padding(Spacing.xxs)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.md)
-                    } else {
-                        Spacer(minLength: 0)
+                    }
+                    .scrollIndicators(.hidden)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if !childFolders.isEmpty {
+                            CollapsiblePinnedSection(isCollapsed: $subFoldersCollapsed) {
+                                subFolderCards
+                                    .padding(.horizontal, Spacing.md + Spacing.xxs)
+                                    .padding(.top, Spacing.md)
+                                    .padding(.bottom, Spacing.sm)
+                            }
+                        }
                     }
                 }
             }

@@ -59,10 +59,6 @@ struct HomeDashboardView: View {
         return bookmarksViewModel.bookmarks.first(where: { $0.id == detailsDraft.id })
     }
 
-    private var pinnedSectionVisible: Bool {
-        config.showContinueSection && !continueItems.isEmpty && !continueSectionCollapsed
-    }
-
     private var isExpandMode: Bool {
         CiderConfig.load().detailModalMode == .expand
     }
@@ -70,8 +66,9 @@ struct HomeDashboardView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                if config.showContinueSection && !continueItems.isEmpty {
-                    CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
+                if libraryItems.isEmpty {
+                    // No scrollable content — show recents normally above empty state
+                    if config.showContinueSection && !continueItems.isEmpty && !continueSectionCollapsed {
                         ContinueSectionView(
                             items: continueItems,
                             onOpenBookmark: { presentDetails(for: $0) },
@@ -80,20 +77,29 @@ struct HomeDashboardView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.md)
                     }
-                }
-
-                if libraryItems.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
                         libraryFeed
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, Spacing.md + Spacing.xxs)
+                            .padding(.bottom, Spacing.md)
                     }
                     .scrollIndicators(.hidden)
-                    .padding(Spacing.xxs)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.top, pinnedSectionVisible ? Spacing.sm : Spacing.md)
-                    .padding(.bottom, Spacing.md)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if config.showContinueSection && !continueItems.isEmpty {
+                            CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
+                                ContinueSectionView(
+                                    items: continueItems,
+                                    onOpenBookmark: { presentDetails(for: $0) },
+                                    onOpenNote: { note in openNoteInPanel(note) }
+                                )
+                                .padding(.horizontal, Spacing.md)
+                                .padding(.top, Spacing.md)
+                                .padding(.bottom, Spacing.xs)
+                            }
+                        }
+                    }
                 }
             }
             .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
