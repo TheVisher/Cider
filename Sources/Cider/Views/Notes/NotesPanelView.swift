@@ -362,7 +362,7 @@ private struct NotesTitleBar: View {
                     Button {
                         viewModel.editorRemoveLink()
                     } label: {
-                        Label("Remove Link", systemImage: "link.badge.minus")
+                        Label("Remove Link", systemImage: "link")
                     }
                 }
 
@@ -563,7 +563,7 @@ private struct NotesFormattingToolbar: View {
                         action: viewModel.editorPromptForLink
                     )
                     NotesToolbarButton(
-                        symbol: "link.badge.minus",
+                        symbol: "link",
                         help: "Remove Link",
                         action: viewModel.editorRemoveLink
                     )
