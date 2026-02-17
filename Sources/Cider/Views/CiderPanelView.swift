@@ -143,9 +143,19 @@ struct CiderPanelView: View {
         }
 
         if selectedTab == .home && selectedFolderID == nil && showContinueSection {
-            recentsSectionToggle
+            SectionCollapseToggle(
+                label: "Recents",
+                isCollapsed: $continueSectionCollapsed,
+                collapsedHelp: "Show recent items",
+                expandedHelp: "Hide recent items"
+            )
         } else if selectedFolderID != nil && folderHasSubFolders {
-            subFoldersToggle
+            SectionCollapseToggle(
+                label: "Folders",
+                isCollapsed: $subFoldersCollapsed,
+                collapsedHelp: "Show sub-folders",
+                expandedHelp: "Hide sub-folders"
+            )
         }
     }
 
@@ -225,55 +235,6 @@ struct CiderPanelView: View {
         return bookmarksViewModel.folders.contains(where: { $0.parentID == folderID })
     }
 
-    private var recentsSectionToggle: some View {
-        Button {
-            withAnimation(reduceMotion ? .none : .snappy) {
-                continueSectionCollapsed.toggle()
-            }
-        } label: {
-            HStack(spacing: Spacing.xs) {
-                Text("Recents")
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.tertiary)
-                    .textCase(.uppercase)
-
-                Image(systemName: "chevron.right")
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.quaternary)
-                    .rotationEffect(.degrees(continueSectionCollapsed ? 0 : 90))
-            }
-            .frame(height: 28)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(reduceMotion ? .none : .snappy, value: continueSectionCollapsed)
-        .help(continueSectionCollapsed ? "Show recent items" : "Hide recent items")
-    }
-
-    private var subFoldersToggle: some View {
-        Button {
-            withAnimation(reduceMotion ? .none : .snappy) {
-                subFoldersCollapsed.toggle()
-            }
-        } label: {
-            HStack(spacing: Spacing.xs) {
-                Text("Folders")
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.tertiary)
-                    .textCase(.uppercase)
-
-                Image(systemName: "chevron.right")
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.quaternary)
-                    .rotationEffect(.degrees(subFoldersCollapsed ? 0 : 90))
-            }
-            .frame(height: 28)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(reduceMotion ? .none : .snappy, value: subFoldersCollapsed)
-        .help(subFoldersCollapsed ? "Show sub-folders" : "Hide sub-folders")
-    }
 
     // MARK: - Sidebar Content
 

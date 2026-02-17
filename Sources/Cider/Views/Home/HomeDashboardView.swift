@@ -59,6 +59,10 @@ struct HomeDashboardView: View {
         return bookmarksViewModel.bookmarks.first(where: { $0.id == detailsDraft.id })
     }
 
+    private var pinnedSectionVisible: Bool {
+        config.showContinueSection && !continueItems.isEmpty && !continueSectionCollapsed
+    }
+
     private var isExpandMode: Bool {
         CiderConfig.load().detailModalMode == .expand
     }
@@ -66,14 +70,16 @@ struct HomeDashboardView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                if config.showContinueSection && !continueSectionCollapsed && !continueItems.isEmpty {
-                    ContinueSectionView(
-                        items: continueItems,
-                        onOpenBookmark: { presentDetails(for: $0) },
-                        onOpenNote: { note in openNoteInPanel(note) }
-                    )
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.md)
+                if config.showContinueSection && !continueItems.isEmpty {
+                    CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
+                        ContinueSectionView(
+                            items: continueItems,
+                            onOpenBookmark: { presentDetails(for: $0) },
+                            onOpenNote: { note in openNoteInPanel(note) }
+                        )
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.top, Spacing.md)
+                    }
                 }
 
                 if libraryItems.isEmpty {
@@ -86,7 +92,7 @@ struct HomeDashboardView: View {
                     .scrollIndicators(.hidden)
                     .padding(Spacing.xxs)
                     .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.md)
+                    .padding(.top, pinnedSectionVisible ? Spacing.sm : Spacing.md)
                     .padding(.bottom, Spacing.md)
                 }
             }
