@@ -82,8 +82,7 @@ struct HomeDashboardView: View {
                     ScrollView {
                         libraryFeed
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, Spacing.md + Spacing.xxs)
-                            .padding(.bottom, Spacing.md)
+                            .padding(.top, Spacing.sm)
                     }
                     .scrollIndicators(.hidden)
                     .safeAreaInset(edge: .top, spacing: 0) {
@@ -94,12 +93,14 @@ struct HomeDashboardView: View {
                                     onOpenBookmark: { presentDetails(for: $0) },
                                     onOpenNote: { note in openNoteInPanel(note) }
                                 )
-                                .padding(.horizontal, Spacing.md)
                                 .padding(.top, Spacing.md)
                                 .padding(.bottom, Spacing.xs)
                             }
                         }
                     }
+                    .padding(Spacing.xxs)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.md)
                 }
             }
             .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)

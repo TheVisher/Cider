@@ -67,8 +67,7 @@ struct FolderDetailView: View {
                         if !folderItems.isEmpty {
                             libraryFeed
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, Spacing.md + Spacing.xxs)
-                                .padding(.bottom, Spacing.md)
+                                .padding(.top, Spacing.sm)
                         }
                     }
                     .scrollIndicators(.hidden)
@@ -76,12 +75,14 @@ struct FolderDetailView: View {
                         if !childFolders.isEmpty {
                             CollapsiblePinnedSection(isCollapsed: $subFoldersCollapsed) {
                                 subFolderCards
-                                    .padding(.horizontal, Spacing.md + Spacing.xxs)
                                     .padding(.top, Spacing.md)
                                     .padding(.bottom, Spacing.sm)
                             }
                         }
                     }
+                    .padding(Spacing.xxs)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.md)
                 }
             }
             .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)

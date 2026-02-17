@@ -8,28 +8,18 @@ struct CollapsiblePinnedSection<Content: View>: View {
 
     var body: some View {
         if !isCollapsed {
-            VStack(spacing: 0) {
-                content()
-
-                Rectangle()
-                    .fill(CiderColors.separator)
-                    .frame(height: Spacing.hairline)
-            }
-            .background {
-                if reduceTransparency {
-                    Color(nsColor: NSColor.windowBackgroundColor)
-                } else {
-                    ZStack {
+            content()
+                .background {
+                    if reduceTransparency {
+                        Color(nsColor: NSColor.windowBackgroundColor)
+                    } else {
                         VisualEffectView(
                             material: .underWindowBackground,
                             blendingMode: .withinWindow
                         )
-                        Color.black.opacity(0.45)
-                        Color.white.opacity(0.03)
                     }
                 }
-            }
-            .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 }
