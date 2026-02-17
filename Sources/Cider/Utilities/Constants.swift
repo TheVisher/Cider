@@ -233,6 +233,9 @@ enum BookmarksDesign {
     static let dragPreviewRotation: CGFloat = -2.5
     static let dragPreviewXOffset: CGFloat = 30
     static let dragPreviewYOffset: CGFloat = -14
+    static let multiDragFanRotationStep: Double = 6
+    static let multiDragFanXStep: CGFloat = 16
+    static let multiDragFanYStep: CGFloat = 8
     static let buttonTapTarget: CGFloat = 28
     static let layoutPickerMaxWidth: CGFloat = 320
     static let collapseToggleAnimationDuration: TimeInterval = 0.18

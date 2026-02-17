@@ -80,6 +80,13 @@ Each tab has its own vision doc capturing features, roadmaps, and brainstorming.
 - **Books:** `Docs/BOOKS_VISION.md` (future tab)
 - **Todos:** `Docs/TODOS_VISION.md` (future tab)
 
+### For AI & Apple Intelligence Features
+**Read:** `Docs/AI_VISION.md`
+- Foundation Models (on-device LLM), NaturalLanguage, Vision framework integration
+- Tiered AI strategy: no-AI → Apple on-device → cloud API (optional)
+- Page summaries, auto-tagging, smart search, transcript summaries
+- Core Spotlight indexing, App Intents / Shortcuts
+
 ### For Display Issues or Performance Problems
 **Read:** `Docs/TROUBLESHOOTING.md`
 - Card sizing and masonry layout fixes
@@ -284,3 +291,9 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Tab deselection in folder view:** CiderTabBar takes `selectedFolderID` binding. `isSelected = selectedTab == tab && selectedFolderID == nil`. Clicking a tab sets `selectedFolderID = nil` so re-clicking the same tab works to exit folder view.
 - **Notes panel modal pattern:** `.openNoteInPanel` with `userInfo: ["modal": true]` installs NSEvent local monitor. Click inside notes panel → remove monitor (normal behavior). Click outside → dismiss AND return `nil` to swallow the event (prevents underlying cards from activating).
 - **onDrop concurrency:** `loadDataRepresentation` callbacks are non-isolated. Capture view model references locally before the closure, then do lookups inside `Task { @MainActor in }` to avoid main-actor-isolation warnings.
+- **Escape key in NSPanel:** `.onExitCommand` does NOT work with `.nonactivatingPanel` — use a hidden `Button("") { ... }.keyboardShortcut(.escape, modifiers: [])` in `.background {}` instead.
+- **Modifier detection in Button actions:** Use `NSEvent.modifierFlags` (static property) to check `.command` / `.shift` at click time. Works inside Button action closures without needing gesture composition.
+- **Custom UTIs in `.onDrop`:** `hasItemConformingToTypeIdentifier()` and `registeredTypeIdentifiers.contains()` both fail for unregistered custom UTIs (e.g., `com.cider.multi-drag`). Encode payloads in `public.utf8-plain-text` with a distinctive prefix (e.g., `cider-multi-drag:JSON`) and detect via text parsing in drop handlers.
+- **Drag preview clipping:** `scaleEffect`, `rotationEffect`, and `offset` on `.onDrag(preview:)` views push content outside the view's natural bounds. macOS clips the preview window to those bounds. Add explicit `.padding()` before transforms to prevent clipping.
+- **Multi-drag provider types:** Don't register single-item type identifiers on multi-drag providers — the single-item drop handler fires first (by order in `handleFolderDrop`) and intercepts the drop, ignoring the multi-drag payload.
+- **Shared view parameter changes:** `BookmarksBrowserView` is used by both `CiderPanelView` and standalone `BookmarksPanelView`. When adding required parameters, update ALL call sites.

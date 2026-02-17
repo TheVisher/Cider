@@ -7,8 +7,10 @@ struct FolderDetailView: View {
     let folderID: UUID
     @Binding var displayMode: LibraryDisplayMode
     @Binding var cardSizeScale: Double
+    @Binding var selectedItemIDs: Set<String>
     var onSelectSubFolder: ((UUID) -> Void)?
 
+    @State private var selectionAnchorID: String?
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsErrorMessage: String?
 
@@ -125,6 +127,7 @@ struct FolderDetailView: View {
     }
 
     private static let dropTypeIdentifiers = [
+        MultiDragPayload.typeIdentifier,
         BookmarkDragPayload.typeIdentifier,
         NoteDragPayload.typeIdentifier,
         "public.utf8-plain-text"
@@ -200,6 +203,26 @@ struct FolderDetailView: View {
         let nvm = notesViewModel
 
         for provider in providers {
+            // Multi-drag drop
+            if provider.registeredTypeIdentifiers.contains(MultiDragPayload.typeIdentifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: MultiDragPayload.typeIdentifier) { data, _ in
+                    guard let data, let items = MultiDragPayload.decode(from: data) else { return }
+                    Task { @MainActor in
+                        for item in items {
+                            if item.type == "bookmark",
+                               let bookmark = bvm.bookmarks.first(where: { $0.id == item.id }) {
+                                _ = bvm.assign(bookmark, toFolder: targetFolderID)
+                            } else if item.type == "note",
+                                      let note = nvm.notes.first(where: { $0.id == item.id }) {
+                                _ = nvm.assignNote(note, toFolder: targetFolderID)
+                            }
+                        }
+                    }
+                }
+                handled = true
+                continue
+            }
+
             // Bookmark drop
             if provider.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) {
                 provider.loadDataRepresentation(forTypeIdentifier: BookmarkDragPayload.typeIdentifier) { data, _ in
@@ -228,12 +251,22 @@ struct FolderDetailView: View {
                 continue
             }
 
-            // Text fallback
+            // Text fallback — also handles multi-drag
             provider.loadItem(forTypeIdentifier: "public.utf8-plain-text", options: nil) { item, _ in
                 guard let data = item as? Data, let text = String(data: data, encoding: .utf8) else { return }
                 Task { @MainActor in
-                    if let bookmarkID = BookmarkDragPayload.bookmarkID(from: text),
-                       let bookmark = bvm.bookmarks.first(where: { $0.id == bookmarkID }) {
+                    if let items = MultiDragPayload.decodeFromText(text) {
+                        for item in items {
+                            if item.type == "bookmark",
+                               let bookmark = bvm.bookmarks.first(where: { $0.id == item.id }) {
+                                _ = bvm.assign(bookmark, toFolder: targetFolderID)
+                            } else if item.type == "note",
+                                      let note = nvm.notes.first(where: { $0.id == item.id }) {
+                                _ = nvm.assignNote(note, toFolder: targetFolderID)
+                            }
+                        }
+                    } else if let bookmarkID = BookmarkDragPayload.bookmarkID(from: text),
+                              let bookmark = bvm.bookmarks.first(where: { $0.id == bookmarkID }) {
                         _ = bvm.assign(bookmark, toFolder: targetFolderID)
                     } else if let noteID = NoteDragPayload.noteID(from: text),
                               let note = nvm.notes.first(where: { $0.id == noteID }) {
@@ -293,10 +326,14 @@ struct FolderDetailView: View {
                 cardSizing: cardSizing.bookmarkSizing,
                 folders: bookmarksViewModel.folders,
                 dragProvider: bookmarkDragProvider(for: bookmark),
-                onShowDetails: { presentDetails(for: bookmark) },
-                onOpen: { bookmarksViewModel.open(bookmark) },
+                dragPreviewOverride: multiDragPreview(for: item),
+                onShowDetails: { handleNormalAction { presentDetails(for: bookmark) } },
+                onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
-                onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) }
+                onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .note(let note):
             NoteListRow(
@@ -305,8 +342,8 @@ struct FolderDetailView: View {
                 searchText: "",
                 folderName: folderName(for: note),
                 folders: bookmarksViewModel.folders,
-                isSelected: false,
-                onOpen: { openNoteInPanel(note) },
+                isSelected: isItemSelected(item),
+                onOpen: { handleNormalAction { openNoteInPanel(note) } },
                 onRename: { newTitle in
                     NotesStorage.shared.rename(note: note, to: newTitle)
                 },
@@ -316,7 +353,10 @@ struct FolderDetailView: View {
                 onMoveToFolder: { folderID in
                     _ = notesViewModel.assignNote(note, toFolder: folderID)
                 },
-                dragProvider: noteDragProvider(for: note)
+                dragProvider: noteDragProvider(for: note),
+                dragPreviewOverride: multiDragPreview(for: item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         }
     }
@@ -334,10 +374,14 @@ struct FolderDetailView: View {
                 cardSizing: cardSizing.bookmarkSizing,
                 folders: bookmarksViewModel.folders,
                 dragProvider: bookmarkDragProvider(for: bookmark),
-                onShowDetails: { presentDetails(for: bookmark) },
-                onOpen: { bookmarksViewModel.open(bookmark) },
+                dragPreviewOverride: multiDragPreview(for: item),
+                onShowDetails: { handleNormalAction { presentDetails(for: bookmark) } },
+                onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
-                onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) }
+                onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .note(let note):
             NoteCardView(
@@ -347,7 +391,7 @@ struct FolderDetailView: View {
                 searchText: "",
                 folderName: folderName(for: note),
                 folders: bookmarksViewModel.folders,
-                onOpen: { openNoteInPanel(note) },
+                onOpen: { handleNormalAction { openNoteInPanel(note) } },
                 onRename: { newTitle in
                     NotesStorage.shared.rename(note: note, to: newTitle)
                 },
@@ -357,7 +401,11 @@ struct FolderDetailView: View {
                 onMoveToFolder: { folderID in
                     _ = notesViewModel.assignNote(note, toFolder: folderID)
                 },
-                dragProvider: noteDragProvider(for: note)
+                dragProvider: noteDragProvider(for: note),
+                dragPreviewOverride: multiDragPreview(for: item),
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         }
     }
@@ -370,6 +418,54 @@ struct FolderDetailView: View {
             title: "This folder is empty",
             subtitle: "Drag bookmarks or notes into this folder to organize them"
         )
+    }
+
+    // MARK: - Selection Helpers
+
+    private func itemID(for item: LibraryItem) -> String {
+        switch item {
+        case .bookmark(let b): return "bookmark-\(b.id.uuidString)"
+        case .note(let n): return "note-\(n.id.uuidString)"
+        }
+    }
+
+    private func isItemSelected(_ item: LibraryItem) -> Bool {
+        selectedItemIDs.contains(itemID(for: item))
+    }
+
+    private func handleSelect(item: LibraryItem) {
+        let id = itemID(for: item)
+        if selectedItemIDs.contains(id) {
+            selectedItemIDs.remove(id)
+        } else {
+            selectedItemIDs.insert(id)
+        }
+        selectionAnchorID = id
+    }
+
+    private func handleShiftSelect(item: LibraryItem) {
+        let id = itemID(for: item)
+        let items = folderItems
+        guard let anchorID = selectionAnchorID,
+              let anchorIndex = items.firstIndex(where: { itemID(for: $0) == anchorID }),
+              let clickedIndex = items.firstIndex(where: { itemID(for: $0) == id }) else {
+            selectedItemIDs.insert(id)
+            selectionAnchorID = id
+            return
+        }
+
+        let range = min(anchorIndex, clickedIndex) ... max(anchorIndex, clickedIndex)
+        for i in range {
+            selectedItemIDs.insert(itemID(for: items[i]))
+        }
+    }
+
+    private func handleNormalAction(_ action: () -> Void) {
+        if !selectedItemIDs.isEmpty {
+            selectedItemIDs.removeAll()
+        } else {
+            action()
+        }
     }
 
     // MARK: - Helpers
@@ -543,35 +639,79 @@ struct FolderDetailView: View {
 
     private func bookmarkDragProvider(for bookmark: Bookmark) -> () -> NSItemProvider {
         return {
-            let provider = NSItemProvider(
-                object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
-            )
-            let payload = Data(bookmark.id.uuidString.utf8)
-            provider.registerDataRepresentation(
-                forTypeIdentifier: BookmarkDragPayload.typeIdentifier,
-                visibility: .all
-            ) { completion in
-                completion(payload, nil)
-                return nil
+            let bookmarkItemID = itemID(for: .bookmark(bookmark))
+
+            if selectedItemIDs.contains(bookmarkItemID) && selectedItemIDs.count > 1 {
+                let allItems = CiderMultiDrag.parseSelectedItemIDs(selectedItemIDs)
+                return CiderMultiDrag.makeProvider(
+                    primaryType: BookmarkDragPayload.typeIdentifier,
+                    primaryID: bookmark.id,
+                    allItemIDs: allItems
+                )
+            } else {
+                let provider = NSItemProvider(
+                    object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
+                )
+                let payload = Data(bookmark.id.uuidString.utf8)
+                provider.registerDataRepresentation(
+                    forTypeIdentifier: BookmarkDragPayload.typeIdentifier,
+                    visibility: .all
+                ) { completion in
+                    completion(payload, nil)
+                    return nil
+                }
+                return provider
             }
-            return provider
         }
     }
 
     private func noteDragProvider(for note: Note) -> () -> NSItemProvider {
         return {
-            let provider = NSItemProvider(
-                object: "\(NoteDragPayload.textPrefix)\(note.id.uuidString)" as NSString
-            )
-            let payload = Data(note.id.uuidString.utf8)
-            provider.registerDataRepresentation(
-                forTypeIdentifier: NoteDragPayload.typeIdentifier,
-                visibility: .all
-            ) { completion in
-                completion(payload, nil)
-                return nil
+            let noteItemID = itemID(for: .note(note))
+
+            if selectedItemIDs.contains(noteItemID) && selectedItemIDs.count > 1 {
+                let allItems = CiderMultiDrag.parseSelectedItemIDs(selectedItemIDs)
+                return CiderMultiDrag.makeProvider(
+                    primaryType: NoteDragPayload.typeIdentifier,
+                    primaryID: note.id,
+                    allItemIDs: allItems
+                )
+            } else {
+                let provider = NSItemProvider(
+                    object: "\(NoteDragPayload.textPrefix)\(note.id.uuidString)" as NSString
+                )
+                let payload = Data(note.id.uuidString.utf8)
+                provider.registerDataRepresentation(
+                    forTypeIdentifier: NoteDragPayload.typeIdentifier,
+                    visibility: .all
+                ) { completion in
+                    completion(payload, nil)
+                    return nil
+                }
+                return provider
             }
-            return provider
+        }
+    }
+
+    // MARK: - Multi-Drag Preview
+
+    private func multiDragPreview(for item: LibraryItem) -> AnyView? {
+        let id = itemID(for: item)
+        guard selectedItemIDs.contains(id), selectedItemIDs.count > 1 else { return nil }
+
+        var previewItems: [MultiDragPreviewItem] = [multiDragPreviewItem(from: item)]
+        for libraryItem in folderItems where isItemSelected(libraryItem) && itemID(for: libraryItem) != id {
+            previewItems.append(multiDragPreviewItem(from: libraryItem))
+            if previewItems.count >= 3 { break }
+        }
+
+        return AnyView(MultiDragPreview(items: previewItems, totalCount: selectedItemIDs.count))
+    }
+
+    private func multiDragPreviewItem(from item: LibraryItem) -> MultiDragPreviewItem {
+        switch item {
+        case .bookmark(let b): return .bookmark(b)
+        case .note(let n): return .note(n)
         }
     }
 }

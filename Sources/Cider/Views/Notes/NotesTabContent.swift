@@ -5,6 +5,7 @@ struct NotesTabContent: View {
     let searchText: String
     var folders: [Folder] = []
     var selectedFolderID: UUID?
+    @Binding var selectedItemIDs: Set<String>
     @State private var selectedNoteID: UUID?
     @State private var isEditing = false
     @State private var isEditingTitle = false
@@ -41,6 +42,7 @@ struct NotesTabContent: View {
                         get: { viewModel.cardSizeScale },
                         set: { viewModel.setCardSizeScale($0) }
                     ),
+                    selectedItemIDs: $selectedItemIDs,
                     searchText: searchText,
                     selectedNoteID: selectedNoteID,
                     onOpenNote: { openNote($0) },

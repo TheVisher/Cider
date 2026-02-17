@@ -37,11 +37,13 @@ struct FolderSidebarView: View {
         childFolders(of: nil)
     }
 
+    private static let multiDragTypeIdentifier = "com.cider.multi-drag"
     private static let bookmarkDragTypeIdentifier = "com.cider.bookmark-id"
     private static let noteDragTypeIdentifier = "com.cider.note-id"
 
     private var folderDropTypeIdentifiers: [String] {
         [
+            Self.multiDragTypeIdentifier,
             Self.bookmarkDragTypeIdentifier,
             Self.noteDragTypeIdentifier,
             UTType.text.identifier,
@@ -522,6 +524,25 @@ struct FolderSidebarView: View {
     // MARK: - Drop Handling
 
     private func handleFolderDrop(providers: [NSItemProvider], targetFolderID: UUID?) -> Bool {
+        // Check for multi-drag payload
+        for provider in providers where provider.registeredTypeIdentifiers.contains(Self.multiDragTypeIdentifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: Self.multiDragTypeIdentifier) { data, _ in
+                guard let data, let items = MultiDragPayload.decode(from: data) else { return }
+                DispatchQueue.main.async {
+                    for item in items {
+                        if item.type == "bookmark",
+                           let bookmark = bookmarks.first(where: { $0.id == item.id }) {
+                            _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
+                        } else if item.type == "note",
+                                  let note = notes.first(where: { $0.id == item.id }) {
+                            _ = onAssignNoteToFolder?(note, targetFolderID)
+                        }
+                    }
+                }
+            }
+            return true
+        }
+
         // Check for bookmark drag payload
         for provider in providers where provider.hasItemConformingToTypeIdentifier(Self.bookmarkDragTypeIdentifier) {
             provider.loadDataRepresentation(forTypeIdentifier: Self.bookmarkDragTypeIdentifier) { data, _ in
@@ -556,11 +577,26 @@ struct FolderSidebarView: View {
             return true
         }
 
-        // Text fallback for bookmark or note IDs
+        // Text fallback for multi-drag or single bookmark/note IDs
         for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
             provider.loadObject(ofClass: NSString.self) { item, _ in
                 guard let raw = item as? String else { return }
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if let items = MultiDragPayload.decodeFromText(trimmed) {
+                    DispatchQueue.main.async {
+                        for item in items {
+                            if item.type == "bookmark",
+                               let bookmark = bookmarks.first(where: { $0.id == item.id }) {
+                                _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
+                            } else if item.type == "note",
+                                      let note = notes.first(where: { $0.id == item.id }) {
+                                _ = onAssignNoteToFolder?(note, targetFolderID)
+                            }
+                        }
+                    }
+                    return
+                }
 
                 if let bookmarkID = BookmarkDragPayload.bookmarkID(from: trimmed) {
                     DispatchQueue.main.async {

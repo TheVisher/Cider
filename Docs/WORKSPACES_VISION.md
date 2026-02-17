@@ -254,17 +254,31 @@ Drag folders in the sidebar to:
 
 ---
 
-## Cross-Cutting Features (Planned)
+## Cross-Cutting Features
 
-### Multi-Select
-Select multiple items across any view for bulk operations:
-- **Shift-click** for range selection
-- **Cmd-click** for individual toggle selection
-- **Cmd+A** to select all visible items
-- Selection state shown with a subtle highlight/check overlay on cards
-- Bulk actions: move to folder, delete, (future: tag, export)
-- Selection bar appears at the bottom or top with action buttons and count
+### Multi-Select ✓
+Implemented. Cmd-click toggles, Shift-click range-selects, Cmd+A selects all visible, Escape clears.
+
+#### Drag & Drop ✓
+When dragging a selected item, all selected items travel together and drop as a group.
+Dragging an unselected item while others are selected drags only that single item.
+
+**Fanned preview** (Finder-style):
+- 1 item: normal single-card preview
+- 2 items: 2-card fan
+- 3+ items: 3-card fan + count badge (capsule, accent bg, white text) when total > 3
+- Fan geometry: 6° rotation, 16pt X offset, 8pt Y offset per successive card
+- Works across all tabs (Home, Bookmarks, Notes, Folders) and all display modes
+- Mixed content: bookmarks and notes can be multi-dragged together (Home tab, folder views)
+
+- Selection title bar replaces normal title bar: `[X] "N items selected" [Move to Folder ▾] [Delete]`
+- Cards: accent border + `SelectionCheckmark` (top-left). List rows: `selectedFill` background + inline checkmark.
+- State: `Set<String>` with type-prefixed IDs (`"bookmark-{uuid}"`, `"note-{uuid}"`) owned by CiderPanelView
+- Clears on tab switch, folder switch, Escape, or X button
+- Continue section (Home tab) excluded from selection
 - Works in all display modes (list, grid, masonry) and all tabs (Home, Bookmarks, Notes, Folders)
+- Escape key: hidden `Button` + `.keyboardShortcut(.escape)` — `.onExitCommand` doesn't work with `.nonactivatingPanel`
+- Future: bulk tag, bulk export
 
 ### Undo System
 Reversible actions should support undo via a transient toast:

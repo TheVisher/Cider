@@ -43,13 +43,19 @@ extension View {
 /// ```
 private struct CardContainerModifier: ViewModifier {
     var isHovered: Bool
+    var isSelected: Bool
     var cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .background(shape.fill(isHovered ? CiderColors.surfaceHover : CiderColors.surfaceElevated))
-            .overlay(shape.stroke(isHovered ? CiderColors.borderHover : CiderColors.borderSubtle, lineWidth: 1))
+            .overlay(shape.stroke(
+                isSelected
+                    ? CiderColors.selectedBorder
+                    : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle,
+                lineWidth: isSelected ? CiderBorder.innerStrokeWidth : 1
+            ))
             .clipShape(shape)
             .contentShape(shape)
     }
@@ -59,8 +65,9 @@ extension View {
     /// Applies the standard hover-aware card container style (fill + border + clip + contentShape).
     func cardContainer(
         isHovered: Bool,
+        isSelected: Bool = false,
         cornerRadius: CGFloat = BookmarksDesign.cardCornerRadius
     ) -> some View {
-        modifier(CardContainerModifier(isHovered: isHovered, cornerRadius: cornerRadius))
+        modifier(CardContainerModifier(isHovered: isHovered, isSelected: isSelected, cornerRadius: cornerRadius))
     }
 }

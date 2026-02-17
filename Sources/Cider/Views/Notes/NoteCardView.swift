@@ -12,6 +12,10 @@ struct NoteCardView: View {
     let onDelete: () -> Void
     let onMoveToFolder: (UUID?) -> Void
     var dragProvider: (() -> NSItemProvider)? = nil
+    var dragPreviewOverride: AnyView? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
 
     enum NoteCardMode {
         case grid
@@ -24,8 +28,19 @@ struct NoteCardView: View {
     @State private var renamingTitle = ""
     @FocusState private var isRenameFocused: Bool
 
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
     var body: some View {
-        Button(action: { if !isRenaming { onOpen() } }) {
+        Button { if !isRenaming { handleClick(normalAction: onOpen) } } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 // Title
                 if isRenaming {
@@ -79,7 +94,13 @@ struct NoteCardView: View {
             .frame(minHeight: mode == .grid ? gridMinHeight : nil)
         }
         .buttonStyle(.plain)
-        .cardContainer(isHovered: isHovered)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected)
+        .overlay(alignment: .topLeading) {
+            if isSelected {
+                SelectionCheckmark()
+                    .padding(Spacing.sm)
+            }
+        }
         .hoverState($isHovered, animation: .snappy)
         .noteContextMenu(
             note: note,
@@ -93,7 +114,11 @@ struct NoteCardView: View {
             onDelete: onDelete
         )
         .ciderDraggable(dragProvider) {
-            NoteDragPreview(note: note)
+            if let preview = dragPreviewOverride {
+                preview
+            } else {
+                NoteDragPreview(note: note)
+            }
         }
         .task(id: note.modifiedAt) {
             cardData = await Task.detached(priority: .userInitiated) {

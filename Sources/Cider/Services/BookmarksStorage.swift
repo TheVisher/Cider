@@ -272,7 +272,6 @@ final class BookmarksStorage: ObservableObject {
         }
 
         bookmarks[index].folderID = folderID
-        bookmarks[index].updatedAt = Date()
         persist()
         return true
     }

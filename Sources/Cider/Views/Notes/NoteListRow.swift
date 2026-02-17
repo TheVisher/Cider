@@ -13,6 +13,9 @@ struct NoteListRow: View {
     let onDelete: () -> Void
     let onMoveToFolder: (UUID?) -> Void
     var dragProvider: (() -> NSItemProvider)? = nil
+    var dragPreviewOverride: AnyView? = nil
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
 
     @State private var isHovered = false
     @State private var cardData: NoteCardData = .empty
@@ -20,8 +23,19 @@ struct NoteListRow: View {
     @State private var renamingTitle = ""
     @FocusState private var isRenameFocused: Bool
 
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
     var body: some View {
-        Button(action: onOpen) {
+        Button { handleClick(normalAction: onOpen) } label: {
             HStack(spacing: Spacing.sm) {
                 // Optional thumbnail (first image)
                 if let firstURL = cardData.imageURLs.first,
@@ -121,7 +135,11 @@ struct NoteListRow: View {
             onDelete: onDelete
         )
         .ciderDraggable(dragProvider) {
-            NoteDragPreview(note: note)
+            if let preview = dragPreviewOverride {
+                preview
+            } else {
+                NoteDragPreview(note: note)
+            }
         }
         .task(id: note.modifiedAt) {
             cardData = await Task.detached(priority: .userInitiated) {

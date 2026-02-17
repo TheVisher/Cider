@@ -452,6 +452,19 @@ The sidebar toggle appears with `.bouncy` animation after a 150ms delay when the
 - **Home tab:** when `showContinueSection` is enabled in config, shows the `Continue` collapse toggle in the trailing slot.
 - **Other tabs:** no trailing title-bar control; tab bar remains right-aligned with spacer behavior unchanged.
 
+### 6.1.2 Selection Title Bar
+
+When `selectedItemIDs` is non-empty, the title bar swaps to selection mode:
+
+| Element | Spec |
+|---------|------|
+| X button | Clears selection, 24×24 frame |
+| Count label | "N items selected", `CiderFont.bodySemibold` |
+| Move to Folder | `Menu` with folder list, `CiderFont.bodySemibold` |
+| Delete | Destructive button, `CiderFont.bodySemibold` |
+
+Transition: `.snappy` spring between normal and selection title bar.
+
 ### 6.2 Divider
 
 | Property | Value |

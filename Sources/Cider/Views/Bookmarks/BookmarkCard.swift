@@ -22,10 +22,14 @@ struct BookmarkCard: View {
     let cardSizing: CardSizing
     var folders: [Folder] = []
     var dragProvider: (() -> NSItemProvider)? = nil
+    var dragPreviewOverride: AnyView? = nil
     let onShowDetails: () -> Void
     let onOpen: () -> Void
     let onDelete: () -> Void
     var onMoveToFolder: ((UUID?) -> Void)? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
     var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
     var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
     var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
@@ -43,9 +47,20 @@ struct BookmarkCard: View {
             || onAssignThumbnailFromImageData != nil
     }
 
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: BookmarksDesign.cardContentSpacing) {
-            Button(action: onShowDetails) {
+            Button { handleClick(normalAction: onShowDetails) } label: {
                 BookmarkThumbnailView(
                     bookmark: bookmark,
                     mode: mode == .grid ? .grid : .masonry,
@@ -65,7 +80,7 @@ struct BookmarkCard: View {
             .help("Show bookmark details")
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Button(action: onOpen) {
+                Button { handleClick(normalAction: onOpen) } label: {
                     HighlightedText(bookmark.title, highlight: searchText)
                         .font(CiderFont.labelSemibold(scale: textScale))
                         .foregroundColor(CiderColors.primary)
@@ -74,7 +89,7 @@ struct BookmarkCard: View {
                 }
                 .buttonStyle(.plain)
 
-                Button(action: onOpen) {
+                Button { handleClick(normalAction: onOpen) } label: {
                     HStack(spacing: Spacing.xs) {
                         Text(bookmark.hostDisplay)
                             .font(CiderFont.body(scale: textScale))
@@ -100,14 +115,22 @@ struct BookmarkCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
                 .stroke(
-                    supportsThumbnailDrops && isThumbnailDropTargeted
-                        ? CiderColors.dropTargetBorderStrong
-                        : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle,
-                    lineWidth: supportsThumbnailDrops && isThumbnailDropTargeted
+                    isSelected
+                        ? CiderColors.selectedBorder
+                        : supportsThumbnailDrops && isThumbnailDropTargeted
+                            ? CiderColors.dropTargetBorderStrong
+                            : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle,
+                    lineWidth: isSelected || (supportsThumbnailDrops && isThumbnailDropTargeted)
                         ? CiderBorder.innerStrokeWidth
                         : 1
                 )
         )
+        .overlay(alignment: .topLeading) {
+            if isSelected {
+                SelectionCheckmark()
+                    .padding(Spacing.sm)
+            }
+        }
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -134,7 +157,11 @@ struct BookmarkCard: View {
             perform: handleThumbnailDrop(providers:)
         )
         .ciderDraggable(dragProvider) {
-            BookmarkDragPreview(bookmark: bookmark)
+            if let preview = dragPreviewOverride {
+                preview
+            } else {
+                BookmarkDragPreview(bookmark: bookmark)
+            }
         }
     }
 

@@ -6,6 +6,7 @@ struct BookmarksPanelView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var panelWindow: NSWindow?
+    @State private var selectedItemIDs: Set<String> = []
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsErrorMessage: String?
     @State private var restoreFrameAfterDetailsClose: NSRect?
@@ -45,6 +46,7 @@ struct BookmarksPanelView: View {
                                     get: { viewModel.cardSizeScale },
                                     set: { viewModel.setCardSizeScale($0) }
                                 ),
+                                selectedItemIDs: $selectedItemIDs,
                                 onOpenBookmark: {
                                     clearSearchFocus()
                                     viewModel.open($0)

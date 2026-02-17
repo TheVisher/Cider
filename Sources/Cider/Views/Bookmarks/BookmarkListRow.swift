@@ -7,18 +7,37 @@ struct BookmarkListRow: View {
     let cardSizing: CardSizing
     var folders: [Folder] = []
     var dragProvider: (() -> NSItemProvider)? = nil
+    var dragPreviewOverride: AnyView? = nil
     let onShowDetails: () -> Void
     let onOpen: () -> Void
     let onDelete: () -> Void
     var onMoveToFolder: ((UUID?) -> Void)? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            Button(action: onShowDetails) {
+            if isSelected {
+                SelectionCheckmark()
+            }
+
+            Button { handleClick(normalAction: onShowDetails) } label: {
                 BookmarkThumbnailView(bookmark: bookmark, mode: .list)
                     .frame(width: cardSizing.listThumbnailWidth, height: cardSizing.listThumbnailHeight)
             }
@@ -26,7 +45,7 @@ struct BookmarkListRow: View {
             .help("Show bookmark details")
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Button(action: onOpen) {
+                Button { handleClick(normalAction: onOpen) } label: {
                     HighlightedText(bookmark.title, highlight: searchText)
                         .font(CiderFont.labelSemibold(scale: textScale))
                         .foregroundColor(CiderColors.primary)
@@ -35,7 +54,7 @@ struct BookmarkListRow: View {
                 }
                 .buttonStyle(.plain)
 
-                Button(action: onOpen) {
+                Button { handleClick(normalAction: onOpen) } label: {
                     HStack(spacing: Spacing.xs) {
                         Text(bookmark.hostDisplay)
                             .font(CiderFont.body(scale: textScale))
@@ -74,7 +93,11 @@ struct BookmarkListRow: View {
         .padding(.vertical, cardSizing.isExtraLarge ? Spacing.sm : Spacing.xs)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(isHovered ? CiderColors.surfaceInput : Color.clear)
+                .fill(
+                    isSelected
+                        ? CiderColors.selectedFill
+                        : isHovered ? CiderColors.surfaceInput : Color.clear
+                )
         )
         .hoverState($isHovered, animation: .snappy)
         .bookmarkContextMenu(
@@ -86,7 +109,11 @@ struct BookmarkListRow: View {
             onDelete: onDelete
         )
         .ciderDraggable(dragProvider) {
-            BookmarkDragPreview(bookmark: bookmark)
+            if let preview = dragPreviewOverride {
+                preview
+            } else {
+                BookmarkDragPreview(bookmark: bookmark)
+            }
         }
     }
 }

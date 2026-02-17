@@ -8,6 +8,7 @@ struct CiderPanelView: View {
     @State private var selectedTab: CiderTab = .home
     @State private var isCollapsed = false
     @State private var selectedFolderID: UUID?
+    @State private var selectedItemIDs: Set<String> = []
     @State private var expandedFolderIDs: Set<UUID> = []
     @State private var isSearchPaletteVisible = false
     @State private var dynamicTabs: [CiderTab] = []
@@ -59,6 +60,10 @@ struct CiderPanelView: View {
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
+            selectedItemIDs.removeAll()
+        }
+        .onChange(of: selectedFolderID) { _, _ in
+            selectedItemIDs.removeAll()
         }
         .onChange(of: homeDisplayMode) { _, newValue in
             var config = CiderConfig.load()
@@ -79,6 +84,20 @@ struct CiderPanelView: View {
             Button("") { isSearchPaletteVisible = true }
                 .keyboardShortcut("k", modifiers: .command)
                 .hidden()
+
+            Button("") { selectAllVisibleItems() }
+                .keyboardShortcut("a", modifiers: .command)
+                .hidden()
+
+            Button("") {
+                if !selectedItemIDs.isEmpty {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        selectedItemIDs.removeAll()
+                    }
+                }
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .hidden()
         }
     }
 
@@ -86,6 +105,15 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var titleBarContent: some View {
+        if !selectedItemIDs.isEmpty {
+            selectionTitleBar
+        } else {
+            normalTitleBar
+        }
+    }
+
+    @ViewBuilder
+    private var normalTitleBar: some View {
         CiderTabBar(
             selectedTab: $selectedTab,
             tabs: allTabs,
@@ -111,6 +139,75 @@ struct CiderPanelView: View {
         if selectedTab == .home && showContinueSection {
             continueToggleButton
         }
+    }
+
+    @ViewBuilder
+    private var selectionTitleBar: some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                selectedItemIDs.removeAll()
+            }
+        } label: {
+            Image(systemName: "xmark")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Clear selection")
+
+        Text("\(selectedItemIDs.count) item\(selectedItemIDs.count == 1 ? "" : "s") selected")
+            .font(CiderFont.bodyMedium)
+            .foregroundColor(CiderColors.primary)
+            .lineLimit(1)
+
+        Spacer(minLength: Spacing.sm)
+
+        Menu {
+            ForEach(bookmarksViewModel.folders) { folder in
+                Button(folder.name) {
+                    moveSelectedToFolder(folder.id)
+                }
+            }
+            if !bookmarksViewModel.folders.isEmpty {
+                Divider()
+            }
+            Button("Remove from Folder") {
+                moveSelectedToFolder(nil)
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "folder")
+                    .font(CiderFont.captionSemibold)
+                Text("Move")
+                    .font(CiderFont.bodyMedium)
+            }
+            .foregroundColor(CiderColors.secondary)
+            .padding(.horizontal, Spacing.sm)
+            .frame(height: 28)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Move selected items to folder")
+
+        Button {
+            deleteSelectedItems()
+        } label: {
+            Image(systemName: "trash")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.destructive)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Delete selected items")
     }
 
     // MARK: - Continue Toggle
@@ -358,6 +455,7 @@ struct CiderPanelView: View {
                 folderID: folderID,
                 displayMode: $homeDisplayMode,
                 cardSizeScale: $homeCardSizeScale,
+                selectedItemIDs: $selectedItemIDs,
                 onSelectSubFolder: { subFolderID in
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)
@@ -372,19 +470,22 @@ struct CiderPanelView: View {
                     selectedFolderID: selectedFolderID,
                     displayMode: $homeDisplayMode,
                     cardSizeScale: $homeCardSizeScale,
-                    continueSectionCollapsed: $continueSectionCollapsed
+                    continueSectionCollapsed: $continueSectionCollapsed,
+                    selectedItemIDs: $selectedItemIDs
                 )
             case .bookmarks:
                 BookmarksTabContent(
                     viewModel: bookmarksViewModel,
-                    selectedFolderID: nil
+                    selectedFolderID: nil,
+                    selectedItemIDs: $selectedItemIDs
                 )
             case .notes:
                 NotesTabContent(
                     viewModel: notesViewModel,
                     searchText: "",
                     folders: bookmarksViewModel.folders,
-                    selectedFolderID: nil
+                    selectedFolderID: nil,
+                    selectedItemIDs: $selectedItemIDs
                 )
             case .search(_, let query):
                 SearchTabContent(
@@ -498,6 +599,81 @@ struct CiderPanelView: View {
         ProjectStorage.shared.addSearchResults(results, toProject: project.id)
         dynamicTabs.removeAll { $0 == selectedTab }
         openProjectTab(project.id)
+    }
+
+    // MARK: - Select All
+
+    private func selectAllVisibleItems() {
+        if let folderID = selectedFolderID, selectedTab.isFixed {
+            let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
+            let notes = notesViewModel.notes.filter { $0.folderID == folderID }
+            for b in bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
+            for n in notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
+        } else {
+            switch selectedTab {
+            case .home:
+                for b in bookmarksViewModel.bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
+                for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
+            case .bookmarks:
+                for b in bookmarksViewModel.filteredBookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
+            case .notes:
+                for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - Bulk Selection Actions
+
+    private func deleteSelectedItems() {
+        var bookmarksToDelete: [Bookmark] = []
+        var notesToDelete: [Note] = []
+
+        for id in selectedItemIDs {
+            if id.hasPrefix("bookmark-") {
+                let uuidString = String(id.dropFirst("bookmark-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == uuid }) {
+                    bookmarksToDelete.append(bookmark)
+                }
+            } else if id.hasPrefix("note-") {
+                let uuidString = String(id.dropFirst("note-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let note = notesViewModel.notes.first(where: { $0.id == uuid }) {
+                    notesToDelete.append(note)
+                }
+            }
+        }
+
+        if !bookmarksToDelete.isEmpty {
+            bookmarksViewModel.deleteBookmarks(bookmarksToDelete)
+        }
+        if !notesToDelete.isEmpty {
+            notesViewModel.deleteNotes(notesToDelete)
+        }
+
+        selectedItemIDs.removeAll()
+    }
+
+    private func moveSelectedToFolder(_ folderID: UUID?) {
+        for id in selectedItemIDs {
+            if id.hasPrefix("bookmark-") {
+                let uuidString = String(id.dropFirst("bookmark-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == uuid }) {
+                    _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+                }
+            } else if id.hasPrefix("note-") {
+                let uuidString = String(id.dropFirst("note-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let note = notesViewModel.notes.first(where: { $0.id == uuid }) {
+                    _ = notesViewModel.assignNote(note, toFolder: folderID)
+                }
+            }
+        }
+
+        selectedItemIDs.removeAll()
     }
 
     // MARK: - Collapse State Sync

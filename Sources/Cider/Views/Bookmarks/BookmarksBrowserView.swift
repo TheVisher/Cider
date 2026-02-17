@@ -7,6 +7,7 @@ struct BookmarksBrowserView: View {
     var folders: [Folder] = []
     @Binding var displayMode: BookmarkDisplayMode
     @Binding var cardSizeScale: Double
+    @Binding var selectedItemIDs: Set<String>
     var searchText: String = ""
     var onOpenBookmark: (Bookmark) -> Void
     var onShowBookmarkDetails: ((Bookmark) -> Void)? = nil
@@ -23,6 +24,7 @@ struct BookmarksBrowserView: View {
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @State private var selectionAnchorID: String?
     @State private var isAddFormVisible = false
     @State private var draftTitle = ""
     @State private var draftURL = ""
@@ -63,6 +65,7 @@ struct BookmarksBrowserView: View {
 
     private var folderDropTypeIdentifiers: [String] {
         [
+            MultiDragPayload.typeIdentifier,
             BookmarkDragPayload.typeIdentifier,
             UTType.text.identifier,
             UTType.plainText.identifier,
@@ -189,10 +192,14 @@ struct BookmarksBrowserView: View {
                         cardSizing: cardSizing,
                         folders: folders,
                         dragProvider: bookmarkDragProvider(for: bookmark),
-                        onShowDetails: { onShowBookmarkDetails?(bookmark) },
-                        onOpen: { onOpenBookmark(bookmark) },
+                        dragPreviewOverride: multiDragPreview(for: bookmark),
+                        onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
+                        onOpen: { handleNormalAction { onOpenBookmark(bookmark) } },
                         onDelete: { onDeleteBookmark?(bookmark) },
-                        onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) }
+                        onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
+                        isSelected: isBookmarkSelected(bookmark),
+                        onSelect: { handleSelect(bookmark: bookmark) },
+                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) }
                     )
                 }
             }
@@ -210,10 +217,14 @@ struct BookmarksBrowserView: View {
                         cardSizing: cardSizing,
                         folders: folders,
                         dragProvider: bookmarkDragProvider(for: bookmark),
-                        onShowDetails: { onShowBookmarkDetails?(bookmark) },
-                        onOpen: { onOpenBookmark(bookmark) },
+                        dragPreviewOverride: multiDragPreview(for: bookmark),
+                        onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
+                        onOpen: { handleNormalAction { onOpenBookmark(bookmark) } },
                         onDelete: { onDeleteBookmark?(bookmark) },
                         onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
+                        isSelected: isBookmarkSelected(bookmark),
+                        onSelect: { handleSelect(bookmark: bookmark) },
+                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) },
                         onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
                         onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
                         onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
@@ -234,10 +245,14 @@ struct BookmarksBrowserView: View {
                         cardSizing: cardSizing,
                         folders: folders,
                         dragProvider: bookmarkDragProvider(for: bookmark),
-                        onShowDetails: { onShowBookmarkDetails?(bookmark) },
-                        onOpen: { onOpenBookmark(bookmark) },
+                        dragPreviewOverride: multiDragPreview(for: bookmark),
+                        onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
+                        onOpen: { handleNormalAction { onOpenBookmark(bookmark) } },
                         onDelete: { onDeleteBookmark?(bookmark) },
                         onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
+                        isSelected: isBookmarkSelected(bookmark),
+                        onSelect: { handleSelect(bookmark: bookmark) },
+                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) },
                         onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
                         onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
                         onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
@@ -513,19 +528,42 @@ struct BookmarksBrowserView: View {
         guard supportsFolderShelf else { return nil }
         return {
             beginBookmarkDrag(for: bookmark.id)
-            let provider = NSItemProvider(
-                object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
-            )
-            let payload = Data(bookmark.id.uuidString.utf8)
-            provider.registerDataRepresentation(
-                forTypeIdentifier: BookmarkDragPayload.typeIdentifier,
-                visibility: .all
-            ) { completion in
-                completion(payload, nil)
-                return nil
+            let bookmarkItemID = itemID(for: bookmark)
+
+            if selectedItemIDs.contains(bookmarkItemID) && selectedItemIDs.count > 1 {
+                let allItems = CiderMultiDrag.parseSelectedItemIDs(selectedItemIDs)
+                return CiderMultiDrag.makeProvider(
+                    primaryType: BookmarkDragPayload.typeIdentifier,
+                    primaryID: bookmark.id,
+                    allItemIDs: allItems
+                )
+            } else {
+                let provider = NSItemProvider(
+                    object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
+                )
+                let payload = Data(bookmark.id.uuidString.utf8)
+                provider.registerDataRepresentation(
+                    forTypeIdentifier: BookmarkDragPayload.typeIdentifier,
+                    visibility: .all
+                ) { completion in
+                    completion(payload, nil)
+                    return nil
+                }
+                return provider
             }
-            return provider
         }
+    }
+
+    private func multiDragPreview(for bookmark: Bookmark) -> AnyView? {
+        guard isBookmarkSelected(bookmark), selectedItemIDs.count > 1 else { return nil }
+
+        var items: [MultiDragPreviewItem] = [.bookmark(bookmark)]
+        for b in displayedBookmarks where isBookmarkSelected(b) && b.id != bookmark.id {
+            items.append(.bookmark(b))
+            if items.count >= 3 { break }
+        }
+
+        return AnyView(MultiDragPreview(items: items, totalCount: selectedItemIDs.count))
     }
 
     private func beginBookmarkDrag(for bookmarkID: UUID) {
@@ -534,6 +572,18 @@ struct BookmarksBrowserView: View {
     }
 
     private func handleFolderDrop(providers: [NSItemProvider], targetFolderID: UUID?) -> Bool {
+        for provider in providers where provider.registeredTypeIdentifiers.contains(MultiDragPayload.typeIdentifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: MultiDragPayload.typeIdentifier) { data, _ in
+                guard let data, let items = MultiDragPayload.decode(from: data) else { return }
+                DispatchQueue.main.async {
+                    for item in items where item.type == "bookmark" {
+                        assignDraggedBookmark(bookmarkID: item.id, toFolder: targetFolderID)
+                    }
+                }
+            }
+            return true
+        }
+
         for provider in providers where provider.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) {
             provider.loadDataRepresentation(forTypeIdentifier: BookmarkDragPayload.typeIdentifier) { data, _ in
                 guard let data,
@@ -550,10 +600,19 @@ struct BookmarksBrowserView: View {
 
         for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
             provider.loadObject(ofClass: NSString.self) { item, _ in
-                guard let raw = item as? String,
-                      let bookmarkID = BookmarkDragPayload.bookmarkID(from: raw) else {
+                guard let raw = item as? String else { return }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if let items = MultiDragPayload.decodeFromText(trimmed) {
+                    DispatchQueue.main.async {
+                        for item in items where item.type == "bookmark" {
+                            assignDraggedBookmark(bookmarkID: item.id, toFolder: targetFolderID)
+                        }
+                    }
                     return
                 }
+
+                guard let bookmarkID = BookmarkDragPayload.bookmarkID(from: trimmed) else { return }
                 DispatchQueue.main.async {
                     assignDraggedBookmark(bookmarkID: bookmarkID, toFolder: targetFolderID)
                 }
@@ -624,7 +683,10 @@ struct BookmarksBrowserView: View {
 
     private func handleBrowserDrop(providers: [NSItemProvider]) -> Bool {
         // Internal bookmark drags should be owned by folder drop targets.
-        if isDraggingBookmark || providers.contains(where: { $0.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) }) {
+        if isDraggingBookmark || providers.contains(where: {
+            $0.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) ||
+            $0.registeredTypeIdentifiers.contains(MultiDragPayload.typeIdentifier)
+        }) {
             return false
         }
         return handleDrop(providers: providers)
@@ -720,10 +782,63 @@ struct BookmarksBrowserView: View {
         return false
     }
 
+    // MARK: - Selection Helpers
+
+    private func itemID(for bookmark: Bookmark) -> String {
+        "bookmark-\(bookmark.id.uuidString)"
+    }
+
+    private func isBookmarkSelected(_ bookmark: Bookmark) -> Bool {
+        selectedItemIDs.contains(itemID(for: bookmark))
+    }
+
+    private func handleSelect(bookmark: Bookmark) {
+        let id = itemID(for: bookmark)
+        if selectedItemIDs.contains(id) {
+            selectedItemIDs.remove(id)
+        } else {
+            selectedItemIDs.insert(id)
+        }
+        selectionAnchorID = id
+    }
+
+    private func handleShiftSelect(bookmark: Bookmark) {
+        let id = itemID(for: bookmark)
+        let items = displayedBookmarks
+        guard let anchorID = selectionAnchorID,
+              let anchorIndex = items.firstIndex(where: { itemID(for: $0) == anchorID }),
+              let clickedIndex = items.firstIndex(where: { $0.id == bookmark.id }) else {
+            selectedItemIDs.insert(id)
+            selectionAnchorID = id
+            return
+        }
+
+        let range = min(anchorIndex, clickedIndex) ... max(anchorIndex, clickedIndex)
+        for i in range {
+            selectedItemIDs.insert(itemID(for: items[i]))
+        }
+    }
+
+    private func handleNormalAction(_ action: () -> Void) {
+        if !selectedItemIDs.isEmpty {
+            selectedItemIDs.removeAll()
+        } else {
+            action()
+        }
+    }
+
+    private func selectAllBookmarks() {
+        for bookmark in displayedBookmarks {
+            selectedItemIDs.insert(itemID(for: bookmark))
+        }
+    }
+
     private func saveDroppedString(_ rawValue: String) {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix(BookmarkDragPayload.textPrefix) {
-            // Internal bookmark drag payload; ignore when dropped outside folder targets.
+        if trimmed.hasPrefix(BookmarkDragPayload.textPrefix) ||
+           trimmed.hasPrefix(NoteDragPayload.textPrefix) ||
+           trimmed.hasPrefix(MultiDragPayload.textPrefix) {
+            // Internal drag payload; ignore when dropped outside folder targets.
             return
         }
 

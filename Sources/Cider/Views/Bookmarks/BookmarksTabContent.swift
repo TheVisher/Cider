@@ -4,6 +4,7 @@ import AppKit
 struct BookmarksTabContent: View {
     @ObservedObject var viewModel: BookmarksViewModel
     var selectedFolderID: UUID?
+    @Binding var selectedItemIDs: Set<String>
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var panelWindow: NSWindow?
@@ -38,6 +39,7 @@ struct BookmarksTabContent: View {
                         get: { viewModel.cardSizeScale },
                         set: { viewModel.setCardSizeScale($0) }
                     ),
+                    selectedItemIDs: $selectedItemIDs,
                     onOpenBookmark: {
                         clearSearchFocus()
                         viewModel.open($0)
