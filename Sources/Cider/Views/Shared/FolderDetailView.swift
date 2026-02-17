@@ -83,27 +83,6 @@ struct FolderDetailView: View {
                         }
 
                         Section {
-                            if !childFolders.isEmpty {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    HStack {
-                                        SectionCollapseToggle(
-                                            label: "Sub Folders",
-                                            isCollapsed: $subFoldersCollapsed
-                                        )
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, Spacing.md + Spacing.xxs)
-                                    .padding(.top, Spacing.sm)
-
-                                    if !subFoldersCollapsed {
-                                        subFolderCards
-                                            .padding(.horizontal, Spacing.md + Spacing.xxs)
-                                            .padding(.top, Spacing.sm)
-                                            .padding(.bottom, Spacing.sm)
-                                    }
-                                }
-                            }
-
                             if !folderItems.isEmpty {
                                 libraryFeed
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -147,9 +126,17 @@ struct FolderDetailView: View {
     // MARK: - Sticky Header
 
     private var stickyHeader: some View {
-        folderHeader
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, Spacing.sm)
+        VStack(alignment: .leading, spacing: 0) {
+            folderHeader
+
+            if !childFolders.isEmpty && !subFoldersCollapsed {
+                subFolderCards
+                    .padding(.horizontal, Spacing.md + Spacing.xxs)
+                    .padding(.top, Spacing.sm)
+                    .padding(.bottom, Spacing.sm)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Folder Header
@@ -187,7 +174,7 @@ struct FolderDetailView: View {
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(1)
 
-            // Item count
+            // Item count + sub-folder toggle
             let total = folderItems.count
             let subCount = childFolders.count
             HStack(spacing: Spacing.sm) {
@@ -205,6 +192,14 @@ struct FolderDetailView: View {
                     Text("Empty")
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.quaternary)
+                }
+
+                if !childFolders.isEmpty {
+                    Spacer()
+                    SectionCollapseToggle(
+                        label: "Folders",
+                        isCollapsed: $subFoldersCollapsed
+                    )
                 }
             }
         }
