@@ -133,7 +133,7 @@ struct BookmarkCard: View {
             isTargeted: $isThumbnailDropTargeted,
             perform: handleThumbnailDrop(providers:)
         )
-        .bookmarkDraggable(dragProvider) {
+        .ciderDraggable(dragProvider) {
             BookmarkDragPreview(bookmark: bookmark)
         }
     }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct NotesBrowserView: View {
@@ -83,7 +84,8 @@ struct NotesBrowserView: View {
             onOpen: { onOpenNote(note) },
             onRename: { onRenameNote(note, $0) },
             onDelete: { onDeleteNote(note) },
-            onMoveToFolder: { onMoveNoteToFolder(note, $0) }
+            onMoveToFolder: { onMoveNoteToFolder(note, $0) },
+            dragProvider: noteDragProvider(for: note)
         )
     }
 
@@ -98,7 +100,27 @@ struct NotesBrowserView: View {
             onOpen: { onOpenNote(note) },
             onRename: { onRenameNote(note, $0) },
             onDelete: { onDeleteNote(note) },
-            onMoveToFolder: { onMoveNoteToFolder(note, $0) }
+            onMoveToFolder: { onMoveNoteToFolder(note, $0) },
+            dragProvider: noteDragProvider(for: note)
         )
+    }
+
+    // MARK: - Drag Provider
+
+    private func noteDragProvider(for note: Note) -> () -> NSItemProvider {
+        return {
+            let provider = NSItemProvider(
+                object: "\(NoteDragPayload.textPrefix)\(note.id.uuidString)" as NSString
+            )
+            let payload = Data(note.id.uuidString.utf8)
+            provider.registerDataRepresentation(
+                forTypeIdentifier: NoteDragPayload.typeIdentifier,
+                visibility: .all
+            ) { completion in
+                completion(payload, nil)
+                return nil
+            }
+            return provider
+        }
     }
 }

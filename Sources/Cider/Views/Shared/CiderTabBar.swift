@@ -5,6 +5,7 @@ struct CiderTabBar: View {
     let tabs: [CiderTab]
     let bookmarkCount: Int
     let noteCount: Int
+    @Binding var selectedFolderID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -22,11 +23,12 @@ struct CiderTabBar: View {
 
     @ViewBuilder
     private func tabButton(for tab: CiderTab) -> some View {
-        let isSelected = selectedTab == tab
+        let isSelected = selectedTab == tab && selectedFolderID == nil
         let count = badgeCount(for: tab)
 
         Button {
             withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
+                selectedFolderID = nil
                 selectedTab = tab
             }
         } label: {

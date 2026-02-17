@@ -115,9 +115,11 @@ Notes containing TODO items (markdown checkboxes `- [ ]` / `- [x]`) display them
 
 ### Drag to Folder
 
-- Drag note cards onto folders in the sidebar to assign them, matching the bookmark drag-and-drop pattern
+- ✅ Drag note cards onto folders in the sidebar to assign them, matching the bookmark drag-and-drop pattern
 - Primary method for folder organization — context menu "Move to Folder" is the secondary option
-- Reuse the same drag provider pattern from bookmarks
+- ✅ Reuses shared `CiderDragPayload` infrastructure (`NoteDragPayload` + `ciderDraggable` modifier)
+- Works across all tabs: Notes tab, Home tab, and FolderDetailView
+- Note cards use `Button(action:)` wrapper (not `.onTapGesture`) to prevent NSPanel window-dragging
 
 ---
 

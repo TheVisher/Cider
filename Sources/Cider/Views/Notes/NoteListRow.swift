@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct NoteListRow: View {
@@ -11,6 +12,7 @@ struct NoteListRow: View {
     let onRename: (String) -> Void
     let onDelete: () -> Void
     let onMoveToFolder: (UUID?) -> Void
+    var dragProvider: (() -> NSItemProvider)? = nil
 
     @State private var isHovered = false
     @State private var cardData: NoteCardData = .empty
@@ -118,6 +120,9 @@ struct NoteListRow: View {
             onMoveToFolder: onMoveToFolder,
             onDelete: onDelete
         )
+        .ciderDraggable(dragProvider) {
+            NoteDragPreview(note: note)
+        }
         .task(id: note.modifiedAt) {
             cardData = await Task.detached(priority: .userInitiated) {
                 NoteCardData.load(for: note)

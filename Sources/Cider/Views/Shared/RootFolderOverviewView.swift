@@ -18,13 +18,13 @@ struct RootFolderOverviewView: View {
     private var unsortedBookmarks: [Bookmark] {
         bookmarks
             .filter { $0.folderID == folderID }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var unsortedNotes: [Note] {
         notes
             .filter { $0.folderID == folderID }
-            .sorted { $0.modifiedAt > $1.modifiedAt }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var hasUnsortedItems: Bool {

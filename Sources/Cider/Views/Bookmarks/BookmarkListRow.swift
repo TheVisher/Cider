@@ -85,7 +85,7 @@ struct BookmarkListRow: View {
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
             onDelete: onDelete
         )
-        .bookmarkDraggable(dragProvider) {
+        .ciderDraggable(dragProvider) {
             BookmarkDragPreview(bookmark: bookmark)
         }
     }

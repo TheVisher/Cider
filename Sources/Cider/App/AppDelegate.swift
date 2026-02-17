@@ -36,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Detail popover
     private var detailPopoverPanel: DetailPopoverPanel?
 
+    // Notes panel modal behavior (click-outside-to-dismiss from Home tab)
+    private var notesPanelModalMonitor: Any?
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -284,7 +287,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.publisher(for: .openNoteInPanel)
             .sink { [weak self] notification in
                 if let note = notification.object as? Note {
+                    let modal = notification.userInfo?["modal"] as? Bool ?? false
                     self?.showNotesPanel(with: note)
+                    if modal {
+                        self?.installNotesPanelModalMonitor()
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -340,11 +347,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideNotesPanel() {
         debugLog("[Notes] hideNotesPanel called")
+        removeNotesPanelModalMonitor()
         persistCurrentNotePanelFrameIfNeeded()
         flushNotesDraftIfNeeded()
         notesPanel?.orderOut(nil)
         notesViewModel?.isVisible = false
         updateGlobalHotkeyEnablement()
+    }
+
+    private func installNotesPanelModalMonitor() {
+        removeNotesPanelModalMonitor()
+
+        // Wait briefly for the panel to fully appear before monitoring
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.notesPanel?.isVisible == true else { return }
+
+            self.notesPanelModalMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                guard let self else { return event }
+
+                let mouseScreen = NSEvent.mouseLocation
+                let isInsideNotesPanel = self.notesPanel?.frame.contains(mouseScreen) == true
+
+                if isInsideNotesPanel {
+                    // Click inside notes panel — remove monitor, let panel behave normally
+                    self.removeNotesPanelModalMonitor()
+                    return event
+                } else {
+                    // Click outside notes panel — dismiss and swallow the event
+                    // so the underlying panel doesn't open another item
+                    self.hideNotesPanel()
+                    return nil
+                }
+            }
+        }
+    }
+
+    private func removeNotesPanelModalMonitor() {
+        if let monitor = notesPanelModalMonitor {
+            NSEvent.removeMonitor(monitor)
+            notesPanelModalMonitor = nil
+        }
     }
 
     private func updateGlobalHotkeyEnablement() {

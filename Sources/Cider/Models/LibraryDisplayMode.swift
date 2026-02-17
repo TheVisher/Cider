@@ -83,12 +83,23 @@ enum LibraryItem: Identifiable {
         }
     }
 
+    /// Most recently modified/updated date — used for Continue section (recency).
     var date: Date {
         switch self {
         case .bookmark(let bookmark):
             bookmark.updatedAt
         case .note(let note):
             note.modifiedAt
+        }
+    }
+
+    /// Original creation date — used for default sort order in library feeds.
+    var createdDate: Date {
+        switch self {
+        case .bookmark(let bookmark):
+            bookmark.createdAt
+        case .note(let note):
+            note.createdAt
         }
     }
 

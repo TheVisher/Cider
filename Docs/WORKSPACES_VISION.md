@@ -43,6 +43,16 @@ Search → Tab → Project → Folder/Archive
 ### Sidebar Location
 Folders live in the sidebar under a "Folders" section, visible across all views.
 
+### Folder View (Implemented)
+- Selecting a folder shows a **standalone FolderDetailView** — same rich card components as Home tab (BookmarkCard, NoteCardView, etc.)
+- **Tab-independent** — the same folder view shows regardless of which tab was active
+- **Tabs deselect** when viewing a folder — clicking any tab exits the folder view
+- **Root folders** show sub-folder cards at the top (clickable to navigate deeper), then mixed items below
+- **Leaf folders** show just the mixed items
+- Supports all display modes (list, grid, masonry) — shares Home tab's display mode setting
+- Drag-and-drop works: items can be dragged onto sub-folder cards or sidebar folders
+- Bookmark detail modals open within the folder view; notes open as modal notes panel
+
 ### Example Use Cases
 - **Restaurants** folder with saved restaurant bookmarks + a note listing ones you've tried.
 - **Design Resources** folder with inspiration links, color palette notes, tool bookmarks.
@@ -143,8 +153,8 @@ The folder sidebar is **universal** — visible across views, not scoped to book
 - **Tab bar** shows *what you're looking at* — Home (library), Bookmarks, Notes, future content types
 - **Sidebar** shows *how you've organized it* — folders, projects
 - "All Items" was removed from the sidebar because it's a view, not a folder
-- Clicking a folder filters the current tab's content to that folder
-- Deselecting all folders returns to the full unfiltered tab view
+- Clicking a folder opens a standalone folder view (deselects tabs)
+- Clicking any tab exits the folder view and returns to tab content
 
 ```
 FOLDERS

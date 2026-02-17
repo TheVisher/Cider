@@ -91,6 +91,7 @@ struct CiderPanelView: View {
             tabs: allTabs,
             bookmarkCount: bookmarksViewModel.bookmarks.count,
             noteCount: notesViewModel.notes.count,
+            selectedFolderID: $selectedFolderID,
             onCloseTab: closeTab
         )
         .frame(maxWidth: .infinity)
@@ -258,9 +259,28 @@ struct CiderPanelView: View {
         .frame(width: BookmarksDesign.folderSidebarWidth)
     }
 
+    private var showFolderViewOptions: Bool {
+        selectedFolderID != nil && selectedTab.isFixed
+    }
+
     @ViewBuilder
     private var viewOptionsButton: some View {
-        if selectedTab == .bookmarks {
+        if showFolderViewOptions {
+            // Folder view uses home display mode
+            Image(systemName: "slider.horizontal.3")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(isHomeViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .contentShape(Rectangle())
+                .onTapGesture { isHomeViewOptionsVisible.toggle() }
+                .help("View options")
+                .popover(isPresented: $isHomeViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale
+                    )
+                }
+        } else if selectedTab == .bookmarks {
             Image(systemName: "slider.horizontal.3")
                 .font(CiderFont.bodySemibold)
                 .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
@@ -330,48 +350,29 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var tabContentBody: some View {
-        if selectedTab == .home {
-            HomeDashboardView(
+        if let folderID = selectedFolderID, selectedTab.isFixed {
+            FolderDetailView(
                 bookmarksViewModel: bookmarksViewModel,
                 notesViewModel: notesViewModel,
-                selectedFolderID: selectedFolderID,
+                folderID: folderID,
                 displayMode: $homeDisplayMode,
                 cardSizeScale: $homeCardSizeScale,
-                continueSectionCollapsed: $continueSectionCollapsed
+                onSelectSubFolder: { subFolderID in
+                    selectedFolderID = subFolderID
+                    expandPathToFolder(subFolderID)
+                }
             )
-        } else if let folderID = selectedFolderID, selectedTab.isFixed {
-            if isRootFolder(folderID) {
-                RootFolderOverviewView(
-                    folderID: folderID,
-                    folders: bookmarksViewModel.folders,
-                    bookmarks: bookmarksViewModel.bookmarks,
-                    notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmarksViewModel.open($0) },
-                    onOpenNote: { note in
-                        notesViewModel.selectNote(note)
-                        NotificationCenter.default.post(name: .openNoteInPanel, object: note)
-                    },
-                    onSelectSubFolder: { subFolderID in
-                        selectedFolderID = subFolderID
-                        expandPathToFolder(subFolderID)
-                    }
-                )
-            } else {
-                FolderContentView(
-                    folderID: folderID,
-                    bookmarks: bookmarksViewModel.bookmarks,
-                    notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmarksViewModel.open($0) },
-                    onOpenNote: { note in
-                        notesViewModel.selectNote(note)
-                        NotificationCenter.default.post(name: .openNoteInPanel, object: note)
-                    }
-                )
-            }
         } else {
             switch selectedTab {
             case .home:
-                EmptyView() // Handled above
+                HomeDashboardView(
+                    bookmarksViewModel: bookmarksViewModel,
+                    notesViewModel: notesViewModel,
+                    selectedFolderID: selectedFolderID,
+                    displayMode: $homeDisplayMode,
+                    cardSizeScale: $homeCardSizeScale,
+                    continueSectionCollapsed: $continueSectionCollapsed
+                )
             case .bookmarks:
                 BookmarksTabContent(
                     viewModel: bookmarksViewModel,

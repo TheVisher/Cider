@@ -191,7 +191,8 @@ CiderPanelView
 │       ├── titleBar (animated sidebar toggle + CiderTabBar + capture button)
 │       ├── Divider (14pt horizontal inset, aligned with card content edges)
 │       └── contentArea (switches by selectedTab)
-│           ├── HomeDashboardView (Continue section + Library feed, filters by folder)
+│           ├── FolderDetailView (when folder selected — tab-independent, deselects tabs)
+│           ├── HomeDashboardView (Continue section + Library feed)
 │           ├── BookmarksTabContent → BookmarksBrowserView
 │           └── NotesTabContent → NotesBrowserView
 ├── compactOverlaySidebar (< 680pt, slides over content)
@@ -279,3 +280,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **MasonryLayout cache:** `computeFrames` intentionally has NO width-only cache optimization. Subview sizes can change independently (e.g., `BookmarkCard.@State cardWidth` updating via GeometryReader after initial layout). Always recompute when SwiftUI calls layout methods.
 - **Prefer inline GeometryReader over PreferenceKey:** `onPreferenceChange` fires with the `defaultValue` (often `0`) before the real measurement arrives, causing incorrect initial state. Inline `GeometryReader { proxy in let x = proxy.size.width ... }` is simpler and avoids this race.
 - **GeometryReader threshold anti-oscillation:** When a threshold controls layout (e.g., 1 vs 2 columns), set it high enough that sidebar show/hide (~200pt delta) can't flip the result. Otherwise content width jumps when sidebar toggles, causing column flicker.
+- **Folder view condition order:** In `tabContentBody`, check `selectedFolderID != nil` BEFORE `selectedTab == .home` — otherwise Home tab content renders instead of FolderDetailView when a folder is selected on the Home tab.
+- **Tab deselection in folder view:** CiderTabBar takes `selectedFolderID` binding. `isSelected = selectedTab == tab && selectedFolderID == nil`. Clicking a tab sets `selectedFolderID = nil` so re-clicking the same tab works to exit folder view.
+- **Notes panel modal pattern:** `.openNoteInPanel` with `userInfo: ["modal": true]` installs NSEvent local monitor. Click inside notes panel → remove monitor (normal behavior). Click outside → dismiss AND return `nil` to swallow the event (prevents underlying cards from activating).
+- **onDrop concurrency:** `loadDataRepresentation` callbacks are non-isolated. Capture view model references locally before the closure, then do lookups inside `Task { @MainActor in }` to avoid main-actor-isolation warnings.

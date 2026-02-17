@@ -1,44 +1,34 @@
 import AppKit
 import SwiftUI
 
-struct HomeDashboardView: View {
+struct FolderDetailView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
-    var selectedFolderID: UUID?
+    let folderID: UUID
     @Binding var displayMode: LibraryDisplayMode
     @Binding var cardSizeScale: Double
-    @Binding var continueSectionCollapsed: Bool
-    @State private var config = CiderConfig.load()
+    var onSelectSubFolder: ((UUID) -> Void)?
+
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsErrorMessage: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // MARK: - Library Items
+    // MARK: - Data
 
-    /// Continue section always shows global recents regardless of folder selection
-    private var continueItems: [LibraryItem] {
-        let bookmarkItems = bookmarksViewModel.bookmarks.map { LibraryItem.bookmark($0) }
-        let noteItems = notesViewModel.notes.map { LibraryItem.note($0) }
-        return (bookmarkItems + noteItems)
-            .sorted { $0.date > $1.date }
-            .prefix(8)
-            .map { $0 }
+    private var folder: Folder? {
+        bookmarksViewModel.folders.first(where: { $0.id == folderID })
     }
 
-    /// Library feed filters by folder when one is selected
-    private var libraryItems: [LibraryItem] {
-        let bookmarks: [Bookmark]
-        let notes: [Note]
+    private var childFolders: [Folder] {
+        bookmarksViewModel.folders
+            .filter { $0.parentID == folderID }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
-        if let folderID = selectedFolderID {
-            bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
-            notes = notesViewModel.notes.filter { $0.folderID == folderID }
-        } else {
-            bookmarks = bookmarksViewModel.bookmarks
-            notes = notesViewModel.notes
-        }
-
+    private var folderItems: [LibraryItem] {
+        let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
+        let notes = notesViewModel.notes.filter { $0.folderID == folderID }
         let bookmarkItems = bookmarks.map { LibraryItem.bookmark($0) }
         let noteItems = notes.map { LibraryItem.note($0) }
         return (bookmarkItems + noteItems)
@@ -62,31 +52,31 @@ struct HomeDashboardView: View {
         CiderConfig.load().detailModalMode == .expand
     }
 
+    // MARK: - Body
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                if config.showContinueSection && !continueSectionCollapsed && !continueItems.isEmpty {
-                    ContinueSectionView(
-                        items: continueItems,
-                        onOpenBookmark: { presentDetails(for: $0) },
-                        onOpenNote: { note in openNoteInPanel(note) }
-                    )
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.md)
-                }
-
-                if libraryItems.isEmpty {
+                if childFolders.isEmpty && folderItems.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
-                        libraryFeed
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: Spacing.lg) {
+                            if !childFolders.isEmpty {
+                                subFolderCards
+                            }
+
+                            if !folderItems.isEmpty {
+                                libraryFeed
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .scrollIndicators(.hidden)
                     .padding(Spacing.xxs)
                     .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.md)
-                    .padding(.bottom, Spacing.md)
+                    .padding(.vertical, Spacing.md)
                 }
             }
             .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
@@ -104,6 +94,159 @@ struct HomeDashboardView: View {
         }
     }
 
+    // MARK: - Sub-Folder Cards
+
+    private var subFolderCards: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "folder")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text("Sub Folders")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .textCase(.uppercase)
+
+                Text("\(childFolders.count)")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: Spacing.sm)],
+                spacing: Spacing.sm
+            ) {
+                ForEach(childFolders) { folder in
+                    subFolderCard(folder)
+                }
+            }
+        }
+    }
+
+    private static let dropTypeIdentifiers = [
+        BookmarkDragPayload.typeIdentifier,
+        NoteDragPayload.typeIdentifier,
+        "public.utf8-plain-text"
+    ]
+
+    private func subFolderCard(_ folder: Folder) -> some View {
+        let bookmarkCount = bookmarksViewModel.bookmarks.filter { $0.folderID == folder.id }.count
+        let noteCount = notesViewModel.notes.filter { $0.folderID == folder.id }.count
+        let totalItems = bookmarkCount + noteCount
+
+        return Button {
+            onSelectSubFolder?(folder.id)
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "folder.fill")
+                        .font(CiderFont.display)
+                        .foregroundColor(CiderColors.controlAccent)
+
+                    Spacer()
+
+                    if totalItems > 0 {
+                        Text("\(totalItems)")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.tertiary)
+                            .padding(.horizontal, Spacing.xs)
+                            .padding(.vertical, Spacing.xxs)
+                            .background(
+                                Capsule()
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                    }
+                }
+
+                Text(folder.name)
+                    .font(CiderFont.labelMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+
+                HStack(spacing: Spacing.sm) {
+                    if bookmarkCount > 0 {
+                        Label("\(bookmarkCount)", systemImage: "bookmark")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+                    }
+                    if noteCount > 0 {
+                        Label("\(noteCount)", systemImage: "note.text")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+                    }
+                    if totalItems == 0 {
+                        Text("Empty")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+                    }
+                }
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sectionContainer()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onDrop(of: Self.dropTypeIdentifiers, isTargeted: nil) { providers in
+            handleSubFolderDrop(providers: providers, targetFolderID: folder.id)
+        }
+    }
+
+    private func handleSubFolderDrop(providers: [NSItemProvider], targetFolderID: UUID) -> Bool {
+        var handled = false
+
+        let bvm = bookmarksViewModel
+        let nvm = notesViewModel
+
+        for provider in providers {
+            // Bookmark drop
+            if provider.hasItemConformingToTypeIdentifier(BookmarkDragPayload.typeIdentifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: BookmarkDragPayload.typeIdentifier) { data, _ in
+                    guard let data, let idString = String(data: data, encoding: .utf8),
+                          let bookmarkID = UUID(uuidString: idString) else { return }
+                    Task { @MainActor in
+                        guard let bookmark = bvm.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
+                        _ = bvm.assign(bookmark, toFolder: targetFolderID)
+                    }
+                }
+                handled = true
+                continue
+            }
+
+            // Note drop
+            if provider.hasItemConformingToTypeIdentifier(NoteDragPayload.typeIdentifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: NoteDragPayload.typeIdentifier) { data, _ in
+                    guard let data, let idString = String(data: data, encoding: .utf8),
+                          let noteID = UUID(uuidString: idString) else { return }
+                    Task { @MainActor in
+                        guard let note = nvm.notes.first(where: { $0.id == noteID }) else { return }
+                        _ = nvm.assignNote(note, toFolder: targetFolderID)
+                    }
+                }
+                handled = true
+                continue
+            }
+
+            // Text fallback
+            provider.loadItem(forTypeIdentifier: "public.utf8-plain-text", options: nil) { item, _ in
+                guard let data = item as? Data, let text = String(data: data, encoding: .utf8) else { return }
+                Task { @MainActor in
+                    if let bookmarkID = BookmarkDragPayload.bookmarkID(from: text),
+                       let bookmark = bvm.bookmarks.first(where: { $0.id == bookmarkID }) {
+                        _ = bvm.assign(bookmark, toFolder: targetFolderID)
+                    } else if let noteID = NoteDragPayload.noteID(from: text),
+                              let note = nvm.notes.first(where: { $0.id == noteID }) {
+                        _ = nvm.assignNote(note, toFolder: targetFolderID)
+                    }
+                }
+            }
+            handled = true
+        }
+
+        return handled
+    }
+
     // MARK: - Library Feed
 
     @ViewBuilder
@@ -111,7 +254,7 @@ struct HomeDashboardView: View {
         switch displayMode {
         case .list:
             LazyVStack(spacing: Spacing.xxs) {
-                ForEach(libraryItems) { item in
+                ForEach(folderItems) { item in
                     libraryListRow(item)
                 }
             }
@@ -119,7 +262,7 @@ struct HomeDashboardView: View {
         case .grid:
             let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
             LazyVGrid(columns: columns, spacing: Spacing.md) {
-                ForEach(libraryItems) { item in
+                ForEach(folderItems) { item in
                     libraryCard(item, mode: .grid)
                 }
             }
@@ -129,7 +272,7 @@ struct HomeDashboardView: View {
                 minimumColumnWidth: cardSizing.cardMinWidth,
                 itemSpacing: Spacing.md
             ) {
-                ForEach(libraryItems) { item in
+                ForEach(folderItems) { item in
                     libraryCard(item, mode: .masonry)
                 }
             }
@@ -222,33 +365,18 @@ struct HomeDashboardView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer(minLength: 0)
-
-            Image(systemName: selectedFolderID != nil ? "folder" : "tray.2")
-                .font(CiderFont.heroDisplay(scale: 1.0))
-                .foregroundColor(CiderColors.tertiary)
-
-            Text(selectedFolderID != nil ? "No items in this folder" : "Your library is empty")
-                .font(CiderFont.subheadingMedium)
-                .foregroundColor(CiderColors.secondary)
-
-            Text(selectedFolderID != nil
-                ? "Drag bookmarks or notes into this folder to organize them"
-                : "Capture a bookmark or create a note to get started")
-                .font(CiderFont.body)
-                .foregroundColor(CiderColors.tertiary)
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "folder",
+            title: "This folder is empty",
+            subtitle: "Drag bookmarks or notes into this folder to organize them"
+        )
     }
 
     // MARK: - Helpers
 
     private func folderName(for note: Note) -> String? {
-        guard let folderID = note.folderID else { return nil }
-        return foldersByID[folderID]?.name
+        guard let fID = note.folderID else { return nil }
+        return foldersByID[fID]?.name
     }
 
     // MARK: - Note Panel

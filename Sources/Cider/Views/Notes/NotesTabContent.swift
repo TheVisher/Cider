@@ -69,6 +69,12 @@ struct NotesTabContent: View {
                 openNote(note)
             }
         }
+        .task(id: viewModel.pendingNoteToOpen) {
+            guard let noteID = viewModel.pendingNoteToOpen,
+                  let note = viewModel.notes.first(where: { $0.id == noteID }) else { return }
+            viewModel.pendingNoteToOpen = nil
+            openNote(note)
+        }
     }
 
     private func openNote(_ note: Note) {

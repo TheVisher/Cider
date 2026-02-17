@@ -11,6 +11,7 @@ struct NoteCardView: View {
     let onRename: (String) -> Void
     let onDelete: () -> Void
     let onMoveToFolder: (UUID?) -> Void
+    var dragProvider: (() -> NSItemProvider)? = nil
 
     enum NoteCardMode {
         case grid
@@ -24,59 +25,61 @@ struct NoteCardView: View {
     @FocusState private var isRenameFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Title
-            if isRenaming {
-                TextField("Note title", text: $renamingTitle)
-                    .textFieldStyle(.plain)
-                    .font(CiderFont.subheadingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .focused($isRenameFocused)
-                    .task {
-                        try? await Task.sleep(for: .milliseconds(150))
-                        isRenameFocused = true
-                    }
-                    .onSubmit {
-                        let trimmed = renamingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty { onRename(trimmed) }
-                        isRenaming = false
-                    }
-                    .onExitCommand { isRenaming = false }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                HighlightedText(note.title, highlight: searchText)
-                    .font(CiderFont.subheadingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        Button(action: { if !isRenaming { onOpen() } }) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                // Title
+                if isRenaming {
+                    TextField("Note title", text: $renamingTitle)
+                        .textFieldStyle(.plain)
+                        .font(CiderFont.subheadingSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .focused($isRenameFocused)
+                        .task {
+                            try? await Task.sleep(for: .milliseconds(150))
+                            isRenameFocused = true
+                        }
+                        .onSubmit {
+                            let trimmed = renamingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !trimmed.isEmpty { onRename(trimmed) }
+                            isRenaming = false
+                        }
+                        .onExitCommand { isRenaming = false }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HighlightedText(note.title, highlight: searchText)
+                        .font(CiderFont.subheadingSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-            // Folder sub-header
-            if let folderName, !folderName.isEmpty {
-                Text(folderName)
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.accentText)
-                    .lineLimit(1)
-            }
+                // Folder sub-header
+                if let folderName, !folderName.isEmpty {
+                    Text(folderName)
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.accentText)
+                        .lineLimit(1)
+                }
 
-            // Content area: text + optional image, or empty placeholder
-            if !cardData.preview.isEmpty || !cardData.imageURLs.isEmpty {
-                contentArea
-            } else {
-                Text("Empty note")
-                    .font(CiderFont.bodyItalic)
-                    .foregroundColor(CiderColors.quaternary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+                // Content area: text + optional image, or empty placeholder
+                if !cardData.preview.isEmpty || !cardData.imageURLs.isEmpty {
+                    contentArea
+                } else {
+                    Text("Empty note")
+                        .font(CiderFont.bodyItalic)
+                        .foregroundColor(CiderColors.quaternary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-            // Footer
-            footer
+                // Footer
+                footer
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: mode == .grid ? gridMinHeight : nil)
         }
-        .padding(Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: mode == .grid ? gridMinHeight : nil)
+        .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered)
-        .onTapGesture(perform: onOpen)
         .hoverState($isHovered, animation: .snappy)
         .noteContextMenu(
             note: note,
@@ -89,6 +92,9 @@ struct NoteCardView: View {
             onMoveToFolder: onMoveToFolder,
             onDelete: onDelete
         )
+        .ciderDraggable(dragProvider) {
+            NoteDragPreview(note: note)
+        }
         .task(id: note.modifiedAt) {
             cardData = await Task.detached(priority: .userInitiated) {
                 NoteCardData.load(for: note)

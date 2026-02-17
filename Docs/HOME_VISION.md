@@ -45,7 +45,14 @@ The Home tab is the library — the unified view of all Cider content. A sticky 
 | **Home tab** | Everything, mixed. Your library. |
 | **Bookmarks tab** | Just bookmarks |
 | **Notes tab** | Just notes |
-| **Sidebar folders** | Filtered slice of whatever tab you're on |
+| **Sidebar folders** | Standalone mixed-content card view (independent of tabs) |
+
+### Click Behavior
+- **Bookmark card click** → Opens bookmark detail modal within the Home view (not tab switch)
+- **Note card click** → Opens standalone notes panel on top, with click-outside-to-dismiss modal behavior
+  - First click outside the notes panel → dismisses it (event is swallowed so underlying cards don't activate)
+  - First click inside the notes panel → removes the monitor, panel becomes a normal sticky panel
+- **Rejected approach:** Tab-switching on click (loses scroll position, feels disruptive)
 
 ## Future Ideas (Not Yet Prioritized)
 

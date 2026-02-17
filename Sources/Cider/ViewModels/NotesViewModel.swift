@@ -23,6 +23,7 @@ final class NotesViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published var isCollapsed: Bool = false
     @Published var isVisible: Bool = false
+    @Published var pendingNoteToOpen: UUID?
     @Published var editingTitle: String = ""
     @Published var charCount: Int = 0
     @Published var externalChangeState: NotesExternalChangeState?

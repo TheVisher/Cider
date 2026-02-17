@@ -403,7 +403,7 @@ final class BookmarksStorage: ObservableObject {
                 return nil
             }
             return BookmarksDiskSnapshot(
-                bookmarks: metadataBookmarks.sorted { $0.updatedAt > $1.updatedAt },
+                bookmarks: metadataBookmarks.sorted { $0.createdAt > $1.createdAt },
                 folders: metadataFolders
             )
         }
@@ -414,7 +414,7 @@ final class BookmarksStorage: ObservableObject {
                 return BookmarksDiskSnapshot(bookmarks: [], folders: [])
             }
             return BookmarksDiskSnapshot(
-                bookmarks: metadataBookmarks.sorted { $0.updatedAt > $1.updatedAt },
+                bookmarks: metadataBookmarks.sorted { $0.createdAt > $1.createdAt },
                 folders: metadataFolders
             )
         }
@@ -486,7 +486,7 @@ final class BookmarksStorage: ObservableObject {
             let decoded = try JSONDecoder().decode([Bookmark].self, from: data)
             UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
             return BookmarksDiskSnapshot(
-                bookmarks: decoded.sorted { $0.updatedAt > $1.updatedAt },
+                bookmarks: decoded.sorted { $0.createdAt > $1.createdAt },
                 folders: []
             )
         } catch {

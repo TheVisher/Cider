@@ -420,7 +420,8 @@ Right Column (VStack, spacing: 0)
 │   HStack(spacing: 8pt = Spacing.sm)
 │   ├── [Sidebar toggle] (24×24, only when sidebar hidden)
 │   ├── CiderTabBar (.frame(maxWidth: .infinity))
-│   └── [Capture button] (28×28, only on Bookmarks tab)
+│   ├── [Capture button] (28×28, only on Bookmarks tab)
+│   └── [Continue toggle] (28pt tall, only on Home when `showContinueSection`)
 │   .padding(.horizontal, 12pt = Spacing.md)
 │   .frame(height: 40pt = titleBarHeight)
 │
@@ -441,8 +442,15 @@ Right Column (VStack, spacing: 0)
 | Horizontal padding | 12pt (`Spacing.md`) |
 | Sidebar toggle icon | 11pt semibold, 24×24 frame |
 | Capture button icon | 11pt semibold, 28×28 frame |
+| Continue toggle | Text: 10pt semibold uppercase (`CiderFont.captionSemibold`) + chevron: 9pt semibold (`CiderFont.micro`), container height 28pt |
 
 The sidebar toggle appears with `.bouncy` animation after a 150ms delay when the sidebar closes. It disappears immediately with `.snappy` when the sidebar opens.
+
+### 6.1.1 Tab-Specific Trailing Controls
+
+- **Bookmarks tab:** shows capture button (`safari`) in the title bar trailing slot.
+- **Home tab:** when `showContinueSection` is enabled in config, shows the `Continue` collapse toggle in the trailing slot.
+- **Other tabs:** no trailing title-bar control; tab bar remains right-aligned with spacer behavior unchanged.
 
 ### 6.2 Divider
 
@@ -814,7 +822,7 @@ The **sidebar content** and **title bar content** change per window:
 
 | Window | Sidebar Content | Title Bar Content |
 |--------|----------------|-------------------|
-| Main panel | Folders + projects + search (section 8.3) | Tab bar + capture button |
+| Main panel | Folders + projects + search (section 8.3) | Tab bar + tab-specific trailing controls (Bookmarks capture button, Home Continue toggle) |
 | Standalone Notes | Scrollable notes list | Title / toolbar |
 | Standalone Bookmarks | TBD (currently folders) | Title / toolbar |
 

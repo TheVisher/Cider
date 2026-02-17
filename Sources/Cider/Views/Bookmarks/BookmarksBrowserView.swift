@@ -2,20 +2,6 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-private enum BookmarkDragPayload {
-    static let typeIdentifier = "com.cider.bookmark-id"
-    static let textPrefix = "cider-bookmark-id:"
-
-    static func bookmarkID(from raw: String) -> UUID? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix(textPrefix) {
-            let idPortion = String(trimmed.dropFirst(textPrefix.count))
-            return UUID(uuidString: idPortion)
-        }
-        return UUID(uuidString: trimmed)
-    }
-}
-
 struct BookmarksBrowserView: View {
     let bookmarks: [Bookmark]
     var folders: [Folder] = []
@@ -856,101 +842,6 @@ private struct BookmarkFolderSidebarRow: View {
             return CiderColors.selectedBorder
         }
         return CiderColors.borderDefault
-    }
-}
-
-struct BookmarkDragPreview: View {
-    let bookmark: Bookmark
-
-    private var previewShape: some Shape {
-        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-    }
-
-    private var thumbnailShape: some Shape {
-        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-    }
-
-    private var gradientPair: (Color, Color) {
-        BookmarkVisualStyle.gradient(for: bookmark)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Group {
-                if let image = loadedThumbnail {
-                    Image(nsImage: image)
-                        .resizable()
-                        .interpolation(.high)
-                        .antialiased(true)
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    LinearGradient(
-                        colors: [gradientPair.0, gradientPair.1],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .overlay {
-                        Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
-                            .font(CiderFont.heroFallback)
-                            .foregroundColor(CiderColors.textOnColor)
-                    }
-                }
-            }
-            .frame(height: BookmarksDesign.dragPreviewThumbnailHeight)
-            .clipShape(thumbnailShape)
-
-            Text(bookmark.title)
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
-        }
-        .padding(Spacing.xs)
-        .frame(width: BookmarksDesign.dragPreviewWidth)
-        .background(
-            previewShape
-                .fill(CiderColors.overlayDark)
-        )
-        .overlay(
-            previewShape
-                .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
-        )
-        .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 3)
-        .scaleEffect(BookmarksDesign.dragPreviewScale)
-        .rotationEffect(.degrees(BookmarksDesign.dragPreviewRotation))
-        .offset(
-            x: BookmarksDesign.dragPreviewXOffset,
-            y: BookmarksDesign.dragPreviewYOffset
-        )
-    }
-
-    private var loadedThumbnail: NSImage? {
-        guard let filePath = bookmark.thumbnailFileURL?.path else { return nil }
-        return NSImage(contentsOfFile: filePath)
-    }
-}
-
-extension View {
-    @ViewBuilder
-    func bookmarkDraggable<Preview: View>(
-        _ provider: (() -> NSItemProvider)?,
-        @ViewBuilder preview: @escaping () -> Preview
-    ) -> some View {
-        if let provider {
-            onDrag(provider, preview: preview)
-        } else {
-            self
-        }
-    }
-
-    @ViewBuilder
-    func bookmarkDraggable(_ provider: (() -> NSItemProvider)?) -> some View {
-        if let provider {
-            onDrag {
-                provider()
-            }
-        } else {
-            self
-        }
     }
 }
 

@@ -10,6 +10,7 @@ final class BookmarksViewModel: ObservableObject {
     @Published var cardSizeScale: Double
     @Published var isVisible = false
     @Published var isCollapsed = false
+    @Published var pendingDetailBookmarkID: UUID?
 
     private var cancellables = Set<AnyCancellable>()
 

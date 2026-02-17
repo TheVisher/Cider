@@ -74,6 +74,12 @@ struct BookmarksTabContent: View {
                 closeDetails()
             }
         }
+        .task(id: viewModel.pendingDetailBookmarkID) {
+            guard let bookmarkID = viewModel.pendingDetailBookmarkID,
+                  let bookmark = viewModel.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
+            viewModel.pendingDetailBookmarkID = nil
+            presentDetails(for: bookmark)
+        }
     }
 
     // MARK: - Details Overlay

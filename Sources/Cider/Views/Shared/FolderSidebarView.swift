@@ -35,10 +35,12 @@ struct FolderSidebarView: View {
     }
 
     private static let bookmarkDragTypeIdentifier = "com.cider.bookmark-id"
+    private static let noteDragTypeIdentifier = "com.cider.note-id"
 
     private var folderDropTypeIdentifiers: [String] {
         [
             Self.bookmarkDragTypeIdentifier,
+            Self.noteDragTypeIdentifier,
             UTType.text.identifier,
             UTType.plainText.identifier,
             UTType.utf8PlainText.identifier,
@@ -492,6 +494,7 @@ struct FolderSidebarView: View {
     // MARK: - Drop Handling
 
     private func handleFolderDrop(providers: [NSItemProvider], targetFolderID: UUID?) -> Bool {
+        // Check for bookmark drag payload
         for provider in providers where provider.hasItemConformingToTypeIdentifier(Self.bookmarkDragTypeIdentifier) {
             provider.loadDataRepresentation(forTypeIdentifier: Self.bookmarkDragTypeIdentifier) { data, _ in
                 guard let data,
@@ -508,18 +511,40 @@ struct FolderSidebarView: View {
             return true
         }
 
+        // Check for note drag payload
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(Self.noteDragTypeIdentifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: Self.noteDragTypeIdentifier) { data, _ in
+                guard let data,
+                      let rawID = String(data: data, encoding: .utf8),
+                      let noteID = UUID(uuidString: rawID) else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    if let note = notes.first(where: { $0.id == noteID }) {
+                        _ = onAssignNoteToFolder?(note, targetFolderID)
+                    }
+                }
+            }
+            return true
+        }
+
+        // Text fallback for bookmark or note IDs
         for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
             provider.loadObject(ofClass: NSString.self) { item, _ in
                 guard let raw = item as? String else { return }
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                let prefix = "cider-bookmark-id:"
-                guard trimmed.hasPrefix(prefix),
-                      let bookmarkID = UUID(uuidString: String(trimmed.dropFirst(prefix.count))) else {
-                    return
-                }
-                DispatchQueue.main.async {
-                    if let bookmark = bookmarks.first(where: { $0.id == bookmarkID }) {
-                        _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
+
+                if let bookmarkID = BookmarkDragPayload.bookmarkID(from: trimmed) {
+                    DispatchQueue.main.async {
+                        if let bookmark = bookmarks.first(where: { $0.id == bookmarkID }) {
+                            _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
+                        }
+                    }
+                } else if let noteID = NoteDragPayload.noteID(from: trimmed) {
+                    DispatchQueue.main.async {
+                        if let note = notes.first(where: { $0.id == noteID }) {
+                            _ = onAssignNoteToFolder?(note, targetFolderID)
+                        }
                     }
                 }
             }
