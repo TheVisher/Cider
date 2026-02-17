@@ -122,6 +122,7 @@ struct CiderConfig: Codable {
     var detailModalMode: DetailModalMode  // How detail modals appear: expand panel or popover window
     var showContinueSection: Bool  // Show the Continue section on the Home tab
     var continueSectionCollapsed: Bool  // Whether the Continue section is collapsed
+    var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
     var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
     var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
 
@@ -148,6 +149,7 @@ struct CiderConfig: Codable {
             detailModalMode: .expand,
             showContinueSection: true,
             continueSectionCollapsed: false,
+            subFoldersCollapsed: false,
             homeDisplayMode: .list
         )
     }
@@ -268,6 +270,10 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .continueSectionCollapsed
         ) ?? false
+        subFoldersCollapsed = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .subFoldersCollapsed
+        ) ?? false
         homeDisplayMode = try container.decodeIfPresent(
             LibraryDisplayMode.self,
             forKey: .homeDisplayMode
@@ -300,6 +306,7 @@ struct CiderConfig: Codable {
         detailModalMode: DetailModalMode = .expand,
         showContinueSection: Bool = true,
         continueSectionCollapsed: Bool = false,
+        subFoldersCollapsed: Bool = false,
         homeDisplayMode: LibraryDisplayMode = .list,
         homeCardSizeScale: Double? = nil
     ) {
@@ -324,6 +331,7 @@ struct CiderConfig: Codable {
         self.detailModalMode = detailModalMode
         self.showContinueSection = showContinueSection
         self.continueSectionCollapsed = continueSectionCollapsed
+        self.subFoldersCollapsed = subFoldersCollapsed
         self.homeDisplayMode = homeDisplayMode
         self.homeCardSizeScale = homeCardSizeScale
     }

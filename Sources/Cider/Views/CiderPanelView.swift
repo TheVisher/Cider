@@ -19,6 +19,7 @@ struct CiderPanelView: View {
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
     @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
     @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
+    @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -80,6 +81,11 @@ struct CiderPanelView: View {
             config.continueSectionCollapsed = newValue
             config.save()
         }
+        .onChange(of: subFoldersCollapsed) { _, newValue in
+            var config = CiderConfig.load()
+            config.subFoldersCollapsed = newValue
+            config.save()
+        }
         .background {
             Button("") { isSearchPaletteVisible = true }
                 .keyboardShortcut("k", modifiers: .command)
@@ -136,8 +142,10 @@ struct CiderPanelView: View {
                 .help("Capture active browser tab")
         }
 
-        if selectedTab == .home && showContinueSection {
-            continueToggleButton
+        if selectedTab == .home && selectedFolderID == nil && showContinueSection {
+            recentsSectionToggle
+        } else if selectedFolderID != nil && folderHasSubFolders {
+            subFoldersToggle
         }
     }
 
@@ -210,16 +218,21 @@ struct CiderPanelView: View {
         .help("Delete selected items")
     }
 
-    // MARK: - Continue Toggle
+    // MARK: - Section Toggles
 
-    private var continueToggleButton: some View {
+    private var folderHasSubFolders: Bool {
+        guard let folderID = selectedFolderID else { return false }
+        return bookmarksViewModel.folders.contains(where: { $0.parentID == folderID })
+    }
+
+    private var recentsSectionToggle: some View {
         Button {
             withAnimation(reduceMotion ? .none : .snappy) {
                 continueSectionCollapsed.toggle()
             }
         } label: {
             HStack(spacing: Spacing.xs) {
-                Text("Continue")
+                Text("Recents")
                     .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
                     .textCase(.uppercase)
@@ -235,6 +248,31 @@ struct CiderPanelView: View {
         .buttonStyle(.plain)
         .animation(reduceMotion ? .none : .snappy, value: continueSectionCollapsed)
         .help(continueSectionCollapsed ? "Show recent items" : "Hide recent items")
+    }
+
+    private var subFoldersToggle: some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                subFoldersCollapsed.toggle()
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Text("Folders")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .textCase(.uppercase)
+
+                Image(systemName: "chevron.right")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.quaternary)
+                    .rotationEffect(.degrees(subFoldersCollapsed ? 0 : 90))
+            }
+            .frame(height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(reduceMotion ? .none : .snappy, value: subFoldersCollapsed)
+        .help(subFoldersCollapsed ? "Show sub-folders" : "Hide sub-folders")
     }
 
     // MARK: - Sidebar Content
@@ -456,6 +494,7 @@ struct CiderPanelView: View {
                 displayMode: $homeDisplayMode,
                 cardSizeScale: $homeCardSizeScale,
                 selectedItemIDs: $selectedItemIDs,
+                subFoldersCollapsed: $subFoldersCollapsed,
                 onSelectSubFolder: { subFolderID in
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)

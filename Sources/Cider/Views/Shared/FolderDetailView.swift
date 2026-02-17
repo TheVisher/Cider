@@ -8,6 +8,7 @@ struct FolderDetailView: View {
     @Binding var displayMode: LibraryDisplayMode
     @Binding var cardSizeScale: Double
     @Binding var selectedItemIDs: Set<String>
+    @Binding var subFoldersCollapsed: Bool
     var onSelectSubFolder: ((UUID) -> Void)?
 
     @State private var selectionAnchorID: String?
@@ -64,7 +65,7 @@ struct FolderDetailView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: Spacing.lg) {
-                            if !childFolders.isEmpty {
+                            if !childFolders.isEmpty && !subFoldersCollapsed {
                                 subFolderCards
                             }
 

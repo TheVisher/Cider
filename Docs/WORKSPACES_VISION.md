@@ -335,6 +335,126 @@ Additional sliders in ViewOptionsDropdown alongside the existing card size slide
 
 ---
 
+## Themed Folders
+
+**Concept:** Folders can have a **theme** that transforms their entire visual presentation, card layout, and organizational features based on content type. A themed folder isn't just a collection of bookmarks — it becomes a specialized micro-app with an aesthetic and UX tailored to that content.
+
+Default folders use the standard Cider card layout (BookmarkCard, NoteCardView). Themed folders replace this with a completely different visual system while keeping the same underlying data (bookmarks + notes + metadata).
+
+### Media Hub Theme
+
+Transform a folder into a Netflix/Apple TV-style media browser. For saving movies, TV shows, documentaries, and anything you want to watch or have watched.
+
+**Visual aesthetic:**
+- Large poster-art cards (portrait orientation, like streaming service tiles)
+- Hero banner at top — featured/pinned item with backdrop image, title overlay, genre tags
+- Horizontal scrolling rows by category (Watching, Watchlist, Completed, Dropped)
+- Card hover: subtle scale + metadata overlay (year, rating, runtime)
+- Dark, cinematic feel — leans into the acrylic panel aesthetic
+
+**Card enrichment:**
+When you save an IMDB, Letterboxd, TMDB, or similar URL, Cider enriches the bookmark with:
+- Poster artwork (high-res, portrait crop for the card)
+- Backdrop image (for hero banner or detail view)
+- Rotten Tomatoes / IMDB score
+- Runtime, release date, genres, director, cast
+- For TV shows: season/episode count, air status (ongoing/ended)
+- Sources: TMDB API (free, comprehensive), OMDB API, or scrape from the bookmarked page
+
+**TV show episode tracking:**
+- Expand a TV show card to see seasons and episodes
+- Mark episodes as watched/unwatched individually
+- Track progress: "Season 2, Episode 4 of 10"
+- Integration with **Trakt.tv** — sync watch status bidirectionally so marking something watched in Cider updates Trakt, and watching something on your TV updates Cider
+- Episode cards show: title, thumbnail, air date, runtime, brief synopsis
+
+**Smart organization:**
+- Auto-categorize into sections: Watching, Watchlist, Completed, Dropped, Favorites
+- Status is per-item (set via right-click or swipe gesture on cards)
+- Sub-folders or smart sections by genre, year, rating
+- "Up Next" section — shows with unwatched episodes, sorted by air date
+
+**AI-powered features** (see AI_VISION.md):
+- Similar show/movie suggestions based on what's in the folder ("You liked these 5 sci-fi shows, you might like...")
+- Auto-genre classification from page content if metadata API misses it
+- Natural language filter: "show me comedies from the 2010s I haven't watched"
+
+**Data flow:**
+```
+User saves IMDB/TMDB URL → Cider captures bookmark
+  → Detect media URL (domain or page structure)
+  → Fetch metadata from TMDB API (poster, backdrop, scores, cast, episodes)
+  → Store enriched metadata on bookmark model (extended fields)
+  → Render with Media Hub card layout instead of standard BookmarkCard
+  → Trakt.tv sync (if connected): push/pull watch status
+```
+
+### Recipe Theme
+
+Transform a folder into a visual recipe collection. For saving recipes from cooking sites, food blogs, YouTube cooking videos.
+
+**Visual aesthetic:**
+- Large food photography thumbnails (landscape, hero-style)
+- Card overlay: recipe title, cook time, servings, difficulty
+- Warm, appetizing color accents
+- Cards feel like physical recipe cards — clean typography, ingredients visible
+
+**Card enrichment:**
+Most recipe sites use **Schema.org Recipe markup** (`application/ld+json`), which means structured data is already on the page:
+- Recipe name, description, author
+- Cook time, prep time, total time
+- Servings / yield
+- Ingredients list
+- Step-by-step instructions
+- Nutrition info (calories, macros)
+- High-quality food photography
+- Cider extracts this on capture — no API needed, it's in the page source
+
+**Card layout variations:**
+- **Photo card:** Full-bleed food image, title + time overlay at bottom (default)
+- **Recipe card:** Split layout — image on left, ingredients list on right (for planning)
+- **Compact list:** Title + time + thumbnail (for searching/browsing quickly)
+
+**Useful features:**
+- Ingredient aggregation — select multiple recipes, see combined ingredient list (meal planning / grocery list)
+- Cooking mode — open a recipe full-panel with large text, step-by-step, screen stays on
+- Tag by cuisine, meal type, dietary restrictions (AI auto-tag or manual)
+- "Tried it" / "Want to make" status tracking
+- Notes field per recipe for personal tweaks ("used less salt", "double the garlic")
+
+### Other Potential Themes (Future Exploration)
+
+- **Reading List** — book covers, Goodreads integration, read/unread/reading status, page progress
+- **Music** — album art grid, Spotify/Apple Music integration, playlist building
+- **Travel** — map view with pinned locations, trip grouping, photos, itinerary timeline
+- **Shopping** — price tracking, product images, purchase status, wishlists
+- **Learning** — course cards, progress tracking, certificate display, learning paths
+
+### Architecture Implications
+
+**Folder model changes:**
+- `Folder.theme: FolderTheme?` — enum: `.default`, `.mediaHub`, `.recipe`, `.readingList`, etc.
+- Theme is set via folder context menu ("Set Theme → Media Hub") or auto-suggested based on content
+
+**Pluggable renderers:**
+- `FolderDetailView` checks `folder.theme` and delegates to the appropriate renderer
+- Each theme has its own card component, layout logic, and section organization
+- Standard folder uses existing `BookmarkCard` / `NoteCardView`
+- Media Hub uses `MediaCard`, `EpisodeRow`, `HeroCarousel`
+- Recipe uses `RecipeCard`, `IngredientsList`, `CookingModeView`
+
+**Extended metadata:**
+- Bookmark model gets a flexible `metadata: [String: AnyCodable]?` field for theme-specific data
+- Media Hub stores: poster URL, backdrop URL, scores, cast, episodes, watch status
+- Recipe stores: ingredients, steps, cook time, servings, nutrition
+- Metadata fetched on capture via theme-appropriate enrichment (TMDB API, Schema.org extraction, etc.)
+
+**Third-party integrations:**
+- Trakt.tv: OAuth flow in settings, background sync service
+- Future: Goodreads, Spotify, etc. — same pattern (OAuth + sync service per integration)
+
+---
+
 ## Implementation Priority
 
 1. **Phase 1: Universal Folders** — Rename BookmarkFolder to Folder, add folderID to Notes, universal sidebar.

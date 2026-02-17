@@ -171,6 +171,113 @@ YouTube URL captured
 | **Screenshot capture** | — | Vision OCR → text extraction → summarize | — |
 | **Image search** | — | Vision OCR indexes text in images/thumbnails | — |
 | **Writing assistance** | — | Writing Tools / Foundation Models | Cloud LLM for complex editing |
+| **Conversational assistant** | — | Foundation Models with library context | Cloud LLM for complex reasoning over large libraries |
+
+---
+
+## Conversational AI Assistant
+
+Foundation Models supports full conversational interaction — sessions with memory, system instructions, and structured output. This means Cider can have a **chat interface that knows your entire library**.
+
+### Concept
+
+A chat bar or conversational surface in the panel where you talk to your collection in natural language. The model runs locally, responds instantly, and never sends your data off-device.
+
+### How It Works
+
+Foundation Models supports:
+- **Conversation sessions** — back-and-forth where the model remembers prior messages
+- **System instructions** — tell the model its role and what data it has access to
+- **Structured output** — model returns typed Swift objects, not just text (e.g., returns a `[BookmarkID]` array)
+
+```swift
+let session = LanguageModelSession(instructions: """
+    You are Cider's library assistant. The user has \(bookmarkCount) bookmarks
+    and \(noteCount) notes. Here are their folders: \(folderList).
+    Answer questions about their saved content.
+    """)
+
+// Feed it context about the user's library
+let response = try await session.respond(to: "What sci-fi movies do I have saved?")
+// Model responds based on the library data in its context
+```
+
+### Example Interactions
+
+**Querying your collection:**
+- "What did I save last week?"
+- "Find bookmarks about Swift concurrency"
+- "What recipes do I have that use chicken and take under 30 minutes?"
+- "Show me movies in my watchlist rated above 80% on Rotten Tomatoes"
+- "How many unread articles do I have in my Web Dev folder?"
+
+**Acting on your collection:**
+- "Move all React articles to my Frontend folder"
+- "Tag these 5 bookmarks as 'research'"
+- "Create a new folder called Travel and move my trip bookmarks there"
+- "Summarize all the notes I wrote this week into one paragraph"
+- "What bookmarks do I have that are similar to this one?"
+
+**Cross-referencing:**
+- "Do I have any notes that reference the same topics as this bookmark?"
+- "What's the overlap between my Work folder and my Learning folder?"
+- "Which of my saved recipes use ingredients I bookmarked from that grocery site?"
+
+### UX Options
+
+**Option A: Chat bar in panel**
+- Persistent text field at the bottom of the panel (like Spotlight but conversational)
+- Responses appear inline above the input, push content up
+- Tap a result to navigate to that item
+- Conversation clears when panel closes (ephemeral, not a chat history)
+
+**Option B: Chat overlay**
+- Triggered by hotkey (Cmd+L or similar) or a button
+- Slides up as an overlay within the panel
+- Fullscreen conversational surface with the library as context
+- Dismiss to return to normal browsing
+
+**Option C: Integrated into search**
+- Enhance the existing Cmd+K search palette with conversational mode
+- Simple queries → standard search results (as today)
+- Natural language queries → Foundation Models interprets and responds
+- The model decides whether to show items, answer a question, or take an action
+
+### Context Window Management
+
+The on-device model has a limited context window (smaller than cloud LLMs). Strategy for fitting the user's library:
+
+- **Don't dump everything in.** Feed relevant slices based on the query.
+- Use NaturalLanguage embeddings to find the most relevant bookmarks/notes for a query, then feed only those into the conversation context.
+- System instructions describe the library structure (folder names, item counts, tags). Detailed content loaded on demand.
+- For themed folders (Media Hub, Recipes), feed structured metadata (titles, scores, tags) rather than full page content — much more compact.
+
+```
+User asks: "What sci-fi movies do I have?"
+  1. NaturalLanguage embedding search: find items tagged/classified as sci-fi
+  2. Feed those 15 results into Foundation Models context
+  3. Model responds with a natural language list + structured IDs
+  4. Cider renders the referenced items as tappable cards below the response
+```
+
+### Structured Output for Actions
+
+Foundation Models can return typed Swift structs, not just text. This means the model can return actionable data:
+
+```swift
+@Generable
+struct LibraryAction {
+    let intent: ActionIntent  // .search, .move, .tag, .summarize, .create
+    let targetIDs: [String]   // bookmark/note IDs to act on
+    let destination: String?  // folder name for .move
+    let tags: [String]?       // tags for .tag
+}
+
+// "Move my React articles to Frontend folder"
+// → LibraryAction(intent: .move, targetIDs: [...], destination: "Frontend")
+```
+
+This bridges natural language input to concrete app actions — the model understands intent, Cider executes it.
 
 ---
 
@@ -189,14 +296,21 @@ YouTube URL captured
 - Transcript summarization
 - Content classification for smarter organization
 
-**Phase 3: Deeper intelligence**
+**Phase 3: Conversational assistant**
+- Chat bar / overlay UI in the panel
+- Foundation Models session with library context injection
+- NaturalLanguage embedding pre-search to scope context for queries
+- Structured output for actionable responses (move, tag, create)
+- Natural language queries over themed folders (media, recipes)
+
+**Phase 4: Deeper intelligence**
 - NaturalLanguage embeddings powering "find similar" UI
 - Vision OCR for screenshot-based capture and image search indexing
 - Smart folder suggestions based on content patterns
 - Auto-organize nudges ("You saved 12 React articles this week — create a folder?")
 - App Intents for Siri and Shortcuts integration
 
-**Phase 4: Cloud AI (optional, cross-platform prep)**
+**Phase 5: Cloud AI (optional, cross-platform prep)**
 - User-configurable API provider (OpenAI, Anthropic, Ollama)
 - Higher-quality summarization for complex content
 - Custom prompt support ("Summarize for a 5-year-old", "Extract action items")
@@ -211,6 +325,5 @@ YouTube URL captured
 - Foundation Models availability: what happens on Macs that don't support Apple Intelligence (Intel Macs, older Apple Silicon)? Tier 0 fallback is critical. NaturalLanguage framework still works on all Macs.
 - Should AI features be behind a toggle in settings, or just work silently?
 - Embedding storage: compute on save and store in a local vector index? Or compute on-demand? Pre-computing enables instant "find similar" but increases storage.
-- Could we use Foundation Models for conversational search? ("What did I bookmark last week about Swift concurrency?")
 - Writing Tools in TipTap: bridge via JS message passing, or build our own summarize/rewrite UI?
 - YouTube caption fetching: use the public timedtext endpoint, or require YouTube Data API key? Public endpoint is fragile but free.
