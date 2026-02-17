@@ -258,20 +258,12 @@ struct CiderPanelShell<
                 sidebarFooter
             }
             .background(
-                ZStack {
-                    VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                    CiderColors.acrylicTint
-                }
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: CiderPanelDesign.cornerRadius,
-                        bottomLeadingRadius: CiderPanelDesign.cornerRadius,
-                        bottomTrailingRadius: Radius.md,
-                        topTrailingRadius: Radius.md,
-                        style: .continuous
-                    )
-                )
+                VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             )
+            .sectionContainer()
+            .padding(.leading, Spacing.md)
+            .padding(.vertical, Spacing.md)
             .transition(.move(edge: .leading).combined(with: .opacity))
         }
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))

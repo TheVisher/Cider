@@ -750,11 +750,13 @@ When the panel width drops below `680pt` (`sidebarCompactThreshold`), the sideba
 ZStack(alignment: .leading)
 ├── Dimming backdrop: CiderColors.backdrop, tap to dismiss
 └── VStack (same sidebarHeader + folderSidebar + sidebarFooter)
-    └── Background: full acrylic stack (VisualEffectView + tint)
-        Corners: UnevenRoundedRectangle
-        ├── Leading corners: 14pt (panel corners)
-        └── Trailing corners: 10pt (Radius.md)
+    └── Background: VisualEffectView(.underWindowBackground, .withinWindow)
+        + .sectionContainer() (surfaceElevated fill + border)
+        Background clip: RoundedRectangle(Radius.md)
+        Outer clip: panel corner radius (14pt)
 ```
+
+**Critical:** The overlay must use `.withinWindow` blending, not `.behindWindow`. Since our window background is transparent (for custom shadows), `.behindWindow` samples the desktop wallpaper instead of the panel's acrylic. `.withinWindow` samples the panel's own rendered content — the dark acrylic — giving the correct appearance.
 
 The entire overlay is clipped to the panel's rounded rect to prevent overflow.
 

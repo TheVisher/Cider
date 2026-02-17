@@ -62,7 +62,7 @@ struct HomeDashboardView: View {
                     }
                 )
                 .padding(.horizontal, Spacing.md)
-                .padding(.top, Spacing.sm)
+                .padding(.top, Spacing.md)
             }
 
             if libraryItems.isEmpty {
@@ -75,7 +75,7 @@ struct HomeDashboardView: View {
                 .scrollIndicators(.hidden)
                 .padding(Spacing.xxs)
                 .padding(.horizontal, Spacing.md)
-                .padding(.top, Spacing.sm)
+                .padding(.top, Spacing.md)
                 .padding(.bottom, Spacing.md)
             }
         }

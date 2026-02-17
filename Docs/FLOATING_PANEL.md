@@ -352,6 +352,14 @@ SwiftUI's `DragGesture` tracks position in view-local coordinates. Resizing the 
 
 `isMovableByWindowBackground = true` checks `mouseDownCanMoveWindow` on the hit-tested view to decide whether to start a drag. If this returns `true` (the default), the window drag starts **before** the view's `mouseDown` fires. Setting `isMovableByWindowBackground = false` in `mouseDown` is too late. Override `mouseDownCanMoveWindow` to return `false` on the resize handle view instead.
 
+### VisualEffectView blending in transparent windows
+
+`.behindWindow` blending samples what's behind the *window* — the desktop wallpaper and other apps. Since our panels use `backgroundColor = .clear` (for custom shadow rendering), any `VisualEffectView(.behindWindow)` added to overlay views inside the panel will show wallpaper colors bleeding through, even though the panel's own acrylic is visually opaque underneath.
+
+**Solution:** Use `.withinWindow` blending for overlay views (compact sidebar, detail sheets) that sit on top of the panel's own acrylic. This samples from the window's own rendered content — the dark acrylic — giving the correct dark frosted appearance without wallpaper bleed-through.
+
+Only the panel's base `AcrylicPanelBackground` should use `.behindWindow`.
+
 ---
 
 ## Design Constants
