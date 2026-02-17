@@ -26,7 +26,7 @@ struct MasonryLayout: Layout {
         cache: inout Cache
     ) -> CGSize {
         let availableWidth = resolvedLayoutWidth(proposal.width)
-        computeFramesIfNeeded(availableWidth: availableWidth, subviews: subviews, cache: &cache)
+        computeFrames(availableWidth: availableWidth, subviews: subviews, cache: &cache)
         return CGSize(width: availableWidth, height: cache.measuredHeight)
     }
 
@@ -37,7 +37,7 @@ struct MasonryLayout: Layout {
         cache: inout Cache
     ) {
         let availableWidth = resolvedLayoutWidth(bounds.width)
-        computeFramesIfNeeded(availableWidth: availableWidth, subviews: subviews, cache: &cache)
+        computeFrames(availableWidth: availableWidth, subviews: subviews, cache: &cache)
 
         for index in subviews.indices {
             let frame = cache.frames[index]
@@ -49,15 +49,11 @@ struct MasonryLayout: Layout {
         }
     }
 
-    private func computeFramesIfNeeded(
+    private func computeFrames(
         availableWidth: CGFloat,
         subviews: Subviews,
         cache: inout Cache
     ) {
-        if cache.frames.count == subviews.count && cache.measuredWidth == availableWidth {
-            return
-        }
-
         if cache.frames.count != subviews.count {
             cache.frames = Array(repeating: .zero, count: subviews.count)
         }
