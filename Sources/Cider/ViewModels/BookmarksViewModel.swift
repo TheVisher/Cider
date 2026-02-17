@@ -121,6 +121,23 @@ final class BookmarksViewModel: ObservableObject {
         BookmarksStorage.shared.deleteFolder(folderID)
     }
 
+    @discardableResult
+    func setFolderCover(_ folderID: UUID, imageData: Data) -> Bool {
+        BookmarksStorage.shared.setFolderCoverImage(folderID, imageData: imageData)
+    }
+
+    func setFolderCoverOffset(_ folderID: UUID, offsetY: Double) {
+        BookmarksStorage.shared.setFolderCoverOffset(folderID, offsetY: offsetY)
+    }
+
+    func removeFolderCover(_ folderID: UUID) {
+        BookmarksStorage.shared.removeFolderCoverImage(folderID)
+    }
+
+    func folderCoverURL(for folder: Folder) -> URL? {
+        BookmarksStorage.shared.folderCoverImageURL(for: folder)
+    }
+
     func folder(for bookmark: Bookmark) -> Folder? {
         guard let folderID = bookmark.folderID else { return nil }
         return folders.first(where: { $0.id == folderID })

@@ -23,6 +23,7 @@ final class BookmarksStorage: ObservableObject {
     private let htmlFileName = "bookmarks.html"
     private let metadataFileName = "_cider_bookmarks_metadata.json"
     private let thumbnailsDirectoryName = ".thumbnails"
+    private let folderCoversDirectoryName = ".folder-covers"
     private var enrichmentTasks: [UUID: Task<Void, Never>] = [:]
 
     private var directoryURL: URL
@@ -274,6 +275,73 @@ final class BookmarksStorage: ObservableObject {
         bookmarks[index].folderID = folderID
         persist()
         return true
+    }
+
+    // MARK: - Folder Cover Images
+
+    private var folderCoversDirectoryURL: URL {
+        directoryURL.appendingPathComponent(folderCoversDirectoryName, isDirectory: true)
+    }
+
+    @discardableResult
+    func setFolderCoverImage(_ folderID: UUID, imageData: Data) -> Bool {
+        guard NSImage(data: imageData) != nil else { return false }
+
+        let filename = "\(folderID.uuidString).jpg"
+        let relativePath = "\(folderCoversDirectoryName)/\(filename)"
+        let fileURL = directoryURL.appendingPathComponent(relativePath)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: folderCoversDirectoryURL,
+                withIntermediateDirectories: true
+            )
+            deleteExistingFolderCoverFiles(for: folderID)
+            try imageData.write(to: fileURL, options: .atomic)
+
+            if let idx = folders.firstIndex(where: { $0.id == folderID }) {
+                folders[idx].coverImagePath = relativePath
+                folders[idx].updatedAt = Date()
+                persist()
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func setFolderCoverOffset(_ folderID: UUID, offsetY: Double) {
+        guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        folders[idx].coverImageOffsetY = offsetY
+        folders[idx].updatedAt = Date()
+        persist()
+    }
+
+    func removeFolderCoverImage(_ folderID: UUID) {
+        deleteExistingFolderCoverFiles(for: folderID)
+        if let idx = folders.firstIndex(where: { $0.id == folderID }) {
+            folders[idx].coverImagePath = nil
+            folders[idx].updatedAt = Date()
+            persist()
+        }
+    }
+
+    func folderCoverImageURL(for folder: Folder) -> URL? {
+        guard let path = folder.coverImagePath else { return nil }
+        let url = directoryURL.appendingPathComponent(path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func deleteExistingFolderCoverFiles(for folderID: UUID) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: folderCoversDirectoryURL,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        let prefix = folderID.uuidString + "."
+        for file in files where file.lastPathComponent.hasPrefix(prefix) {
+            try? fm.removeItem(at: file)
+        }
     }
 
     @discardableResult

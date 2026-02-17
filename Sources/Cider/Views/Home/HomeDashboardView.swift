@@ -72,7 +72,8 @@ struct HomeDashboardView: View {
                         ContinueSectionView(
                             items: continueItems,
                             onOpenBookmark: { presentDetails(for: $0) },
-                            onOpenNote: { note in openNoteInPanel(note) }
+                            onOpenNote: { note in openNoteInPanel(note) },
+                            dragProviderForItem: continueDragProvider
                         )
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.md)
@@ -84,7 +85,8 @@ struct HomeDashboardView: View {
                             ContinueSectionView(
                                 items: continueItems,
                                 onOpenBookmark: { presentDetails(for: $0) },
-                                onOpenNote: { note in openNoteInPanel(note) }
+                                onOpenNote: { note in openNoteInPanel(note) },
+                                dragProviderForItem: continueDragProvider
                             )
                             .padding(.horizontal, Spacing.md)
                             .padding(.top, Spacing.md)
@@ -490,6 +492,15 @@ struct HomeDashboardView: View {
     }
 
     // MARK: - Drag Providers
+
+    private func continueDragProvider(for item: LibraryItem) -> (() -> NSItemProvider)? {
+        switch item {
+        case .bookmark(let bookmark):
+            return bookmarkDragProvider(for: bookmark)
+        case .note(let note):
+            return noteDragProvider(for: note)
+        }
+    }
 
     private func bookmarkDragProvider(for bookmark: Bookmark) -> () -> NSItemProvider {
         return {

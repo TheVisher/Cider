@@ -14,6 +14,9 @@ struct FolderDetailView: View {
     @State private var selectionAnchorID: String?
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsErrorMessage: String?
+    @State private var coverImage: NSImage?
+    @State private var coverOffsetY: Double = 0.5
+    @State private var isHoveringCover = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -55,78 +58,277 @@ struct FolderDetailView: View {
         CiderConfig.load().detailModalMode == .expand
     }
 
+    /// Ancestors of the current folder (excluding itself), from root → parent.
+    private var breadcrumbPath: [Folder] {
+        let fullPath = bookmarksViewModel.folderPath(to: folderID)
+        return Array(fullPath.dropLast())
+    }
+
     // MARK: - Body
 
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                if childFolders.isEmpty && folderItems.isEmpty {
+            if childFolders.isEmpty && folderItems.isEmpty && coverImage == nil {
+                VStack(spacing: 0) {
+                    folderHeader
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     emptyState
-                } else {
-                    if !childFolders.isEmpty {
-                        CollapsiblePinnedSection(isCollapsed: $subFoldersCollapsed) {
-                            subFolderCards
-                                .padding(.horizontal, Spacing.md + Spacing.xxs)
-                                .padding(.top, Spacing.md)
-                                .padding(.bottom, Spacing.sm)
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        if coverImage != nil {
+                            folderCoverBanner
                         }
-                    }
 
-                    if !folderItems.isEmpty {
-                        ScrollView {
-                            libraryFeed
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        Section {
+                            if !childFolders.isEmpty {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    HStack {
+                                        SectionCollapseToggle(
+                                            label: "Sub Folders",
+                                            isCollapsed: $subFoldersCollapsed
+                                        )
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, Spacing.md + Spacing.xxs)
+                                    .padding(.top, Spacing.sm)
+
+                                    if !subFoldersCollapsed {
+                                        subFolderCards
+                                            .padding(.horizontal, Spacing.md + Spacing.xxs)
+                                            .padding(.top, Spacing.sm)
+                                            .padding(.bottom, Spacing.sm)
+                                    }
+                                }
+                            }
+
+                            if !folderItems.isEmpty {
+                                libraryFeed
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(Spacing.xxs)
+                                    .padding(.horizontal, Spacing.md)
+                                    .padding(.vertical, Spacing.md)
+                            } else {
+                                EmptyStateView(
+                                    icon: "tray",
+                                    title: "No items yet",
+                                    subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
+                                )
+                                .frame(minHeight: 200)
+                            }
+                        } header: {
+                            stickyHeader
                         }
-                        .scrollIndicators(.hidden)
-                        .padding(Spacing.xxs)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.md)
-                    } else {
-                        Spacer(minLength: 0)
                     }
                 }
+                .scrollIndicators(.hidden)
             }
-            .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
-            .animation(reduceMotion ? .none : .snappy, value: detailsDraft != nil)
 
             if isExpandMode, detailsDraft != nil {
                 detailsOverlay
             }
         }
+        .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
+        .animation(reduceMotion ? .none : .snappy, value: detailsDraft != nil)
         .onChange(of: bookmarksViewModel.bookmarks.map(\.id)) { _, bookmarkIDs in
             guard let detailsDraft else { return }
             if !bookmarkIDs.contains(detailsDraft.id) {
                 closeDetails()
             }
         }
+        .task(id: "\(folderID)-\(folder?.coverImagePath ?? "")-\(folder?.updatedAt.timeIntervalSinceReferenceDate ?? 0)") {
+            await loadCoverImage()
+            coverOffsetY = folder?.coverImageOffsetY ?? 0.5
+        }
+    }
+
+    // MARK: - Sticky Header
+
+    private var stickyHeader: some View {
+        folderHeader
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, Spacing.sm)
+    }
+
+    // MARK: - Folder Header
+
+    private var folderHeader: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            // Breadcrumbs (only if nested)
+            if !breadcrumbPath.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(Array(breadcrumbPath.enumerated()), id: \.element.id) { index, ancestor in
+                        if index > 0 {
+                            Image(systemName: "chevron.right")
+                                .font(CiderFont.micro)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                        Button {
+                            onSelectSubFolder?(ancestor.id)
+                        } label: {
+                            Text(ancestor.name)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.quaternary)
+                }
+            }
+
+            // Folder name
+            Text(folder?.name ?? "Folder")
+                .font(CiderFont.titleMedium)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+
+            // Item count
+            let total = folderItems.count
+            let subCount = childFolders.count
+            HStack(spacing: Spacing.sm) {
+                if total > 0 {
+                    Text("\(total) item\(total == 1 ? "" : "s")")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                if subCount > 0 {
+                    Text("\(subCount) folder\(subCount == 1 ? "" : "s")")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                if total == 0 && subCount == 0 {
+                    Text("Empty")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
+                }
+            }
+        }
+        .padding(.horizontal, Spacing.md + Spacing.xxs)
+        .padding(.top, Spacing.md)
+        .padding(.bottom, Spacing.xs)
+        .contextMenu {
+            if coverImage != nil {
+                Button("Change Cover Image...") { pickCoverImage() }
+                Button("Remove Cover Image") { removeCoverImage() }
+            } else {
+                Button("Set Cover Image...") { pickCoverImage() }
+            }
+        }
+    }
+
+    // MARK: - Cover Banner
+
+    private static let coverBannerHeight: CGFloat = 160
+
+    private var folderCoverBanner: some View {
+        GeometryReader { geo in
+            if let coverImage {
+                let imageAspect = coverImage.size.height / max(coverImage.size.width, 1)
+                let imageHeight = geo.size.width * imageAspect
+                let containerHeight = Self.coverBannerHeight
+                let maxOffset = max(imageHeight - containerHeight, 0)
+
+                Image(nsImage: coverImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: imageHeight)
+                    .offset(y: -coverOffsetY * maxOffset)
+                    .frame(width: geo.size.width, height: containerHeight, alignment: .top)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    .overlay(alignment: .bottom) {
+                        if isHoveringCover && maxOffset > 0 {
+                            Text("Drag to reposition")
+                                .font(CiderFont.caption)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, Spacing.sm)
+                                .padding(.vertical, Spacing.xxs)
+                                .background(Capsule().fill(Color.black.opacity(0.5)))
+                                .padding(.bottom, Spacing.sm)
+                                .transition(.opacity)
+                                .animation(reduceMotion ? .none : .snappy, value: isHoveringCover)
+                        }
+                    }
+                    .overlay {
+                        CoverRepositionOverlay(
+                            maxOffset: maxOffset,
+                            baseOffsetY: folder?.coverImageOffsetY ?? 0.5,
+                            onOffsetChanged: { coverOffsetY = $0 },
+                            onDragEnded: { bookmarksViewModel.setFolderCoverOffset(folderID, offsetY: $0) },
+                            onHoverChanged: { isHoveringCover = $0 }
+                        )
+                    }
+            }
+        }
+        .frame(height: Self.coverBannerHeight)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .padding(.horizontal, Spacing.md + Spacing.xxs)
+        .padding(.top, Spacing.sm)
+        .contextMenu {
+            Button("Change Cover Image...") { pickCoverImage() }
+            Button("Remove Cover Image") { removeCoverImage() }
+        }
+    }
+
+    // MARK: - Cover Image Loading
+
+    private func loadCoverImage() async {
+        guard let folder,
+              let url = bookmarksViewModel.folderCoverURL(for: folder) else {
+            coverImage = nil
+            return
+        }
+
+        let loaded = await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil as NSImage? }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 800,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil as NSImage?
+            }
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }.value
+
+        if !Task.isCancelled {
+            coverImage = loaded
+        }
+    }
+
+    private func pickCoverImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canCreateDirectories = false
+        panel.title = "Choose Cover Image"
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url) else { return }
+        bookmarksViewModel.setFolderCover(folderID, imageData: data)
+    }
+
+    private func removeCoverImage() {
+        bookmarksViewModel.removeFolderCover(folderID)
     }
 
     // MARK: - Sub-Folder Cards
 
     private var subFolderCards: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "folder")
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.tertiary)
-
-                Text("Sub Folders")
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.tertiary)
-                    .textCase(.uppercase)
-
-                Text("\(childFolders.count)")
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.quaternary)
-            }
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: Spacing.sm)],
-                spacing: Spacing.sm
-            ) {
-                ForEach(childFolders) { folder in
-                    subFolderCard(folder)
-                }
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: Spacing.sm)],
+            spacing: Spacing.sm
+        ) {
+            ForEach(childFolders) { folder in
+                subFolderCard(folder)
             }
         }
     }
@@ -717,6 +919,114 @@ struct FolderDetailView: View {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
+        }
+    }
+}
+
+// MARK: - Cover Reposition Overlay
+
+/// Transparent NSView overlay that prevents `isMovableByWindowBackground` from
+/// starting a window drag on the cover image, and handles drag-to-reposition
+/// via AppKit mouse events (since SwiftUI DragGesture can't override
+/// `mouseDownCanMoveWindow`).
+private struct CoverRepositionOverlay: NSViewRepresentable {
+    var maxOffset: CGFloat
+    var baseOffsetY: Double
+    var onOffsetChanged: (Double) -> Void
+    var onDragEnded: (Double) -> Void
+    var onHoverChanged: (Bool) -> Void
+
+    func makeNSView(context: Context) -> CoverRepositionNSView {
+        let view = CoverRepositionNSView()
+        view.maxOffset = maxOffset
+        view.baseOffsetY = baseOffsetY
+        view.onOffsetChanged = onOffsetChanged
+        view.onDragEnded = onDragEnded
+        view.onHoverChanged = onHoverChanged
+        return view
+    }
+
+    func updateNSView(_ nsView: CoverRepositionNSView, context: Context) {
+        nsView.maxOffset = maxOffset
+        nsView.baseOffsetY = baseOffsetY
+        nsView.onOffsetChanged = onOffsetChanged
+        nsView.onDragEnded = onDragEnded
+        nsView.onHoverChanged = onHoverChanged
+    }
+}
+
+private final class CoverRepositionNSView: NSView {
+    var maxOffset: CGFloat = 0
+    var baseOffsetY: Double = 0.5
+    var onOffsetChanged: ((Double) -> Void)?
+    var onDragEnded: ((Double) -> Void)?
+    var onHoverChanged: ((Bool) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return bounds.contains(local) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // MARK: - Hover Tracking
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
+
+    // MARK: - Drag Handling (event loop pattern — same as PanelEdgeResizeView)
+
+    override func mouseDown(with event: NSEvent) {
+        guard maxOffset > 0, let window else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        let startY = event.locationInWindow.y
+        let startBase = baseOffsetY
+        var current = startBase
+
+        var keepRunning = true
+        while keepRunning {
+            guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+
+            switch next.type {
+            case .leftMouseDragged:
+                let deltaY = next.locationInWindow.y - startY
+                // Dragging up (positive deltaY) → reveal more bottom → increase offsetY
+                let newOffset = min(max(startBase + deltaY / maxOffset, 0), 1)
+                current = newOffset
+                onOffsetChanged?(newOffset)
+            case .leftMouseUp:
+                onDragEnded?(current)
+                keepRunning = false
+            default:
+                break
+            }
         }
     }
 }
