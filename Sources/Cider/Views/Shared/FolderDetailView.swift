@@ -63,26 +63,27 @@ struct FolderDetailView: View {
                 if childFolders.isEmpty && folderItems.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        if !folderItems.isEmpty {
+                    if !childFolders.isEmpty {
+                        CollapsiblePinnedSection(isCollapsed: $subFoldersCollapsed) {
+                            subFolderCards
+                                .padding(.horizontal, Spacing.md + Spacing.xxs)
+                                .padding(.top, Spacing.md)
+                                .padding(.bottom, Spacing.sm)
+                        }
+                    }
+
+                    if !folderItems.isEmpty {
+                        ScrollView {
                             libraryFeed
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, Spacing.sm)
                         }
+                        .scrollIndicators(.hidden)
+                        .padding(Spacing.xxs)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.md)
+                    } else {
+                        Spacer(minLength: 0)
                     }
-                    .scrollIndicators(.hidden)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        if !childFolders.isEmpty {
-                            CollapsiblePinnedSection(isCollapsed: $subFoldersCollapsed) {
-                                subFolderCards
-                                    .padding(.top, Spacing.md)
-                                    .padding(.bottom, Spacing.sm)
-                            }
-                        }
-                    }
-                    .padding(Spacing.xxs)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.bottom, Spacing.md)
                 }
             }
             .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)

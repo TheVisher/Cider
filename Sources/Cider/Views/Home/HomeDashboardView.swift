@@ -79,27 +79,26 @@ struct HomeDashboardView: View {
                     }
                     emptyState
                 } else {
+                    if config.showContinueSection && !continueItems.isEmpty {
+                        CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
+                            ContinueSectionView(
+                                items: continueItems,
+                                onOpenBookmark: { presentDetails(for: $0) },
+                                onOpenNote: { note in openNoteInPanel(note) }
+                            )
+                            .padding(.horizontal, Spacing.md)
+                            .padding(.top, Spacing.md)
+                        }
+                    }
+
                     ScrollView {
                         libraryFeed
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, Spacing.sm)
                     }
                     .scrollIndicators(.hidden)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        if config.showContinueSection && !continueItems.isEmpty {
-                            CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
-                                ContinueSectionView(
-                                    items: continueItems,
-                                    onOpenBookmark: { presentDetails(for: $0) },
-                                    onOpenNote: { note in openNoteInPanel(note) }
-                                )
-                                .padding(.top, Spacing.md)
-                                .padding(.bottom, Spacing.xs)
-                            }
-                        }
-                    }
                     .padding(Spacing.xxs)
                     .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.md)
                     .padding(.bottom, Spacing.md)
                 }
             }
