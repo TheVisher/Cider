@@ -25,6 +25,18 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **Params:** `showBackground: Bool = true` — set `false` when a wrapper provides the background (e.g., CiderPanelView's sidebar column)
 - **Note:** Folders are shared across bookmarks and notes — both content types can be assigned to any folder
 
+### BookmarkCard
+- **File:** `Views/Bookmarks/BookmarkCard.swift`
+- **Used by:** Bookmarks (grid/masonry), Home (library feed grid/masonry)
+- **What:** Visual card for bookmarks with thumbnail, title, domain, timestamp. Supports `.grid` and `.masonry` modes.
+- **Note:** Extracted from BookmarksBrowserView to enable reuse from Home tab's mixed-content library feed
+
+### BookmarkListRow
+- **File:** `Views/Bookmarks/BookmarkListRow.swift`
+- **Used by:** Bookmarks (list mode), Home (library feed list mode)
+- **What:** Compact list row for bookmarks with optional thumbnail, title, domain, timestamp, hover delete
+- **Note:** Extracted from BookmarksBrowserView to enable reuse from Home tab's mixed-content library feed
+
 ### FolderContentView / RootFolderOverviewView
 - **Files:** `Views/Shared/FolderContentView.swift`, `Views/Shared/RootFolderOverviewView.swift`
 - **Used by:** CiderPanelView (when a folder is selected in sidebar)
@@ -93,9 +105,10 @@ When building a new feature, check this doc first. If a component or pattern alr
 These aren't single components but established patterns that should be followed consistently across tabs.
 
 ### Display Modes (list / grid / masonry)
-- **Used by:** Bookmarks (`BookmarkDisplayMode`), Notes (`NoteDisplayMode`)
+- **Used by:** Bookmarks (`BookmarkDisplayMode`), Notes (`NoteDisplayMode`), Home (`LibraryDisplayMode`)
 - **Pattern:** Enum conforming to `DisplayModeOption` protocol → plugs into `ViewOptionsDropdown`
-- **Card sizing:** Continuous 0–3 slider via a sizing struct (e.g., `CardSizing`, `NoteCardSizing`) that interpolates between stops
+- **Card sizing:** Continuous 0–3 slider via a sizing struct (e.g., `CardSizing`, `NoteCardSizing`, `LibraryCardSizing`) that interpolates between stops
+- **Cross-type sizing:** `LibraryCardSizing` delegates to `CardSizing` and `NoteCardSizing` — mixed-content views use it to size both bookmark and note cards consistently
 - **When adding a new tab with cards:** Create a `<Tab>DisplayMode` enum conforming to `DisplayModeOption` + a `<Tab>CardSizing` struct
 
 ### Card Data Loading

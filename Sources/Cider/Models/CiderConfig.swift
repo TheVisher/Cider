@@ -120,6 +120,10 @@ struct CiderConfig: Codable {
     var notesDefaultViewMode: NoteDisplayMode  // Default notes layout mode
     var notesCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for notes
     var detailModalMode: DetailModalMode  // How detail modals appear: expand panel or popover window
+    var showContinueSection: Bool  // Show the Continue section on the Home tab
+    var continueSectionCollapsed: Bool  // Whether the Continue section is collapsed
+    var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
+    var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
 
     static let storageKey = "CiderConfig"
 
@@ -141,7 +145,10 @@ struct CiderConfig: Codable {
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
             notesDefaultViewMode: .list,
-            detailModalMode: .expand
+            detailModalMode: .expand,
+            showContinueSection: true,
+            continueSectionCollapsed: false,
+            homeDisplayMode: .list
         )
     }
 
@@ -253,6 +260,22 @@ struct CiderConfig: Codable {
             DetailModalMode.self,
             forKey: .detailModalMode
         ) ?? .expand
+        showContinueSection = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .showContinueSection
+        ) ?? true
+        continueSectionCollapsed = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .continueSectionCollapsed
+        ) ?? false
+        homeDisplayMode = try container.decodeIfPresent(
+            LibraryDisplayMode.self,
+            forKey: .homeDisplayMode
+        ) ?? .list
+        homeCardSizeScale = try container.decodeIfPresent(
+            Double.self,
+            forKey: .homeCardSizeScale
+        )
     }
 
     init(
@@ -274,7 +297,11 @@ struct CiderConfig: Codable {
         bookmarksCardSizeScale: Double? = nil,
         notesDefaultViewMode: NoteDisplayMode = .list,
         notesCardSizeScale: Double? = nil,
-        detailModalMode: DetailModalMode = .expand
+        detailModalMode: DetailModalMode = .expand,
+        showContinueSection: Bool = true,
+        continueSectionCollapsed: Bool = false,
+        homeDisplayMode: LibraryDisplayMode = .list,
+        homeCardSizeScale: Double? = nil
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -295,5 +322,9 @@ struct CiderConfig: Codable {
         self.notesDefaultViewMode = notesDefaultViewMode
         self.notesCardSizeScale = notesCardSizeScale
         self.detailModalMode = detailModalMode
+        self.showContinueSection = showContinueSection
+        self.continueSectionCollapsed = continueSectionCollapsed
+        self.homeDisplayMode = homeDisplayMode
+        self.homeCardSizeScale = homeCardSizeScale
     }
 }

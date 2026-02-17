@@ -81,16 +81,6 @@ struct FolderSidebarView: View {
                 .foregroundColor(CiderColors.secondary)
                 .padding(.top, Spacing.xs)
 
-            FolderSidebarAllItemsRow(
-                itemCount: bookmarks.count + notes.count,
-                isSelected: selectedFolderID == nil,
-                dropTypeIdentifiers: folderDropTypeIdentifiers,
-                onTap: { selectFolder(nil) },
-                onDropProviders: { providers in
-                    handleFolderDrop(providers: providers, targetFolderID: nil)
-                }
-            )
-
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: Spacing.sm) {
                     ForEach(topLevelFolders) { folder in
@@ -537,55 +527,6 @@ struct FolderSidebarView: View {
         }
 
         return false
-    }
-}
-
-// MARK: - All Items Row
-
-private struct FolderSidebarAllItemsRow: View {
-    let itemCount: Int
-    let isSelected: Bool
-    let dropTypeIdentifiers: [String]
-    let onTap: () -> Void
-    let onDropProviders: ([NSItemProvider]) -> Bool
-
-    @State private var isDropTargeted = false
-    @State private var isHovered = false
-
-    var body: some View {
-        HStack(spacing: Spacing.xs) {
-            Image(systemName: "tray.2")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
-
-            Text("All Items")
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
-
-            Spacer(minLength: Spacing.xs)
-
-            Text("\(itemCount)")
-                .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.tertiary)
-        }
-        .padding(.horizontal, Spacing.sm)
-        .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(isSelected ? CiderColors.selectedFill
-                      : isHovered ? CiderColors.surfaceHover
-                      : CiderColors.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(isSelected ? CiderColors.selectedBorder : CiderColors.borderDefault,
-                        lineWidth: CiderBorder.innerStrokeWidth)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-        .hoverState($isHovered)
-        .onDrop(of: dropTypeIdentifiers, isTargeted: $isDropTargeted, perform: onDropProviders)
     }
 }
 

@@ -1,24 +1,42 @@
 # Home Tab Vision
 
-The Home tab is the library — the unified view of all Cider content. Stats and quick actions at the top, then all items (bookmarks, notes, etc.) in a scrollable mixed-content feed below.
+The Home tab is the library — the unified view of all Cider content. A sticky "Continue" section for recent items, then a scrollable mixed-content feed below with display mode switching.
 
 ---
 
 ## Current State (Implemented)
 
-- **Stats row** — bookmark count and note count in styled cards
-- **Quick actions** — Capture Tab, New Note, Paste URL buttons
-- **Recent Bookmarks** — last 6 bookmarks (title, host, relative date), click to open in browser
-- **Recent Notes** — last 6 notes (title, relative date), click to open in notes panel
+### Continue Section
+- Sticky two-column list of the 8 most recent items (mixed bookmarks + notes), sorted by date
+- Left column: items 0-3 (most recent), right column: items 4-7
+- At compact width (content area < 700pt), right column hides — only left column's 4 items shown
+- Threshold set high enough that sidebar auto-hiding (~200pt freed) doesn't cause column flicker
+- Collapse toggle lives in the title bar (right-aligned, away from tabs) — no wasted vertical space when collapsed
+- Collapsed state persisted in CiderConfig
+- Hideable via `showContinueSection` setting
+- Always shows global recents regardless of folder selection
+- No divider between Continue and library feed — the visual shift from compact rows to cards is sufficient separation
 
-## Next: Home as Library (Planned)
+### Library Feed
+- Scrollable mixed-content feed of all bookmarks + notes, sorted by date
+- Filters by folder when one is selected in the sidebar
+- Display mode switching: list / grid / masonry (same ViewOptionsDropdown as Bookmarks/Notes)
+- Continuous card size slider (0-3 scale) via LibraryCardSizing
+- List mode is the default — mixed content reads better as a uniform list
+- Reuses existing card components: BookmarkCard, BookmarkListRow, NoteCardView, NoteListRow
+- Scrollbars hidden — consistent with the rest of the app (no visible scroll indicators anywhere)
 
-Remove "All Items" from the sidebar. Home becomes the unified content view:
+### Architecture
+- `LibraryItem` discriminated union: `.bookmark(Bookmark)` / `.note(Note)` with shared `id`, `date`, `title`, `folderID`
+- `LibraryDisplayMode` enum conforming to `DisplayModeOption` — plugs into ViewOptionsDropdown
+- `LibraryCardSizing` struct with 4-stop interpolation, produces `bookmarkSizing` and `noteSizing` for downstream components
+- View state (display mode, card size, continue collapsed) persisted in CiderConfig
+- Display mode and card size controlled by CiderPanelView via bindings, persisted on change
 
-1. **Stats/widgets header** — counts, activity, quick actions (existing)
-2. **All content feed** — scrollable mixed view of every bookmark, note, and future content type
-3. **Scrolling behavior** — stats header scrolls away as you browse content
-4. **View options** — same card size slider and display mode toggle as Bookmarks/Notes (sidebar header button always visible since every tab now has cards)
+### Sidebar Changes
+- "All Items" row removed from FolderSidebarView — sidebar is purely organizational (folders only)
+- Home tab serves as "All Items" — want to see everything? Click Home.
+- Folder selection on Home tab filters the library feed (not the Continue section)
 
 ### Mental Model
 
@@ -28,18 +46,6 @@ Remove "All Items" from the sidebar. Home becomes the unified content view:
 | **Bookmarks tab** | Just bookmarks |
 | **Notes tab** | Just notes |
 | **Sidebar folders** | Filtered slice of whatever tab you're on |
-
-### Why Remove "All Items" from Sidebar
-
-- "All Items" is a *view*, not a *folder* — it belongs in the tab bar, not the sidebar
-- The sidebar is for organization (folders, projects) — not view switching
-- The count badge (65) is misleading when the active tab only shows one content type
-- "All Items" stays blue/selected regardless of which tab you're on — confusing
-- Home-as-library solves this naturally: want to see everything? Click Home.
-
-### Sidebar View Options Always Visible
-
-With Home showing cards too, the view options button in the sidebar header is always relevant — no more conditional show/hide based on selected tab.
 
 ## Future Ideas (Not Yet Prioritized)
 

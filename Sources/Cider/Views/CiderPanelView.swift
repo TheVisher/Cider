@@ -13,6 +13,11 @@ struct CiderPanelView: View {
     @State private var dynamicTabs: [CiderTab] = []
     @State private var isViewOptionsVisible = false
     @State private var isNoteViewOptionsVisible = false
+    @State private var isHomeViewOptionsVisible = false
+    @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
+    @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
+    @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
+    @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -55,6 +60,21 @@ struct CiderPanelView: View {
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
         }
+        .onChange(of: homeDisplayMode) { _, newValue in
+            var config = CiderConfig.load()
+            config.homeDisplayMode = newValue
+            config.save()
+        }
+        .onChange(of: homeCardSizeScale) { _, newValue in
+            var config = CiderConfig.load()
+            config.homeCardSizeScale = newValue
+            config.save()
+        }
+        .onChange(of: continueSectionCollapsed) { _, newValue in
+            var config = CiderConfig.load()
+            config.continueSectionCollapsed = newValue
+            config.save()
+        }
         .background {
             Button("") { isSearchPaletteVisible = true }
                 .keyboardShortcut("k", modifiers: .command)
@@ -86,6 +106,37 @@ struct CiderPanelView: View {
                 }
                 .help("Capture active browser tab")
         }
+
+        if selectedTab == .home && showContinueSection {
+            continueToggleButton
+        }
+    }
+
+    // MARK: - Continue Toggle
+
+    private var continueToggleButton: some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                continueSectionCollapsed.toggle()
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Text("Continue")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .textCase(.uppercase)
+
+                Image(systemName: "chevron.right")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.quaternary)
+                    .rotationEffect(.degrees(continueSectionCollapsed ? 0 : 90))
+            }
+            .frame(height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(reduceMotion ? .none : .snappy, value: continueSectionCollapsed)
+        .help(continueSectionCollapsed ? "Show recent items" : "Hide recent items")
     }
 
     // MARK: - Sidebar Content
@@ -249,6 +300,20 @@ struct CiderPanelView: View {
                         )
                     )
                 }
+        } else if selectedTab == .home {
+            Image(systemName: "slider.horizontal.3")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(isHomeViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .contentShape(Rectangle())
+                .onTapGesture { isHomeViewOptionsVisible.toggle() }
+                .help("View options")
+                .popover(isPresented: $isHomeViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale
+                    )
+                }
         } else {
             // Invisible spacer to keep layout stable
             Color.clear
@@ -265,7 +330,16 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var tabContentBody: some View {
-        if let folderID = selectedFolderID, selectedTab.isFixed {
+        if selectedTab == .home {
+            HomeDashboardView(
+                bookmarksViewModel: bookmarksViewModel,
+                notesViewModel: notesViewModel,
+                selectedFolderID: selectedFolderID,
+                displayMode: $homeDisplayMode,
+                cardSizeScale: $homeCardSizeScale,
+                continueSectionCollapsed: $continueSectionCollapsed
+            )
+        } else if let folderID = selectedFolderID, selectedTab.isFixed {
             if isRootFolder(folderID) {
                 RootFolderOverviewView(
                     folderID: folderID,
@@ -297,10 +371,7 @@ struct CiderPanelView: View {
         } else {
             switch selectedTab {
             case .home:
-                HomeDashboardView(
-                    bookmarksViewModel: bookmarksViewModel,
-                    notesViewModel: notesViewModel
-                )
+                EmptyView() // Handled above
             case .bookmarks:
                 BookmarksTabContent(
                     viewModel: bookmarksViewModel,

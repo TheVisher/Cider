@@ -7,6 +7,7 @@ protocol DisplayModeOption: Hashable, CaseIterable {
 
 extension BookmarkDisplayMode: DisplayModeOption {}
 extension NoteDisplayMode: DisplayModeOption {}
+extension LibraryDisplayMode: DisplayModeOption {}
 
 struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
     @Binding var displayMode: Mode

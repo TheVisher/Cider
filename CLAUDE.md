@@ -162,13 +162,13 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 ```
 Sources/Cider/
 ├── App/              # Entry point, AppDelegate, Panels (CiderPanel, Bookmarks, Notes, Settings)
-├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, CiderTab)
+├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, CiderTab, LibraryDisplayMode)
 ├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, etc.)
 ├── Utilities/        # Constants, CiderFont, CiderColors, ButtonStyles, ContainerStyles, HoverState, helpers
 ├── ViewModels/       # ObservableObject view models (BookmarksViewModel, NotesViewModel, SettingsViewModel)
 └── Views/
-    ├── Bookmarks/         # Bookmark browser, cards, masonry layout, panel view
-    ├── Home/              # Home dashboard
+    ├── Bookmarks/         # Bookmark browser, cards (BookmarkCard, BookmarkListRow), masonry layout, panel view
+    ├── Home/              # Home dashboard (Continue section + Library feed)
     ├── Notes/             # Notes editor, tab content, panel view
     ├── Projects/          # Project tab content
     ├── Search/            # Search palette and tab content
@@ -191,7 +191,7 @@ CiderPanelView
 │       ├── titleBar (animated sidebar toggle + CiderTabBar + capture button)
 │       ├── Divider (14pt horizontal inset, aligned with card content edges)
 │       └── contentArea (switches by selectedTab)
-│           ├── HomeDashboardView
+│           ├── HomeDashboardView (Continue section + Library feed, filters by folder)
 │           ├── BookmarksTabContent → BookmarksBrowserView
 │           └── NotesTabContent → NotesBrowserView
 ├── compactOverlaySidebar (< 680pt, slides over content)
@@ -236,6 +236,20 @@ Card sizing: Continuous slider (0-3 scale) via NoteCardSizing struct
 ViewOptionsDropdown is generic over DisplayModeOption protocol
 ```
 
+## Home Display Modes
+```
+LibraryDisplayMode: .list | .grid | .masonry
+
+Card sizing: Continuous slider (0-3 scale) via LibraryCardSizing struct
+- Delegates to CardSizing (bookmarks) and NoteCardSizing (notes)
+- Mixed content: BookmarkCard/BookmarkListRow + NoteCardView/NoteListRow
+- Continue section: sticky 8-item recents, two-column, collapsible
+- Library feed: scrollable mixed feed, filters by folder selection
+
+State: CiderPanelView owns @State, passes Bindings to HomeDashboardView
+Persistence: homeDisplayMode + homeCardSizeScale on CiderConfig
+```
+
 ## TipTap Editor Architecture
 
 The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
@@ -259,3 +273,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **SourceKit false positives:** "Cannot find 'CiderFont' in scope" (and similar cross-file type errors) are SourceKit indexing noise, not real build errors. Ignore them — verify with `swift build` instead.
 - **Shadow shapes use literal `Color.black`** — this is correct, not a CiderColors violation. The custom shadow pattern (blurred black RoundedRectangle) is intentional.
 - **AppKit Reduce Motion:** For `NSAnimationContext` code (panel collapse), check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` — `@Environment(\.accessibilityReduceMotion)` is SwiftUI-only.
+- **CiderFont scale-dependent tokens:** `heroDisplay(scale:)` requires a `CGFloat` parameter — use `CiderFont.heroDisplay(scale: 1.0)`, not `CiderFont.heroDisplay`.
+- **ScrollView bottom padding:** Padding on content INSIDE a ScrollView doesn't prevent clipping at the panel edge — the scroll area itself still extends to the edge. Put bottom padding OUTSIDE the ScrollView (on the ScrollView itself) so the scroll area is inset from the panel.
+- **Prefer inline GeometryReader over PreferenceKey:** `onPreferenceChange` fires with the `defaultValue` (often `0`) before the real measurement arrives, causing incorrect initial state. Inline `GeometryReader { proxy in let x = proxy.size.width ... }` is simpler and avoids this race.
+- **GeometryReader threshold anti-oscillation:** When a threshold controls layout (e.g., 1 vs 2 columns), set it high enough that sidebar show/hide (~200pt delta) can't flip the result. Otherwise content width jumps when sidebar toggles, causing column flicker.
