@@ -20,6 +20,7 @@ struct CiderPanelView: View {
     @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
     @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
     @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
+    @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     @State private var suppressSidebarAutoExpandForDetails = false
 
     private var allTabs: [CiderTab] {
@@ -61,6 +62,7 @@ struct CiderPanelView: View {
             }
         }
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
+        .environment(\.textScale, textScale)
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
             selectedItemIDs.removeAll()
@@ -96,6 +98,9 @@ struct CiderPanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .dismissCiderPanel)) { _ in
             suppressSidebarAutoExpandForDetails = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
+            textScale = CiderConfig.load().textSize.scale
         }
         .background {
             Button("") { isSearchPaletteVisible = true }

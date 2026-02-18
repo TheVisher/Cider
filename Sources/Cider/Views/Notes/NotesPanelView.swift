@@ -3,6 +3,7 @@ import AppKit
 
 struct NotesPanelView: View {
     @ObservedObject var viewModel: NotesViewModel
+    @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
 
     var body: some View {
         ZStack {
@@ -66,6 +67,10 @@ struct NotesPanelView: View {
                 ? NotesDesign.panelCollapsedBottomPadding
                 : NotesDesign.panelTopPadding
         )
+        .environment(\.textScale, textScale)
+        .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
+            textScale = CiderConfig.load().textSize.scale
+        }
     }
 }
 

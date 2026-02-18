@@ -11,6 +11,7 @@ struct BookmarksPanelView: View {
     @State private var detailsErrorMessage: String?
     @State private var restoreFrameAfterDetailsClose: NSRect?
     @State private var isPresentingDetailsWithResize = false
+    @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     @FocusState private var isSearchFieldFocused: Bool
 
     private var selectedDetailsBookmark: Bookmark? {
@@ -104,6 +105,7 @@ struct BookmarksPanelView: View {
                 ? BookmarksDesign.panelCollapsedBottomPadding
                 : BookmarksDesign.panelTopPadding
         )
+        .environment(\.textScale, textScale)
         .onChange(of: viewModel.isCollapsed) { _, isCollapsed in
             guard isCollapsed else { return }
             closeDetails(restorePanel: false)
@@ -116,6 +118,9 @@ struct BookmarksPanelView: View {
         }
         .onAppear {
             clearSearchFocus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
+            textScale = CiderConfig.load().textSize.scale
         }
     }
 
