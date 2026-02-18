@@ -169,8 +169,8 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 ```
 Sources/Cider/
 ├── App/              # Entry point, AppDelegate, Panels (CiderPanel, Bookmarks, Notes, Settings)
-├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, CiderTab, LibraryDisplayMode)
-├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, etc.)
+├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, TrashItem, CiderTab, LibraryDisplayMode)
+├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, TrashStorage, CiderUndoManager, etc.)
 ├── Utilities/        # Constants, CiderFont, CiderColors, ButtonStyles, ContainerStyles, HoverState, helpers
 ├── ViewModels/       # ObservableObject view models (BookmarksViewModel, NotesViewModel, SettingsViewModel)
 └── Views/
@@ -262,6 +262,10 @@ State: CiderPanelView owns @State, passes Bindings to HomeDashboardView
 Persistence: homeDisplayMode + homeCardSizeScale on CiderConfig
 ```
 
+## Settings Architecture
+
+Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Appearance, Storage.
+
 ## TipTap Editor Architecture
 
 The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
@@ -286,7 +290,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **SourceKit false positives:** "Cannot find 'CiderFont' in scope" (and similar cross-file type errors) are SourceKit indexing noise, not real build errors. Ignore them — verify with `swift build` instead.
 - **Shadow shapes use literal `Color.black`** — this is correct, not a CiderColors violation. The custom shadow pattern (blurred black RoundedRectangle) is intentional.
 - **AppKit Reduce Motion:** For `NSAnimationContext` code (panel collapse), check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` — `@Environment(\.accessibilityReduceMotion)` is SwiftUI-only.
-- **CiderFont scale-dependent tokens:** `heroDisplay(scale:)` requires a `CGFloat` parameter — use `CiderFont.heroDisplay(scale: 1.0)`, not `CiderFont.heroDisplay`.
+- **CiderFont tokens are now global/dynamic:** All `CiderFont.*` tokens are `static var` computed properties that read `CiderConfig.load().textSize.scale` on every access. No need for explicit `(scale:)` variants for standard tokens — they all respond to the global text size setting automatically. Only `heroDisplay(scale:)` still requires an explicit parameter.
 - **ScrollView bottom padding:** Padding on content INSIDE a ScrollView doesn't prevent clipping at the panel edge — the scroll area itself still extends to the edge. Put bottom padding OUTSIDE the ScrollView (on the ScrollView itself) so the scroll area is inset from the panel.
 - **MasonryLayout cache:** `computeFrames` intentionally has NO width-only cache optimization. Subview sizes can change independently (e.g., `BookmarkCard.@State cardWidth` updating via GeometryReader after initial layout). Always recompute when SwiftUI calls layout methods.
 - **Prefer inline GeometryReader over PreferenceKey:** `onPreferenceChange` fires with the `defaultValue` (often `0`) before the real measurement arrives, causing incorrect initial state. Inline `GeometryReader { proxy in let x = proxy.size.width ... }` is simpler and avoids this race.
@@ -306,3 +310,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **`.task(id:)` for file replacement:** When file content changes but the path stays the same (e.g., replacing a cover image), include `updatedAt` timestamp in the task ID — not just the file path.
 - **Bookmark image memory model:** Render bookmark cards from `thumbnailFileURL` (downsampled asset), not `originalImageFileURL`. Full-size originals are for explicit user actions (open/export) only.
 - **Sticky section headers:** `LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders])` makes `Section { } header: { }` headers pin at the top during scroll. Used in FolderDetailView for folder header + sub-folder cards. The header needs an opaque background to prevent content showing through when pinned.
+- **DetailPopoverPanel:** Secondary floating NSPanel (`App/DetailPopoverPanel.swift`) that shows detail views adjacent to the main CiderPanel. Triggered via `.showDetailPopover` notification with `userInfo["view"]` (AnyView) and optional `userInfo["preferredWidth"]` (CGFloat). Positions to the right of the main panel by default, falls back to left if no screen space. Expand mode: post `.expandCiderPanelForDetailModal` with `userInfo["minimumWidth"]` — AppDelegate saves and widens CiderPanel, then restores via `.restoreCiderPanelAfterDetailModal`. Sidebar collapses automatically during expand mode.
+- **Carbon hotkey fallback:** `BookmarksHotkeyDetector` and `NotesHotkeyDetector` fall back to Carbon `RegisterEventHotKey` / `InstallEventHandler` when `CGEventTap` creation fails (e.g., no Accessibility permission). Both detectors now work without full accessibility access — Opt+N and Opt+B hotkeys register via Carbon API in that case.
+- **Delete is non-destructive:** `BookmarksStorage.remove()`, `removeAll()`, and `NotesStorage.delete()` all delegate to `TrashStorage` and return `@discardableResult TrashItem`. Callers in ViewModels capture the result and pass it to `CiderUndoManager.shared.record()` to enable undo. Never add a direct file-deletion path — always go through TrashStorage.
+- **Undo toast progress bar:** Both capture toast and undo toast use a repeating `Timer` at `BookmarksToastDesign.reviewProgressTickInterval` (1/30s). Model is an `ObservableObject` with `@Published var progress: CGFloat = 1`. Hover pauses the timer; unhover resumes. Match this pattern for any future timed toast.

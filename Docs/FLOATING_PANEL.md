@@ -380,6 +380,39 @@ enum MyDesign {
 
 ---
 
+## DetailPopoverPanel
+
+A secondary floating panel (`App/DetailPopoverPanel.swift`) for showing bookmark/note detail views alongside the main CiderPanel.
+
+### Two display modes
+
+**Popover mode** — panel appears adjacent to CiderPanel (right by default, left if no room):
+```swift
+NotificationCenter.default.post(name: .showDetailPopover, object: nil, userInfo: [
+    "view": AnyView(MyDetailView()),
+    "preferredWidth": CGFloat(600)   // optional, defaults to 600
+])
+```
+
+**Expand mode** — CiderPanel widens to accommodate an inline detail view:
+```swift
+// Before showing: saves CiderPanel frame and expands it
+NotificationCenter.default.post(name: .expandCiderPanelForDetailModal, object: nil, userInfo: [
+    "minimumWidth": CGFloat(900)
+])
+// After dismissing: restores CiderPanel to saved frame
+NotificationCenter.default.post(name: .restoreCiderPanelAfterDetailModal, object: nil)
+```
+
+### Key behaviors
+- `canBecomeKey = true` so the detail panel can receive keyboard input
+- `isMovableByWindowBackground = true` — user can drag it freely after initial placement
+- Sidebar collapses automatically when CiderPanel expands for detail modal, restores when dismissed
+- AppDelegate owns the `DetailPopoverPanel` instance (singleton, reused across show calls)
+- Dismiss via `.dismissDetailPopover` notification or when CiderPanel is hidden
+
+---
+
 ## Checklist for new floating panels
 
 1. Create `NSPanel` subclass — borderless, non-activating, no system shadow

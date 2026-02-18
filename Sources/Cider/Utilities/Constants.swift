@@ -42,6 +42,10 @@ extension Notification.Name {
     static let showBookmarkAddForm = Notification.Name("cider.showBookmarkAddForm")
     static let triggerNewNoteInTab = Notification.Name("cider.triggerNewNoteInTab")
     static let showFolderCreationField = Notification.Name("cider.showFolderCreationField")
+    static let showUndoToast = Notification.Name("cider.showUndoToast")
+    static let pauseUndoToastDismiss = Notification.Name("cider.pauseUndoToastDismiss")
+    static let resumeUndoToastDismiss = Notification.Name("cider.resumeUndoToastDismiss")
+    static let trashContentsChanged = Notification.Name("cider.trashContentsChanged")
 }
 
 enum CiderBorder {
@@ -277,6 +281,41 @@ enum BookmarksToastDesign {
 
     static var reviewPanelHeight: CGFloat {
         reviewHeight + shadowPadding * 2
+    }
+}
+
+enum ToastPosition: String, Codable, CaseIterable {
+    case topCenterScreen
+    case bottomRightPanel
+    case bottomLeftPanel
+    case topRightPanel
+    case topLeftPanel
+
+    var displayName: String {
+        switch self {
+        case .topCenterScreen: return "Top center (screen)"
+        case .bottomRightPanel: return "Bottom right (panel)"
+        case .bottomLeftPanel: return "Bottom left (panel)"
+        case .topRightPanel: return "Top right (panel)"
+        case .topLeftPanel: return "Top left (panel)"
+        }
+    }
+}
+
+enum UndoToastDesign {
+    static let width: CGFloat = 360
+    static let height: CGFloat = 56
+    static let cornerRadius: CGFloat = Radius.md
+    static let shadowPadding: CGFloat = 24
+    static let autoHideDuration: TimeInterval = 5.0
+    static let panelEdgeInset: CGFloat = Spacing.md
+
+    static var panelWidth: CGFloat {
+        width + shadowPadding * 2
+    }
+
+    static var panelHeight: CGFloat {
+        height + shadowPadding * 2
     }
 }
 

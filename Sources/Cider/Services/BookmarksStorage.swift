@@ -122,20 +122,34 @@ final class BookmarksStorage: ObservableObject {
         return bookmark
     }
 
-    func remove(_ bookmark: Bookmark) {
+    @discardableResult
+    func remove(_ bookmark: Bookmark) -> TrashItem {
         cancelEnrichment(for: bookmark.id)
-        removeBookmarkImageAssetsIfPresent(for: bookmark)
+        let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()
+        return trashItem
     }
 
-    func removeAll(_ bookmarksToDelete: [Bookmark]) {
+    @discardableResult
+    func removeAll(_ bookmarksToDelete: [Bookmark]) -> [TrashItem] {
+        var trashItems: [TrashItem] = []
         for bookmark in bookmarksToDelete {
             cancelEnrichment(for: bookmark.id)
-            removeBookmarkImageAssetsIfPresent(for: bookmark)
+            let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
+            trashItems.append(item)
         }
         let ids = Set(bookmarksToDelete.map(\.id))
         bookmarks.removeAll { ids.contains($0.id) }
+        persist()
+        return trashItems
+    }
+
+    func restoreFromTrash(_ bookmark: Bookmark) {
+        guard !bookmarks.contains(where: { $0.id == bookmark.id }) else { return }
+        var restored = bookmark
+        restored.isEnriching = false
+        bookmarks.insert(restored, at: 0)
         persist()
     }
 

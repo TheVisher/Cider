@@ -312,6 +312,9 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .storageTrash:
+            StorageSettingsView()
+
         case .aboutOverview:
             AboutSettingsView()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -382,12 +385,13 @@ private enum SettingsCategory: String, CaseIterable {
     case notes = "Notes"
     case bookmarks = "Bookmarks"
     case appearance = "Appearance"
+    case storage = "Storage"
     case advanced = "Advanced"
     case about = "About"
     case account = "Account"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .notes, .bookmarks, .appearance, .advanced, .about]
+        [.general, .notes, .bookmarks, .appearance, .storage, .advanced, .about]
     }
 
     var icon: String {
@@ -400,6 +404,8 @@ private enum SettingsCategory: String, CaseIterable {
             "square.grid.2x2"
         case .appearance:
             "paintbrush"
+        case .storage:
+            "trash"
         case .advanced:
             "slider.horizontal.3"
         case .about:
@@ -419,6 +425,8 @@ private enum SettingsCategory: String, CaseIterable {
             [.bookmarksManage]
         case .appearance:
             [.appearanceText, .appearanceMenuBar]
+        case .storage:
+            [.storageTrash]
         case .advanced:
             [.advancedAccessibility, .advancedReset]
         case .about:
@@ -439,6 +447,7 @@ private enum SettingsSubcategory: Hashable {
     case bookmarksManage
     case appearanceText
     case appearanceMenuBar
+    case storageTrash
     case advancedAccessibility
     case advancedReset
     case aboutOverview
@@ -464,6 +473,8 @@ private enum SettingsSubcategory: Hashable {
             "Text"
         case .appearanceMenuBar:
             "Menu Bar"
+        case .storageTrash:
+            "Trash"
         case .advancedAccessibility:
             "Accessibility"
         case .advancedReset:

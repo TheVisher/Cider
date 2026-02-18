@@ -98,12 +98,26 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     func delete(_ bookmark: Bookmark) {
-        BookmarksStorage.shared.remove(bookmark)
+        let trashItem = BookmarksStorage.shared.remove(bookmark)
+        CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: trashItem))
     }
 
     @discardableResult
     func assign(_ bookmark: Bookmark, toFolder folderID: UUID?) -> Bool {
-        BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folderID)
+        let oldFolderID = bookmark.folderID
+        let result = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folderID)
+        if result {
+            let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+            CiderUndoManager.shared.record(.movedToFolder(
+                itemType: .bookmark,
+                itemID: bookmark.id,
+                title: bookmark.title,
+                fromFolderID: oldFolderID,
+                toFolderID: folderID,
+                folderName: folderName
+            ))
+        }
+        return result
     }
 
     @discardableResult
@@ -235,7 +249,10 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     func deleteBookmarks(_ bookmarks: [Bookmark]) {
-        BookmarksStorage.shared.removeAll(bookmarks)
+        let trashItems = BookmarksStorage.shared.removeAll(bookmarks)
+        if !trashItems.isEmpty {
+            CiderUndoManager.shared.record(.bulkDeletedToTrash(trashItems))
+        }
     }
 
     func open(_ bookmark: Bookmark) {

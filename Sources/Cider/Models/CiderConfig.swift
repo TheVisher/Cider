@@ -125,6 +125,9 @@ struct CiderConfig: Codable {
     var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
     var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
     var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
+    var trashRetentionDays: Int  // 0 = never auto-purge, default 30
+    var captureToastPosition: ToastPosition  // Position for bookmark capture toast
+    var undoToastPosition: ToastPosition  // Position for undo action toast
 
     static let storageKey = "CiderConfig"
 
@@ -150,7 +153,10 @@ struct CiderConfig: Codable {
             showContinueSection: true,
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
-            homeDisplayMode: .list
+            homeDisplayMode: .list,
+            trashRetentionDays: 30,
+            captureToastPosition: .topCenterScreen,
+            undoToastPosition: .bottomRightPanel
         )
     }
 
@@ -282,6 +288,15 @@ struct CiderConfig: Codable {
             Double.self,
             forKey: .homeCardSizeScale
         )
+        trashRetentionDays = try container.decodeIfPresent(Int.self, forKey: .trashRetentionDays) ?? 30
+        captureToastPosition = try container.decodeIfPresent(
+            ToastPosition.self,
+            forKey: .captureToastPosition
+        ) ?? .topCenterScreen
+        undoToastPosition = try container.decodeIfPresent(
+            ToastPosition.self,
+            forKey: .undoToastPosition
+        ) ?? .bottomRightPanel
     }
 
     init(
@@ -308,7 +323,10 @@ struct CiderConfig: Codable {
         continueSectionCollapsed: Bool = false,
         subFoldersCollapsed: Bool = false,
         homeDisplayMode: LibraryDisplayMode = .list,
-        homeCardSizeScale: Double? = nil
+        homeCardSizeScale: Double? = nil,
+        trashRetentionDays: Int = 30,
+        captureToastPosition: ToastPosition = .topCenterScreen,
+        undoToastPosition: ToastPosition = .bottomRightPanel
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -334,5 +352,8 @@ struct CiderConfig: Codable {
         self.subFoldersCollapsed = subFoldersCollapsed
         self.homeDisplayMode = homeDisplayMode
         self.homeCardSizeScale = homeCardSizeScale
+        self.trashRetentionDays = trashRetentionDays
+        self.captureToastPosition = captureToastPosition
+        self.undoToastPosition = undoToastPosition
     }
 }

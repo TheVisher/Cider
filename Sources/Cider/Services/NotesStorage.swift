@@ -293,14 +293,21 @@ private struct NoteIndexEntry: Codable, Equatable {
         return true
     }
 
-    func delete(note: Note) {
-        let fileURL = directoryURL.appendingPathComponent(note.relativePath)
-        try? FileManager.default.removeItem(at: fileURL)
+    @discardableResult
+    func delete(note: Note) -> TrashItem {
+        let trashItem = TrashStorage.shared.trashNote(note, notesDir: directoryURL)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
         index.removeValue(forKey: note.id)
         saveIndex()
         notes.removeAll { $0.id == note.id }
         scheduleAttachmentCleanup()
+        return trashItem
+    }
+
+    func restoreFromTrash(noteID: UUID, filename: String, folderID: UUID?, createdAt: Date) {
+        index[noteID] = NoteIndexEntry(filename: filename, folderID: folderID, createdAt: createdAt)
+        saveIndex()
+        scanNotes()
     }
 
     func hasSnapshots(for note: Note) -> Bool {

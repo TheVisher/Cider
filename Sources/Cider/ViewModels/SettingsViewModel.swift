@@ -65,6 +65,15 @@ final class SettingsViewModel: ObservableObject {
     @Published var detailModalMode: DetailModalMode {
         didSet { saveConfig() }
     }
+    @Published var trashRetentionDays: Int {
+        didSet { saveConfig() }
+    }
+    @Published var captureToastPosition: ToastPosition {
+        didSet { saveConfig() }
+    }
+    @Published var undoToastPosition: ToastPosition {
+        didSet { saveConfig() }
+    }
 
     private var config: CiderConfig
 
@@ -87,6 +96,9 @@ final class SettingsViewModel: ObservableObject {
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
         self.detailModalMode = config.detailModalMode
+        self.trashRetentionDays = config.trashRetentionDays
+        self.captureToastPosition = config.captureToastPosition
+        self.undoToastPosition = config.undoToastPosition
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -114,6 +126,9 @@ final class SettingsViewModel: ObservableObject {
         config.bookmarksCardSize = bookmarksCardSize
         config.bookmarksCardSizeScale = bookmarksCardSize.sliderValue
         config.detailModalMode = detailModalMode
+        config.trashRetentionDays = trashRetentionDays
+        config.captureToastPosition = captureToastPosition
+        config.undoToastPosition = undoToastPosition
         config.save()
 
         // Post notification so AppDelegate can respond

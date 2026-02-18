@@ -40,6 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Notes panel modal behavior (click-outside-to-dismiss from Home tab)
     private var notesPanelModalMonitor: Any?
 
+    // Undo toast
+    private var undoToastPanel: BookmarkCaptureToastPanel?
+    private let undoToastModel = UndoToastModel()
+    private var undoToastTimer: Timer?
+    private var undoToastIsHovering = false
+    private var undoToastRemaining: TimeInterval = UndoToastDesign.autoHideDuration
+    private var undoToastLastTick: Date?
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -61,6 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startDoubleTapDetection()
         startNotesHotkeyDetection()
         startBookmarksHotkeyDetection()
+        observeUndoNotifications()
+
+        Task { @MainActor in
+            let config = CiderConfig.load()
+            if config.trashRetentionDays > 0 {
+                TrashStorage.shared.purgeExpired(olderThan: config.trashRetentionDays)
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -68,6 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopBookmarkClipboardReviewTimer()
         bookmarkCaptureToastHideWorkItem?.cancel()
         bookmarkCaptureToastPanel?.orderOut(nil)
+        stopUndoToastTimer()
+        undoToastPanel?.orderOut(nil)
     }
 
     func applicationWillResignActive(_ notification: Notification) {
@@ -521,6 +539,161 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
     }
 
+    // MARK: - Undo Toast
+
+    private func observeUndoNotifications() {
+        NotificationCenter.default.publisher(for: .showUndoToast)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                let message = notification.userInfo?["message"] as? String ?? ""
+                let showViewTrash = notification.userInfo?["showViewTrash"] as? Bool ?? false
+                self?.showUndoToast(message: message, showViewTrash: showViewTrash)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func showUndoToast(message: String, showViewTrash: Bool) {
+        stopUndoToastTimer()
+        undoToastIsHovering = false
+        undoToastRemaining = UndoToastDesign.autoHideDuration
+        undoToastModel.progress = 1
+
+        if undoToastPanel == nil {
+            undoToastPanel = BookmarkCaptureToastPanel()
+        }
+        guard let panel = undoToastPanel else { return }
+
+        let toastView = UndoToastView(
+            model: undoToastModel,
+            message: message,
+            showViewTrash: showViewTrash,
+            onUndo: { [weak self] in
+                CiderUndoManager.shared.undo()
+                self?.dismissUndoToast()
+            },
+            onViewTrash: { [weak self] in
+                self?.dismissUndoToast()
+                NotificationCenter.default.post(name: .openCiderSettings, object: nil,
+                    userInfo: ["category": "storage"])
+            },
+            onHoverChanged: { [weak self] hovering in
+                guard let self else { return }
+                if hovering {
+                    self.undoToastIsHovering = true
+                    self.undoToastRemaining = UndoToastDesign.autoHideDuration
+                    self.undoToastModel.progress = 1
+                    self.stopUndoToastTimer()
+                } else {
+                    self.undoToastIsHovering = false
+                    self.startUndoToastTimer()
+                }
+            }
+        )
+        let hostingView = BookmarkCaptureToastHostingView(rootView: toastView)
+        hostingView.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: UndoToastDesign.panelWidth, height: UndoToastDesign.panelHeight)
+        )
+        panel.contentView = hostingView
+        panel.setContentSize(NSSize(width: UndoToastDesign.panelWidth, height: UndoToastDesign.panelHeight))
+
+        let frame = undoToastFrame(position: CiderConfig.load().undoToastPosition)
+        panel.setFrame(frame, display: true)
+        panel.orderFrontRegardless()
+
+        startUndoToastTimer()
+    }
+
+    private func undoToastFrame(position: ToastPosition) -> NSRect {
+        let w = UndoToastDesign.panelWidth
+        let h = UndoToastDesign.panelHeight
+        let inset = UndoToastDesign.panelEdgeInset
+
+        switch position {
+        case .topCenterScreen:
+            let mouseLocation = NSEvent.mouseLocation
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
+                ?? NSScreen.main ?? NSScreen.screens.first
+            let visibleFrame = screen?.visibleFrame ?? .zero
+            let x = visibleFrame.midX - w / 2
+            let y = visibleFrame.maxY - h - Spacing.xxxl
+            return NSRect(x: x, y: y, width: w, height: h)
+
+        case .bottomRightPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            let x = panelFrame.maxX - w - inset
+            let y = panelFrame.minY + inset
+            return NSRect(x: x, y: y, width: w, height: h)
+
+        case .bottomLeftPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            let x = panelFrame.minX + inset
+            let y = panelFrame.minY + inset
+            return NSRect(x: x, y: y, width: w, height: h)
+
+        case .topRightPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            let x = panelFrame.maxX - w - inset
+            let y = panelFrame.maxY - h - inset
+            return NSRect(x: x, y: y, width: w, height: h)
+
+        case .topLeftPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            let x = panelFrame.minX + inset
+            let y = panelFrame.maxY - h - inset
+            return NSRect(x: x, y: y, width: w, height: h)
+        }
+    }
+
+    private func startUndoToastTimer() {
+        stopUndoToastTimer()
+        undoToastLastTick = Date()
+
+        let timer = Timer(timeInterval: BookmarksToastDesign.reviewProgressTickInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.undoToastTimerTick()
+            }
+        }
+        undoToastTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopUndoToastTimer() {
+        undoToastTimer?.invalidate()
+        undoToastTimer = nil
+        undoToastLastTick = nil
+    }
+
+    private func undoToastTimerTick() {
+        guard !undoToastIsHovering else { return }
+        guard let lastTick = undoToastLastTick else {
+            undoToastLastTick = Date()
+            return
+        }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastTick)
+        undoToastLastTick = now
+        guard elapsed.isFinite, elapsed > 0 else { return }
+
+        undoToastRemaining -= elapsed
+        let duration = max(UndoToastDesign.autoHideDuration, 0.01)
+
+        if undoToastRemaining <= 0 {
+            undoToastModel.progress = 0
+            dismissUndoToast()
+            return
+        }
+
+        undoToastModel.progress = max(0, min(1, undoToastRemaining / duration))
+    }
+
+    private func dismissUndoToast() {
+        stopUndoToastTimer()
+        undoToastPanel?.orderOut(nil)
+        CiderUndoManager.shared.discard()
+    }
+
     private func toggleBookmarksPanel() {
         guard let panel = bookmarksPanel else { return }
 
@@ -721,23 +894,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showBookmarkToastPanel(_ panel: BookmarkCaptureToastPanel, contentHeight: CGFloat) {
+        let panelWidth = BookmarksToastDesign.panelWidth
         let panelHeight = contentHeight + BookmarksToastDesign.shadowPadding * 2
-        panel.setContentSize(NSSize(width: BookmarksToastDesign.panelWidth, height: panelHeight))
+        panel.setContentSize(NSSize(width: panelWidth, height: panelHeight))
 
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-        guard let screen else { return }
-
-        let visibleFrame = screen.visibleFrame
-        let x = visibleFrame.midX - BookmarksToastDesign.panelWidth / 2
-        let y = visibleFrame.maxY - panelHeight - BookmarksToastDesign.topInset
-        panel.setFrame(
-            NSRect(x: x, y: y, width: BookmarksToastDesign.panelWidth, height: panelHeight),
-            display: true
-        )
+        let position = CiderConfig.load().captureToastPosition
+        let frame = captureToastFrame(position: position, panelWidth: panelWidth, panelHeight: panelHeight)
+        panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+    }
+
+    private func captureToastFrame(position: ToastPosition, panelWidth: CGFloat, panelHeight: CGFloat) -> NSRect {
+        let inset = UndoToastDesign.panelEdgeInset
+        switch position {
+        case .topCenterScreen:
+            let mouseLocation = NSEvent.mouseLocation
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
+                ?? NSScreen.main ?? NSScreen.screens.first
+            let visibleFrame = screen?.visibleFrame ?? .zero
+            let x = visibleFrame.midX - panelWidth / 2
+            let y = visibleFrame.maxY - panelHeight - BookmarksToastDesign.topInset
+            return NSRect(x: x, y: y, width: panelWidth, height: panelHeight)
+
+        case .bottomRightPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            return NSRect(x: panelFrame.maxX - panelWidth - inset, y: panelFrame.minY + inset,
+                          width: panelWidth, height: panelHeight)
+
+        case .bottomLeftPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            return NSRect(x: panelFrame.minX + inset, y: panelFrame.minY + inset,
+                          width: panelWidth, height: panelHeight)
+
+        case .topRightPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            return NSRect(x: panelFrame.maxX - panelWidth - inset, y: panelFrame.maxY - panelHeight - inset,
+                          width: panelWidth, height: panelHeight)
+
+        case .topLeftPanel:
+            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            return NSRect(x: panelFrame.minX + inset, y: panelFrame.maxY - panelHeight - inset,
+                          width: panelWidth, height: panelHeight)
+        }
     }
 
     private func compactURLDisplay(from url: URL) -> String {

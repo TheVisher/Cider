@@ -24,7 +24,7 @@ Right-click any card or list row for:
 - **Open** — opens the note in the editor
 - **Rename** — inline rename directly on the card (title swaps to a focused text field, Enter to save, Escape to cancel)
 - **Move to Folder** — submenu listing all folders + "No Folder" option
-- **Delete** — destructive, removes the note
+- **Delete** — sends the note to Trash (recoverable via Settings → Storage)
 
 Design decision: Rename edits inline on the card rather than opening the editor. This matches user expectations for a "Rename" action.
 

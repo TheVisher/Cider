@@ -345,9 +345,14 @@ final class NotesViewModel: ObservableObject {
             clearSelectedNote()
         }
 
+        var trashItems: [TrashItem] = []
         for note in notes {
-            NotesStorage.shared.delete(note: note)
+            let trashItem = NotesStorage.shared.delete(note: note)
+            trashItems.append(trashItem)
             NotesPanelPositionStore.shared.removeFrame(for: note.id)
+        }
+        if !trashItems.isEmpty {
+            CiderUndoManager.shared.record(.bulkDeletedToTrash(trashItems))
         }
     }
 

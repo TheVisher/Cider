@@ -302,22 +302,26 @@ Dragging an unselected item while others are selected drags only that single ite
 - Escape key: hidden `Button` + `.keyboardShortcut(.escape)` — `.onExitCommand` doesn't work with `.nonactivatingPanel`
 - Future: bulk tag, bulk export
 
-### Undo System
+### Undo System ✓
 Reversible actions should support undo via a transient toast:
 - Toast appears for ~5 seconds after destructive/organizational actions with an "Undo" button
 - Actions that support undo: delete, move to folder, move to trash, bulk operations
 - Single-level undo (undo the most recent action)
 - Toast dismisses on timeout or manual dismiss; clicking "Undo" reverses the action immediately
 
-### Trash System
+**Implemented.** `CiderUndoManager` singleton tracks one pending `UndoAction`. Timer-driven 5-second progress bar with hover-to-pause matches the clipboard review toast pattern. Delete actions show an additional "Trash" button to open Settings → Storage. Toast position is user-configurable per toast type (capture toast and undo toast have separate position settings).
+
+### Trash System ✓
 Deleted items go to a Trash instead of being permanently removed:
 - **30-day retention** — items auto-purge after 30 days in trash
-- Trash is accessible from the sidebar (below folders) or via a menu
+- Trash is accessible from **Settings → Storage** (not the sidebar)
 - Trash view shows items with their deletion date and days remaining
 - Actions in trash: Restore (moves back to original folder), Delete Permanently
 - "Empty Trash" option for manual purge
 - Items in trash don't appear in search results, Home feed, or folder views
 - Affects both bookmarks and notes
+
+**Implemented.** `TrashStorage` manages `.trash/` subdirectories inside each storage directory with JSON manifests. Bookmarks move image assets to `.trash/thumbnails|originals/`. Notes move `.md` files to `.trash/`. Retention is configurable (7/30/90 days or Never) in Settings → Storage. Auto-purge runs on launch.
 
 ### Keyboard Navigation
 Power-user keyboard shortcuts for the floating panel:
@@ -489,8 +493,8 @@ Most recipe sites use **Schema.org Recipe markup** (`application/ld+json`), whic
 
 1. **Folder rename** — right-click context menu + inline editing in sidebar
 2. **Multi-select** — shift/cmd-click selection with bulk operations
-3. **Undo system** — transient toast with "Undo" button
-4. **Trash system** — 30-day retention, restore/permanent delete
+3. **Undo system** ✓ — transient toast with "Undo" button
+4. **Trash system** ✓ — 30-day retention, restore/permanent delete
 5. **Sorting options** — per-tab sort controls
 6. **Folder header + breadcrumb** — title and navigation in FolderDetailView
 7. **Sub-folders section** — collapsible sub-folder cards at top of folder view
