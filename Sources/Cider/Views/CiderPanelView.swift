@@ -20,6 +20,7 @@ struct CiderPanelView: View {
     @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
     @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
     @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
+    @State private var suppressSidebarAutoExpandForDetails = false
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + dynamicTabs
@@ -30,6 +31,7 @@ struct CiderPanelView: View {
     var body: some View {
         CiderPanelShell(
             isCollapsed: isCollapsed,
+            suppressSidebarAutoExpand: suppressSidebarAutoExpandForDetails,
             onClose: { NotificationCenter.default.post(name: .dismissCiderPanel, object: nil) },
             onCollapse: { NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil) },
             onMaximize: { NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil) }
@@ -85,6 +87,15 @@ struct CiderPanelView: View {
             var config = CiderConfig.load()
             config.subFoldersCollapsed = newValue
             config.save()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .expandCiderPanelForDetailModal)) { _ in
+            suppressSidebarAutoExpandForDetails = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .restoreCiderPanelAfterDetailModal)) { _ in
+            suppressSidebarAutoExpandForDetails = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .dismissCiderPanel)) { _ in
+            suppressSidebarAutoExpandForDetails = false
         }
         .background {
             Button("") { isSearchPaletteVisible = true }

@@ -41,7 +41,9 @@ final class DetailPopoverPanel: NSPanel {
         let maxAllowedHeight = max(minimumHeight, visibleFrame.height - CiderPanelDesign.shadowPadding * 2)
         hostingView.frame = NSRect(x: 0, y: 0, width: popoverWidth, height: maxAllowedHeight)
         hostingView.layoutSubtreeIfNeeded()
-        let desiredHeight = max(hostingView.fittingSize.height, minimumHeight)
+        // Favor parent-panel height so first-layout fitting glitches don't clip the details sheet.
+        let baselineHeight = max(minimumHeight, parentFrame.height)
+        let desiredHeight = max(hostingView.fittingSize.height, baselineHeight)
         let popoverHeight = min(desiredHeight, maxAllowedHeight)
         let padding = CiderPanelDesign.shadowPadding
 

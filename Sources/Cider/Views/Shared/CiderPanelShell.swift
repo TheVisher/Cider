@@ -15,6 +15,7 @@ struct CiderPanelShell<
     PanelOverlay: View
 >: View {
     let isCollapsed: Bool
+    let suppressSidebarAutoExpand: Bool
     let onClose: () -> Void
     let onCollapse: () -> Void
     let onMaximize: () -> Void
@@ -34,6 +35,7 @@ struct CiderPanelShell<
 
     init(
         isCollapsed: Bool,
+        suppressSidebarAutoExpand: Bool = false,
         onClose: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
         onMaximize: @escaping () -> Void,
@@ -44,6 +46,7 @@ struct CiderPanelShell<
         @ViewBuilder overlay: () -> PanelOverlay
     ) {
         self.isCollapsed = isCollapsed
+        self.suppressSidebarAutoExpand = suppressSidebarAutoExpand
         self.onClose = onClose
         self.onCollapse = onCollapse
         self.onMaximize = onMaximize
@@ -98,7 +101,7 @@ struct CiderPanelShell<
                                 }
                             } else if !compact && isCompactMode {
                                 isCompactMode = false
-                                if sidebarAutoCollapsed {
+                                if sidebarAutoCollapsed && !suppressSidebarAutoExpand {
                                     sidebarAutoCollapsed = false
                                     isSidebarVisible = true
                                 }
@@ -286,6 +289,7 @@ struct CiderPanelShell<
 extension CiderPanelShell where PanelOverlay == EmptyView {
     init(
         isCollapsed: Bool,
+        suppressSidebarAutoExpand: Bool = false,
         onClose: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
         onMaximize: @escaping () -> Void,
@@ -295,6 +299,7 @@ extension CiderPanelShell where PanelOverlay == EmptyView {
         @ViewBuilder content: () -> Content
     ) {
         self.isCollapsed = isCollapsed
+        self.suppressSidebarAutoExpand = suppressSidebarAutoExpand
         self.onClose = onClose
         self.onCollapse = onCollapse
         self.onMaximize = onMaximize
