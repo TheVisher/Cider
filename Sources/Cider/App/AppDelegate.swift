@@ -263,7 +263,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startNotesHotkeyDetection() {
         let config = CiderConfig.load()
         guard config.enableNotesHotkey else { return }
-        guard AccessibilityHelpers.isTrusted() else { return }
 
         notesHotkeyDetector = NotesHotkeyDetector(
             onToggle: { [weak self] in
@@ -467,7 +466,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startBookmarksHotkeyDetection() {
         let config = CiderConfig.load()
         guard config.enableBookmarksHotkey || config.enableBookmarksCaptureHotkey else { return }
-        guard AccessibilityHelpers.isTrusted() else { return }
 
         bookmarksHotkeyDetector = BookmarksHotkeyDetector(
             onToggle: { [weak self] in

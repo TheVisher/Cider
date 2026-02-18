@@ -10,8 +10,12 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var toggleHotKeyRef: EventHotKeyRef?
+    private var captureHotKeyRef: EventHotKeyRef?
+    private var hotKeyHandler: EventHandlerRef?
     private var isEnabled = true
     private var retainedForEventTap = false
+    private var retainedForHotKey = false
 
     init(
         onToggle: @escaping @MainActor @Sendable () -> Void,
@@ -22,7 +26,7 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
     }
 
     func start() {
-        guard eventTap == nil else { return }
+        guard eventTap == nil, toggleHotKeyRef == nil, captureHotKeyRef == nil else { return }
 
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
@@ -41,7 +45,11 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
         )
 
         guard let eventTap else {
-            print("[BookmarksHotkeyDetector] Failed to create event tap - check accessibility permissions")
+            if registerHotKeyFallback() {
+                print("[BookmarksHotkeyDetector] Started (Carbon hotkey fallback)")
+            } else {
+                print("[BookmarksHotkeyDetector] Failed to create event tap or fallback hotkey")
+            }
             return
         }
 
@@ -74,6 +82,26 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
             retainedForEventTap = false
         }
 
+        if let toggleHotKeyRef {
+            UnregisterEventHotKey(toggleHotKeyRef)
+            self.toggleHotKeyRef = nil
+        }
+
+        if let captureHotKeyRef {
+            UnregisterEventHotKey(captureHotKeyRef)
+            self.captureHotKeyRef = nil
+        }
+
+        if let hotKeyHandler {
+            RemoveEventHandler(hotKeyHandler)
+            self.hotKeyHandler = nil
+        }
+
+        if retainedForHotKey {
+            Unmanaged.passUnretained(self).release()
+            retainedForHotKey = false
+        }
+
         print("[BookmarksHotkeyDetector] Stopped")
     }
 
@@ -86,10 +114,108 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
                 return
             }
             CGEvent.tapEnable(tap: eventTap, enable: enabled)
-        } else if enabled {
+        } else if toggleHotKeyRef == nil && captureHotKeyRef == nil && enabled {
             start()
         }
     }
+
+    private func registerHotKeyFallback() -> Bool {
+        var eventSpec = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        let installStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, eventRef, userData in
+                guard let eventRef, let userData else { return OSStatus(eventNotHandledErr) }
+                let detector = Unmanaged<BookmarksHotkeyDetector>.fromOpaque(userData).takeUnretainedValue()
+                return detector.handleHotKeyEvent(eventRef)
+            },
+            1,
+            &eventSpec,
+            userData,
+            &hotKeyHandler
+        )
+        guard installStatus == noErr else { return false }
+
+        let toggleID = EventHotKeyID(signature: Self.signature, id: 1)
+        let toggleStatus = RegisterEventHotKey(
+            UInt32(kVK_ANSI_B),
+            UInt32(optionKey),
+            toggleID,
+            GetApplicationEventTarget(),
+            0,
+            &toggleHotKeyRef
+        )
+
+        let captureID = EventHotKeyID(signature: Self.signature, id: 2)
+        let captureStatus = RegisterEventHotKey(
+            UInt32(kVK_ANSI_B),
+            UInt32(optionKey | shiftKey),
+            captureID,
+            GetApplicationEventTarget(),
+            0,
+            &captureHotKeyRef
+        )
+
+        guard toggleStatus == noErr, captureStatus == noErr,
+              toggleHotKeyRef != nil, captureHotKeyRef != nil else {
+            if let toggleHotKeyRef {
+                UnregisterEventHotKey(toggleHotKeyRef)
+                self.toggleHotKeyRef = nil
+            }
+            if let captureHotKeyRef {
+                UnregisterEventHotKey(captureHotKeyRef)
+                self.captureHotKeyRef = nil
+            }
+            if let hotKeyHandler {
+                RemoveEventHandler(hotKeyHandler)
+                self.hotKeyHandler = nil
+            }
+            return false
+        }
+
+        _ = Unmanaged.passRetained(self)
+        retainedForHotKey = true
+        return true
+    }
+
+    private func handleHotKeyEvent(_ eventRef: EventRef) -> OSStatus {
+        guard isEnabled else { return noErr }
+
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            eventRef,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+        guard status == noErr, hotKeyID.signature == Self.signature else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        DoubleTapDetector.suppressUntilNextOptionDown = true
+
+        switch hotKeyID.id {
+        case 1:
+            let callback = onToggle
+            Task { @MainActor in callback() }
+            return noErr
+        case 2:
+            let callback = onCapture
+            Task { @MainActor in callback() }
+            return noErr
+        default:
+            return OSStatus(eventNotHandledErr)
+        }
+    }
+
+    private static let signature: OSType = 0x43424B59 // "CBKY"
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         guard isEnabled else { return Unmanaged.passUnretained(event) }

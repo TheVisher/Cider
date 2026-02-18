@@ -9,15 +9,18 @@ final class NotesHotkeyDetector: @unchecked Sendable {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyHandler: EventHandlerRef?
     private var isEnabled = true
     private var retainedForEventTap = false
+    private var retainedForHotKey = false
 
     init(onToggle: @escaping @MainActor @Sendable () -> Void) {
         self.onToggle = onToggle
     }
 
     func start() {
-        guard eventTap == nil else { return }
+        guard eventTap == nil, hotKeyRef == nil else { return }
 
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
 
@@ -37,7 +40,11 @@ final class NotesHotkeyDetector: @unchecked Sendable {
         )
 
         guard let eventTap else {
-            print("[NotesHotkeyDetector] Failed to create event tap - check accessibility permissions")
+            if registerHotKeyFallback() {
+                print("[NotesHotkeyDetector] Started (Carbon hotkey fallback)")
+            } else {
+                print("[NotesHotkeyDetector] Failed to create event tap or fallback hotkey")
+            }
             return
         }
 
@@ -71,6 +78,21 @@ final class NotesHotkeyDetector: @unchecked Sendable {
             retainedForEventTap = false
         }
 
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
+
+        if let hotKeyHandler {
+            RemoveEventHandler(hotKeyHandler)
+            self.hotKeyHandler = nil
+        }
+
+        if retainedForHotKey {
+            Unmanaged.passUnretained(self).release()
+            retainedForHotKey = false
+        }
+
         print("[NotesHotkeyDetector] Stopped")
     }
 
@@ -83,10 +105,79 @@ final class NotesHotkeyDetector: @unchecked Sendable {
                 return
             }
             CGEvent.tapEnable(tap: eventTap, enable: enabled)
-        } else if enabled {
+        } else if hotKeyRef == nil && enabled {
             start()
         }
     }
+
+    private func registerHotKeyFallback() -> Bool {
+        var eventSpec = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        let installStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, eventRef, userData in
+                guard let eventRef, let userData else { return OSStatus(eventNotHandledErr) }
+                let detector = Unmanaged<NotesHotkeyDetector>.fromOpaque(userData).takeUnretainedValue()
+                return detector.handleHotKeyEvent(eventRef)
+            },
+            1,
+            &eventSpec,
+            userData,
+            &hotKeyHandler
+        )
+        guard installStatus == noErr else { return false }
+
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        let registerStatus = RegisterEventHotKey(
+            UInt32(kVK_ANSI_N),
+            UInt32(optionKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+
+        guard registerStatus == noErr, hotKeyRef != nil else {
+            if let hotKeyHandler {
+                RemoveEventHandler(hotKeyHandler)
+                self.hotKeyHandler = nil
+            }
+            return false
+        }
+
+        _ = Unmanaged.passRetained(self)
+        retainedForHotKey = true
+        return true
+    }
+
+    private func handleHotKeyEvent(_ eventRef: EventRef) -> OSStatus {
+        guard isEnabled else { return noErr }
+
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            eventRef,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+        guard status == noErr, hotKeyID.signature == Self.signature, hotKeyID.id == 1 else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        DoubleTapDetector.suppressUntilNextOptionDown = true
+        let callback = onToggle
+        Task { @MainActor in callback() }
+        return noErr
+    }
+
+    private static let signature: OSType = 0x434E544E // "CNTN"
 
     // MARK: - Event Handling
 
