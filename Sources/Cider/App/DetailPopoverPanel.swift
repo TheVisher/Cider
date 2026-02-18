@@ -26,12 +26,17 @@ final class DetailPopoverPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    func showAdjacent(to parentPanel: NSPanel, content: some View) {
+    func showAdjacent(to parentPanel: NSPanel, preferredWidth: CGFloat, content: some View) {
         let hostingView = NSHostingView(rootView: content)
         self.contentView = hostingView
 
         let parentFrame = parentPanel.frame
-        let popoverWidth: CGFloat = 600
+        let screen = parentPanel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let visibleFrame = screen?.visibleFrame ?? parentFrame
+        let minimumWidth: CGFloat = 480
+        let desiredWidth = max(preferredWidth, minimumWidth)
+        let maxAllowedWidth = max(minimumWidth, visibleFrame.width - CiderPanelDesign.shadowPadding * 2)
+        let popoverWidth = min(desiredWidth, maxAllowedWidth)
         let popoverHeight: CGFloat = parentFrame.height
         let padding = CiderPanelDesign.shadowPadding
 
@@ -39,14 +44,14 @@ final class DetailPopoverPanel: NSPanel {
         let rightX = parentFrame.maxX - padding
         let leftX = parentFrame.minX - popoverWidth + padding
 
-        let screen = parentPanel.screen ?? NSScreen.main ?? NSScreen.screens.first
-        let visibleMaxX = screen?.visibleFrame.maxX ?? .infinity
+        let visibleMinX = visibleFrame.minX
+        let visibleMaxX = visibleFrame.maxX
 
         let x: CGFloat
         if rightX + popoverWidth <= visibleMaxX {
             x = rightX
         } else {
-            x = leftX
+            x = min(max(leftX, visibleMinX), visibleMaxX - popoverWidth)
         }
 
         let frame = NSRect(

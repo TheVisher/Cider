@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Detail popover
     private var detailPopoverPanel: DetailPopoverPanel?
+    private var ciderPanelFrameBeforeDetailModalExpand: NSRect?
 
     // Notes panel modal behavior (click-outside-to-dismiss from Home tab)
     private var notesPanelModalMonitor: Any?
@@ -814,6 +815,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.dismissDetailPopover()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .expandCiderPanelForDetailModal)
+            .sink { [weak self] notification in
+                self?.expandCiderPanelForDetailModal(notification)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .restoreCiderPanelAfterDetailModal)
+            .sink { [weak self] _ in
+                self?.restoreCiderPanelAfterDetailModal()
+            }
+            .store(in: &cancellables)
     }
 
     private func toggleCiderPanel() {
@@ -828,6 +841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showCiderPanel() {
         guard let panel = ciderPanel else { return }
+        ciderPanelFrameBeforeDetailModalExpand = nil
 
         if panel.isVisible {
             persistCurrentCiderPanelFrameIfNeeded()
@@ -845,6 +859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func hideCiderPanel() {
         persistCurrentCiderPanelFrameIfNeeded()
         dismissDetailPopover()
+        ciderPanelFrameBeforeDetailModalExpand = nil
         ciderPanel?.orderOut(nil)
     }
 
@@ -857,6 +872,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showDetailPopover(_ notification: Notification) {
         guard let panel = ciderPanel, panel.isVisible else { return }
         guard let contentView = notification.userInfo?["view"] as? AnyView else { return }
+        let preferredWidth = (notification.userInfo?["preferredWidth"] as? CGFloat)
+            ?? (notification.userInfo?["preferredWidth"] as? Double).map { CGFloat($0) }
+            ?? 600
 
         let popover = detailPopoverPanel ?? DetailPopoverPanel()
         detailPopoverPanel = popover
@@ -871,11 +889,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         .padding(CiderPanelDesign.shadowPadding)
 
-        popover.showAdjacent(to: panel, content: wrappedContent)
+        popover.showAdjacent(to: panel, preferredWidth: preferredWidth, content: wrappedContent)
     }
 
     private func dismissDetailPopover() {
         detailPopoverPanel?.orderOut(nil)
+    }
+
+    private func expandCiderPanelForDetailModal(_ notification: Notification) {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+
+        let requestedWidth = (notification.userInfo?["minimumWidth"] as? CGFloat)
+            ?? (notification.userInfo?["minimumWidth"] as? Double).map { CGFloat($0) }
+            ?? BookmarksDesign.detailsRequiredPanelWidth
+        let requiredWidth = max(requestedWidth, CiderPanelDesign.panelMinWidth)
+
+        guard panel.frame.width + 0.5 < requiredWidth else { return }
+
+        if ciderPanelFrameBeforeDetailModalExpand == nil {
+            ciderPanelFrameBeforeDetailModalExpand = panel.frame
+        }
+
+        let targetFrame = expandedDetailFrame(
+            from: panel.frame,
+            targetWidth: requiredWidth,
+            screenVisibleFrame: panel.screen?.visibleFrame ?? panel.frame
+        )
+
+        guard abs(targetFrame.width - panel.frame.width) > 0.5
+                || abs(targetFrame.minX - panel.frame.minX) > 0.5 else {
+            return
+        }
+
+        panel.setFrame(targetFrame, display: true, animate: false)
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    private func restoreCiderPanelAfterDetailModal() {
+        guard let restoreFrame = ciderPanelFrameBeforeDetailModalExpand else { return }
+        guard let panel = ciderPanel, panel.isVisible else {
+            ciderPanelFrameBeforeDetailModalExpand = nil
+            return
+        }
+
+        let targetFrame = expandedDetailFrame(
+            from: restoreFrame,
+            targetWidth: restoreFrame.width,
+            screenVisibleFrame: panel.screen?.visibleFrame ?? panel.frame
+        )
+
+        panel.setFrame(targetFrame, display: true, animate: false)
+        ciderPanelFrameBeforeDetailModalExpand = nil
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    private func expandedDetailFrame(
+        from frame: NSRect,
+        targetWidth: CGFloat,
+        screenVisibleFrame: NSRect
+    ) -> NSRect {
+        let clampedWidth = min(max(targetWidth, CiderPanelDesign.panelMinWidth), screenVisibleFrame.width)
+        let clampedHeight = min(frame.height, screenVisibleFrame.height)
+        let preferredX = frame.maxX - clampedWidth
+        let x = min(
+            max(preferredX, screenVisibleFrame.minX),
+            screenVisibleFrame.maxX - clampedWidth
+        )
+        let y = min(
+            max(frame.minY, screenVisibleFrame.minY),
+            screenVisibleFrame.maxY - clampedHeight
+        )
+        return NSRect(x: x, y: y, width: clampedWidth, height: clampedHeight)
     }
 
     private func maximizeCiderPanel() {

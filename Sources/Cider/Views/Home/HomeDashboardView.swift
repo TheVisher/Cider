@@ -117,6 +117,11 @@ struct HomeDashboardView: View {
                 closeDetails()
             }
         }
+        .onDisappear {
+            if detailsDraft != nil {
+                closeDetails()
+            }
+        }
     }
 
     // MARK: - Library Feed
@@ -351,6 +356,8 @@ struct HomeDashboardView: View {
         let config = CiderConfig.load()
         if config.detailModalMode == .popover {
             showDetailsPopover(draft: draft)
+        } else {
+            requestPanelExpansionForDetails()
         }
     }
 
@@ -358,6 +365,8 @@ struct HomeDashboardView: View {
         let config = CiderConfig.load()
         if config.detailModalMode == .popover {
             NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
+        } else {
+            requestPanelRestoreAfterDetails()
         }
         detailsDraft = nil
         detailsErrorMessage = nil
@@ -388,8 +397,23 @@ struct HomeDashboardView: View {
         NotificationCenter.default.post(
             name: .showDetailPopover,
             object: nil,
-            userInfo: ["view": popoverContent]
+            userInfo: [
+                "view": popoverContent,
+                "preferredWidth": BookmarksDesign.detailsRequiredPanelWidth,
+            ]
         )
+    }
+
+    private func requestPanelExpansionForDetails() {
+        NotificationCenter.default.post(
+            name: .expandCiderPanelForDetailModal,
+            object: nil,
+            userInfo: ["minimumWidth": BookmarksDesign.detailsRequiredPanelWidth]
+        )
+    }
+
+    private func requestPanelRestoreAfterDetails() {
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterDetailModal, object: nil)
     }
 
     private func saveDetails() {

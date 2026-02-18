@@ -116,6 +116,11 @@ struct FolderDetailView: View {
                 closeDetails()
             }
         }
+        .onDisappear {
+            if detailsDraft != nil {
+                closeDetails()
+            }
+        }
         .task(id: "\(folderID)-\(folder?.coverImagePath ?? "")-\(folder?.updatedAt.timeIntervalSinceReferenceDate ?? 0)") {
             await loadCoverImage()
             coverOffsetY = folder?.coverImageOffsetY ?? 0.5
@@ -698,6 +703,8 @@ struct FolderDetailView: View {
         let config = CiderConfig.load()
         if config.detailModalMode == .popover {
             showDetailsPopover(draft: draft)
+        } else {
+            requestPanelExpansionForDetails()
         }
     }
 
@@ -705,6 +712,8 @@ struct FolderDetailView: View {
         let config = CiderConfig.load()
         if config.detailModalMode == .popover {
             NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
+        } else {
+            requestPanelRestoreAfterDetails()
         }
         detailsDraft = nil
         detailsErrorMessage = nil
@@ -735,8 +744,23 @@ struct FolderDetailView: View {
         NotificationCenter.default.post(
             name: .showDetailPopover,
             object: nil,
-            userInfo: ["view": popoverContent]
+            userInfo: [
+                "view": popoverContent,
+                "preferredWidth": BookmarksDesign.detailsRequiredPanelWidth,
+            ]
         )
+    }
+
+    private func requestPanelExpansionForDetails() {
+        NotificationCenter.default.post(
+            name: .expandCiderPanelForDetailModal,
+            object: nil,
+            userInfo: ["minimumWidth": BookmarksDesign.detailsRequiredPanelWidth]
+        )
+    }
+
+    private func requestPanelRestoreAfterDetails() {
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterDetailModal, object: nil)
     }
 
     private func saveDetails() {
