@@ -51,6 +51,15 @@ struct SettingsView: View {
         .onChange(of: selectedCategory) { _, _ in
             syncSelectedSubcategory(reset: true)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .settingsNavigate)) { notification in
+            guard let category = notification.userInfo?["category"] as? String else { return }
+            switch category {
+            case "storage": selectedCategory = .storage
+            case "general": selectedCategory = .general
+            case "appearance": selectedCategory = .appearance
+            default: break
+            }
+        }
     }
 
     @ViewBuilder

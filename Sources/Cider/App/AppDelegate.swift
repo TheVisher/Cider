@@ -231,8 +231,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func observeSettingsNotifications() {
         NotificationCenter.default.publisher(for: .openCiderSettings)
-            .sink { [weak self] _ in
+            .sink { [weak self] notification in
                 self?.showSettings()
+                if let category = notification.userInfo?["category"] as? String {
+                    NotificationCenter.default.post(
+                        name: .settingsNavigate,
+                        object: nil,
+                        userInfo: ["category": category]
+                    )
+                }
             }
             .store(in: &cancellables)
 

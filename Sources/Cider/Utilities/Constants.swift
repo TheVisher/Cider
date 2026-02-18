@@ -18,6 +18,7 @@ extension EnvironmentValues {
 
 extension Notification.Name {
     static let openCiderSettings = Notification.Name("cider.openCiderSettings")
+    static let settingsNavigate = Notification.Name("cider.settingsNavigate")
     static let dismissSettings = Notification.Name("cider.dismissSettings")
     static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
     static let toggleNotes = Notification.Name("cider.toggleNotes")
