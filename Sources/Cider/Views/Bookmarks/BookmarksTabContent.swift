@@ -9,6 +9,7 @@ struct BookmarksTabContent: View {
 
     @State private var panelWindow: NSWindow?
     @State private var detailsDraft: BookmarkDetailsDraft?
+    @State private var detailsPresentationMode: DetailModalMode?
     @State private var detailsErrorMessage: String?
 
     private var displayedBookmarks: [Bookmark] {
@@ -22,7 +23,7 @@ struct BookmarksTabContent: View {
     }
 
     private var isExpandMode: Bool {
-        CiderConfig.load().detailModalMode == .expand
+        (detailsPresentationMode ?? CiderConfig.load().detailModalMode) == .expand
     }
 
     var body: some View {
@@ -139,8 +140,10 @@ struct BookmarksTabContent: View {
         detailsDraft = draft
         detailsErrorMessage = nil
 
-        let config = CiderConfig.load()
-        if config.detailModalMode == .popover {
+        let presentationMode = CiderConfig.load().detailModalMode
+        detailsPresentationMode = presentationMode
+
+        if presentationMode == .popover {
             showDetailsPopover(draft: draft)
         } else {
             requestPanelExpansionForDetails()
@@ -149,12 +152,13 @@ struct BookmarksTabContent: View {
 
     private func closeDetails() {
         clearSearchFocus()
-        let config = CiderConfig.load()
-        if config.detailModalMode == .popover {
+        let presentationMode = detailsPresentationMode ?? CiderConfig.load().detailModalMode
+        if presentationMode == .popover {
             NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
         } else {
             requestPanelRestoreAfterDetails()
         }
+        detailsPresentationMode = nil
         detailsDraft = nil
         detailsErrorMessage = nil
     }

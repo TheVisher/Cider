@@ -34,10 +34,15 @@ final class DetailPopoverPanel: NSPanel {
         let screen = parentPanel.screen ?? NSScreen.main ?? NSScreen.screens.first
         let visibleFrame = screen?.visibleFrame ?? parentFrame
         let minimumWidth: CGFloat = 480
+        let minimumHeight: CGFloat = 420
         let desiredWidth = max(preferredWidth, minimumWidth)
         let maxAllowedWidth = max(minimumWidth, visibleFrame.width - CiderPanelDesign.shadowPadding * 2)
         let popoverWidth = min(desiredWidth, maxAllowedWidth)
-        let popoverHeight: CGFloat = parentFrame.height
+        let maxAllowedHeight = max(minimumHeight, visibleFrame.height - CiderPanelDesign.shadowPadding * 2)
+        hostingView.frame = NSRect(x: 0, y: 0, width: popoverWidth, height: maxAllowedHeight)
+        hostingView.layoutSubtreeIfNeeded()
+        let desiredHeight = max(hostingView.fittingSize.height, minimumHeight)
+        let popoverHeight = min(desiredHeight, maxAllowedHeight)
         let padding = CiderPanelDesign.shadowPadding
 
         // Try to position to the right of the parent panel
@@ -54,9 +59,15 @@ final class DetailPopoverPanel: NSPanel {
             x = min(max(leftX, visibleMinX), visibleMaxX - popoverWidth)
         }
 
+        let preferredY = parentFrame.maxY - popoverHeight
+        let y = min(
+            max(preferredY, visibleFrame.minY),
+            visibleFrame.maxY - popoverHeight
+        )
+
         let frame = NSRect(
             x: x,
-            y: parentFrame.minY,
+            y: y,
             width: popoverWidth,
             height: popoverHeight
         )

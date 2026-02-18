@@ -11,6 +11,7 @@ struct HomeDashboardView: View {
     @Binding var selectedItemIDs: Set<String>
     @State private var config = CiderConfig.load()
     @State private var detailsDraft: BookmarkDetailsDraft?
+    @State private var detailsPresentationMode: DetailModalMode?
     @State private var detailsErrorMessage: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -60,7 +61,7 @@ struct HomeDashboardView: View {
     }
 
     private var isExpandMode: Bool {
-        CiderConfig.load().detailModalMode == .expand
+        (detailsPresentationMode ?? CiderConfig.load().detailModalMode) == .expand
     }
 
     var body: some View {
@@ -353,8 +354,10 @@ struct HomeDashboardView: View {
         detailsDraft = draft
         detailsErrorMessage = nil
 
-        let config = CiderConfig.load()
-        if config.detailModalMode == .popover {
+        let presentationMode = CiderConfig.load().detailModalMode
+        detailsPresentationMode = presentationMode
+
+        if presentationMode == .popover {
             showDetailsPopover(draft: draft)
         } else {
             requestPanelExpansionForDetails()
@@ -362,12 +365,13 @@ struct HomeDashboardView: View {
     }
 
     private func closeDetails() {
-        let config = CiderConfig.load()
-        if config.detailModalMode == .popover {
+        let presentationMode = detailsPresentationMode ?? CiderConfig.load().detailModalMode
+        if presentationMode == .popover {
             NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
         } else {
             requestPanelRestoreAfterDetails()
         }
+        detailsPresentationMode = nil
         detailsDraft = nil
         detailsErrorMessage = nil
     }

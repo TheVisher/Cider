@@ -13,6 +13,7 @@ struct FolderDetailView: View {
 
     @State private var selectionAnchorID: String?
     @State private var detailsDraft: BookmarkDetailsDraft?
+    @State private var detailsPresentationMode: DetailModalMode?
     @State private var detailsErrorMessage: String?
     @State private var coverImage: NSImage?
     @State private var coverOffsetY: Double = 0.5
@@ -55,7 +56,7 @@ struct FolderDetailView: View {
     }
 
     private var isExpandMode: Bool {
-        CiderConfig.load().detailModalMode == .expand
+        (detailsPresentationMode ?? CiderConfig.load().detailModalMode) == .expand
     }
 
     /// Ancestors of the current folder (excluding itself), from root → parent.
@@ -700,8 +701,10 @@ struct FolderDetailView: View {
         detailsDraft = draft
         detailsErrorMessage = nil
 
-        let config = CiderConfig.load()
-        if config.detailModalMode == .popover {
+        let presentationMode = CiderConfig.load().detailModalMode
+        detailsPresentationMode = presentationMode
+
+        if presentationMode == .popover {
             showDetailsPopover(draft: draft)
         } else {
             requestPanelExpansionForDetails()
@@ -709,12 +712,13 @@ struct FolderDetailView: View {
     }
 
     private func closeDetails() {
-        let config = CiderConfig.load()
-        if config.detailModalMode == .popover {
+        let presentationMode = detailsPresentationMode ?? CiderConfig.load().detailModalMode
+        if presentationMode == .popover {
             NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
         } else {
             requestPanelRestoreAfterDetails()
         }
+        detailsPresentationMode = nil
         detailsDraft = nil
         detailsErrorMessage = nil
     }

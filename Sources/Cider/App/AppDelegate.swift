@@ -879,17 +879,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let popover = detailPopoverPanel ?? DetailPopoverPanel()
         detailPopoverPanel = popover
 
-        let wrappedContent = ZStack {
-            AcrylicPanelBackground(
-                cornerRadius: CiderPanelDesign.cornerRadius,
-                shadowStyle: .full
-            )
-            contentView
-                .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
-        }
-        .padding(CiderPanelDesign.shadowPadding)
-
-        popover.showAdjacent(to: panel, preferredWidth: preferredWidth, content: wrappedContent)
+        popover.showAdjacent(to: panel, preferredWidth: preferredWidth, content: contentView)
     }
 
     private func dismissDetailPopover() {
@@ -902,7 +892,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let requestedWidth = (notification.userInfo?["minimumWidth"] as? CGFloat)
             ?? (notification.userInfo?["minimumWidth"] as? Double).map { CGFloat($0) }
             ?? BookmarksDesign.detailsRequiredPanelWidth
-        let requiredWidth = max(requestedWidth, CiderPanelDesign.panelMinWidth)
+        let sidebarCompensation = BookmarksDesign.folderSidebarWidth + Spacing.md
+        let requiredWidth = max(requestedWidth + sidebarCompensation, CiderPanelDesign.panelMinWidth)
 
         guard panel.frame.width + 0.5 < requiredWidth else { return }
 
