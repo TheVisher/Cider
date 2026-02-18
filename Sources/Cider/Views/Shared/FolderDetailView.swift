@@ -168,13 +168,23 @@ struct FolderDetailView: View {
                 }
             }
 
-            // Folder name
-            Text(folder?.name ?? "Folder")
-                .font(CiderFont.titleMedium)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
+            // Folder name + sub-folder toggle
+            HStack(alignment: .lastTextBaseline) {
+                Text(folder?.name ?? "Folder")
+                    .font(CiderFont.titleMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+    
+                if !childFolders.isEmpty {
+                    Spacer()
+                    SectionCollapseToggle(
+                        label: "Folders",
+                        isCollapsed: $subFoldersCollapsed
+                    )
+                    }
+            }
 
-            // Item count + sub-folder toggle
+            // Item count
             let total = folderItems.count
             let subCount = childFolders.count
             HStack(spacing: Spacing.sm) {
@@ -192,14 +202,6 @@ struct FolderDetailView: View {
                     Text("Empty")
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.quaternary)
-                }
-
-                if !childFolders.isEmpty {
-                    Spacer()
-                    SectionCollapseToggle(
-                        label: "Folders",
-                        isCollapsed: $subFoldersCollapsed
-                    )
                 }
             }
         }

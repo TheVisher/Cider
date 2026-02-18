@@ -15,6 +15,7 @@ The Home tab is the library — the unified view of all Cider content. A sticky 
 - Collapsed state persisted in CiderConfig
 - Hideable via `showContinueSection` setting
 - Always shows global recents regardless of folder selection
+- Rows are draggable (single-item drag to folders) with hover highlight
 - No divider between Continue and library feed — the visual shift from compact rows to cards is sufficient separation
 
 ### Library Feed

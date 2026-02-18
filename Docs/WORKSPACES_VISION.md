@@ -47,8 +47,10 @@ Folders live in the sidebar under a "Folders" section, visible across all views.
 - Selecting a folder shows a **standalone FolderDetailView** — same rich card components as Home tab (BookmarkCard, NoteCardView, etc.)
 - **Tab-independent** — the same folder view shows regardless of which tab was active
 - **Tabs deselect** when viewing a folder — clicking any tab exits the folder view
-- **Root folders** show sub-folder cards at the top (clickable to navigate deeper), then mixed items below
-- **Leaf folders** show just the mixed items
+- **Layout:** `ScrollView` with `LazyVStack(pinnedViews: [.sectionHeaders])` — cover image scrolls away, header (title + counts + FOLDERS toggle + sub-folder cards when expanded) sticks at top
+- **Root folders** show cover image (if set), sticky header with sub-folder cards, then mixed items below
+- **Leaf folders** show cover image (if set), sticky header, then mixed items
+- **Empty folders** show header + empty state (no scroll needed)
 - Supports all display modes (list, grid, masonry) — shares Home tab's display mode setting
 - Drag-and-drop works: items can be dragged onto sub-folder cards or sidebar folders
 - Bookmark detail modals open within the folder view; notes open as modal notes panel
@@ -227,17 +229,37 @@ FolderDetailView should have a header area showing:
 - Each breadcrumb segment is clickable to navigate up
 
 ### Folder Header Image
-Folders can have an optional hero/cover image displayed at the top of FolderDetailView, giving the folder a curated, personal feel (like Notion page covers).
-- Set via drag-and-drop onto the header area, or a picker in the context menu
-- Stored alongside folder metadata
-- When no image is set, the header area shows just the title/breadcrumb (no empty placeholder)
+**Status: Implemented.**
+Folders have optional cover images displayed at the top of FolderDetailView (Notion-style).
+- 160pt banner, drag-to-reposition vertically (normalized 0.0–1.0 offset, persisted)
+- Set/change/remove via right-click context menu on header or cover image
+- Cover scrolls away when scrolling; header sticks via `LazyVStack(pinnedViews: [.sectionHeaders])`
+- `CoverRepositionOverlay` NSViewRepresentable blocks `isMovableByWindowBackground` window drag
+- Uses AppKit event loop (`window.nextEvent`) pattern (same as PanelEdgeResizeView)
+- Image downsampled to 800px via `CGImageSourceCreateThumbnailAtIndex`
+- Stored in `.folder-covers/` directory; `Folder.coverImagePath` + `coverImageOffsetY` on model
+- NSOpenPanel for image picker requires `NSApp.activate(ignoringOtherApps: true)` before `runModal()` — non-activating panel doesn't give the file picker proper focus otherwise
 
 ### Sub-Folders Section in Folder View
-When viewing a folder that has sub-folders, show a collapsible "Sub Folders" section at the top of FolderDetailView (reusing the Continue section's collapse pattern):
-- Replaces the Continue section's toggle — "Sub Folders" button in the top-right instead of "Continue"
-- Expandable/collapsible with the same animation
-- Shows sub-folder cards in a compact layout (clickable to navigate deeper)
-- Below the sub-folders section: the folder's own items (bookmarks + notes)
+**Status: Implemented.**
+- "FOLDERS >" toggle on the same line as the folder title (right-aligned, `SectionCollapseToggle`)
+- Sub-folder cards are part of the sticky Section header — they pin while scrolling
+- Collapsible with `.snappy` animation; state persisted
+- Shows sub-folder cards in a compact grid (clickable to navigate deeper)
+- Below the sticky header: the folder's own items (bookmarks + notes)
+
+### Sticky Header Readability (Unsolved)
+The pinned folder header (title, counts, FOLDERS toggle, sub-folder cards) currently has no background.
+Content scrolls visibly through/behind the header text, making it unreadable when cards overlap.
+
+**Rejected approaches (avoid revisiting):**
+- **Full-width acrylic background** (VisualEffectView + tint) — looks like an ugly solid dark bar, especially when nothing is scrolled under it
+- **Scroll-triggered dark overlay** — same ugly bar, just delayed. Jarring when it appears.
+- **Gradient fade below header** — doesn't help because content passes *through* the header text, not under the gradient
+- **Frosted rail always-on** (blur + subtle tint + border) — ugly dark strip when no content underneath
+- **Per-element backplates** (small dark pills behind each text element, overlap-triggered) — rejected, felt cluttered
+
+**Still exploring:** Need a solution that provides readability without adding any visible surface when content isn't behind the header. Text shadow/glow on the header text is one untried option.
 
 ### Folder Sorting Options
 Folders need their own sort controls in the view options dropdown:
