@@ -269,8 +269,10 @@ struct FolderSidebarView: View {
                 dropTypeIdentifiers: folderDropTypeIdentifiers,
                 onTap: {
                     selectFolder(folder.id)
-                    if !isExpanded {
-                        _ = withAnimation(reduceMotion ? .none : .snappy) {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        if isExpanded {
+                            expandedFolderIDs.remove(folder.id)
+                        } else {
                             expandedFolderIDs.insert(folder.id)
                         }
                     }
@@ -340,9 +342,13 @@ struct FolderSidebarView: View {
                 dropTypeIdentifiers: folderDropTypeIdentifiers,
                 onTap: {
                     selectFolder(folder.id)
-                    if !isExpanded && hasChildrenOrSubCreation {
-                        _ = withAnimation(reduceMotion ? .none : .snappy) {
-                            expandedFolderIDs.insert(folder.id)
+                    if hasChildrenOrSubCreation {
+                        withAnimation(reduceMotion ? .none : .snappy) {
+                            if isExpanded {
+                                expandedFolderIDs.remove(folder.id)
+                            } else {
+                                expandedFolderIDs.insert(folder.id)
+                            }
                         }
                     }
                 },
