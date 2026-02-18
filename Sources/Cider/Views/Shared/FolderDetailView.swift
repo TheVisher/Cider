@@ -77,32 +77,31 @@ struct FolderDetailView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(spacing: 0) {
                         if coverImage != nil {
                             folderCoverBanner
                         }
 
-                        Section {
-                            if !folderItems.isEmpty {
-                                libraryFeed
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(Spacing.xxs)
-                                    .padding(.horizontal, Spacing.md)
-                                    .padding(.vertical, Spacing.md)
-                            } else {
-                                EmptyStateView(
-                                    icon: "tray",
-                                    title: "No items yet",
-                                    subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
-                                )
-                                .frame(minHeight: 200)
-                            }
-                        } header: {
-                            stickyHeader
+                        folderHeaderSection
+
+                        if !folderItems.isEmpty {
+                            libraryFeed
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(Spacing.xxs)
+                                .padding(.horizontal, Spacing.md)
+                                .padding(.vertical, Spacing.md)
+                        } else {
+                            EmptyStateView(
+                                icon: "tray",
+                                title: "No items yet",
+                                subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
+                            )
+                            .frame(minHeight: 200)
                         }
                     }
                 }
                 .scrollIndicators(.hidden)
+                .padding(.bottom, Spacing.md)
             }
 
             if isExpandMode, detailsDraft != nil {
@@ -123,9 +122,9 @@ struct FolderDetailView: View {
         }
     }
 
-    // MARK: - Sticky Header
+    // MARK: - Folder Header Section
 
-    private var stickyHeader: some View {
+    private var folderHeaderSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             folderHeader
 
