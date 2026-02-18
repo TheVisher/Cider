@@ -974,7 +974,7 @@ struct BookmarkThumbnailView: View {
     @Environment(\.textScale) private var textScale
     @State private var thumbnailImage: NSImage?
     @State private var rendersAsIconOverlay = false
-    @State private var loadedThumbnailPath: String?
+    @State private var loadedThumbnailFingerprint: String?
 
     private var palette: (Color, Color) {
         BookmarkVisualStyle.gradient(for: bookmark)
@@ -987,6 +987,12 @@ struct BookmarkThumbnailView: View {
             .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .onAppear(perform: loadThumbnailIfNeeded)
             .onChange(of: bookmark.thumbnailRelativePath) { _, _ in
+                loadThumbnailIfNeeded()
+            }
+            .onChange(of: bookmark.metadataUpdatedAt) { _, _ in
+                loadThumbnailIfNeeded()
+            }
+            .onChange(of: bookmark.thumbnailRemoteURLString) { _, _ in
                 loadThumbnailIfNeeded()
             }
     }
@@ -1084,8 +1090,13 @@ struct BookmarkThumbnailView: View {
 
     private func loadThumbnailIfNeeded() {
         let path = bookmark.thumbnailFileURL?.path
-        guard loadedThumbnailPath != path else { return }
-        loadedThumbnailPath = path
+        let fingerprint = [
+            path ?? "",
+            String(bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1),
+            bookmark.thumbnailRemoteURLString ?? "",
+        ].joined(separator: "|")
+        guard loadedThumbnailFingerprint != fingerprint else { return }
+        loadedThumbnailFingerprint = fingerprint
 
         guard let path else {
             thumbnailImage = nil

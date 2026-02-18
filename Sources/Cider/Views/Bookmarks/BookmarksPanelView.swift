@@ -690,7 +690,7 @@ struct BookmarkDetailsHeroPreview: View {
 
     @Environment(\.textScale) private var textScale
     @State private var thumbnailImage: NSImage?
-    @State private var loadedThumbnailPath: String?
+    @State private var loadedThumbnailFingerprint: String?
 
     private var palette: (Color, Color) {
         let seed = bookmark?.urlString ?? draft.urlString
@@ -719,6 +719,12 @@ struct BookmarkDetailsHeroPreview: View {
             .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             .onAppear(perform: loadThumbnailIfNeeded)
             .onChange(of: bookmark?.thumbnailRelativePath) { _, _ in
+                loadThumbnailIfNeeded()
+            }
+            .onChange(of: bookmark?.metadataUpdatedAt) { _, _ in
+                loadThumbnailIfNeeded()
+            }
+            .onChange(of: bookmark?.thumbnailRemoteURLString) { _, _ in
                 loadThumbnailIfNeeded()
             }
     }
@@ -771,8 +777,13 @@ struct BookmarkDetailsHeroPreview: View {
 
     private func loadThumbnailIfNeeded() {
         let path = bookmark?.thumbnailFileURL?.path
-        guard loadedThumbnailPath != path else { return }
-        loadedThumbnailPath = path
+        let fingerprint = [
+            path ?? "",
+            String(bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1),
+            bookmark?.thumbnailRemoteURLString ?? "",
+        ].joined(separator: "|")
+        guard loadedThumbnailFingerprint != fingerprint else { return }
+        loadedThumbnailFingerprint = fingerprint
 
         guard let path else {
             thumbnailImage = nil
