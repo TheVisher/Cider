@@ -307,6 +307,34 @@ struct CommandPaletteSettings: FeatureSettings {
 
 ---
 
+## Proposed Near-Term Settings Additions
+
+### Bookmarks: Thumbnail Quality Profile
+
+Reason:
+- Bookmark cards now render from downsampled thumbnails for memory stability while preserving full-size originals for explicit open/export actions.
+- This is a good candidate for a user-facing quality/performance toggle.
+
+Proposed config shape:
+
+```swift
+enum BookmarkThumbnailQuality: String, Codable, CaseIterable {
+    case high      // 720px max thumbnail dimension (current default)
+    case balanced  // 512px
+    case memorySaver // 360px
+}
+```
+
+Proposed settings UI:
+- Tab: `Appearance` (or `Bookmarks` if feature-specific tabs expand later)
+- Label: `Bookmark Thumbnail Quality`
+- Options: `High Quality (720)`, `Balanced (512)`, `Memory Saver (360)`
+
+Operational note:
+- Changing this setting should trigger a background thumbnail re-normalization pass for existing bookmarks.
+
+---
+
 ## Feature Settings Checklist
 
 **When implementing ANY feature, you MUST:**

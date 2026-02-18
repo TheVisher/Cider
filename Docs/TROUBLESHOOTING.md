@@ -203,24 +203,37 @@ if rebuiltIndex != previousIndex {
 
 ### Watch For: Memory growth with large bookmark/note collections
 
-**Status:** Not yet a problem, but worth monitoring as collections grow.
+**Status:** Major bookmark-thumbnail source has been addressed.
 
-**Current baseline:** ~270 MB with a small collection. Comparable to Messages (~249 MB), higher than typical utility apps (~140-175 MB). The WKWebView singleton for TipTap accounts for a chunk of this.
+**Implemented fix (bookmarks):**
+- Dual-asset storage:
+  - Full-size image persisted in `.originals/`.
+  - Downsampled runtime thumbnail persisted in `.thumbnails/` (PNG).
+- Card/list rendering uses the downsampled thumbnail path.
+- Existing bookmark images are retroactively normalized on load.
 
-**Known risk areas:**
+**Observed impact:** Local test run reduced app memory from ~550 MB to ~276 MB after first-run normalization.
 
-1. **Bookmark thumbnails** — if held at full resolution in memory, a large collection will balloon quickly. Notes already downsample to 240px via `CGImageSource` — bookmarks should follow the same pattern.
-2. **SwiftUI lazy container retention** — `LazyVGrid` and masonry layouts keep rendered views in memory longer than expected, especially with variable-height cards. Off-screen cards may not be deallocated promptly.
-3. **WKWebView** — the TipTap editor WebView is always alive (singleton pattern). WebKit processes are inherently memory-heavy.
+**Remaining risk areas:**
+1. **SwiftUI lazy container retention** — `LazyVGrid` and masonry layouts keep rendered views in memory longer than expected, especially with variable-height cards. Off-screen cards may not be deallocated promptly.
+2. **WKWebView** — the TipTap editor WebView is always alive (singleton pattern). WebKit processes are inherently memory-heavy.
 
-**Mitigation strategies when this becomes an issue:**
+**Thumbnail max-dimension profiles (for future settings toggle):**
+- `720px` (current default) — highest quality, higher memory than smaller profiles.
+- `512px` — balanced quality/perf.
+- `360px` — memory-first profile for very large libraries.
 
-- **`NSCache` for thumbnails** — auto-evicts under system memory pressure. Reload from disk on cache miss. This is the single biggest win.
-- **Downsample bookmark thumbnails on save** — store a 240-360px version on disk, never load the full-resolution image into the card grid.
-- **Limit prefetch distance** — only load thumbnails for cards within ~2 screens of the current scroll position.
-- **Profile with Instruments** — use the Allocations and Leaks instruments to identify the actual top consumers before optimizing. Don't guess.
+**Suggested future settings label set:**
+- `High Quality (720)`
+- `Balanced (512)`
+- `Memory Saver (360)`
 
-**Key insight:** Native Swift has the tools (`NSCache`, `CGImageSource` downsampling, `autoreleasepool` for batch operations) — the framework handles memory pressure gracefully as long as you use these patterns. The app should scale to hundreds of bookmarks without issue if thumbnails are properly managed.
+**Still useful mitigation strategies:**
+- **`NSCache` for decoded thumbnails** — auto-evicts under memory pressure.
+- **Limit prefetch distance** — only load thumbnails for cards within ~2 screens of current viewport.
+- **Profile with Instruments** — use Allocations + Leaks to validate real hot spots before further optimization.
+
+**Key insight:** Persisting small display assets separately from originals gives predictable memory behavior while preserving full-quality media for explicit user actions (open/export).
 
 ---
 

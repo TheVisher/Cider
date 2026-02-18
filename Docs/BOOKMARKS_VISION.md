@@ -11,6 +11,10 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Metadata/title enrichment and thumbnail fetching with fallback behavior.
 - Shimmer placeholder while enrichment/thumbnail loads.
 - Manual thumbnail assignment by dropping image/image URL/file onto a bookmark card.
+- Dual-image asset storage for bookmarks:
+  - Full-size originals stored in `.originals/` for later access/export.
+  - Runtime thumbnails stored in `.thumbnails/` as downsampled PNGs (currently max 720px).
+  - Existing bookmarks are normalized retroactively on load (legacy large thumbnails are rewritten to the new format).
 - Clipboard review toast flow (save/discard), plus capture success/error toasts.
 - Window behavior parity improvements (resizing, tiling shortcuts, snap padding consistency).
 - Context menus on cards/rows with Open in Browser, Show Details, Move to Folder, Delete (shared CardContextMenu component).
@@ -43,6 +47,7 @@ The standalone bookmarks panel (`BookmarksPanelView`) uses a single-corner resiz
 - replace/remove thumbnail
 - copy URL
 - open in browser
+- open original image (if local original exists, else remote fallback)
 
 ### Acceptance Criteria
 - Details panel opens reliably from cards in all layouts.
@@ -79,6 +84,19 @@ The standalone bookmarks panel (`BookmarksPanelView`) uses a single-corner resiz
 ### Acceptance Criteria
 - Smooth interaction at high bookmark counts.
 - No layout jank in masonry during enrichment updates.
+- Thumbnail memory/perf can be tuned without code changes (future settings toggle target).
+
+### Thumbnail Dimension Options (Documented for Future Settings)
+These are intentionally documented as operational profiles for a future user-facing settings toggle:
+
+- `720px` max dimension (current default): best visual quality, moderate memory use.
+- `512px` max dimension: balanced quality/performance profile.
+- `360px` max dimension: aggressive memory savings for very large libraries.
+
+Potential settings UX:
+- `High Quality (720)`
+- `Balanced (512)`
+- `Memory Saver (360)`
 
 ---
 

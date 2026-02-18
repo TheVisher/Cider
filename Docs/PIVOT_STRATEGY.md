@@ -131,7 +131,8 @@ Cider Capture Layer (always present)
     |- bookmarks_metadata.json     |- NotionAdapter (API)
     |- notes/*.md                  |- LogseqAdapter (filesystem)
     |- .thumbnails/                |- AppleNotesAdapter (AppleScript)
-    |- .attachments/               |- CustomFolderAdapter (filesystem)
+    |- .originals/                 |- CustomFolderAdapter (filesystem)
+    |- .attachments/
 ```
 
 ### How This Works

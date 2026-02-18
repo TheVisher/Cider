@@ -205,6 +205,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var folderID: UUID?
     var thumbnailRemoteURLString: String?
     var thumbnailRelativePath: String?
+    var originalImageRelativePath: String?
     var metadataUpdatedAt: Date?
     var isEnriching: Bool = false
 
@@ -219,6 +220,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case folderID
         case thumbnailRemoteURLString
         case thumbnailRelativePath
+        case originalImageRelativePath
         case metadataUpdatedAt
     }
 
@@ -233,6 +235,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         folderID: UUID? = nil,
         thumbnailRemoteURLString: String? = nil,
         thumbnailRelativePath: String? = nil,
+        originalImageRelativePath: String? = nil,
         metadataUpdatedAt: Date? = nil,
         isEnriching: Bool = false
     ) {
@@ -246,6 +249,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.folderID = folderID
         self.thumbnailRemoteURLString = thumbnailRemoteURLString
         self.thumbnailRelativePath = thumbnailRelativePath
+        self.originalImageRelativePath = originalImageRelativePath
         self.metadataUpdatedAt = metadataUpdatedAt
         self.isEnriching = isEnriching
     }
@@ -273,5 +277,14 @@ struct Bookmark: Identifiable, Hashable, Codable {
 
         let basePath = NSString(string: CiderConfig.load().bookmarksDirectory).expandingTildeInPath
         return URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent(thumbnailRelativePath)
+    }
+
+    var originalImageFileURL: URL? {
+        guard let originalImageRelativePath, !originalImageRelativePath.isEmpty else {
+            return nil
+        }
+
+        let basePath = NSString(string: CiderConfig.load().bookmarksDirectory).expandingTildeInPath
+        return URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent(originalImageRelativePath)
     }
 }

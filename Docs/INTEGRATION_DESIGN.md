@@ -264,7 +264,8 @@ The clipboard monitor (`BookmarksClipboardMonitor`) already watches for copied U
 ├── Bookmarks/
 │   ├── bookmarks.html                    # Netscape HTML (portable)
 │   ├── _cider_bookmarks_metadata.json    # Extended metadata
-│   └── .thumbnails/                      # Bookmark thumbnail images
+│   ├── .thumbnails/                      # Downsampled runtime thumbnail images
+│   └── .originals/                       # Full-size bookmarked images
 ├── Notes/                                # Only used when no vault connected
 │   ├── *.md                              # Individual note files
 │   ├── _cider_notes_index.json           # UUID-to-filename index
@@ -273,6 +274,10 @@ The clipboard monitor (`BookmarksClipboardMonitor`) already watches for copied U
 └── Config/
     └── cider.json                        # App configuration (CiderConfig)
 ```
+
+Bookmark image behavior:
+- UI cards/lists should render from `.thumbnails/` for predictable memory use.
+- `.originals/` is retained for explicit open/export workflows.
 
 ### When Connected to an Obsidian Vault
 

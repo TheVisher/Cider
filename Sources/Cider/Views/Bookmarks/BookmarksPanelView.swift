@@ -575,6 +575,20 @@ struct BookmarkDetailsSheet: View {
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(CiderColors.surfaceInput)
                 )
+
+                Button(action: openOriginalImage) {
+                    Label("Open Image", systemImage: "photo")
+                        .font(CiderFont.bodyMedium(scale: textScale))
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                        .padding(.horizontal, Spacing.sm)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .disabled(!hasOpenableImageSource)
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -681,6 +695,29 @@ struct BookmarkDetailsSheet: View {
             max(maxCandidate, BookmarksDesign.detailsSidebarMinWidth),
             BookmarksDesign.detailsSidebarMaxWidth
         )
+    }
+
+    private var hasOpenableImageSource: Bool {
+        if let originalFileURL = bookmark?.originalImageFileURL {
+            return FileManager.default.fileExists(atPath: originalFileURL.path)
+        }
+        if let remote = bookmark?.thumbnailRemoteURLString {
+            return URL(string: remote) != nil
+        }
+        return false
+    }
+
+    private func openOriginalImage() {
+        if let originalFileURL = bookmark?.originalImageFileURL,
+           FileManager.default.fileExists(atPath: originalFileURL.path) {
+            NSWorkspace.shared.open(originalFileURL)
+            return
+        }
+
+        if let remote = bookmark?.thumbnailRemoteURLString,
+           let remoteURL = URL(string: remote) {
+            NSWorkspace.shared.open(remoteURL)
+        }
     }
 }
 

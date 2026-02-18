@@ -227,6 +227,10 @@ Card sizing: Continuous slider (0-3 scale) via CardSizing struct
 - Grid: fixed thumbnail height, proportional to card width
 - Masonry: thumbnail height = exact image aspect ratio (no clamping)
 - List: thumbnail width/height scale with slider
+- Dual image assets per bookmark:
+  - `.originals/` keeps full-size source image
+  - `.thumbnails/` stores downsampled runtime PNG (currently max 720px)
+  - Existing legacy thumbnails are normalized on load
 
 View options: Dropdown popover in sidebar header (ViewOptionsDropdown.swift)
 ```
@@ -300,4 +304,5 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **NSOpenPanel from non-activating panel:** Call `NSApp.activate(ignoringOtherApps: true)` before `runModal()` — otherwise the file picker sidebar isn't fully interactive (requires multiple clicks). Don't set `panel.level = .floating` on the open panel.
 - **Mouse event capture on NSViewRepresentable:** For overlays that MUST capture mouse events (e.g., cover image drag), override `mouseDownCanMoveWindow` → `false`, `hitTest` → return `self`, `acceptsFirstMouse` → `true`, and use `.activeAlways` tracking area (not `.activeInKeyWindow` — non-activating panels are never key). Use `window.nextEvent(matching:)` event loop pattern (see `PanelEdgeResizeView` and `CoverRepositionNSView`).
 - **`.task(id:)` for file replacement:** When file content changes but the path stays the same (e.g., replacing a cover image), include `updatedAt` timestamp in the task ID — not just the file path.
+- **Bookmark image memory model:** Render bookmark cards from `thumbnailFileURL` (downsampled asset), not `originalImageFileURL`. Full-size originals are for explicit user actions (open/export) only.
 - **Sticky section headers:** `LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders])` makes `Section { } header: { }` headers pin at the top during scroll. Used in FolderDetailView for folder header + sub-folder cards. The header needs an opaque background to prevent content showing through when pinned.

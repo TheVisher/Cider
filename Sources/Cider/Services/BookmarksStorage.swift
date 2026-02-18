@@ -1,6 +1,8 @@
 import AppKit
 import Combine
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 private struct BookmarksDiskSnapshot {
     var bookmarks: [Bookmark]
@@ -10,6 +12,11 @@ private struct BookmarksDiskSnapshot {
 private struct BookmarksMetadataSnapshot: Codable {
     var bookmarks: [Bookmark]
     var folders: [Folder]
+}
+
+private struct BookmarkImageAssets {
+    let thumbnailRelativePath: String
+    let originalImageRelativePath: String
 }
 
 @MainActor
@@ -23,7 +30,9 @@ final class BookmarksStorage: ObservableObject {
     private let htmlFileName = "bookmarks.html"
     private let metadataFileName = "_cider_bookmarks_metadata.json"
     private let thumbnailsDirectoryName = ".thumbnails"
+    private let originalImagesDirectoryName = ".originals"
     private let folderCoversDirectoryName = ".folder-covers"
+    private let thumbnailMaxPixelDimension: CGFloat = 720
     private var enrichmentTasks: [UUID: Task<Void, Never>] = [:]
 
     private var directoryURL: URL
@@ -52,7 +61,8 @@ final class BookmarksStorage: ObservableObject {
             bookmarks = previousBookmarks
             folders = previousFolders
             persist()
-            copyThumbnailAssetsIfNeeded(from: previousDirectoryURL, bookmarks: previousBookmarks)
+            copyBookmarkImageAssetsIfNeeded(from: previousDirectoryURL, bookmarks: previousBookmarks)
+            normalizeBookmarkImageAssetsIfNeeded()
             scheduleEnrichmentForIncompleteBookmarks()
         }
     }
@@ -114,7 +124,7 @@ final class BookmarksStorage: ObservableObject {
 
     func remove(_ bookmark: Bookmark) {
         cancelEnrichment(for: bookmark.id)
-        removeThumbnailIfPresent(for: bookmark)
+        removeBookmarkImageAssetsIfPresent(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()
     }
@@ -122,7 +132,7 @@ final class BookmarksStorage: ObservableObject {
     func removeAll(_ bookmarksToDelete: [Bookmark]) {
         for bookmark in bookmarksToDelete {
             cancelEnrichment(for: bookmark.id)
-            removeThumbnailIfPresent(for: bookmark)
+            removeBookmarkImageAssetsIfPresent(for: bookmark)
         }
         let ids = Set(bookmarksToDelete.map(\.id))
         bookmarks.removeAll { ids.contains($0.id) }
@@ -367,13 +377,13 @@ final class BookmarksStorage: ObservableObject {
             return false
         }
 
-        guard let relativePath = await cacheThumbnail(from: sourceURL, for: bookmarkID) else {
+        guard let assets = await cacheImageAssets(from: sourceURL, for: bookmarkID) else {
             return false
         }
 
         return applyManualThumbnail(
             for: bookmarkID,
-            relativePath: relativePath,
+            assets: assets,
             remoteURLString: sourceURL.absoluteString
         )
     }
@@ -396,7 +406,7 @@ final class BookmarksStorage: ObservableObject {
         imageData: Data,
         preferredFileExtension: String? = nil
     ) -> Bool {
-        guard let relativePath = cacheThumbnail(
+        guard let assets = cacheImageAssets(
             from: imageData,
             for: bookmarkID,
             preferredFileExtension: preferredFileExtension
@@ -406,7 +416,7 @@ final class BookmarksStorage: ObservableObject {
 
         return applyManualThumbnail(
             for: bookmarkID,
-            relativePath: relativePath,
+            assets: assets,
             remoteURLString: nil
         )
     }
@@ -423,6 +433,10 @@ final class BookmarksStorage: ObservableObject {
         directoryURL.appendingPathComponent(thumbnailsDirectoryName, isDirectory: true)
     }
 
+    private var originalImagesDirectoryURL: URL {
+        directoryURL.appendingPathComponent(originalImagesDirectoryName, isDirectory: true)
+    }
+
     private func ensureDirectory() {
         let fm = FileManager.default
         if !fm.fileExists(atPath: directoryURL.path) {
@@ -430,6 +444,9 @@ final class BookmarksStorage: ObservableObject {
         }
         if !fm.fileExists(atPath: thumbnailsDirectoryURL.path) {
             try? fm.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
+        }
+        if !fm.fileExists(atPath: originalImagesDirectoryURL.path) {
+            try? fm.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
         }
     }
 
@@ -439,6 +456,7 @@ final class BookmarksStorage: ObservableObject {
         if let loaded = loadFromDisk() {
             bookmarks = loaded.bookmarks
             folders = loaded.folders
+            normalizeBookmarkImageAssetsIfNeeded()
             scheduleEnrichmentForIncompleteBookmarks()
             return
         }
@@ -446,6 +464,7 @@ final class BookmarksStorage: ObservableObject {
         if let migrated = migrateLegacyUserDefaults() {
             bookmarks = migrated.bookmarks
             folders = migrated.folders
+            normalizeBookmarkImageAssetsIfNeeded()
             persist()
             scheduleEnrichmentForIncompleteBookmarks()
             return
@@ -612,18 +631,18 @@ final class BookmarksStorage: ObservableObject {
             guard let self else { return }
             let payload = await Self.fetchEnrichmentPayload(for: url)
 
-            let thumbnailRelativePath: String?
+            let imageAssets: BookmarkImageAssets?
             if let thumbnailURL = payload?.thumbnailURL {
-                thumbnailRelativePath = await self.cacheThumbnail(from: thumbnailURL, for: bookmarkID)
+                imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID)
             } else {
-                thumbnailRelativePath = nil
+                imageAssets = nil
             }
 
             await self.completeEnrichment(
                 for: bookmarkID,
                 sourceURL: url,
                 payload: payload,
-                thumbnailRelativePath: thumbnailRelativePath
+                imageAssets: imageAssets
             )
         }
 
@@ -634,7 +653,7 @@ final class BookmarksStorage: ObservableObject {
         for bookmarkID: UUID,
         sourceURL: URL,
         payload: BookmarkEnrichmentPayload?,
-        thumbnailRelativePath: String?
+        imageAssets: BookmarkImageAssets?
     ) async {
         defer { enrichmentTasks.removeValue(forKey: bookmarkID) }
 
@@ -649,12 +668,19 @@ final class BookmarksStorage: ObservableObject {
             changed = true
         }
 
-        if let thumbnailRelativePath {
-            if bookmark.thumbnailRelativePath != thumbnailRelativePath {
-                removeThumbnailIfPresent(for: bookmark)
-                bookmark.thumbnailRelativePath = thumbnailRelativePath
+        if let imageAssets {
+            if bookmark.thumbnailRelativePath != imageAssets.thumbnailRelativePath {
+                removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
+                bookmark.thumbnailRelativePath = imageAssets.thumbnailRelativePath
                 changed = true
             }
+
+            if bookmark.originalImageRelativePath != imageAssets.originalImageRelativePath {
+                removeImageIfPresent(relativePath: bookmark.originalImageRelativePath)
+                bookmark.originalImageRelativePath = imageAssets.originalImageRelativePath
+                changed = true
+            }
+
             if let remoteURL = payload?.thumbnailURL?.absoluteString,
                bookmark.thumbnailRemoteURLString != remoteURL {
                 bookmark.thumbnailRemoteURLString = remoteURL
@@ -748,18 +774,27 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private func localThumbnailExists(relativePath: String?) -> Bool {
+        localImageExists(relativePath: relativePath)
+    }
+
+    private func localImageExists(relativePath: String?) -> Bool {
         guard let relativePath, !relativePath.isEmpty else { return false }
         let url = directoryURL.appendingPathComponent(relativePath)
         return FileManager.default.fileExists(atPath: url.path)
     }
 
-    private func removeThumbnailIfPresent(for bookmark: Bookmark) {
-        guard let relativePath = bookmark.thumbnailRelativePath, !relativePath.isEmpty else { return }
+    private func removeImageIfPresent(relativePath: String?) {
+        guard let relativePath, !relativePath.isEmpty else { return }
         let fileURL = directoryURL.appendingPathComponent(relativePath)
         try? FileManager.default.removeItem(at: fileURL)
     }
 
-    private func cacheThumbnail(from remoteURL: URL, for bookmarkID: UUID) async -> String? {
+    private func removeBookmarkImageAssetsIfPresent(for bookmark: Bookmark) {
+        removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
+        removeImageIfPresent(relativePath: bookmark.originalImageRelativePath)
+    }
+
+    private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID) async -> BookmarkImageAssets? {
         var request = URLRequest(url: remoteURL)
         request.timeoutInterval = 8
         request.setValue(
@@ -770,42 +805,65 @@ final class BookmarksStorage: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard !Task.isCancelled else { return nil }
-            guard data.count > 128, data.count < 12_000_000 else { return nil }
-            guard NSImage(data: data) != nil else { return nil }
-
             let fileExtension = inferredImageFileExtension(response: response, remoteURL: remoteURL)
-            let filename = "\(bookmarkID.uuidString).\(fileExtension)"
-            let relativePath = "\(thumbnailsDirectoryName)/\(filename)"
-            let fileURL = directoryURL.appendingPathComponent(relativePath)
-
-            try? FileManager.default.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
-            deleteExistingThumbnailFiles(for: bookmarkID)
-            try data.write(to: fileURL, options: .atomic)
-
-            return relativePath
+            return cacheImageAssets(
+                from: data,
+                for: bookmarkID,
+                preferredFileExtension: fileExtension
+            )
         } catch {
             return nil
         }
     }
 
-    private func cacheThumbnail(
+    private func cacheImageAssets(
         from data: Data,
         for bookmarkID: UUID,
         preferredFileExtension: String?
-    ) -> String? {
+    ) -> BookmarkImageAssets? {
         guard data.count > 128, data.count < 12_000_000 else { return nil }
         guard NSImage(data: data) != nil else { return nil }
 
-        let fileExtension = normalizedImageFileExtension(preferredFileExtension)
-        let filename = "\(bookmarkID.uuidString).\(fileExtension)"
-        let relativePath = "\(thumbnailsDirectoryName)/\(filename)"
-        let fileURL = directoryURL.appendingPathComponent(relativePath)
+        return persistImageAssets(
+            for: bookmarkID,
+            sourceData: data,
+            preferredFileExtension: preferredFileExtension
+        )
+    }
+
+    private func persistImageAssets(
+        for bookmarkID: UUID,
+        sourceData: Data,
+        preferredFileExtension: String?
+    ) -> BookmarkImageAssets? {
+        guard let thumbnailData = Self.downsampledThumbnailData(
+            from: sourceData,
+            maxDimension: thumbnailMaxPixelDimension
+        ) else {
+            return nil
+        }
+
+        let originalFileExtension = normalizedImageFileExtension(preferredFileExtension)
+        let originalFilename = "\(bookmarkID.uuidString).\(originalFileExtension)"
+        let originalRelativePath = "\(originalImagesDirectoryName)/\(originalFilename)"
+        let originalFileURL = directoryURL.appendingPathComponent(originalRelativePath)
+
+        let thumbnailRelativePath = "\(thumbnailsDirectoryName)/\(bookmarkID.uuidString).png"
+        let thumbnailFileURL = directoryURL.appendingPathComponent(thumbnailRelativePath)
 
         do {
             try FileManager.default.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
             deleteExistingThumbnailFiles(for: bookmarkID)
-            try data.write(to: fileURL, options: .atomic)
-            return relativePath
+            deleteExistingOriginalImageFiles(for: bookmarkID)
+
+            try sourceData.write(to: originalFileURL, options: .atomic)
+            try thumbnailData.write(to: thumbnailFileURL, options: .atomic)
+
+            return BookmarkImageAssets(
+                thumbnailRelativePath: thumbnailRelativePath,
+                originalImageRelativePath: originalRelativePath
+            )
         } catch {
             return nil
         }
@@ -813,7 +871,7 @@ final class BookmarksStorage: ObservableObject {
 
     private func applyManualThumbnail(
         for bookmarkID: UUID,
-        relativePath: String,
+        assets: BookmarkImageAssets,
         remoteURLString: String?
     ) -> Bool {
         cancelEnrichment(for: bookmarkID)
@@ -821,7 +879,14 @@ final class BookmarksStorage: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
 
         var bookmark = bookmarks[index]
-        bookmark.thumbnailRelativePath = relativePath
+        if bookmark.thumbnailRelativePath != assets.thumbnailRelativePath {
+            removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
+        }
+        if bookmark.originalImageRelativePath != assets.originalImageRelativePath {
+            removeImageIfPresent(relativePath: bookmark.originalImageRelativePath)
+        }
+        bookmark.thumbnailRelativePath = assets.thumbnailRelativePath
+        bookmark.originalImageRelativePath = assets.originalImageRelativePath
         bookmark.thumbnailRemoteURLString = remoteURLString
         bookmark.metadataUpdatedAt = Date()
         bookmark.updatedAt = Date()
@@ -835,6 +900,18 @@ final class BookmarksStorage: ObservableObject {
     private func deleteExistingThumbnailFiles(for bookmarkID: UUID) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: thumbnailsDirectoryURL, includingPropertiesForKeys: nil) else {
+            return
+        }
+
+        let prefix = bookmarkID.uuidString + "."
+        for file in files where file.lastPathComponent.hasPrefix(prefix) {
+            try? fm.removeItem(at: file)
+        }
+    }
+
+    private func deleteExistingOriginalImageFiles(for bookmarkID: UUID) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: originalImagesDirectoryURL, includingPropertiesForKeys: nil) else {
             return
         }
 
@@ -879,10 +956,159 @@ final class BookmarksStorage: ObservableObject {
         }
     }
 
-    private func copyThumbnailAssetsIfNeeded(from previousDirectoryURL: URL, bookmarks: [Bookmark]) {
+    private func normalizeBookmarkImageAssetsIfNeeded() {
+        guard !bookmarks.isEmpty else { return }
+
+        var didChangeAnyBookmark = false
+        let fm = FileManager.default
+
+        for index in bookmarks.indices {
+            var bookmark = bookmarks[index]
+            var didChangeBookmark = false
+
+            guard let thumbnailRelativePath = bookmark.thumbnailRelativePath,
+                  !thumbnailRelativePath.isEmpty else {
+                continue
+            }
+
+            let thumbnailURL = directoryURL.appendingPathComponent(thumbnailRelativePath)
+            guard fm.fileExists(atPath: thumbnailURL.path) else { continue }
+
+            // Ensure we preserve a local full-size original before rewriting old thumbnails.
+            let originalResult = ensureOriginalImageAsset(for: bookmark, fallbackThumbnailURL: thumbnailURL)
+            if let originalPath = originalResult.relativePath,
+               bookmark.originalImageRelativePath != originalPath {
+                bookmark.originalImageRelativePath = originalPath
+                didChangeBookmark = true
+            }
+
+            let canonicalThumbnailRelativePath = "\(thumbnailsDirectoryName)/\(bookmark.id.uuidString).png"
+            let currentMaxDimension = imageMaxPixelDimension(at: thumbnailURL) ?? 0
+            let shouldRewriteThumbnail =
+                thumbnailRelativePath != canonicalThumbnailRelativePath
+                || currentMaxDimension > thumbnailMaxPixelDimension + 1
+
+            if shouldRewriteThumbnail {
+                let sourceURL = originalResult.fileURL ?? thumbnailURL
+                if let sourceData = try? Data(contentsOf: sourceURL),
+                   let downsampledData = Self.downsampledThumbnailData(
+                       from: sourceData,
+                       maxDimension: thumbnailMaxPixelDimension
+                   ) {
+                    let canonicalThumbnailURL = directoryURL.appendingPathComponent(canonicalThumbnailRelativePath)
+                    try? fm.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
+                    try? downsampledData.write(to: canonicalThumbnailURL, options: .atomic)
+
+                    if thumbnailRelativePath != canonicalThumbnailRelativePath {
+                        removeImageIfPresent(relativePath: thumbnailRelativePath)
+                        bookmark.thumbnailRelativePath = canonicalThumbnailRelativePath
+                        didChangeBookmark = true
+                    }
+                }
+            }
+
+            if didChangeBookmark {
+                bookmark.metadataUpdatedAt = Date()
+                bookmarks[index] = bookmark
+                didChangeAnyBookmark = true
+            }
+        }
+
+        if didChangeAnyBookmark {
+            persist()
+        }
+    }
+
+    private func ensureOriginalImageAsset(
+        for bookmark: Bookmark,
+        fallbackThumbnailURL: URL
+    ) -> (relativePath: String?, fileURL: URL?) {
+        let fm = FileManager.default
+
+        if let existingPath = bookmark.originalImageRelativePath,
+           !existingPath.isEmpty {
+            let existingURL = directoryURL.appendingPathComponent(existingPath)
+            if fm.fileExists(atPath: existingURL.path) {
+                return (existingPath, existingURL)
+            }
+        }
+
+        let originalFileExtension = normalizedImageFileExtension(fallbackThumbnailURL.pathExtension)
+        let originalRelativePath = "\(originalImagesDirectoryName)/\(bookmark.id.uuidString).\(originalFileExtension)"
+        let originalURL = directoryURL.appendingPathComponent(originalRelativePath)
+
+        do {
+            try fm.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
+            if !fm.fileExists(atPath: originalURL.path) {
+                try fm.copyItem(at: fallbackThumbnailURL, to: originalURL)
+            }
+            return (originalRelativePath, originalURL)
+        } catch {
+            return (nil, nil)
+        }
+    }
+
+    private func imageMaxPixelDimension(at fileURL: URL) -> CGFloat? {
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let widthNumber = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let heightNumber = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
+            return nil
+        }
+        return max(CGFloat(widthNumber.doubleValue), CGFloat(heightNumber.doubleValue))
+    }
+
+    private static func downsampledThumbnailData(from sourceData: Data, maxDimension: CGFloat) -> Data? {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+        ]
+
+        guard let source = CGImageSourceCreateWithData(sourceData as CFData, sourceOptions as CFDictionary) else {
+            return nil
+        }
+
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+
+        let destinationData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            destinationData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return destinationData as Data
+    }
+
+    private func copyBookmarkImageAssetsIfNeeded(from previousDirectoryURL: URL, bookmarks: [Bookmark]) {
         let fm = FileManager.default
         for bookmark in bookmarks {
             guard let relativePath = bookmark.thumbnailRelativePath, !relativePath.isEmpty else { continue }
+
+            let sourceURL = previousDirectoryURL.appendingPathComponent(relativePath)
+            let destinationURL = directoryURL.appendingPathComponent(relativePath)
+            guard fm.fileExists(atPath: sourceURL.path) else { continue }
+            guard !fm.fileExists(atPath: destinationURL.path) else { continue }
+
+            try? fm.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.copyItem(at: sourceURL, to: destinationURL)
+        }
+
+        for bookmark in bookmarks {
+            guard let relativePath = bookmark.originalImageRelativePath, !relativePath.isEmpty else { continue }
 
             let sourceURL = previousDirectoryURL.appendingPathComponent(relativePath)
             let destinationURL = directoryURL.appendingPathComponent(relativePath)
@@ -1111,16 +1337,35 @@ final class BookmarksStorage: ObservableObject {
 
     private func sanitizedBookmarks(from rawBookmarks: [Bookmark], validFolderIDs: Set<UUID>) -> [Bookmark] {
         guard !rawBookmarks.isEmpty else { return [] }
+
+        func normalizedBookmark(_ bookmark: Bookmark) -> Bookmark {
+            var normalized = bookmark
+
+            if let thumbnailPath = normalized.thumbnailRelativePath?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               thumbnailPath.isEmpty {
+                normalized.thumbnailRelativePath = nil
+            }
+
+            if let originalPath = normalized.originalImageRelativePath?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               originalPath.isEmpty {
+                normalized.originalImageRelativePath = nil
+            }
+
+            return normalized
+        }
+
         guard !validFolderIDs.isEmpty else {
             return rawBookmarks.map { bookmark in
-                var normalized = bookmark
+                var normalized = normalizedBookmark(bookmark)
                 normalized.folderID = nil
                 return normalized
             }
         }
 
         return rawBookmarks.map { bookmark in
-            var normalized = bookmark
+            var normalized = normalizedBookmark(bookmark)
             if let folderID = normalized.folderID, !validFolderIDs.contains(folderID) {
                 normalized.folderID = nil
             }
