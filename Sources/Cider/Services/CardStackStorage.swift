@@ -33,6 +33,64 @@ final class CardStackStorage: ObservableObject {
     }
 
     @discardableResult
+    func createStack(template: StackTemplateKind, nameOverride: String? = nil) -> CardStack {
+        let stack: CardStack
+
+        switch template {
+        case .blank:
+            stack = CardStack(name: cleanName(nameOverride) ?? "Untitled Stack")
+
+        case .bills:
+            stack = CardStack(
+                name: cleanName(nameOverride) ?? "Bills",
+                isPinned: true,
+                sortMode: .attention,
+                matchRules: [
+                    StackMatchRule(condition: .entityType, value: LibraryEntityType.dateCard.rawValue)
+                ],
+                surfaceRules: [
+                    SurfacingRule(type: .pinUntilDone),
+                    SurfacingRule(type: .surfaceDaysBeforeDate, integerValue: 7)
+                ],
+                summaryModule: .bills
+            )
+
+        case .birthdays:
+            stack = CardStack(
+                name: cleanName(nameOverride) ?? "Birthdays",
+                isPinned: true,
+                sortMode: .time,
+                matchRules: [
+                    StackMatchRule(condition: .entityType, value: LibraryEntityType.dateCard.rawValue)
+                ],
+                surfaceRules: [
+                    SurfacingRule(type: .surfaceDaysBeforeDate, integerValue: 14)
+                ],
+                summaryModule: .none
+            )
+
+        case .schedule:
+            stack = CardStack(
+                name: cleanName(nameOverride) ?? "Schedule",
+                isPinned: false,
+                sortMode: .time,
+                matchRules: [
+                    StackMatchRule(condition: .hasDate)
+                ],
+                surfaceRules: [
+                    SurfacingRule(type: .remindBeforeMinutes, integerValue: 30)
+                ],
+                summaryModule: .none
+            )
+        }
+
+        stacks.append(stack)
+        sortStacks()
+        persist()
+        return stack
+    }
+
+    @discardableResult
     func updateStack(_ updated: CardStack) -> Bool {
         guard let idx = stacks.firstIndex(where: { $0.id == updated.id }) else { return false }
         var copy = updated
@@ -80,6 +138,12 @@ final class CardStackStorage: ObservableObject {
         } catch {
             stacks = []
         }
+    }
+
+    private func cleanName(_ candidate: String?) -> String? {
+        guard let candidate else { return nil }
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func persist() {

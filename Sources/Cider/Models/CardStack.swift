@@ -10,6 +10,26 @@ enum StackSummaryModule: String, Codable, CaseIterable, Hashable {
     case bills
 }
 
+enum StackTemplateKind: String, Codable, CaseIterable, Hashable {
+    case blank
+    case bills
+    case birthdays
+    case schedule
+
+    var displayName: String {
+        switch self {
+        case .blank:
+            "Blank"
+        case .bills:
+            "Bills"
+        case .birthdays:
+            "Birthdays"
+        case .schedule:
+            "Schedule"
+        }
+    }
+}
+
 enum StackMatchCondition: String, Codable, CaseIterable, Hashable {
     case hasDate
     case isIncomplete

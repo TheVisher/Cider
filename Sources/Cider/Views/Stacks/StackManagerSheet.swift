@@ -29,15 +29,31 @@ struct StackManagerSheet: View {
 
                     Spacer(minLength: 0)
 
-                    Button {
-                        let created = stackStorage.createStack(name: "New Stack")
-                        selectedStackID = created.id
+                    Menu {
+                        Button("New Blank Stack") {
+                            let created = stackStorage.createStack(template: .blank, nameOverride: "New Stack")
+                            selectedStackID = created.id
+                        }
+                        Divider()
+                        Button("New Bills Stack") {
+                            let created = stackStorage.createStack(template: .bills)
+                            selectedStackID = created.id
+                        }
+                        Button("New Birthdays Stack") {
+                            let created = stackStorage.createStack(template: .birthdays)
+                            selectedStackID = created.id
+                        }
+                        Button("New Schedule Stack") {
+                            let created = stackStorage.createStack(template: .schedule)
+                            selectedStackID = created.id
+                        }
                     } label: {
                         Image(systemName: "plus")
                             .font(CiderFont.bodySemibold)
                             .foregroundColor(CiderColors.tertiary)
                     }
-                    .buttonStyle(.plain)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                 }
 
                 ScrollView {

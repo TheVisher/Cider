@@ -13,6 +13,7 @@ struct SavedViewTabContent: View {
     var onMoveNoteToFolder: ((Note, UUID?) -> Void)? = nil
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
+    @ObservedObject private var labelStorage = CardLabelStorage.shared
     @ObservedObject private var stackStorage = CardStackStorage.shared
     var onUpdateSavedView: ((SavedView) -> Void)? = nil
     var onDeleteSavedView: ((UUID) -> Void)? = nil
@@ -26,6 +27,7 @@ struct SavedViewTabContent: View {
     @State private var isStackManagerPresented = false
     @State private var stackManagerInitialSelectionID: UUID?
     @State private var selectedStackSurfaceID: StackSurfaceSelection?
+    @State private var selectedStackSurfaceSnapshot: StackSurfaceResult?
 
     private var cardSizing: LibraryCardSizing {
         LibraryCardSizing(scale: savedView.layoutSpec.cardSizeScale)
@@ -124,6 +126,25 @@ struct SavedViewTabContent: View {
             if let surface = surfacedStacks.first(where: { $0.id == selection.id }) {
                 StackDetailSheet(
                     surface: surface,
+                    onOpenBookmark: { bookmark in
+                        onOpenBookmark?(bookmark)
+                    },
+                    onOpenNote: { note in
+                        onOpenNote?(note)
+                    },
+                    onOpenDateCard: { dateCard in
+                        editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+                    },
+                    onOpenContact: { contact in
+                        contactEditorContext = ContactEditorContext(existingContact: contact)
+                    }
+                )
+                .onAppear {
+                    selectedStackSurfaceSnapshot = surface
+                }
+            } else if let snapshot = selectedStackSurfaceSnapshot, snapshot.id == selection.id {
+                StackDetailSheet(
+                    surface: snapshot,
                     onOpenBookmark: { bookmark in
                         onOpenBookmark?(bookmark)
                     },
@@ -336,12 +357,57 @@ struct SavedViewTabContent: View {
 
     private var filterChipsRow: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                TextField(
+                    "Search this view",
+                    text: Binding(
+                        get: { savedView.filterSpec.textQuery },
+                        set: { newValue in
+                            var updated = savedView
+                            updated.filterSpec.textQuery = newValue
+                            onUpdateSavedView?(updated)
+                        }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+
+                Menu {
+                    sortButton(.createdDescending, label: "Created (Newest)")
+                    sortButton(.createdAscending, label: "Created (Oldest)")
+                    sortButton(.updatedDescending, label: "Updated (Newest)")
+                    sortButton(.updatedAscending, label: "Updated (Oldest)")
+                    sortButton(.titleAscending, label: "Title (A-Z)")
+                    sortButton(.titleDescending, label: "Title (Z-A)")
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.hairline)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(CiderColors.separatorLight)
+                        )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Spacing.xs) {
                     filterChip(for: .bookmark, label: "Bookmarks")
                     filterChip(for: .note, label: "Notes")
                     filterChip(for: .dateCard, label: "Date Cards")
                     filterChip(for: .contact, label: "Contacts")
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.xs) {
+                    completedChip
+                    ForEach(labelStorage.labels) { label in
+                        labelFilterChip(label)
+                    }
                 }
             }
 
@@ -416,6 +482,58 @@ struct SavedViewTabContent: View {
         var updated = savedView
         updated.filterSpec.entityTypes = nextTypes
         onUpdateSavedView?(updated)
+    }
+
+    private var completedChip: some View {
+        let isOn = savedView.filterSpec.includeCompleted
+        return Button {
+            var updated = savedView
+            updated.filterSpec.includeCompleted.toggle()
+            onUpdateSavedView?(updated)
+        } label: {
+            Text("Completed")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(isOn ? CiderColors.primary : CiderColors.tertiary)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.hairline)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isOn ? CiderColors.separatorMedium : CiderColors.separatorLight)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func labelFilterChip(_ label: CardLabel) -> some View {
+        let isOn = savedView.filterSpec.labelIDs.contains(label.id)
+        return Button {
+            var updated = savedView
+            if updated.filterSpec.labelIDs.contains(label.id) {
+                updated.filterSpec.labelIDs.remove(label.id)
+            } else {
+                updated.filterSpec.labelIDs.insert(label.id)
+            }
+            onUpdateSavedView?(updated)
+        } label: {
+            Text(label.name)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(isOn ? CiderColors.primary : CiderColors.tertiary)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.hairline)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isOn ? CiderColors.separatorMedium : CiderColors.separatorLight)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sortButton(_ mode: LibrarySortMode, label: String) -> some View {
+        Button(label) {
+            var updated = savedView
+            updated.sortSpec.mode = mode
+            onUpdateSavedView?(updated)
+        }
     }
 
     private func displayModeChip(_ mode: LibraryDisplayMode, label: String) -> some View {
@@ -671,6 +789,8 @@ struct SavedViewTabContent: View {
                     itemRow(item)
                         .contextMenu {
                             addToStackMenu(for: item)
+                            linkMenu(for: item)
+                            linkedItemsMenu(for: item)
                         }
                 }
             case .grid:
@@ -680,6 +800,8 @@ struct SavedViewTabContent: View {
                         itemCard(item)
                             .contextMenu {
                                 addToStackMenu(for: item)
+                                linkMenu(for: item)
+                                linkedItemsMenu(for: item)
                             }
                     }
                 }
@@ -692,6 +814,8 @@ struct SavedViewTabContent: View {
                         itemCard(item)
                             .contextMenu {
                                 addToStackMenu(for: item)
+                                linkMenu(for: item)
+                                linkedItemsMenu(for: item)
                             }
                     }
                 }
@@ -808,7 +932,7 @@ struct SavedViewTabContent: View {
     private func addToStackMenu(for item: LibraryItemV2) -> some View {
         if stackStorage.stacks.isEmpty {
             Button("Create Stack and Add") {
-                let created = stackStorage.createStack(name: "New Stack")
+                let created = stackStorage.createStack(template: .blank, nameOverride: "New Stack")
                 addManualItem(item, to: created)
             }
         } else {
@@ -821,6 +945,124 @@ struct SavedViewTabContent: View {
                     .disabled(alreadyIncluded)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func linkMenu(for item: LibraryItemV2) -> some View {
+        switch item {
+        case .dateCard(let dateCard):
+            Menu("Link Contact") {
+                if contactStorage.contacts.isEmpty {
+                    Text("No contacts available")
+                } else {
+                    ForEach(contactStorage.contacts) { contact in
+                        let alreadyLinked = dateCard.linkedEntities.contains(
+                            LibraryEntityRef(type: .contact, entityID: contact.id)
+                        )
+                        Button(alreadyLinked ? "\(contact.displayName) (Linked)" : contact.displayName) {
+                            link(dateCardID: dateCard.id, contactID: contact.id)
+                        }
+                        .disabled(alreadyLinked)
+                    }
+                }
+            }
+        case .contact(let contact):
+            Menu("Link Date Card") {
+                if dateCardStorage.dateCards.isEmpty {
+                    Text("No date cards available")
+                } else {
+                    ForEach(dateCardStorage.dateCards) { dateCard in
+                        let alreadyLinked = contact.linkedEntities.contains(
+                            LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
+                        )
+                        Button(alreadyLinked ? "\(dateCard.title) (Linked)" : dateCard.title) {
+                            link(dateCardID: dateCard.id, contactID: contact.id)
+                        }
+                        .disabled(alreadyLinked)
+                    }
+                }
+            }
+        case .bookmark, .note:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func linkedItemsMenu(for item: LibraryItemV2) -> some View {
+        let refs = linkedEntityRefs(for: item)
+        if !refs.isEmpty {
+            Menu("Linked Items") {
+                ForEach(refs, id: \.id) { ref in
+                    if let title = titleForLinkedRef(ref) {
+                        Button(title) {
+                            openLinkedRef(ref)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func linkedEntityRefs(for item: LibraryItemV2) -> [LibraryEntityRef] {
+        switch item {
+        case .dateCard(let dateCard):
+            return dateCard.linkedEntities
+        case .contact(let contact):
+            return contact.linkedEntities
+        case .bookmark, .note:
+            return []
+        }
+    }
+
+    private func titleForLinkedRef(_ ref: LibraryEntityRef) -> String? {
+        switch ref.type {
+        case .bookmark:
+            return BookmarksStorage.shared.bookmarks.first(where: { $0.id == ref.entityID })?.title
+        case .note:
+            return NotesStorage.shared.notes.first(where: { $0.id == ref.entityID })?.title
+        case .dateCard:
+            return dateCardStorage.dateCard(for: ref.entityID)?.title
+        case .contact:
+            return contactStorage.contact(for: ref.entityID)?.displayName
+        }
+    }
+
+    private func openLinkedRef(_ ref: LibraryEntityRef) {
+        switch ref.type {
+        case .bookmark:
+            if let bookmark = BookmarksStorage.shared.bookmarks.first(where: { $0.id == ref.entityID }) {
+                onOpenBookmark?(bookmark)
+            }
+        case .note:
+            if let note = NotesStorage.shared.notes.first(where: { $0.id == ref.entityID }) {
+                onOpenNote?(note)
+            }
+        case .dateCard:
+            if let dateCard = dateCardStorage.dateCard(for: ref.entityID) {
+                editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+            }
+        case .contact:
+            if let contact = contactStorage.contact(for: ref.entityID) {
+                contactEditorContext = ContactEditorContext(existingContact: contact)
+            }
+        }
+    }
+
+    private func link(dateCardID: UUID, contactID: UUID) {
+        guard var dateCard = dateCardStorage.dateCard(for: dateCardID),
+              var contact = contactStorage.contact(for: contactID) else { return }
+
+        let contactRef = LibraryEntityRef(type: .contact, entityID: contactID)
+        if !dateCard.linkedEntities.contains(contactRef) {
+            dateCard.linkedEntities.append(contactRef)
+            _ = dateCardStorage.updateDateCard(dateCard)
+        }
+
+        let dateRef = LibraryEntityRef(type: .dateCard, entityID: dateCardID)
+        if !contact.linkedEntities.contains(dateRef) {
+            contact.linkedEntities.append(dateRef)
+            _ = contactStorage.updateContact(contact)
         }
     }
 
