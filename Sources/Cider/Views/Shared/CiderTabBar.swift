@@ -82,6 +82,7 @@ struct CiderTabBar: View {
         case .home: 0
         case .bookmarks: bookmarkCount
         case .notes: noteCount
+        case .savedView: 0
         case .search: 0
         case .project(let id, _): ProjectStorage.shared.itemCount(for: id)
         }

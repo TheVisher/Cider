@@ -17,11 +17,9 @@ final class ProjectStorage: ObservableObject {
     private var fileURL: URL
 
     private init() {
-        let config = CiderConfig.load()
-        let expanded = NSString(string: config.bookmarksDirectory).expandingTildeInPath
-        let directoryURL = URL(fileURLWithPath: expanded)
-        fileURL = directoryURL.appendingPathComponent(fileName)
-        ensureDirectory(directoryURL)
+        let directoryURL = StoragePaths.ciderDataDirectoryURL()
+        fileURL = StoragePaths.jsonFileURL(fileName: fileName, in: directoryURL)
+        StoragePaths.ensureDirectory(directoryURL)
         load()
     }
 
@@ -193,14 +191,6 @@ final class ProjectStorage: ObservableObject {
         } catch {
             // Silent fail — storage is best-effort
         }
-    }
-
-    private func ensureDirectory(_ directoryURL: URL) {
-        try? FileManager.default.createDirectory(
-            at: directoryURL,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
     }
 
     private func touchProject(_ projectID: UUID) {

@@ -5,6 +5,8 @@ struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
     @ObservedObject private var projectStorage = ProjectStorage.shared
+    @ObservedObject private var savedViewStorage = SavedViewStorage.shared
+    @StateObject private var libraryViewModel = LibraryViewModel()
     @State private var selectedTab: CiderTab = .home
     @State private var isCollapsed = false
     @State private var selectedFolderID: UUID?
@@ -24,7 +26,14 @@ struct CiderPanelView: View {
     @State private var suppressSidebarAutoExpandForDetails = false
 
     private var allTabs: [CiderTab] {
-        CiderTab.fixedTabs + dynamicTabs
+        CiderTab.fixedTabs + savedViewTabs + dynamicTabs
+    }
+
+    private var savedViewTabs: [CiderTab] {
+        guard CiderConfig.load().enableSavedViewTabs else { return [] }
+        return savedViewStorage.pinnedSavedViews().map { savedView in
+            .savedView(id: savedView.id, name: savedView.name)
+        }
     }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -158,13 +167,25 @@ struct CiderPanelView: View {
                 .help("Capture active browser tab")
         }
 
-        if selectedTab == .home && selectedFolderID == nil && showContinueSection {
-            SectionCollapseToggle(
-                label: "Recents",
-                isCollapsed: $continueSectionCollapsed,
-                collapsedHelp: "Show recent items",
-                expandedHelp: "Hide recent items"
-            )
+        if selectedTab == .home && selectedFolderID == nil {
+            Image(systemName: "plus.square.on.square")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    createSavedViewFromCurrentHomeState()
+                }
+                .help("Save current view as tab")
+
+            if showContinueSection {
+                SectionCollapseToggle(
+                    label: "Recents",
+                    isCollapsed: $continueSectionCollapsed,
+                    collapsedHelp: "Show recent items",
+                    expandedHelp: "Hide recent items"
+                )
+            }
         } else if selectedFolderID != nil && folderHasSubFolders {
             SectionCollapseToggle(
                 label: "Folders",
@@ -503,6 +524,51 @@ struct CiderPanelView: View {
                     selectedFolderID: nil,
                     selectedItemIDs: $selectedItemIDs
                 )
+            case .savedView(let id, _):
+                if let savedView = savedViewStorage.savedView(for: id) {
+                    SavedViewTabContent(
+                        savedView: savedView,
+                        libraryViewModel: libraryViewModel,
+                        folders: bookmarksViewModel.folders,
+                        onOpenBookmark: { bookmark in
+                            bookmarksViewModel.open(bookmark)
+                        },
+                        onOpenNote: { note in
+                            notesViewModel.selectNote(note)
+                            selectedTab = .notes
+                        },
+                        onDeleteBookmark: { bookmark in
+                            bookmarksViewModel.deleteBookmarks([bookmark])
+                        },
+                        onDeleteNote: { note in
+                            notesViewModel.deleteNotes([note])
+                        },
+                        onRenameNote: { note, newTitle in
+                            NotesStorage.shared.rename(note: note, to: newTitle)
+                        },
+                        onMoveBookmarkToFolder: { bookmark, folderID in
+                            _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+                        },
+                        onMoveNoteToFolder: { note, folderID in
+                            _ = notesViewModel.assignNote(note, toFolder: folderID)
+                        },
+                        onUpdateSavedView: { updated in
+                            _ = savedViewStorage.updateSavedView(updated)
+                            if case .savedView(let selectedID, _) = selectedTab,
+                               selectedID == updated.id {
+                                selectedTab = .savedView(id: updated.id, name: updated.name)
+                            }
+                        },
+                        onDeleteSavedView: { savedViewID in
+                            deleteSavedView(savedViewID)
+                        }
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "square.grid.2x2",
+                        title: "Saved view not found"
+                    )
+                }
             case .search(_, let query):
                 SearchTabContent(
                     query: query,
@@ -542,10 +608,56 @@ struct CiderPanelView: View {
 
     private func closeTab(_ tab: CiderTab) {
         guard tab.isCloseable else { return }
+        if case .savedView(let id, _) = tab, var savedView = savedViewStorage.savedView(for: id) {
+            savedView.isTabPinned = false
+            _ = savedViewStorage.updateSavedView(savedView)
+            if selectedTab == tab {
+                selectedTab = .home
+            }
+            return
+        }
         dynamicTabs.removeAll { $0 == tab }
         if selectedTab == tab {
             selectedTab = .home
         }
+    }
+
+    private func createSavedViewFromCurrentHomeState() {
+        var config = CiderConfig.load()
+        if !config.enableSavedViewTabs {
+            config.enableSavedViewTabs = true
+            config.save()
+        }
+
+        let name = nextSavedViewName()
+        let layout = SavedViewLayoutSpec(
+            displayMode: homeDisplayMode,
+            cardSizeScale: homeCardSizeScale,
+            showsGhostCells: true,
+            showsCalendarProjection: false
+        )
+        let savedView = savedViewStorage.createSavedView(
+            name: name,
+            layoutSpec: layout
+        )
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+    }
+
+    private func deleteSavedView(_ id: UUID) {
+        let wasSelected = selectedTab.savedViewID == id
+        _ = savedViewStorage.deleteSavedView(id)
+        if wasSelected {
+            selectedTab = .home
+        }
+    }
+
+    private func nextSavedViewName() -> String {
+        let usedNames = Set(savedViewStorage.pinnedSavedViews().map(\.name))
+        var index = 1
+        while usedNames.contains("View \(index)") {
+            index += 1
+        }
+        return "View \(index)"
     }
 
     // MARK: - Project Management
