@@ -25,6 +25,9 @@ The floating panel is the main way users interact with Cider:
 
 ## Documentation Reference
 
+### Full Docs Map
+**Read:** `Docs/DOCS_INDEX.md` — lists every doc, what it covers, and its implementation status. Start here when you need to find, read, or update the right doc.
+
 ### Before Writing ANY UI Code
 **Read:** `Docs/DESIGN_SYSTEM.md`
 - Color palette, typography, spacing tokens

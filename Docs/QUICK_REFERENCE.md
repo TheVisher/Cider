@@ -25,38 +25,40 @@
 
 ## Docs Layout
 
+> **See `DOCS_INDEX.md` for the full map** — what every doc covers, what's implemented vs future, and what to update after each session.
+
 ```
 Docs/
-├── Tab Vision Docs (feature plans per tab)
+├── DOCS_INDEX.md                 ← start here
+├── CODE_HEALTH.md                living bug/debt tracker
+│
+├── Tab Vision Docs
 │   ├── HOME_VISION.md
 │   ├── BOOKMARKS_VISION.md
 │   ├── NOTES_VISION.md
+│   ├── WORKSPACES_VISION.md      folders, projects, saved view tabs
+│   ├── AI_VISION.md
+│   ├── INTEGRATION_DESIGN.md     Obsidian/knowledge-base sync (future)
 │   ├── WHITEBOARD_VISION.md      (not yet implemented)
 │   ├── DOCUMENTS_VISION.md       (not yet implemented)
 │   ├── BOOKS_VISION.md           (not yet implemented)
 │   └── TODOS_VISION.md           (not yet implemented)
 │
-├── System Docs (how to build things)
-│   ├── DESIGN_SYSTEM.md          colors, typography, spacing tokens
-│   ├── ACRYLIC_STYLE.md          material/shadow patterns
-│   ├── CONVENTIONS.md            Swift style guide
-│   ├── TECH_STACK.md             Swift 6.2, concurrency, storage
-│   ├── FLOATING_PANEL.md         NSPanel architecture
-│   ├── SHARED_COMPONENTS.md      reusable cross-tab components
-│   └── USER_PREFERENCES.md      settings/CiderConfig patterns
-│
-├── Feature Docs
-│   ├── WORKSPACES_VISION.md      folders, projects, search
-│   ├── WORKSPACES_IMPLEMENTATION_PLAN.md
-│   ├── UX_FOLDER_DESIGN.md
-│   └── UX_TAB_SIMPLIFICATION.md  (future proposal, not approved)
+├── Reference Docs (agents read before writing code)
+│   ├── DESIGN_SYSTEM.md
+│   ├── ACRYLIC_STYLE.md
+│   ├── CONVENTIONS.md
+│   ├── TECH_STACK.md
+│   ├── FLOATING_PANEL.md
+│   ├── SHARED_COMPONENTS.md
+│   └── USER_PREFERENCES.md
 │
 ├── Ops
 │   ├── RELEASE_CHECKLIST.md
 │   ├── TROUBLESHOOTING.md
 │   └── NOTES_EDITOR_SMOKE_CHECKLIST.md
 │
-└── _archive/                     old/superseded docs
+└── _archive/                     superseded docs, nothing is deleted
 ```
 
 ## Current Tab Status

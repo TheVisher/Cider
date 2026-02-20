@@ -2,7 +2,12 @@
 
 > This document captures the product vision for Cider's organizational system: universal folders, project workspaces, and search-to-tab flow.
 >
-> **Status:** Phase 1 (Universal Folders) — Complete. Phases 2-4 (Search, Projects) — Future work.
+> **Implementation Status:**
+> - ✅ Phase 1 — Universal Folders (complete)
+> - ✅ Phase 2 — Center Search Palette (complete)
+> - ✅ Phase 3 — Custom Saved View Tabs (complete, `feature/custom-tabs-date-cards-stacks`)
+> - 🔲 Phase 4 — Projects UI (ProjectStorage exists; full sidebar + tab UI future)
+> - 🔲 Phase 5 — Tear-off windows, Kanban, archiving (future)
 
 ---
 
@@ -266,6 +271,13 @@ Folders need their own sort controls in the view options dropdown:
 - Sort by: creation date, recently modified, title A-Z/Z-A
 - Ascending/descending toggle
 - Per-folder sort persistence (each folder remembers its preferred sort)
+
+### Custom Folder Icons
+Allow users to change the folder icon in the sidebar:
+- Right-click > "Change Icon" on any folder row
+- Pick from SF Symbols or emoji
+- Store as `iconName: String?` in `Folder` model
+- Default to "folder.fill" for roots, "folder" for sub-folders
 
 ### Sidebar Folder Drag Reorder & Nesting
 Drag folders in the sidebar to:
