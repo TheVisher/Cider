@@ -43,7 +43,7 @@ struct NotesPanelView: View {
                             .background(CiderColors.separator)
                     }
 
-                    if viewModel.selectedNote != nil {
+                    if viewModel.selectedNote != nil || viewModel.activeExternalFile != nil {
                         TipTapEditorView(viewModel: viewModel)
                     } else {
                         NotesEmptyState(onCreateNew: { viewModel.createNewNote() })
@@ -209,11 +209,13 @@ private struct NotesTitleBar: View {
                 .font(CiderFont.subheadingSemibold)
                 .foregroundColor(CiderColors.primary)
             } else {
-                Text(viewModel.selectedNote?.title ?? "Notes")
+                let displayTitle = viewModel.activeExternalFile?.title ?? viewModel.selectedNote?.title ?? "Notes"
+                Text(displayTitle)
                     .font(CiderFont.subheadingSemibold)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
                     .onTapGesture(count: 2) {
+                        // Title editing only for native notes, not external files
                         if viewModel.selectedNote != nil {
                             isEditingTitle = true
                         }

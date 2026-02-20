@@ -178,6 +178,19 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .features:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Features") {
+                    SettingsToggleRow(
+                        title: "Linked Sources",
+                        subtitle: "Watch external folders and surface their .md files in Cider",
+                        isOn: $viewModel.enableLinkedSources
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
         case .bookmarksManage:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Bookmarks") {
@@ -427,7 +440,7 @@ private enum SettingsCategory: String, CaseIterable {
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation, .panelBehavior]
+            [.startup, .activation, .panelBehavior, .features]
         case .notes:
             [.notesBehavior, .notesEditor, .notesStorage]
         case .bookmarks:
@@ -450,6 +463,7 @@ private enum SettingsSubcategory: Hashable {
     case startup
     case activation
     case panelBehavior
+    case features
     case notesBehavior
     case notesEditor
     case notesStorage
@@ -470,6 +484,8 @@ private enum SettingsSubcategory: Hashable {
             "Activation"
         case .panelBehavior:
             "Panel"
+        case .features:
+            "Features"
         case .notesBehavior:
             "Behavior"
         case .notesEditor:

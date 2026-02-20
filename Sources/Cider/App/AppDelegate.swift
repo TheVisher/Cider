@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startNotesHotkeyDetection()
         startBookmarksHotkeyDetection()
         observeUndoNotifications()
+        observeSourcesNotifications()
 
         Task { @MainActor in
             let config = CiderConfig.load()
@@ -483,7 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func flushNotesDraftIfNeeded() {
-        guard notesViewModel?.selectedNote != nil else { return }
+        guard notesViewModel?.selectedNote != nil || notesViewModel?.activeExternalFile != nil else { return }
         notesViewModel?.flushSave()
     }
 
@@ -584,6 +585,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] notification in
                 guard let urlString = notification.userInfo?["urlString"] as? String else { return }
                 self?.showBookmarkClipboardReviewToast(urlString: urlString)
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - External Sources
+
+    private func observeSourcesNotifications() {
+        NotificationCenter.default.publisher(for: Notification.Name("cider.openExternalFile"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self,
+                      let url = notification.userInfo?["fileURL"] as? URL,
+                      let viewModel = self.notesViewModel else { return }
+                let file = ExternalSourceRegistry.shared.libraryFiles.first(where: { $0.path == url })
+                    ?? ExternalFile(
+                        id: ExternalFile.stableID(for: url.path),
+                        title: url.deletingPathExtension().lastPathComponent,
+                        path: url,
+                        sourceID: UUID(),
+                        sourceName: url.deletingLastPathComponent().lastPathComponent,
+                        createdAt: Date(),
+                        modifiedAt: Date()
+                    )
+                viewModel.openExternalFile(file)
+                self.showNotesPanel()
             }
             .store(in: &cancellables)
     }

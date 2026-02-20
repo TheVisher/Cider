@@ -57,6 +57,14 @@ struct SourceCardView: View {
             onOpen()
         }
         .contextMenu {
+            Button {
+                NSWorkspace.shared.open(file.path)
+            } label: {
+                Label("Open in Default App", systemImage: "arrow.up.right.square")
+            }
+
+            Divider()
+
             Button(role: .destructive) {
                 onDelete()
             } label: {
