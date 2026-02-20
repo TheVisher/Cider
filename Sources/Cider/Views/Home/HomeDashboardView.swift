@@ -58,6 +58,10 @@ struct HomeDashboardView: View {
         LibraryCardSizing(scale: cardSizeScale)
     }
 
+    private func cardMinWidth(for mode: BookmarkCard.CardMode) -> CGFloat {
+        cardSizing.bookmarkSizing.cardMinWidth
+    }
+
     private var foldersByID: [UUID: Folder] {
         Dictionary(uniqueKeysWithValues: bookmarksViewModel.folders.map { ($0.id, $0) })
     }
@@ -228,6 +232,22 @@ struct HomeDashboardView: View {
             DateCardListRow(dateCard: dateCard, onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } })
         case .contact(let contact):
             ContactListRow(contact: contact, onOpen: { handleNormalAction { presentContactDetail(contact) } })
+        case .externalFile(let file):
+            SourceCardView(
+                file: file,
+                width: .infinity,
+                isSelected: isItemSelected(item),
+                onOpen: {
+                    handleNormalAction {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("cider.openExternalFile"),
+                            object: nil,
+                            userInfo: ["fileURL": file.path]
+                        )
+                    }
+                },
+                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
+            )
         }
     }
 
@@ -281,6 +301,22 @@ struct HomeDashboardView: View {
             DateCardCardView(dateCard: dateCard, onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } })
         case .contact(let contact):
             ContactCardCardView(contact: contact, onOpen: { handleNormalAction { presentContactDetail(contact) } })
+        case .externalFile(let file):
+            SourceCardView(
+                file: file,
+                width: cardMinWidth(for: mode),
+                isSelected: isItemSelected(item),
+                onOpen: {
+                    handleNormalAction {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("cider.openExternalFile"),
+                            object: nil,
+                            userInfo: ["fileURL": file.path]
+                        )
+                    }
+                },
+                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
+            )
         }
     }
 
@@ -629,6 +665,12 @@ struct HomeDashboardView: View {
         case .note(let note): openNoteInPanel(note)
         case .dateCard(let dateCard): presentDateCardDetail(dateCard)
         case .contact(let contact): presentContactDetail(contact)
+        case .externalFile(let file):
+            NotificationCenter.default.post(
+                name: Notification.Name("cider.openExternalFile"),
+                object: nil,
+                userInfo: ["fileURL": file.path]
+            )
         }
     }
 
@@ -636,7 +678,7 @@ struct HomeDashboardView: View {
         switch item {
         case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
         case .note(let note): return noteDragProvider(for: note)
-        case .dateCard, .contact: return nil
+        case .dateCard, .contact, .externalFile: return nil
         }
     }
 

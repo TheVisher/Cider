@@ -523,6 +523,8 @@ struct StackManagerSheet: View {
             return LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
         case .contact(let contact):
             return LibraryEntityRef(type: .contact, entityID: contact.id)
+        case .externalFile(let file):
+            return LibraryEntityRef(type: .externalFile, entityID: file.id)
         }
     }
 
@@ -537,6 +539,8 @@ struct StackManagerSheet: View {
                 return ref.type == .dateCard && ref.entityID == dateCard.id
             case .contact(let contact):
                 return ref.type == .contact && ref.entityID == contact.id
+            case .externalFile(let file):
+                return ref.type == .externalFile && ref.entityID == file.id
             }
         }) {
             return item.title
@@ -554,6 +558,8 @@ struct StackManagerSheet: View {
             "calendar"
         case .contact:
             "person.crop.circle"
+        case .externalFile:
+            "folder.badge.gear"
         }
     }
 }

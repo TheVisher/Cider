@@ -47,6 +47,7 @@ extension Notification.Name {
     static let pauseUndoToastDismiss = Notification.Name("cider.pauseUndoToastDismiss")
     static let resumeUndoToastDismiss = Notification.Name("cider.resumeUndoToastDismiss")
     static let trashContentsChanged = Notification.Name("cider.trashContentsChanged")
+    static let openExternalSourceAndSelectFile = Notification.Name("cider.openExternalSourceAndSelectFile")
 }
 
 enum CiderBorder {

@@ -6,10 +6,12 @@ struct CiderPanelView: View {
     @ObservedObject var notesViewModel: NotesViewModel
     @ObservedObject private var projectStorage = ProjectStorage.shared
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
+    @ObservedObject private var externalSourceStorage = ExternalSourceStorage.shared
     @StateObject private var libraryViewModel = LibraryViewModel()
     @State private var selectedTab: CiderTab = .home
     @State private var isCollapsed = false
     @State private var selectedFolderID: UUID?
+    @State private var selectedSourceID: UUID?
     @State private var selectedItemIDs: Set<String> = []
     @State private var expandedFolderIDs: Set<UUID> = []
     @State private var isSearchPaletteVisible = false
@@ -30,7 +32,14 @@ struct CiderPanelView: View {
     @State private var newContactEditorContext: ContactEditorContext?
 
     private var allTabs: [CiderTab] {
-        CiderTab.fixedTabs + savedViewTabs + dynamicTabs
+        CiderTab.fixedTabs + savedViewTabs + sourceTabs + dynamicTabs
+    }
+
+    private var sourceTabs: [CiderTab] {
+        guard CiderConfig.load().enableLinkedSources else { return [] }
+        return externalSourceStorage.pinnedSources().map {
+            .externalSource(id: $0.id, name: $0.displayName)
+        }
     }
 
     private var savedViewTabs: [CiderTab] {
@@ -78,6 +87,7 @@ struct CiderPanelView: View {
         .environment(\.textScale, textScale)
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
+            selectedSourceID = nil
             selectedItemIDs.removeAll()
         }
         .onChange(of: selectedFolderID) { _, _ in
@@ -353,8 +363,52 @@ struct CiderPanelView: View {
             onRenameFolder: { bookmarksViewModel.renameFolder($0, to: $1) },
             onDeleteFolder: deleteFolder,
             onTriggerSearch: { isSearchPaletteVisible = true },
-            showBackground: false
+            showBackground: false,
+            sources: externalSourceStorage.sources,
+            selectedSourceID: $selectedSourceID,
+            onAddSource: addLinkedSource,
+            onSelectSource: { id in
+                selectedSourceID = id
+                selectedFolderID = nil
+            },
+            onToggleSourceTab: { id in
+                guard var source = externalSourceStorage.source(for: id) else { return }
+                source.isTabPinned.toggle()
+                externalSourceStorage.updateSource(source)
+            },
+            onToggleSourceLibrary: { id in
+                guard var source = externalSourceStorage.source(for: id) else { return }
+                source.showInLibrary.toggle()
+                externalSourceStorage.updateSource(source)
+            },
+            onRemoveSource: { id in
+                if selectedSourceID == id { selectedSourceID = nil }
+                externalSourceStorage.removeSource(id)
+                // Also close any open tab for this source
+                dynamicTabs.removeAll {
+                    if case .externalSource(let tabID, _) = $0 { return tabID == id }
+                    return false
+                }
+                if case .externalSource(let tabID, _) = selectedTab, tabID == id {
+                    selectedTab = .home
+                }
+            }
         )
+    }
+
+    private func addLinkedSource() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.title = "Choose a Folder to Link"
+        panel.prompt = "Link Folder"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let source = externalSourceStorage.addSource(path: url.path, displayName: url.lastPathComponent)
+        selectedSourceID = source.id
+        selectedFolderID = nil
     }
 
     // MARK: - Sidebar Footer
@@ -556,7 +610,14 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var tabContentBody: some View {
-        if let folderID = selectedFolderID, selectedTab.isFixed {
+        if let sourceID = selectedSourceID,
+           let source = externalSourceStorage.source(for: sourceID) {
+            SourceDetailView(
+                source: source,
+                displayMode: $homeDisplayMode,
+                cardSizeScale: $homeCardSizeScale
+            )
+        } else if let folderID = selectedFolderID, selectedTab.isFixed {
             FolderDetailView(
                 bookmarksViewModel: bookmarksViewModel,
                 notesViewModel: notesViewModel,
@@ -678,6 +739,19 @@ struct CiderPanelView: View {
                         selectedTab = .notes
                     }
                 )
+            case .externalSource(let id, _):
+                if let source = externalSourceStorage.source(for: id) {
+                    SourceDetailView(
+                        source: source,
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "folder.badge.gear",
+                        title: "Source not found"
+                    )
+                }
             }
         }
     }
@@ -695,6 +769,14 @@ struct CiderPanelView: View {
         if case .savedView(let id, _) = tab, var savedView = savedViewStorage.savedView(for: id) {
             savedView.isTabPinned = false
             _ = savedViewStorage.updateSavedView(savedView)
+            if selectedTab == tab {
+                selectedTab = .home
+            }
+            return
+        }
+        if case .externalSource(let id, _) = tab, var source = externalSourceStorage.source(for: id) {
+            source.isTabPinned = false
+            externalSourceStorage.updateSource(source)
             if selectedTab == tab {
                 selectedTab = .home
             }

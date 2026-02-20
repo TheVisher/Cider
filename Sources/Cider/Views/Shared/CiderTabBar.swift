@@ -8,6 +8,7 @@ struct CiderTabBar: View {
     @Binding var selectedFolderID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -85,6 +86,7 @@ struct CiderTabBar: View {
         case .savedView: 0
         case .search: 0
         case .project(let id, _): ProjectStorage.shared.itemCount(for: id)
+        case .externalSource(let id, _): externalSourceRegistry.files(for: id).count
         }
     }
 }

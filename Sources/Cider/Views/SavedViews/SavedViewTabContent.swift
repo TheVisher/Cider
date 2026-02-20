@@ -675,6 +675,21 @@ struct SavedViewTabContent: View {
                 )
             }
             return AnyView(genericRow(item))
+        case .externalFile(let file):
+            return AnyView(
+                SourceCardView(
+                    file: file,
+                    width: .infinity,
+                    onOpen: {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("cider.openExternalFile"),
+                            object: nil,
+                            userInfo: ["fileURL": file.path]
+                        )
+                    },
+                    onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
+                )
+            )
         }
     }
 
@@ -797,6 +812,19 @@ struct SavedViewTabContent: View {
             } else {
                 GenericLibraryItemCard(item: item)
             }
+        case .externalFile(let file):
+            SourceCardView(
+                file: file,
+                width: cardSizing.bookmarkSizing.cardMinWidth,
+                onOpen: {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("cider.openExternalFile"),
+                        object: nil,
+                        userInfo: ["fileURL": file.path]
+                    )
+                },
+                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
+            )
         }
     }
 
@@ -855,7 +883,7 @@ struct SavedViewTabContent: View {
                     }
                 }
             }
-        case .bookmark, .note:
+        case .bookmark, .note, .externalFile:
             EmptyView()
         }
     }
@@ -882,7 +910,7 @@ struct SavedViewTabContent: View {
             return dateCard.linkedEntities
         case .contact(let contact):
             return contact.linkedEntities
-        case .bookmark, .note:
+        case .bookmark, .note, .externalFile:
             return []
         }
     }
@@ -897,6 +925,8 @@ struct SavedViewTabContent: View {
             return dateCardStorage.dateCard(for: ref.entityID)?.title
         case .contact:
             return contactStorage.contact(for: ref.entityID)?.displayName
+        case .externalFile:
+            return nil
         }
     }
 
@@ -918,6 +948,8 @@ struct SavedViewTabContent: View {
             if let contact = contactStorage.contact(for: ref.entityID) {
                 contactEditorContext = ContactEditorContext(existingContact: contact)
             }
+        case .externalFile:
+            break
         }
     }
 
@@ -956,6 +988,8 @@ struct SavedViewTabContent: View {
             return LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
         case .contact(let contact):
             return LibraryEntityRef(type: .contact, entityID: contact.id)
+        case .externalFile(let file):
+            return LibraryEntityRef(type: .externalFile, entityID: file.id)
         }
     }
 
@@ -969,6 +1003,8 @@ struct SavedViewTabContent: View {
             return "calendar"
         case .contact:
             return "person.crop.circle"
+        case .externalFile:
+            return "folder.badge.gear"
         }
     }
 
@@ -982,6 +1018,8 @@ struct SavedViewTabContent: View {
             return dateCard.location.isEmpty ? "Date Card" : dateCard.location
         case .contact(let contact):
             return contact.relationshipLabel.isEmpty ? "Contact" : contact.relationshipLabel
+        case .externalFile(let file):
+            return file.sourceName
         }
     }
 
@@ -1049,6 +1087,7 @@ private struct GenericLibraryItemCard: View {
         case .note: "note.text"
         case .dateCard: "calendar"
         case .contact: "person.crop.circle"
+        case .externalFile: "folder.badge.gear"
         }
     }
 
@@ -1062,6 +1101,8 @@ private struct GenericLibraryItemCard: View {
             dateCard.location.isEmpty ? "Date Card" : dateCard.location
         case .contact(let contact):
             contact.relationshipLabel.isEmpty ? "Contact" : contact.relationshipLabel
+        case .externalFile(let file):
+            file.sourceName
         }
     }
 }

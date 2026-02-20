@@ -23,8 +23,9 @@ final class LibraryViewModel: ObservableObject {
         let noteItems = NotesStorage.shared.notes.map { LibraryItemV2.note($0) }
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
+        let externalFileItems = ExternalSourceRegistry.shared.libraryFiles.map { LibraryItemV2.externalFile($0) }
 
-        items = bookmarkItems + noteItems + dateCardItems + contactItems
+        items = bookmarkItems + noteItems + dateCardItems + contactItems + externalFileItems
     }
 
     func filteredItems(
@@ -126,6 +127,11 @@ final class LibraryViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildItems() }
             .store(in: &cancellables)
+
+        ExternalSourceRegistry.shared.$libraryFiles
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildItems() }
+            .store(in: &cancellables)
     }
 
     private func matchesTextQuery(_ query: String, in item: LibraryItemV2) -> Bool {
@@ -146,6 +152,10 @@ final class LibraryViewModel: ObservableObject {
             return contact.displayName.lowercased().contains(query)
                 || contact.relationshipLabel.lowercased().contains(query)
                 || contact.notes.lowercased().contains(query)
+        case .externalFile(let file):
+            if file.title.lowercased().contains(query) { return true }
+            let content = (try? String(contentsOf: file.path, encoding: .utf8))?.lowercased() ?? ""
+            return content.contains(query)
         }
     }
 
@@ -280,6 +290,8 @@ final class LibraryViewModel: ObservableObject {
             dateCard.id.uuidString
         case .contact(let contact):
             contact.id.uuidString
+        case .externalFile(let file):
+            file.id.uuidString
         }
     }
 }

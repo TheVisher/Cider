@@ -99,6 +99,8 @@ struct StackDetailSheet: View {
             "calendar"
         case .contact:
             "person.crop.circle"
+        case .externalFile:
+            "folder.badge.gear"
         }
     }
 
@@ -206,6 +208,12 @@ struct StackDetailSheet: View {
             onOpenDateCard?(dateCard)
         case .contact(let contact):
             onOpenContact?(contact)
+        case .externalFile(let file):
+            NotificationCenter.default.post(
+                name: Notification.Name("cider.openExternalFile"),
+                object: nil,
+                userInfo: ["fileURL": file.path]
+            )
         }
     }
 

@@ -14,6 +14,14 @@ let package = Package(
             path: "Sources/Cider",
             resources: [
                 .copy("Resources/TipTapEditor")
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/Cider/Resources/Info.plist"
+                ])
             ]
         ),
         .testTarget(

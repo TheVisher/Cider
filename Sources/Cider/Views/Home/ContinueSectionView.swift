@@ -133,12 +133,13 @@ extension LibraryItemV2 {
         case .note: "note.text"
         case .dateCard(let dc): dc.isCompleted ? "checkmark.circle.fill" : "calendar"
         case .contact: "person.crop.circle"
+        case .externalFile: "folder.badge.gear"
         }
     }
 
     var iconColor: Color {
         switch self {
-        case .bookmark, .note: CiderColors.tertiary
+        case .bookmark, .note, .externalFile: CiderColors.tertiary
         case .dateCard(let dc): dc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
         case .contact: CiderColors.controlAccent
         }

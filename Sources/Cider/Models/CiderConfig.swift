@@ -129,6 +129,7 @@ struct CiderConfig: Codable {
     var enableStacks: Bool  // Feature flag for stack models + UI
     var enableSavedViewTabs: Bool  // Feature flag for custom saved view tabs
     var enableCalendarProjection: Bool  // Feature flag for calendar projection views
+    var enableLinkedSources: Bool       // Feature flag for external directory linking
     var trashRetentionDays: Int  // 0 = never auto-purge, default 30
     var captureToastPosition: ToastPosition  // Position for bookmark capture toast
     var undoToastPosition: ToastPosition  // Position for undo action toast
@@ -164,6 +165,7 @@ struct CiderConfig: Codable {
             enableStacks: false,
             enableSavedViewTabs: false,
             enableCalendarProjection: false,
+            enableLinkedSources: false,
             trashRetentionDays: 30,
             captureToastPosition: .topCenterScreen,
             undoToastPosition: .bottomRightPanel,
@@ -315,6 +317,10 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .enableCalendarProjection
         ) ?? false
+        enableLinkedSources = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .enableLinkedSources
+        ) ?? false
         trashRetentionDays = try container.decodeIfPresent(Int.self, forKey: .trashRetentionDays) ?? 30
         captureToastPosition = try container.decodeIfPresent(
             ToastPosition.self,
@@ -363,6 +369,7 @@ struct CiderConfig: Codable {
         enableStacks: Bool = false,
         enableSavedViewTabs: Bool = false,
         enableCalendarProjection: Bool = false,
+        enableLinkedSources: Bool = false,
         trashRetentionDays: Int = 30,
         captureToastPosition: ToastPosition = .topCenterScreen,
         undoToastPosition: ToastPosition = .bottomRightPanel,
@@ -397,6 +404,7 @@ struct CiderConfig: Codable {
         self.enableStacks = enableStacks
         self.enableSavedViewTabs = enableSavedViewTabs
         self.enableCalendarProjection = enableCalendarProjection
+        self.enableLinkedSources = enableLinkedSources
         self.trashRetentionDays = trashRetentionDays
         self.captureToastPosition = captureToastPosition
         self.undoToastPosition = undoToastPosition

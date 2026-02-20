@@ -5,6 +5,7 @@ enum LibraryEntityType: String, Codable, CaseIterable, Hashable {
     case note
     case dateCard
     case contact
+    case externalFile
 }
 
 struct LibraryEntityRef: Identifiable, Codable, Hashable {

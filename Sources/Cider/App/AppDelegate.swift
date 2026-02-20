@@ -93,6 +93,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         flushNotesDraftIfNeeded()
     }
 
+    // MARK: - File Open Handler
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+
+            if isDirectory.boolValue {
+                // User opened a directory URL — link it as a new source
+                ExternalSourceStorage.shared.addSource(
+                    path: url.path,
+                    displayName: url.lastPathComponent
+                )
+                // Bring Cider panel to front
+                NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+            } else if url.pathExtension.lowercased() == "md" {
+                // Markdown file — find or create its parent source, then select file
+                let parentPath = url.deletingLastPathComponent().path
+                let existingSource = ExternalSourceStorage.shared.sources.first(where: { $0.path == parentPath })
+                let source: ExternalSource
+                if let existing = existingSource {
+                    source = existing
+                } else {
+                    source = ExternalSourceStorage.shared.addSource(
+                        path: parentPath,
+                        displayName: url.deletingLastPathComponent().lastPathComponent
+                    )
+                }
+                NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+                NotificationCenter.default.post(
+                    name: .openExternalSourceAndSelectFile,
+                    object: nil,
+                    userInfo: [
+                        "sourceID": source.id,
+                        "fileURL": url
+                    ]
+                )
+            }
+        }
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }

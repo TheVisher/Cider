@@ -5,6 +5,7 @@ enum LibraryItemV2: Identifiable, Hashable {
     case note(Note)
     case dateCard(DateCard)
     case contact(ContactCard)
+    case externalFile(ExternalFile)
 
     var id: String {
         switch self {
@@ -16,6 +17,8 @@ enum LibraryItemV2: Identifiable, Hashable {
             "datecard-\(dateCard.id.uuidString)"
         case .contact(let contact):
             "contact-\(contact.id.uuidString)"
+        case .externalFile(let file):
+            "externalfile-\(file.id.uuidString)"
         }
     }
 
@@ -29,6 +32,8 @@ enum LibraryItemV2: Identifiable, Hashable {
             .dateCard
         case .contact:
             .contact
+        case .externalFile:
+            .externalFile
         }
     }
 
@@ -42,6 +47,8 @@ enum LibraryItemV2: Identifiable, Hashable {
             dateCard.createdAt
         case .contact(let contact):
             contact.createdAt
+        case .externalFile(let file):
+            file.createdAt
         }
     }
 
@@ -55,6 +62,8 @@ enum LibraryItemV2: Identifiable, Hashable {
             dateCard.updatedAt
         case .contact(let contact):
             contact.updatedAt
+        case .externalFile(let file):
+            file.modifiedAt
         }
     }
 
@@ -68,6 +77,8 @@ enum LibraryItemV2: Identifiable, Hashable {
             dateCard.title
         case .contact(let contact):
             contact.displayName
+        case .externalFile(let file):
+            file.title
         }
     }
 
@@ -80,6 +91,8 @@ enum LibraryItemV2: Identifiable, Hashable {
         case .dateCard:
             nil
         case .contact:
+            nil
+        case .externalFile:
             nil
         }
     }
@@ -94,6 +107,8 @@ enum LibraryItemV2: Identifiable, Hashable {
             return Set(dateCard.labelIDs)
         case .contact(let contact):
             return Set(contact.labelIDs)
+        case .externalFile:
+            return []
         }
     }
 
@@ -103,7 +118,7 @@ enum LibraryItemV2: Identifiable, Hashable {
             return dateCard.startAt
         case .contact(let contact):
             return contact.birthday
-        case .bookmark, .note:
+        case .bookmark, .note, .externalFile:
             return nil
         }
     }
@@ -112,7 +127,7 @@ enum LibraryItemV2: Identifiable, Hashable {
         switch self {
         case .dateCard(let dateCard):
             return dateCard.isCompleted
-        case .bookmark, .note, .contact:
+        case .bookmark, .note, .contact, .externalFile:
             return false
         }
     }
