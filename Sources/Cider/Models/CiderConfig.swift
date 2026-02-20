@@ -136,6 +136,8 @@ struct CiderConfig: Codable {
     var homeEntityFilter: Set<LibraryEntityType>  // Which entity types to show in Home feed
 
     static let storageKey = "CiderConfig"
+    
+    private static var cachedConfig: CiderConfig?
 
     static var `default`: CiderConfig {
         CiderConfig(
@@ -173,8 +175,14 @@ struct CiderConfig: Codable {
     }
 
     static func load() -> CiderConfig {
+        if let cached = cachedConfig {
+            return cached
+        }
+        
         guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            return .default
+            let defaults = CiderConfig.default
+            cachedConfig = defaults
+            return defaults
         }
 
         // Try to decode, handling missing fields gracefully
@@ -200,6 +208,8 @@ struct CiderConfig: Codable {
 
             if didMigrate {
                 config.save()
+            } else {
+                cachedConfig = config
             }
 
             return config
@@ -215,7 +225,8 @@ struct CiderConfig: Codable {
     func save() {
         if let data = try? JSONEncoder().encode(self) {
             UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
-            UserDefaults.standard.synchronize() // Force immediate write
+            CiderConfig.cachedConfig = self
+            // synchronize() is unnecessary on modern macOS
             NSLog("[Cider] Config saved: textSize=\(textSize)")
         }
     }
