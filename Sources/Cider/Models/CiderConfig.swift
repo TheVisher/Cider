@@ -215,7 +215,6 @@ struct CiderConfig: Codable {
     func save() {
         if let data = try? JSONEncoder().encode(self) {
             UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
-            UserDefaults.standard.synchronize() // Force immediate write
             NSLog("[Cider] Config saved: textSize=\(textSize)")
         }
     }
