@@ -86,7 +86,7 @@ struct Note: Identifiable, Hashable {
     var contentPreview: String {
         let plain = strippedContent
         guard !plain.isEmpty else { return "" }
-        return String(plain.prefix(300))
+        return String(plain.prefix(150))
     }
 
     // MARK: - Private Helpers
@@ -99,11 +99,19 @@ struct Note: Identifiable, Hashable {
             .replacingOccurrences(of: #"!\[[^\]]*\]\([^\)]+\)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\[([^\]]*)\]\([^\)]+\)"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"[#*_~`>]+"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            // Collapse runs of 3+ newlines to a single blank line
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            // Collapse inline whitespace (spaces/tabs) but leave newlines alone
+            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func resolveImagePath(_ path: String, base: URL) -> URL? {
+        if path.hasPrefix("file:///") {
+            let posixPath = String(path.dropFirst("file://".count))
+            let url = URL(fileURLWithPath: posixPath)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
         if path.hasPrefix("./") {
             let relative = String(path.dropFirst(2))
             let url = base.appendingPathComponent(relative)

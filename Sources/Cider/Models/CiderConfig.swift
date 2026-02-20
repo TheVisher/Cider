@@ -132,6 +132,8 @@ struct CiderConfig: Codable {
     var trashRetentionDays: Int  // 0 = never auto-purge, default 30
     var captureToastPosition: ToastPosition  // Position for bookmark capture toast
     var undoToastPosition: ToastPosition  // Position for undo action toast
+    var homeSort: LibrarySortMode  // Sort mode for the Home library feed
+    var homeEntityFilter: Set<LibraryEntityType>  // Which entity types to show in Home feed
 
     static let storageKey = "CiderConfig"
 
@@ -164,7 +166,9 @@ struct CiderConfig: Codable {
             enableCalendarProjection: false,
             trashRetentionDays: 30,
             captureToastPosition: .topCenterScreen,
-            undoToastPosition: .bottomRightPanel
+            undoToastPosition: .bottomRightPanel,
+            homeSort: .createdDescending,
+            homeEntityFilter: Set(LibraryEntityType.allCases)
         )
     }
 
@@ -321,6 +325,14 @@ struct CiderConfig: Codable {
             ToastPosition.self,
             forKey: .undoToastPosition
         ) ?? .bottomRightPanel
+        homeSort = try container.decodeIfPresent(
+            LibrarySortMode.self,
+            forKey: .homeSort
+        ) ?? .createdDescending
+        homeEntityFilter = try container.decodeIfPresent(
+            Set<LibraryEntityType>.self,
+            forKey: .homeEntityFilter
+        ) ?? Set(LibraryEntityType.allCases)
     }
 
     init(
@@ -354,7 +366,9 @@ struct CiderConfig: Codable {
         enableCalendarProjection: Bool = false,
         trashRetentionDays: Int = 30,
         captureToastPosition: ToastPosition = .topCenterScreen,
-        undoToastPosition: ToastPosition = .bottomRightPanel
+        undoToastPosition: ToastPosition = .bottomRightPanel,
+        homeSort: LibrarySortMode = .createdDescending,
+        homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases)
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -387,5 +401,7 @@ struct CiderConfig: Codable {
         self.trashRetentionDays = trashRetentionDays
         self.captureToastPosition = captureToastPosition
         self.undoToastPosition = undoToastPosition
+        self.homeSort = homeSort
+        self.homeEntityFilter = homeEntityFilter
     }
 }

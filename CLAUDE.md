@@ -254,9 +254,18 @@ LibraryDisplayMode: .list | .grid | .masonry
 
 Card sizing: Continuous slider (0-3 scale) via LibraryCardSizing struct
 - Delegates to CardSizing (bookmarks) and NoteCardSizing (notes)
-- Mixed content: BookmarkCard/BookmarkListRow + NoteCardView/NoteListRow
+- Mixed content: BookmarkCard/BookmarkListRow + NoteCardView/NoteListRow + DateCardCardView + ContactCardCardView
 - Continue section: sticky 8-item recents, two-column, collapsible
 - Library feed: scrollable mixed feed, filters by folder selection
+
+LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard(DateCard) | .contact(ContactCard)
+- dateAnchor: Date? — key property for calendar projection; dateCards use startAt, contacts use birthday, bookmarks/notes nil
+- isCompleted: Bool — only meaningful for dateCards; used by stack surfacing rules like pinUntilDone
+
+LibraryViewModel — unified query engine reading from all 4 storages; rebuilds on any storage change
+- Produces: filtered library feed, calendar buckets, stack resolutions
+- Stacks: CardStack has matchRules + manualItemRefs, resolves items dynamically (not containers)
+- SavedViews: isTabPinned: Bool controls tab bar presence; calendar is a view mode toggle, not a separate tab
 
 State: CiderPanelView owns @State, passes Bindings to HomeDashboardView
 Persistence: homeDisplayMode + homeCardSizeScale on CiderConfig
@@ -276,6 +285,9 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **CSS gotcha** — `line-height` on `<pre>` (block) controls code block spacing, NOT on `<code>` (inline child). The `<pre>` inherits body's `line-height` if not explicitly set.
 - **Table CSS** — `width:auto; table-layout:auto` for content-sized tables (not `width:100%` which stretches to fill)
 - **Accepted risk:** `allowingReadAccessTo` is filesystem root (`/`) so the editor can load images from any local path the user drags in. Navigation delegate filters external URLs. This is appropriate for a local-only desktop app with bundled editor HTML and ProseMirror schema validation.
+- **Image serialization format:** `CiderImage.serialize` ALWAYS uses `<img src="..." alt="..." />` HTML — never `![]()` markdown. Reason: `![]()` inside a `<p style="text-align: ...">` block is treated as raw literal text by markdown-it (CommonMark type-6 HTML block rule). `<img>` is safe in both aligned and plain paragraphs; markdown-it wraps a bare `<img>` in `<p>` on reload and TipTap parses it back correctly. Don't revert to `![]()`.
+- **CommonMark HTML block rule:** `<p>...</p>` (and other block-level HTML tags) are CommonMark type-6 HTML blocks — markdown-it does NOT parse markdown syntax inside them. So `<p style="text-align: center">![alt](src)</p>` renders the `![]()` as raw text, not an image. Always use `<img>` inside any `<p>` block.
+- **Legacy note migration:** `normalizeIncomingMarkdown` calls `convertMarkdownImagesInHtmlParagraphs` (in `editor.js`) to convert any `<p>..![]()</p>` patterns to `<p>..<img /></p>` on load. One-time migration for old notes; the correct serialized format going forward is `<img>` everywhere.
 
 ## SwiftUI + NSPanel Gotchas
 
@@ -314,3 +326,6 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Carbon hotkey fallback:** `BookmarksHotkeyDetector` and `NotesHotkeyDetector` fall back to Carbon `RegisterEventHotKey` / `InstallEventHandler` when `CGEventTap` creation fails (e.g., no Accessibility permission). Both detectors now work without full accessibility access — Opt+N and Opt+B hotkeys register via Carbon API in that case.
 - **Delete is non-destructive:** `BookmarksStorage.remove()`, `removeAll()`, and `NotesStorage.delete()` all delegate to `TrashStorage` and return `@discardableResult TrashItem`. Callers in ViewModels capture the result and pass it to `CiderUndoManager.shared.record()` to enable undo. Never add a direct file-deletion path — always go through TrashStorage.
 - **Undo toast progress bar:** Both capture toast and undo toast use a repeating `Timer` at `BookmarksToastDesign.reviewProgressTickInterval` (1/30s). Model is an `ObservableObject` with `@Published var progress: CGFloat = 1`. Hover pauses the timer; unhover resumes. Match this pattern for any future timed toast.
+- **Card container contract:** Every card view (BookmarkCard, NoteCardView, DateCardCardView, ContactCardCardView) MUST use `.cardContainer(isHovered:isSelected:isDropTargeted:)` — never inline a `RoundedRectangle` with manual background/border/clip. Border priority inside `cardContainer`: selected > dropTargeted > hovered > default. `isDropTargeted` defaults to `false` so existing call sites need no changes when adding drop support.
+- **BookmarkCard thumbnail drop is self-contained:** `BookmarkCard` calls `BookmarksStorage.shared.assignThumbnail(...)` directly and posts `.showBookmarkCaptureToast` itself. There are NO `onAssignThumbnailFrom*` callback properties — do not add them back. Any view that renders `BookmarkCard` gets drag-and-drop thumbnail assignment for free with no wiring.
+- **`nonisolated static` for View helpers called off main thread:** Pure utility static methods on SwiftUI `View` structs that are called from `NSItemProvider` callbacks (non-isolated background threads) must be marked `nonisolated static`. Without it, the compiler emits a main-actor isolation warning. Example: `BookmarkCard.preferredImageFileExtension(for:)`.

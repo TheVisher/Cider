@@ -68,22 +68,20 @@ struct NoteCardView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Folder sub-header
-                if let folderName, !folderName.isEmpty {
-                    Text(folderName)
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.accentText)
-                        .lineLimit(1)
-                }
+                // Content area with left accent bar
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(CiderColors.controlAccent.opacity(0.55))
+                        .frame(width: 2)
 
-                // Content area: text + optional image, or empty placeholder
-                if !cardData.preview.isEmpty || !cardData.imageURLs.isEmpty {
-                    contentArea
-                } else {
-                    Text("Empty note")
-                        .font(CiderFont.bodyItalic)
-                        .foregroundColor(CiderColors.quaternary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !cardData.preview.isEmpty || !cardData.imageURLs.isEmpty {
+                        contentArea
+                    } else {
+                        Text("Empty note")
+                            .font(CiderFont.bodyItalic)
+                            .foregroundColor(CiderColors.quaternary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 // Footer
@@ -192,7 +190,7 @@ struct NoteCardView: View {
         HighlightedText(cardData.preview, highlight: searchText)
             .font(CiderFont.body)
             .foregroundColor(CiderColors.secondary)
-            .lineLimit(mode == .grid ? gridPreviewLineLimit : nil)
+            .lineLimit(mode == .grid ? gridPreviewLineLimit : masonryPreviewLineLimit)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -200,6 +198,17 @@ struct NoteCardView: View {
 
     private var footer: some View {
         HStack(spacing: Spacing.xs) {
+            if let folderName, !folderName.isEmpty {
+                Text(folderName)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.accentText)
+                    .lineLimit(1)
+
+                Text("\u{00B7}")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+
             Text(note.createdAt.noteCardDate)
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
@@ -240,5 +249,9 @@ struct NoteCardView: View {
 
     private var gridPreviewLineLimit: Int {
         cardSizing.scale < 1.5 ? 4 : 6
+    }
+
+    private var masonryPreviewLineLimit: Int {
+        cardSizing.scale < 1.5 ? 7 : 10
     }
 }

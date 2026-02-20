@@ -7,6 +7,10 @@ enum LibrarySortMode: String, Codable, CaseIterable, Hashable {
     case updatedAscending
     case titleAscending
     case titleDescending
+    /// Items with a dateAnchor sort nearest first; others fall back to createdDate.
+    case dateUpcoming
+    /// Items with a dateAnchor sort farthest first; others fall back to createdDate.
+    case dateFarthest
 }
 
 struct SavedViewFilterSpec: Codable, Hashable {

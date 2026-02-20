@@ -20,10 +20,14 @@ struct CiderPanelView: View {
     @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
     @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
+    @State private var homeSort: LibrarySortMode = CiderConfig.load().homeSort
+    @State private var homeEntityFilter: Set<LibraryEntityType> = CiderConfig.load().homeEntityFilter
     @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
     @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     @State private var suppressSidebarAutoExpandForDetails = false
+    @State private var newEventEditorContext: DateCardEditorContext?
+    @State private var newContactEditorContext: ContactEditorContext?
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + savedViewTabs + dynamicTabs
@@ -99,6 +103,16 @@ struct CiderPanelView: View {
             config.subFoldersCollapsed = newValue
             config.save()
         }
+        .onChange(of: homeSort) { _, newValue in
+            var config = CiderConfig.load()
+            config.homeSort = newValue
+            config.save()
+        }
+        .onChange(of: homeEntityFilter) { _, newValue in
+            var config = CiderConfig.load()
+            config.homeEntityFilter = newValue
+            config.save()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .expandCiderPanelForDetailModal)) { _ in
             suppressSidebarAutoExpandForDetails = true
         }
@@ -110,6 +124,52 @@ struct CiderPanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
             textScale = CiderConfig.load().textSize.scale
+        }
+        .sheet(item: $newEventEditorContext) { context in
+            DateCardEditorSheet(
+                existingCard: context.existingCard,
+                defaultDate: context.defaultDate,
+                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs in
+                    LibraryItemEditor.saveDateCard(
+                        existingCard: context.existingCard,
+                        title: title,
+                        details: details,
+                        startAt: startAt,
+                        endAt: endAt,
+                        allDay: allDay,
+                        location: location,
+                        amount: amount,
+                        labelIDs: labelIDs
+                    )
+                },
+                onDelete: { dateCard in
+                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                }
+            )
+        }
+        .sheet(item: $newContactEditorContext) { context in
+            ContactEditorSheet(
+                existingContact: context.existingContact,
+                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar in
+                    LibraryItemEditor.saveContact(
+                        draftContactID: draftContactID,
+                        existingContact: context.existingContact,
+                        displayName: displayName,
+                        relationshipLabel: relationshipLabel,
+                        birthday: birthday,
+                        notes: notes,
+                        labelIDs: labelIDs,
+                        addBirthdayDateCard: addBirthdayDateCard,
+                        email: email,
+                        phone: phone,
+                        address: address,
+                        hasAvatar: hasAvatar
+                    )
+                },
+                onDelete: { contact in
+                    _ = ContactStorage.shared.deleteContact(contact.id)
+                }
+            )
         }
         .background {
             Button("") { isSearchPaletteVisible = true }
@@ -349,6 +409,16 @@ struct CiderPanelView: View {
                     } label: {
                         Label("New Note", systemImage: "note.text")
                     }
+                    Button {
+                        newEventEditorContext = DateCardEditorContext(existingCard: nil, defaultDate: Date())
+                    } label: {
+                        Label("New Event", systemImage: "calendar.badge.plus")
+                    }
+                    Button {
+                        newContactEditorContext = ContactEditorContext(existingContact: nil)
+                    } label: {
+                        Label("New Contact", systemImage: "person.badge.plus")
+                    }
                     Divider()
                     Button {
                         _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
@@ -465,7 +535,9 @@ struct CiderPanelView: View {
                 .popover(isPresented: $isHomeViewOptionsVisible) {
                     ViewOptionsDropdown(
                         displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale
+                        cardSizeScale: $homeCardSizeScale,
+                        sortMode: $homeSort,
+                        entityFilter: $homeEntityFilter
                     )
                 }
         } else {
@@ -504,11 +576,23 @@ struct CiderPanelView: View {
                 HomeDashboardView(
                     bookmarksViewModel: bookmarksViewModel,
                     notesViewModel: notesViewModel,
+                    libraryViewModel: libraryViewModel,
                     selectedFolderID: selectedFolderID,
                     displayMode: $homeDisplayMode,
                     cardSizeScale: $homeCardSizeScale,
                     continueSectionCollapsed: $continueSectionCollapsed,
-                    selectedItemIDs: $selectedItemIDs
+                    selectedItemIDs: $selectedItemIDs,
+                    sortMode: $homeSort,
+                    entityFilter: $homeEntityFilter,
+                    onEditDateCard: { dateCard in
+                        newEventEditorContext = DateCardEditorContext(
+                            existingCard: dateCard,
+                            defaultDate: dateCard.startAt
+                        )
+                    },
+                    onEditContact: { contact in
+                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                    }
                 )
             case .bookmarks:
                 BookmarksTabContent(

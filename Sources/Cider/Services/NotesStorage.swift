@@ -515,8 +515,10 @@ private struct NoteIndexEntry: Codable, Equatable {
     }
 
     private func referencedAttachmentFilenames() -> Set<String> {
-        let markdownReferencePattern = #"\((?:\./)?\.attachments/([^)]+)\)"#
-        let htmlReferencePattern = #"(?:src|href)=["'](?:\./)?\.attachments/([^"']+)["']"#
+        // Matches relative: (.attachments/file) or (./\.attachments/file)
+        // Also matches absolute file:// URLs: (file:///path/.attachments/file)
+        let markdownReferencePattern = #"\((?:file:///[^)]*?/|(?:\./)?)?\.attachments/([^)]+)\)"#
+        let htmlReferencePattern = #"(?:src|href)=["'](?:[^"']*?/)?\.attachments/([^"']+)["']"#
 
         let markdownRegex = try? NSRegularExpression(pattern: markdownReferencePattern, options: [])
         let htmlRegex = try? NSRegularExpression(pattern: htmlReferencePattern, options: [])

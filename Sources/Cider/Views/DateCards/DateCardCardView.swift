@@ -34,69 +34,64 @@ struct DateCardCardView: View {
         Button {
             onOpen?()
         } label: {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack(alignment: .top, spacing: Spacing.sm) {
-                    VStack(alignment: .leading, spacing: Spacing.hairline) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                // Header: large date block on left, vertical divider, title on right
+                HStack(alignment: .top, spacing: 0) {
+                    // Date block — the hero visual
+                    VStack(alignment: .leading, spacing: 0) {
                         Text(monthString)
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.tertiary)
-
                         Text(dayString)
-                            .font(CiderFont.headingSemibold)
+                            .font(CiderFont.heroFallback)
                             .foregroundColor(CiderColors.primary)
+                            .monospacedDigit()
+                    }
+                    .frame(width: 48, alignment: .leading)
+
+                    Rectangle()
+                        .fill(CiderColors.borderSubtle)
+                        .frame(width: 1)
+                        .padding(.vertical, Spacing.xxs)
+                        .padding(.horizontal, Spacing.sm)
+
+                    // Title + completed badge
+                    HStack(alignment: .top, spacing: Spacing.xs) {
+                        Text(dateCard.title)
+                            .font(CiderFont.subheadingSemibold)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if dateCard.isCompleted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(CiderFont.bodyMedium)
+                                .foregroundColor(CiderColors.controlAccent)
+                        }
+                    }
+                    .padding(.top, Spacing.xs)
+                }
+
+                // Detail rows — time first, then location, amount, details
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    detailRow(icon: "clock", text: timeString)
+
+                    if !dateCard.location.isEmpty {
+                        detailRow(icon: "mappin.and.ellipse", text: dateCard.location)
                     }
 
-                    Spacer(minLength: 0)
-
-                    if dateCard.isCompleted {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(CiderFont.bodyMedium)
-                            .foregroundColor(CiderColors.controlAccent)
+                    if let amount = dateCard.amount {
+                        detailRow(
+                            icon: "dollarsign.circle",
+                            text: Self.currencyFormatter.string(from: NSNumber(value: amount))
+                                ?? String(format: "%.2f", amount)
+                        )
                     }
-                }
 
-                Text(dateCard.title)
-                    .font(CiderFont.subheadingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(2)
-
-                if !dateCard.details.isEmpty {
-                    Text(dateCard.details)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.secondary)
-                        .lineLimit(3)
-                }
-
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "clock")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.tertiary)
-                    Text(timeString)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
-                }
-
-                if !dateCard.location.isEmpty {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(CiderFont.captionMedium)
-                            .foregroundColor(CiderColors.tertiary)
-                        Text(dateCard.location)
+                    if !dateCard.details.isEmpty {
+                        Text(dateCard.details)
                             .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-
-                if let amount = dateCard.amount {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "dollarsign.circle")
-                            .font(CiderFont.captionMedium)
-                            .foregroundColor(CiderColors.tertiary)
-                        Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(3)
                     }
                 }
             }
@@ -106,6 +101,92 @@ struct DateCardCardView: View {
         .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered)
         .hoverState($isHovered, animation: .snappy)
+    }
+
+    private func detailRow(icon: String, text: String) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: icon)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 12)
+            Text(text)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+        }
+    }
+
+    private static let currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
+}
+
+struct DateCardListRow: View {
+    let dateCard: DateCard
+    var onOpen: (() -> Void)? = nil
+
+    var body: some View {
+        Button {
+            onOpen?()
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    Text(dateCard.startAt.formatted(.dateTime.month(.abbreviated)))
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                    Text(dateCard.startAt.formatted(.dateTime.day()))
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                }
+                .frame(width: 42, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(dateCard.title)
+                        .font(CiderFont.subheadingMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    HStack(spacing: Spacing.xs) {
+                        Text(dateCard.allDay ? "All Day" : dateCard.startAt.formatted(.dateTime.hour().minute()))
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.tertiary)
+                        if !dateCard.location.isEmpty {
+                            Text("\u{00B7}")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.quaternary)
+                            Text(dateCard.location)
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    if let amount = dateCard.amount {
+                        Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+
+                Spacer(minLength: Spacing.sm)
+
+                if dateCard.isCompleted {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceSubtle)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private static let currencyFormatter: NumberFormatter = {

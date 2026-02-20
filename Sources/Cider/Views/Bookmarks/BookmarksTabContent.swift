@@ -51,9 +51,6 @@ struct BookmarksTabContent: View {
                         viewModel.delete($0)
                     },
                     onAddBookmark: { viewModel.addBookmark(urlString: $0, title: $1) },
-                    onAssignThumbnailFromDroppedString: { viewModel.assignThumbnail(for: $0, droppedString: $1) },
-                    onAssignThumbnailFromLocalFileURL: { viewModel.assignThumbnail(for: $0, fileURL: $1) },
-                    onAssignThumbnailFromImageData: { viewModel.assignThumbnail(for: $0, imageData: $1, preferredFileExtension: $2) },
                     onAssignBookmarkToFolder: { viewModel.assign($0, toFolder: $1) },
                     onCreateFolder: { viewModel.createFolder(name: $0, parentID: $1) },
                     showsInternalFolderSidebar: false

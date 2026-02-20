@@ -10,7 +10,7 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Browser coverage working for Chrome, Dia, Zen, and Comet capture path.
 - Metadata/title enrichment and thumbnail fetching with fallback behavior.
 - Shimmer placeholder while enrichment/thumbnail loads.
-- Manual thumbnail assignment by dropping image/image URL/file onto a bookmark card.
+- Manual thumbnail assignment by dropping image/image URL/file onto a bookmark card. **This feature is self-contained in `BookmarkCard` — it calls `BookmarksStorage.shared` directly and posts the toast notification itself. No per-view wiring needed. Any view that renders `BookmarkCard` gets drag-and-drop automatically. Do not add `onAssignThumbnailFrom*` callbacks back.**
 - Dual-image asset storage for bookmarks:
   - Full-size originals stored in `.originals/` for later access/export.
   - Runtime thumbnails stored in `.thumbnails/` as downsampled PNGs (currently max 720px).
@@ -18,6 +18,18 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Clipboard review toast flow (save/discard), plus capture success/error toasts.
 - Window behavior parity improvements (resizing, tiling shortcuts, snap padding consistency).
 - Context menus on cards/rows with Open in Browser, Show Details, Move to Folder, Delete (shared CardContextMenu component).
+
+## Label and Stack Integration
+
+Bookmarks participate in the cross-entity label and stack system alongside date cards and contacts.
+
+- The `CardLabel` system is cross-entity — labels can be assigned to bookmarks, date cards, and contacts
+- Bookmarks can be included in stacks via **manual refs** (explicitly added) or **rule matches** (e.g., stack filtering for a specific label)
+- Filter chips in saved views allow label-based filtering across all entity types simultaneously
+- Example use cases:
+  - Tag a bookmark with a "Gift Idea" label → it surfaces in a partner's birthday stack
+  - Tag concert/event bookmarks with a "Tickets" label → a stack filters for upcoming events
+  - Color-code bookmarks by project or person for quick visual scanning in mixed-content views
 
 ## Bug Fix: Standalone Panel Resize Handles
 

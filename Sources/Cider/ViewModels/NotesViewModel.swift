@@ -257,7 +257,7 @@ final class NotesViewModel: ObservableObject {
         guard let note = selectedNote else { return }
         let imageURL = NotesStorage.shared.saveImage(data: data, filename: filename, for: note)
         guard let webView = editorWebView else { return }
-        let src = imageURL.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? imageURL.path
+        let src = imageURL.absoluteString
         let alt = filename
         guard let srcData = try? JSONSerialization.data(withJSONObject: src, options: .fragmentsAllowed),
               let altData = try? JSONSerialization.data(withJSONObject: alt, options: .fragmentsAllowed),

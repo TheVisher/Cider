@@ -163,6 +163,18 @@ final class LibraryViewModel: ObservableObject {
             return source.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case .titleDescending:
             return source.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
+        case .dateUpcoming:
+            return source.sorted {
+                let lhs = $0.dateAnchor ?? $0.createdDate
+                let rhs = $1.dateAnchor ?? $1.createdDate
+                return lhs < rhs
+            }
+        case .dateFarthest:
+            return source.sorted {
+                let lhs = $0.dateAnchor ?? $0.createdDate
+                let rhs = $1.dateAnchor ?? $1.createdDate
+                return lhs > rhs
+            }
         }
     }
 

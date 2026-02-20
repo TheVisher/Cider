@@ -80,7 +80,7 @@ struct SavedViewTabContent: View {
                 existingCard: context.existingCard,
                 defaultDate: context.defaultDate,
                 onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs in
-                    saveDateCard(
+                    LibraryItemEditor.saveDateCard(
                         existingCard: context.existingCard,
                         title: title,
                         details: details,
@@ -100,15 +100,20 @@ struct SavedViewTabContent: View {
         .sheet(item: $contactEditorContext) { context in
             ContactEditorSheet(
                 existingContact: context.existingContact,
-                onSave: { displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard in
-                    saveContact(
+                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar in
+                    LibraryItemEditor.saveContact(
+                        draftContactID: draftContactID,
                         existingContact: context.existingContact,
                         displayName: displayName,
                         relationshipLabel: relationshipLabel,
                         birthday: birthday,
                         notes: notes,
                         labelIDs: labelIDs,
-                        addBirthdayDateCard: addBirthdayDateCard
+                        addBirthdayDateCard: addBirthdayDateCard,
+                        email: email,
+                        phone: phone,
+                        address: address,
+                        hasAvatar: hasAvatar
                     )
                 },
                 onDelete: { contact in
@@ -625,78 +630,6 @@ struct SavedViewTabContent: View {
         }
     }
 
-    private func saveDateCard(
-        existingCard: DateCard?,
-        title: String,
-        details: String,
-        startAt: Date,
-        endAt: Date?,
-        allDay: Bool,
-        location: String,
-        amount: Double?,
-        labelIDs: [UUID]
-    ) {
-        if var existingCard {
-            existingCard.title = title
-            existingCard.details = details
-            existingCard.startAt = startAt
-            existingCard.endAt = endAt
-            existingCard.allDay = allDay
-            existingCard.location = location
-            existingCard.amount = amount
-            existingCard.labelIDs = labelIDs
-            _ = dateCardStorage.updateDateCard(existingCard)
-            return
-        }
-
-        var created = dateCardStorage.createDateCard(
-            title: title,
-            startAt: startAt,
-            endAt: endAt,
-            allDay: allDay,
-            amount: amount
-        )
-        created.details = details
-        created.location = location
-        created.amount = amount
-        created.labelIDs = labelIDs
-        _ = dateCardStorage.updateDateCard(created)
-    }
-
-    private func saveContact(
-        existingContact: ContactCard?,
-        displayName: String,
-        relationshipLabel: String,
-        birthday: Date?,
-        notes: String,
-        labelIDs: [UUID],
-        addBirthdayDateCard: Bool
-    ) {
-        if var existingContact {
-            existingContact.displayName = displayName
-            existingContact.relationshipLabel = relationshipLabel
-            existingContact.birthday = birthday
-            existingContact.notes = notes
-            existingContact.labelIDs = labelIDs
-            _ = contactStorage.updateContact(existingContact)
-            if addBirthdayDateCard, let birthday {
-                createOrUpdateBirthdayDateCard(for: existingContact, birthday: birthday)
-            }
-            return
-        }
-
-        var created = contactStorage.createContact(displayName: displayName)
-        created.relationshipLabel = relationshipLabel
-        created.birthday = birthday
-        created.notes = notes
-        created.labelIDs = labelIDs
-        _ = contactStorage.updateContact(created)
-
-        if addBirthdayDateCard, let birthday {
-            createOrUpdateBirthdayDateCard(for: created, birthday: birthday)
-        }
-    }
-
     private func itemRow(_ item: LibraryItemV2) -> some View {
         switch item {
         case .bookmark(let bookmark):
@@ -865,67 +798,6 @@ struct SavedViewTabContent: View {
                 GenericLibraryItemCard(item: item)
             }
         }
-    }
-
-    private func createOrUpdateBirthdayDateCard(for contact: ContactCard, birthday: Date) {
-        var refreshedContact = contactStorage.contact(for: contact.id) ?? contact
-        let targetStart = nextBirthdayOccurrence(from: birthday)
-
-        if let linkedDateCardID = refreshedContact.linkedEntities.first(where: { $0.type == .dateCard })?.entityID,
-           var existingBirthdayCard = dateCardStorage.dateCard(for: linkedDateCardID) {
-            existingBirthdayCard.title = "\(refreshedContact.displayName) Birthday"
-            existingBirthdayCard.details = "Birthday reminder linked to \(refreshedContact.displayName)."
-            existingBirthdayCard.startAt = targetStart
-            existingBirthdayCard.endAt = nil
-            existingBirthdayCard.allDay = true
-            existingBirthdayCard.location = ""
-            existingBirthdayCard.recurrenceRule = DateCardRecurrenceRule(frequency: .yearly, interval: 1)
-            if !existingBirthdayCard.linkedEntities.contains(where: { $0.type == .contact && $0.entityID == refreshedContact.id }) {
-                existingBirthdayCard.linkedEntities.append(LibraryEntityRef(type: .contact, entityID: refreshedContact.id))
-            }
-            _ = dateCardStorage.updateDateCard(existingBirthdayCard)
-            if !refreshedContact.linkedEntities.contains(where: { $0.type == .dateCard && $0.entityID == existingBirthdayCard.id }) {
-                refreshedContact.linkedEntities.append(LibraryEntityRef(type: .dateCard, entityID: existingBirthdayCard.id))
-                _ = contactStorage.updateContact(refreshedContact)
-            }
-            return
-        }
-
-        var createdBirthdayCard = dateCardStorage.createDateCard(
-            title: "\(refreshedContact.displayName) Birthday",
-            startAt: targetStart,
-            endAt: nil,
-            allDay: true
-        )
-        createdBirthdayCard.details = "Birthday reminder linked to \(refreshedContact.displayName)."
-        createdBirthdayCard.recurrenceRule = DateCardRecurrenceRule(frequency: .yearly, interval: 1)
-        createdBirthdayCard.linkedEntities.append(LibraryEntityRef(type: .contact, entityID: refreshedContact.id))
-        _ = dateCardStorage.updateDateCard(createdBirthdayCard)
-
-        if !refreshedContact.linkedEntities.contains(where: { $0.type == .dateCard && $0.entityID == createdBirthdayCard.id }) {
-            refreshedContact.linkedEntities.append(LibraryEntityRef(type: .dateCard, entityID: createdBirthdayCard.id))
-            _ = contactStorage.updateContact(refreshedContact)
-        }
-    }
-
-    private func nextBirthdayOccurrence(from birthday: Date, now: Date = Date()) -> Date {
-        let calendar = Calendar.current
-        let monthDay = calendar.dateComponents([.month, .day], from: birthday)
-        let year = calendar.component(.year, from: now)
-
-        guard
-            let month = monthDay.month,
-            let day = monthDay.day,
-            let candidate = calendar.date(from: DateComponents(year: year, month: month, day: day))
-        else {
-            return birthday
-        }
-
-        if candidate >= calendar.startOfDay(for: now) {
-            return candidate
-        }
-
-        return calendar.date(from: DateComponents(year: year + 1, month: month, day: day)) ?? candidate
     }
 
     @ViewBuilder
@@ -1138,17 +1010,6 @@ struct SavedViewTabContent: View {
     }
 }
 
-private struct DateCardEditorContext: Identifiable {
-    let id = UUID()
-    let existingCard: DateCard?
-    let defaultDate: Date
-}
-
-private struct ContactEditorContext: Identifiable {
-    let id = UUID()
-    let existingContact: ContactCard?
-}
-
 private struct StackSurfaceSelection: Identifiable {
     let id: UUID
 }
@@ -1205,75 +1066,3 @@ private struct GenericLibraryItemCard: View {
     }
 }
 
-private struct DateCardListRow: View {
-    let dateCard: DateCard
-    let onOpen: () -> Void
-
-    var body: some View {
-        Button {
-            onOpen()
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                VStack(alignment: .leading, spacing: Spacing.hairline) {
-                    Text(dateCard.startAt.formatted(.dateTime.month(.abbreviated)))
-                        .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
-                    Text(dateCard.startAt.formatted(.dateTime.day()))
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.primary)
-                }
-                .frame(width: 42, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(dateCard.title)
-                        .font(CiderFont.subheadingMedium)
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(1)
-
-                    HStack(spacing: Spacing.xs) {
-                        Text(dateCard.allDay ? "All Day" : dateCard.startAt.formatted(.dateTime.hour().minute()))
-                            .font(CiderFont.body)
-                            .foregroundColor(CiderColors.tertiary)
-                        if !dateCard.location.isEmpty {
-                            Text("\u{00B7}")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.quaternary)
-                            Text(dateCard.location)
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.tertiary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    if let amount = dateCard.amount {
-                        Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
-                            .font(CiderFont.body)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                }
-
-                Spacer(minLength: Spacing.sm)
-
-                if dateCard.isCompleted {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(CiderFont.bodyMedium)
-                        .foregroundColor(CiderColors.controlAccent)
-                }
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(CiderColors.surfaceSubtle)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private static let currencyFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.maximumFractionDigits = 2
-        return formatter
-    }()
-}
