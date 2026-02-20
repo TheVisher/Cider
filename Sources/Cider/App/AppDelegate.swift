@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import Combine
-import os
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -71,7 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startNotesHotkeyDetection()
         startBookmarksHotkeyDetection()
         observeUndoNotifications()
-        SearchIndexService.shared.warmUp()
 
         Task { @MainActor in
             let config = CiderConfig.load()
@@ -1205,9 +1203,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Debug Logging
 
-    private let logger = Logger(subsystem: "com.cider.app", category: "AppDelegate")
-
     private func debugLog(_ message: String) {
-        logger.debug("\(message, privacy: .public)")
+        let path = "/tmp/cider-debug.log"
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        guard let lineData = line.data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            defer { handle.closeFile() }
+            handle.seekToEndOfFile()
+            handle.write(lineData)
+        } else {
+            FileManager.default.createFile(atPath: path, contents: lineData)
+        }
     }
 }
