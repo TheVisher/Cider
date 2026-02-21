@@ -100,22 +100,23 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
         }
     }
 
-    // Allow file:// URLs for local image loading
+    // Allow only file:// (editor HTML + local images) and about: (initial blank).
+    // Everything else is blocked regardless of how the navigation was triggered —
+    // only user-clicked links are additionally opened in the system browser.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
-        if let url = navigationAction.request.url {
-            if url.isFileURL || url.scheme == "about" {
-                return .allow
-            }
-            // Block external navigation (links in editor content)
-            if navigationAction.navigationType == .linkActivated {
-                NSWorkspace.shared.open(url)
-                return .cancel
-            }
+        guard let url = navigationAction.request.url else { return .cancel }
+
+        if url.isFileURL || url.scheme == "about" {
+            return .allow
         }
-        return .allow
+
+        if navigationAction.navigationType == .linkActivated {
+            NSWorkspace.shared.open(url)
+        }
+        return .cancel
     }
 }
 

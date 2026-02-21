@@ -28,39 +28,13 @@
 
 ## Security
 
-### CH-S01 — WKWebView root filesystem access (High)
+### ~~CH-S01 — WKWebView root filesystem access~~ ✅ Fixed 2026-02-21
 
-The notes editor WebView loads with `allowingReadAccessTo: URL(fileURLWithPath: "/")` — a skeleton key to the entire disk. Cider only needs access to the user's home directory (notes, attachments, dragged images).
+Changed `allowingReadAccessTo: URL(fileURLWithPath: "/")` to `URL(fileURLWithPath: NSHomeDirectory())` in `NotesViewModel.swift`. WebView can now only read from the user's home directory, not the entire filesystem.
 
-- [ ]
+### ~~CH-S02 — WebView bridge exposure via HTML + navigation policy~~ ✅ Fixed 2026-02-21
 
-- [ ]
-
-- Remediation: Change to `URL(fileURLWithPath: NSHomeDirectory())`
-
-- File refs: `Sources/Cider/ViewModels/NotesViewModel.swift:199–200`
-
-- First reported: 2026-02-16
-
-- [ ] Fixed
-
-### CH-S02 — WebView bridge exposure via HTML + navigation policy (Critical)
-
-The editor enables HTML markdown parsing (`html: true`) and registers multiple `window.webkit.messageHandlers`. The navigation policy only blocks `.linkActivated`, leaving non-link navigations able to interact with native bridge handlers.
-
-> **Note:** CLAUDE.md documents this as an accepted risk — the editor JS is bundled and trusted, and the navigation delegate filters external URLs. Flag for hardening if the editor ever accepts arbitrary external content.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Restrict navigation to trusted origins/schemes; consider sanitizing unsafe HTML on ingest.
-
-- File refs: `Sources/Cider/Views/Notes/TipTapEditorView.swift:12, 123, 133`
-
-- First reported: 2026-02-16
-
-- [ ] Fixed
+Navigation policy in `TipTapEditorCoordinator` changed to deny-by-default. Only `file://` (editor HTML + local images) and `about:` (initial blank) are allowed through. All other schemes are blocked regardless of `navigationType` — the previous code only blocked `.linkActivated`, leaving JS-triggered navigations open. User-clicked external links still open in the system browser before being cancelled.
 
 ---
 
@@ -102,37 +76,15 @@ Move is now `try fm.moveItem` inside a `do/catch`; on failure, function returns 
 
 `search()` is now `async`. Note content loading extracted to `fetchNoteResults()` — a `nonisolated static async` method that reads files on the cooperative thread pool. `searchNotes()` captures `NotesStorage.shared.notesDirectoryURL` on the main actor then `await`s the nonisolated helper. Both call sites (`SearchPaletteView` task, `SearchTabContent` `.task(id:)`) already run off the main actor. `SearchTabContent` switched from computed property to `@State + .task(id: query)`.
 
-### CH-P02 — Main-thread I/O at startup and directory-switch (Medium)
+### ~~CH-P02 — Main-thread I/O at startup and directory-switch~~ ✅ Fixed 2026-02-21
 
-Large note/bookmark scans and JSON parsing happen synchronously on `@MainActor` during launch and when the storage directory changes in Settings.
+**NotesStorage:** `init()` and `updateDirectory()` now capture file URLs on MainActor, fire `Task.detached(priority: .userInitiated)` calling a new `nonisolated static loadAndScan(directoryURL:indexURL:indexFileName:)` that combines `loadIndex` + `scanNotes` I/O off-thread, then applies `(index, notes, needsSave)` back on MainActor. Existing `loadIndex()` and `scanNotes()` instance methods kept for directory watcher.
 
-- [ ]
+**BookmarksStorage:** `init()` reads both files (`_cider_bookmarks_metadata.json`, `bookmarks.html`) in `Task.detached`, then parses and applies via new `buildSnapshotFromFiles(metaData:htmlData:)` on MainActor. `load()`, `loadFromDisk()`, and `loadMetadataSnapshot()` unchanged (still used by `updateDirectory()` and `reload()`).
 
-- [ ]
+### ~~CH-P03 — Attachment orphan cleanup scans all notes on main actor~~ ✅ Fixed 2026-02-21
 
-- Remediation: Move read/decode work to background tasks; publish finalized state back on main actor.
-
-- File refs: `Sources/Cider/Services/NotesStorage.swift:40`, `Sources/Cider/Services/BookmarksStorage.swift:467`
-
-- First reported: 2026-02-16 (ME-02)
-
-- [ ] Fixed
-
-### CH-P03 — Attachment orphan cleanup scans all notes on main actor (Medium)
-
-After every note save, orphan cleanup reads all note files and the attachment directory on `@MainActor`. Cost is O(n notes) and blocks the UI.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Move cleanup to a `Task.detached`; fence mutations back to `@MainActor`.
-
-- File refs: `Sources/Cider/Services/NotesStorage.swift:470, 483, 528`
-
-- First reported: 2026-02-16 (ME-03), confirmed 2026-02-20
-
-- [ ] Fixed
+`scheduleAttachmentCleanup()` now captures note paths and the attachments directory on MainActor, then fires `Task.detached(priority: .background)` calling `nonisolated static removeOrphanAttachmentsInBackground(notePaths:attachmentsDir:gracePeriodSeconds:)`. `referencedAttachmentFilenamesFromPaths(_:)` and `extractAttachmentFilenames(from:regex:into:)` also made `nonisolated static`. Old instance methods `removeOrphanAttachments()` and `referencedAttachmentFilenames()` removed.
 
 ### ~~CH-P04 — Config save thrashing on slider changes~~ ✅ Fixed 2026-02-21
 
@@ -162,19 +114,9 @@ Replaced `CAMediaTimingFunction(name: .easeInEaseOut)` with `CAMediaTimingFuncti
 
 Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(24).offset(y:12).opacity(shadowShapeFullOpacity) }` — same pattern as `AcrylicPanelBackground`.
 
-### CH-D05 — Some UI elements ignore global text-size preference (Low)
+### ~~CH-D05 — Some UI elements ignore global text-size preference~~ ✅ Fixed 2026-02-21
 
-A few fixed-size icon/font paths remain unscaled after the global `CiderFont` scale was introduced.
-
-- [ ]
-
-- [ ]
-
-- File refs: `Sources/Cider/Utilities/CiderFont.swift:93`, `Sources/Cider/Views/Notes/NotesPanelView.swift:511`
-
-- First reported: 2026-02-18
-
-- [ ] Fixed
+Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from `static let` to `static var` using `scaled(36)`. Fixed traffic light symbol fonts in `NotesPanelView.swift` (2 instances), `CiderPanelShell.swift`, and `BookmarksPanelView.swift` to multiply by `CiderFont.scale`. `appIcon` left as fixed 64pt (purely decorative on About screen).
 
 ---
 

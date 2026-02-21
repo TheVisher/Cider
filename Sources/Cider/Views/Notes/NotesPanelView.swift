@@ -515,7 +515,7 @@ private struct NotesTrafficLightButton: View {
                 .overlay {
                     if isHovered {
                         Image(systemName: symbol)
-                            .font(.system(size: NotesDesign.trafficLightSymbolSize, weight: .semibold))
+                            .font(.system(size: NotesDesign.trafficLightSymbolSize * CiderFont.scale, weight: .semibold))
                             .foregroundColor(CiderColors.trafficLightSymbol)
                     }
                 }

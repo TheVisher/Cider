@@ -28,7 +28,7 @@ final class NotesStorage: ObservableObject {
     private let orphanAttachmentGracePeriodSeconds: TimeInterval = 5 * 60
 
     /// Per-note metadata persisted in the index file.
-private struct NoteIndexEntry: Codable, Equatable {
+private struct NoteIndexEntry: Codable, Equatable, Sendable {
         var filename: String
         var folderID: UUID?
         var createdAt: Date?
@@ -42,9 +42,19 @@ private struct NoteIndexEntry: Codable, Equatable {
         let path = NSString(string: config.notesDirectory).expandingTildeInPath
         self.directoryURL = URL(fileURLWithPath: path)
         ensureDirectory()
-        loadIndex()
-        scanNotes()
         startDirectoryWatcher()
+        let dirURL = directoryURL
+        let idxURL = dirURL.appendingPathComponent(indexFileName)
+        let idxName = indexFileName
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.loadAndScan(directoryURL: dirURL, indexURL: idxURL, indexFileName: idxName)
+            }.value
+            self.index = result.index
+            self.notes = result.notes
+            if result.needsSave { self.saveIndex() }
+        }
     }
 
     /// The base directory URL where notes are stored.
@@ -59,9 +69,19 @@ private struct NoteIndexEntry: Codable, Equatable {
         let expanded = NSString(string: newPath).expandingTildeInPath
         directoryURL = URL(fileURLWithPath: expanded)
         ensureDirectory()
-        loadIndex()
-        scanNotes()
         startDirectoryWatcher()
+        let dirURL = directoryURL
+        let idxURL = dirURL.appendingPathComponent(indexFileName)
+        let idxName = indexFileName
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.loadAndScan(directoryURL: dirURL, indexURL: idxURL, indexFileName: idxName)
+            }.value
+            self.index = result.index
+            self.notes = result.notes
+            if result.needsSave { self.saveIndex() }
+        }
     }
 
     private func ensureDirectory() {
@@ -180,6 +200,101 @@ private struct NoteIndexEntry: Codable, Equatable {
         if rebuiltIndex != previousIndex {
             saveIndex()
         }
+    }
+
+    // MARK: - Background Load & Scan
+
+    /// Combines loadIndex + scanNotes into a pure, background-safe function.
+    /// Returns the rebuilt index, scanned notes, and whether the index needs saving.
+    private nonisolated static func loadAndScan(
+        directoryURL: URL,
+        indexURL: URL,
+        indexFileName: String
+    ) -> (index: [UUID: NoteIndexEntry], notes: [Note], needsSave: Bool) {
+        // Load index
+        var loadedIndex: [UUID: NoteIndexEntry] = [:]
+        if let data = try? Data(contentsOf: indexURL) {
+            // Try new format first: [String: NoteIndexEntry]
+            if let decoded = try? JSONDecoder().decode([String: NoteIndexEntry].self, from: data) {
+                loadedIndex = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
+                    guard let uuid = UUID(uuidString: key) else { return nil }
+                    return (uuid, value)
+                })
+            } else if let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+                // Fallback: legacy format [String: String] (UUID → filename)
+                loadedIndex = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
+                    guard let uuid = UUID(uuidString: key) else { return nil }
+                    return (uuid, NoteIndexEntry(filename: value, folderID: nil, createdAt: nil))
+                })
+            }
+        }
+
+        // Scan directory
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+        ) else {
+            return (index: [:], notes: [], needsSave: false)
+        }
+
+        // Build a resilient reverse map (filename -> UUID).
+        var filenameToUUID: [String: UUID] = [:]
+        for (uuid, entry) in loadedIndex.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            if filenameToUUID[entry.filename] == nil {
+                filenameToUUID[entry.filename] = uuid
+            }
+        }
+
+        var workingIndex = loadedIndex
+        var scannedNotes: [Note] = []
+
+        for fileURL in files {
+            guard fileURL.pathExtension == "md" else { continue }
+            let filename = fileURL.lastPathComponent
+            guard filename != indexFileName else { continue }
+
+            let title = String(filename.dropLast(3)) // Remove .md
+            let uuid = filenameToUUID[filename] ?? UUID()
+            let folderID = workingIndex[uuid]?.folderID
+
+            let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+            let modDate = attrs?[.modificationDate] as? Date ?? Date()
+            let fsCreateDate = attrs?[.creationDate] as? Date ?? Date()
+
+            // Use persisted createdAt from index (survives atomic file writes).
+            // Fall back to filesystem creation date for legacy notes without it.
+            let existingEntry = workingIndex[uuid]
+            let createDate = existingEntry?.createdAt ?? fsCreateDate
+
+            // Register in index if new, or backfill createdAt if missing
+            if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
+                workingIndex[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, createdAt: createDate)
+            }
+
+            // Lazy: don't load content during scan
+            scannedNotes.append(Note(
+                id: uuid,
+                title: title,
+                content: "",
+                createdAt: createDate,
+                modifiedAt: modDate,
+                relativePath: filename,
+                folderID: folderID
+            ))
+        }
+
+        // Rebuild the index from scanned files so duplicates/stale entries are
+        // cleaned up automatically. Preserve folderID and createdAt from existing entries.
+        let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, createdAt: $0.createdAt))
+        })
+
+        // Sort by newest created first
+        scannedNotes.sort { $0.createdAt > $1.createdAt }
+
+        let needsSave = rebuiltIndex != loadedIndex
+        return (index: rebuiltIndex, notes: scannedNotes, needsSave: needsSave)
     }
 
     // MARK: - CRUD
@@ -469,7 +584,17 @@ private struct NoteIndexEntry: Codable, Equatable {
 
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
-                self?.removeOrphanAttachments()
+                guard let self else { return }
+                let notePaths = self.notes.map { self.directoryURL.appendingPathComponent($0.relativePath) }
+                let attachmentsDir = self.attachmentsDirectoryURL()
+                let gracePeriod = self.orphanAttachmentGracePeriodSeconds
+                Task.detached(priority: .background) {
+                    Self.removeOrphanAttachmentsInBackground(
+                        notePaths: notePaths,
+                        attachmentsDir: attachmentsDir,
+                        gracePeriodSeconds: gracePeriod
+                    )
+                }
             }
         }
 
@@ -480,9 +605,12 @@ private struct NoteIndexEntry: Codable, Equatable {
         )
     }
 
-    private func removeOrphanAttachments() {
+    private nonisolated static func removeOrphanAttachmentsInBackground(
+        notePaths: [URL],
+        attachmentsDir: URL,
+        gracePeriodSeconds: TimeInterval
+    ) {
         let fm = FileManager.default
-        let attachmentsDir = attachmentsDirectoryURL()
         guard fm.fileExists(atPath: attachmentsDir.path) else { return }
 
         guard let attachmentURLs = try? fm.contentsOfDirectory(
@@ -493,8 +621,8 @@ private struct NoteIndexEntry: Codable, Equatable {
             return
         }
 
-        let referencedFiles = referencedAttachmentFilenames()
-        let orphanCutoff = Date().addingTimeInterval(-orphanAttachmentGracePeriodSeconds)
+        let referencedFiles = referencedAttachmentFilenamesFromPaths(notePaths)
+        let orphanCutoff = Date().addingTimeInterval(-gracePeriodSeconds)
 
         for fileURL in attachmentURLs {
             guard let values = try? fileURL.resourceValues(
@@ -514,7 +642,7 @@ private struct NoteIndexEntry: Codable, Equatable {
         }
     }
 
-    private func referencedAttachmentFilenames() -> Set<String> {
+    private nonisolated static func referencedAttachmentFilenamesFromPaths(_ notePaths: [URL]) -> Set<String> {
         // Matches relative: (.attachments/file) or (./\.attachments/file)
         // Also matches absolute file:// URLs: (file:///path/.attachments/file)
         let markdownReferencePattern = #"\((?:file:///[^)]*?/|(?:\./)?)?\.attachments/([^)]+)\)"#
@@ -525,8 +653,7 @@ private struct NoteIndexEntry: Codable, Equatable {
 
         var referenced = Set<String>()
 
-        for note in notes {
-            let noteURL = directoryURL.appendingPathComponent(note.relativePath)
+        for noteURL in notePaths {
             guard let content = try? String(contentsOf: noteURL, encoding: .utf8) else {
                 continue
             }
@@ -551,7 +678,7 @@ private struct NoteIndexEntry: Codable, Equatable {
         return referenced
     }
 
-    private func extractAttachmentFilenames(
+    private nonisolated static func extractAttachmentFilenames(
         from content: String,
         regex: NSRegularExpression,
         into referenced: inout Set<String>

@@ -200,7 +200,7 @@ final class NotesViewModel: ObservableObject {
         }
 
         if let resourceURL = Bundle.module.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
-            let readAccessRoot = URL(fileURLWithPath: "/", isDirectory: true)
+            let readAccessRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
         }
 

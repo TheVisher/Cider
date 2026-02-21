@@ -236,8 +236,8 @@ Cider uses **SF Pro** (macOS system font) exclusively. All font declarations use
 | `.microBold` | 9pt | Bold | Sidebar confirm/cancel icons |
 | `.badge` | 8pt | Bold | Tab bar badge count |
 | `.heroFallback` | 28pt | Bold | Bookmark hero fallback letter |
-| `.emptyStateIcon` | 36pt | Regular | Empty state icon |
-| `.appIcon` | 64pt | Regular | About screen app icon |
+| `.emptyStateIcon` | 36pt × scale | Regular | Empty state icon (scales with global text size) |
+| `.appIcon` | 64pt | Regular | About screen app icon (fixed — decorative) |
 
 #### Responsive Tokens (textScale-based)
 

@@ -42,7 +42,38 @@ final class BookmarksStorage: ObservableObject {
         let expanded = NSString(string: config.ciderDataDirectory).expandingTildeInPath
         directoryURL = URL(fileURLWithPath: expanded)
         ensureDirectory()
-        load()
+
+        // Read files off the main thread; parse and apply on MainActor
+        let metaURL = metadataFileURL
+        let htmlURL = htmlFileURL
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.cancelAllEnrichmentTasks()
+
+            let (metaData, htmlData) = await Task.detached(priority: .userInitiated) {
+                (try? Data(contentsOf: metaURL), try? Data(contentsOf: htmlURL))
+            }.value
+
+            if let snapshot = self.buildSnapshotFromFiles(metaData: metaData, htmlData: htmlData) {
+                self.bookmarks = snapshot.bookmarks
+                self.folders = snapshot.folders
+                self.normalizeBookmarkImageAssetsIfNeeded()
+                self.scheduleEnrichmentForIncompleteBookmarks()
+                return
+            }
+
+            if let migrated = self.migrateLegacyUserDefaults() {
+                self.bookmarks = migrated.bookmarks
+                self.folders = migrated.folders
+                self.normalizeBookmarkImageAssetsIfNeeded()
+                self.persist()
+                self.scheduleEnrichmentForIncompleteBookmarks()
+                return
+            }
+
+            self.bookmarks = []
+            self.folders = []
+        }
     }
 
     func updateDirectory(to newPath: String) {
@@ -498,6 +529,93 @@ final class BookmarksStorage: ObservableObject {
         let metadataByURL = Dictionary(uniqueKeysWithValues: metadataBookmarks.map { ($0.urlString.lowercased(), $0) })
 
         guard let htmlData = try? Data(contentsOf: htmlFileURL),
+              let html = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .utf16) else {
+            if metadataBookmarks.isEmpty, metadataFolders.isEmpty {
+                return nil
+            }
+            return BookmarksDiskSnapshot(
+                bookmarks: metadataBookmarks.sorted { $0.createdAt > $1.createdAt },
+                folders: metadataFolders
+            )
+        }
+
+        let entries = NetscapeBookmarksCodec.decode(html)
+        if entries.isEmpty {
+            if metadataBookmarks.isEmpty, metadataFolders.isEmpty {
+                return BookmarksDiskSnapshot(bookmarks: [], folders: [])
+            }
+            return BookmarksDiskSnapshot(
+                bookmarks: metadataBookmarks.sorted { $0.createdAt > $1.createdAt },
+                folders: metadataFolders
+            )
+        }
+
+        var loadedBookmarks: [Bookmark] = []
+        loadedBookmarks.reserveCapacity(entries.count)
+
+        for entry in entries {
+            guard let normalized = normalizedURL(from: entry.urlString) else { continue }
+            let canonical = normalized.absoluteString
+
+            var bookmark = metadataByURL[canonical.lowercased()] ?? Bookmark(
+                title: resolvedTitle(for: normalized, override: entry.title),
+                urlString: canonical
+            )
+            bookmark.urlString = canonical
+
+            if let title = entry.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                bookmark.title = title
+            } else if bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                bookmark.title = resolvedTitle(for: normalized, override: nil)
+            }
+
+            if let addDate = entry.addDate {
+                bookmark.createdAt = addDate
+            }
+            if let modifiedDate = entry.lastModified {
+                bookmark.updatedAt = max(bookmark.updatedAt, modifiedDate)
+            }
+
+            loadedBookmarks.append(bookmark)
+        }
+
+        let sanitizedLoaded = sanitizedBookmarks(
+            from: loadedBookmarks,
+            validFolderIDs: Set(metadataFolders.map(\.id))
+        )
+        return BookmarksDiskSnapshot(
+            bookmarks: sanitizedLoaded,
+            folders: metadataFolders
+        )
+    }
+
+    private func buildSnapshotFromFiles(metaData: Data?, htmlData: Data?) -> BookmarksDiskSnapshot? {
+        let metadataSnapshot: BookmarksMetadataSnapshot
+        if let data = metaData {
+            do {
+                metadataSnapshot = try JSONDecoder().decode(BookmarksMetadataSnapshot.self, from: data)
+            } catch {
+                do {
+                    // Legacy metadata format before folders support.
+                    let bookmarks = try JSONDecoder().decode([Bookmark].self, from: data)
+                    metadataSnapshot = BookmarksMetadataSnapshot(bookmarks: bookmarks, folders: [])
+                } catch {
+                    NSLog("[BookmarksStorage] Failed to decode metadata: \(error)")
+                    metadataSnapshot = BookmarksMetadataSnapshot(bookmarks: [], folders: [])
+                }
+            }
+        } else {
+            metadataSnapshot = BookmarksMetadataSnapshot(bookmarks: [], folders: [])
+        }
+
+        let metadataFolders = sanitizedFolders(from: metadataSnapshot.folders)
+        let metadataBookmarks = sanitizedBookmarks(
+            from: metadataSnapshot.bookmarks,
+            validFolderIDs: Set(metadataFolders.map(\.id))
+        )
+        let metadataByURL = Dictionary(uniqueKeysWithValues: metadataBookmarks.map { ($0.urlString.lowercased(), $0) })
+
+        guard let htmlData,
               let html = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .utf16) else {
             if metadataBookmarks.isEmpty, metadataFolders.isEmpty {
                 return nil
