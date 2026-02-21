@@ -12,14 +12,12 @@ struct NewItemPopover: View {
     var onDismiss: () -> Void
 
     @State private var step: NewItemStep = .picker
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             switch step {
             case .picker:
                 pickerView
-                    .transition(.opacity)
             case .bookmark:
                 BookmarkCreationForm(
                     onBack: back,
@@ -28,7 +26,6 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
-                .transition(.opacity)
             case .note:
                 NoteCreationForm(
                     onBack: back,
@@ -37,7 +34,6 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
-                .transition(.opacity)
             case .event:
                 EventCreationForm(
                     onBack: back,
@@ -46,7 +42,6 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
-                .transition(.opacity)
             case .contact:
                 ContactCreationForm(
                     onBack: back,
@@ -55,7 +50,6 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
-                .transition(.opacity)
             case .folder:
                 FolderCreationForm(
                     folders: folders,
@@ -65,17 +59,15 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
-                .transition(.opacity)
             }
         }
+        // No animation on step changes: animating popover content size via ViewBridge
+        // (RemoteViewService XPC) causes crashes in non-activating NSPanel popovers.
         .frame(width: 264)
-        .animation(reduceMotion ? .none : CiderAnimation.snappy, value: step)
     }
 
     private func back() {
-        withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
-            step = .picker
-        }
+        step = .picker
     }
 
     // MARK: - Picker
@@ -128,14 +120,12 @@ struct NewItemPopover: View {
     }
 
     private func handleTypeTap(_ type: NewItemType) {
-        withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
-            switch type {
-            case .bookmark: step = .bookmark
-            case .note:     step = .note
-            case .event:    step = .event
-            case .contact:  step = .contact
-            case .folder:   step = .folder
-            }
+        switch type {
+        case .bookmark: step = .bookmark
+        case .note:     step = .note
+        case .event:    step = .event
+        case .contact:  step = .contact
+        case .folder:   step = .folder
         }
     }
 }
@@ -251,7 +241,6 @@ private struct BookmarkCreationForm: View {
     @State private var url = ""
     @State private var title = ""
     @State private var errorMessage = ""
-    @FocusState private var urlFocused: Bool
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -267,7 +256,6 @@ private struct BookmarkCreationForm: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
-                    .focused($urlFocused)
                     .onSubmit(commit)
 
                 TextField("Title (optional)", text: $title)
@@ -295,10 +283,6 @@ private struct BookmarkCreationForm: View {
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
         }
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            urlFocused = true
-        }
     }
 
     private func commit() {
@@ -321,7 +305,6 @@ private struct NoteCreationForm: View {
     @State private var title = ""
     @State private var content = ""
     @State private var errorMessage = ""
-    @FocusState private var titleFocused: Bool
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -337,7 +320,6 @@ private struct NoteCreationForm: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
-                    .focused($titleFocused)
                     .onSubmit(commit)
 
                 TextField("Content (optional)", text: $content, axis: .vertical)
@@ -365,10 +347,6 @@ private struct NoteCreationForm: View {
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
         }
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            titleFocused = true
-        }
     }
 
     private func commit() {
@@ -391,7 +369,6 @@ private struct EventCreationForm: View {
     @State private var date = Date()
     @State private var allDay = false
     @State private var errorMessage = ""
-    @FocusState private var titleFocused: Bool
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -407,22 +384,7 @@ private struct EventCreationForm: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
-                    .focused($titleFocused)
                     .onSubmit(commit)
-
-                DatePicker(
-                    "Date",
-                    selection: $date,
-                    displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
-                )
-                .datePickerStyle(.field)
-                .font(CiderFont.body)
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
 
                 Toggle("All Day", isOn: $allDay)
                     .font(CiderFont.body)
@@ -434,6 +396,23 @@ private struct EventCreationForm: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
+
+                // .field and .compact DatePicker styles crash in .nonactivatingPanel —
+                // they open a popup calendar that calls through nil AppKit function pointers.
+                // .graphical is fully inline (no popup) and safe.
+                DatePicker(
+                    "",
+                    selection: $date,
+                    displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
             }
             .padding(.horizontal, Spacing.md)
 
@@ -448,10 +427,6 @@ private struct EventCreationForm: View {
             AddButton(label: "Create Event", action: commit)
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
-        }
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            titleFocused = true
         }
     }
 
@@ -474,7 +449,6 @@ private struct ContactCreationForm: View {
     @State private var name = ""
     @State private var relationship = ""
     @State private var errorMessage = ""
-    @FocusState private var nameFocused: Bool
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -490,7 +464,6 @@ private struct ContactCreationForm: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
-                    .focused($nameFocused)
                     .onSubmit(commit)
 
                 TextField("Relationship (optional)", text: $relationship)
@@ -518,10 +491,6 @@ private struct ContactCreationForm: View {
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
         }
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            nameFocused = true
-        }
     }
 
     private func commit() {
@@ -544,7 +513,6 @@ private struct FolderCreationForm: View {
     @State private var name = ""
     @State private var parentID: UUID? = nil
     @State private var errorMessage = ""
-    @FocusState private var nameFocused: Bool
 
     private var rootFolders: [Folder] {
         folders.filter { $0.parentID == nil }
@@ -564,7 +532,6 @@ private struct FolderCreationForm: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
-                    .focused($nameFocused)
                     .onSubmit(commit)
 
                 if !folders.isEmpty {
@@ -599,10 +566,6 @@ private struct FolderCreationForm: View {
             AddButton(label: "Create Folder", action: commit)
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
-        }
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            nameFocused = true
         }
     }
 
