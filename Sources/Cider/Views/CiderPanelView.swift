@@ -17,7 +17,7 @@ struct CiderPanelView: View {
     @State private var isSearchPaletteVisible = false
     @State private var dynamicTabs: [CiderTab] = []
     @State private var isHomeViewOptionsVisible = false
-    @State private var newItemAnchor: NSView?
+    @State private var showNewItemPicker = false
     @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
     @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
@@ -431,9 +431,9 @@ struct CiderPanelView: View {
 
                 Spacer(minLength: 0)
 
-                // + pill button → NewItemPopover via NSPopover (avoids ViewBridge crashes)
+                // + pill button
                 Button {
-                    showNewItemPopover()
+                    showNewItemPicker.toggle()
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
@@ -453,9 +453,9 @@ struct CiderPanelView: View {
                 .buttonStyle(.plain)
                 .fixedSize()
                 .help("Create new item")
-                .background(
-                    PopoverAnchorView { [self] view in newItemAnchor = view }
-                )
+                .popover(isPresented: $showNewItemPicker, arrowEdge: .bottom) {
+                    newItemPickerContent
+                }
 
                 Spacer(minLength: 0)
 
@@ -467,6 +467,54 @@ struct CiderPanelView: View {
         .padding(.horizontal, Spacing.sm)
         .padding(.bottom, Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
+    }
+
+    private var newItemPickerContent: some View {
+        let bvm = bookmarksViewModel
+        let eventContextSetter = _newEventEditorContext
+        let contactContextSetter = _newContactEditorContext
+        return NewItemPopover(
+            folders: bvm.folders,
+            onCreateBookmark: { urlString, title in
+                _ = bvm.addBookmark(urlString: urlString, title: title)
+            },
+            onCreateNote: { [self] title, content in
+                createNoteAndOpen(title: title, content: content)
+            },
+            onCreateEvent: { title, date, allDay in
+                let card = DateCardStorage.shared.createDateCard(
+                    title: title,
+                    startAt: date,
+                    allDay: allDay
+                )
+                DispatchQueue.main.async {
+                    eventContextSetter.wrappedValue = DateCardEditorContext(
+                        existingCard: card,
+                        defaultDate: date
+                    )
+                }
+            },
+            onCreateContact: { name, relationship in
+                var contact = ContactStorage.shared.createContact(displayName: name)
+                if !relationship.isEmpty {
+                    contact.relationshipLabel = relationship
+                    ContactStorage.shared.updateContact(contact)
+                }
+                DispatchQueue.main.async {
+                    contactContextSetter.wrappedValue = ContactEditorContext(existingContact: contact)
+                }
+            },
+            onCreateFolder: { name, parentID in
+                bvm.createFolder(name: name, parentID: parentID)
+            },
+            onCreateProject: { [self] name in
+                let project = ProjectStorage.shared.createProject(name: name)
+                openProjectTab(project.id)
+            },
+            onDismiss: { [self] in
+                showNewItemPicker = false
+            }
+        )
     }
 
     private var showFolderViewOptions: Bool {
@@ -652,72 +700,6 @@ struct CiderPanelView: View {
                 }
             }
         }
-    }
-
-    // MARK: - New Item Popover (NSPopover — avoids ViewBridge/RemoteViewService crashes)
-
-    private func showNewItemPopover() {
-        guard let anchor = newItemAnchor else { return }
-
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = false
-
-        let folders = bookmarksViewModel.folders
-        let bvm = bookmarksViewModel
-
-        // Capture @State bindings via their backing State wrappers so mutations
-        // propagate back to the SwiftUI tree even from AppKit callbacks.
-        let eventContextSetter = _newEventEditorContext
-        let contactContextSetter = _newContactEditorContext
-
-        let content = NewItemPopover(
-            folders: folders,
-            onCreateBookmark: { urlString, title in
-                _ = bvm.addBookmark(urlString: urlString, title: title)
-            },
-            onCreateNote: { [self] title, content in
-                createNoteAndOpen(title: title, content: content)
-            },
-            onCreateEvent: { title, date, allDay in
-                let card = DateCardStorage.shared.createDateCard(
-                    title: title,
-                    startAt: date,
-                    allDay: allDay
-                )
-                DispatchQueue.main.async {
-                    eventContextSetter.wrappedValue = DateCardEditorContext(
-                        existingCard: card,
-                        defaultDate: date
-                    )
-                }
-            },
-            onCreateContact: { name, relationship in
-                var contact = ContactStorage.shared.createContact(displayName: name)
-                if !relationship.isEmpty {
-                    contact.relationshipLabel = relationship
-                    ContactStorage.shared.updateContact(contact)
-                }
-                DispatchQueue.main.async {
-                    contactContextSetter.wrappedValue = ContactEditorContext(existingContact: contact)
-                }
-            },
-            onCreateFolder: { name, parentID in
-                bvm.createFolder(name: name, parentID: parentID)
-            },
-            onCreateProject: { [self] name in
-                let project = ProjectStorage.shared.createProject(name: name)
-                openProjectTab(project.id)
-            },
-            onDismiss: { [weak popover] in
-                popover?.close()
-            }
-        )
-
-        let controller = NSHostingController(rootView: content)
-        controller.sizingOptions = [.intrinsicContentSize]
-        popover.contentViewController = controller
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
     }
 
     // MARK: - Note Creation
