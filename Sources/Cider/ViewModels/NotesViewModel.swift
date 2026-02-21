@@ -468,7 +468,6 @@ final class NotesViewModel: ObservableObject {
             let content = editingContent
             guard content != lastSyncedDiskContent else {
                 hasPendingSave = false
-                syncExternalContentFromEditor(fileURL: externalFile.path)
                 return
             }
             lastSyncedDiskContent = content
@@ -477,7 +476,6 @@ final class NotesViewModel: ObservableObject {
             externalChangeState = nil
             try? content.write(to: externalFile.path, atomically: true, encoding: .utf8)
             hasPendingSave = false
-            syncExternalContentFromEditor(fileURL: externalFile.path)
             return
         }
 
