@@ -228,3 +228,19 @@ Right-click context menu:
 - Drag folder onto sidebar or icon → add as source
 - `Info.plist` `.md` file type registration
 - "Open With Cider" from Finder context menu
+
+---
+
+## Future Ideas
+
+### Diff View — Changes Since Last Opened
+Show what changed in a file since you last viewed it in Cider. Effort: **~1.5 days**.
+
+**How it would work:**
+1. **Snapshot storage** — when a file is closed, save its content (keyed by `ExternalFile.stableID`) to a small JSON store in Cider's data directory. No size limit concern; these are `.md` files.
+2. **Diff on open** — on next open, load the snapshot and compute a line-level diff using Swift's `CollectionDifference`. Produces a list of added/unchanged/removed lines.
+3. **TipTap rendering** — a custom TipTap extension that decorates paragraphs with `data-diff="added"` / `data-diff="removed"` background marks. Added lines get a subtle green tint, removed lines shown as struck-through or in a ghost color. A "Dismiss diff" button in the toolbar clears the marks.
+
+**The hard part** is the TipTap JS integration — the decoration API is straightforward but requires care to not interfere with normal editing. A simpler v1 could skip TipTap integration entirely and show a read-only diff panel *before* opening the editor (like a "what changed?" preview card).
+
+**Good trigger:** show automatically only if more than N lines changed since last open, to avoid noise on trivial edits.

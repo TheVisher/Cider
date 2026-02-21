@@ -451,6 +451,11 @@ final class NotesViewModel: ObservableObject {
 
         if let externalFile = activeExternalFile {
             let content = editingContent
+            guard content != lastSyncedDiskContent else {
+                hasPendingSave = false
+                syncExternalContentFromEditor(fileURL: externalFile.path)
+                return
+            }
             lastSyncedDiskContent = content
             pendingExternalDiskContent = nil
             ignoredExternalDiskContent = nil
@@ -487,10 +492,14 @@ final class NotesViewModel: ObservableObject {
                 let content = NotesStorage.shared.markdownForPersistence(markdown)
                 editingContent = content
                 charCount = content.count
-                lastSyncedDiskContent = content
                 pendingExternalDiskContent = nil
                 ignoredExternalDiskContent = nil
                 externalChangeState = nil
+                guard content != self.lastSyncedDiskContent else {
+                    hasPendingSave = false
+                    return
+                }
+                lastSyncedDiskContent = content
                 try? content.write(to: fileURL, atomically: true, encoding: .utf8)
                 hasPendingSave = false
             }
