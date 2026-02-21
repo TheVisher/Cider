@@ -665,8 +665,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if hovering {
                     self.undoToastIsHovering = true
-                    self.undoToastRemaining = UndoToastDesign.autoHideDuration
-                    self.undoToastModel.progress = 1
                     self.stopUndoToastTimer()
                 } else {
                     self.undoToastIsHovering = false

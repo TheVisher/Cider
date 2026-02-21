@@ -146,21 +146,9 @@ After every note save, orphan cleanup reads all note files and the attachment di
 
 - [ ] Fixed
 
-### CH-P04 — Config save thrashing on slider changes (Medium)
+### ~~CH-P04 — Config save thrashing on slider changes~~ ✅ Fixed 2026-02-21
 
-Every slider tick (e.g., card size) triggers `config.save()` immediately. Slow drags produce dozens of disk writes per second. `save()` also logs on every call, adding noise.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Debounce writes with a \~300ms delay. Lower the log call to `.debug` or remove it.
-
-- File refs: `Sources/Cider/Views/CiderPanelView.swift:86, 115`, `Sources/Cider/Models/CiderConfig.swift:215, 218`, `Sources/Cider/ViewModels/SettingsViewModel.swift:15, 132`
-
-- First reported: 2026-02-20
-
-- [ ] Fixed
+`homeCardSizeScale` onChange in `CiderPanelView` now debounces via a cancelled-and-restarted `Task` with 300ms sleep before saving. `CiderConfig.save()` no longer logs on every call.
 
 ### ~~CH-P05 — CiderFont decodes config on every render access~~ ✅ Fixed 2026-02-21
 
@@ -170,37 +158,13 @@ Every slider tick (e.g., card size) triggers `config.save()` immediately. Slow d
 
 ## Design & Architecture
 
-### CH-D01 — Carbon fallback hotkeys consume keys when disabled (Medium)
+### ~~CH-D01 — Carbon fallback hotkeys consume keys when disabled~~ ✅ Fixed 2026-02-21
 
-In Carbon fallback mode (no Accessibility permission), disabled hotkeys still report "handled," causing `Opt+N` / `Opt+B` to be swallowed even when the feature is turned off.
+`handleHotKeyEvent` in both `NotesHotkeyDetector` and `BookmarksHotkeyDetector` now returns `OSStatus(eventNotHandledErr)` (not `noErr`) when `isEnabled` is false, so the event passes through to other handlers.
 
-- [ ]
+### ~~CH-D02 — Undo-toast hover resets timer instead of pausing~~ ✅ Fixed 2026-02-21
 
-- [ ]
-
-- Remediation: Check the enabled state inside the Carbon event handler; return `eventNotHandledErr` if disabled.
-
-- File refs: `Sources/Cider/Services/NotesHotkeyDetector.swift:166`, `Sources/Cider/Services/BookmarksHotkeyDetector.swift:190`
-
-- First reported: 2026-02-18
-
-- [ ] Fixed
-
-### CH-D02 — Undo-toast hover resets timer instead of pausing (Medium)
-
-Hovering over the undo toast resets the countdown timer and progress to full rather than simply pausing it in place. This makes the undo window effectively unbounded while the user hovers.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Pause the timer on hover-enter (save remaining time); resume from saved point on hover-exit. Do not reset.
-
-- File refs: `Sources/Cider/App/AppDelegate.swift:586`
-
-- First reported: 2026-02-18
-
-- [ ] Fixed
+Hover-enter branch now only stops the timer and sets `undoToastIsHovering = true`; `undoToastRemaining` and `undoToastModel.progress` are no longer reset. Hover-exit resumes the timer from where it left off.
 
 ### CH-D03 — Non-spring animation curves in panel transitions (Low)
 
@@ -268,21 +232,9 @@ A few fixed-size icon/font paths remain unscaled after the global `CiderFont` sc
 
 - [ ] Fixed
 
-### CH-L02 — Dead code artifacts (Low)
+### ~~CH-L02 — Dead code artifacts~~ ✅ Fixed 2026-02-21
 
-Three files exist in the codebase and are never referenced.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Delete all three.
-
-- File refs: `Sources/Cider/Services/SystemStatus.swift`, `Sources/Cider/Models/FeatureSettings.swift`, `Sources/Cider/Views/Projects/ProjectTabContent.swift:16` (unused import)
-
-- First reported: 2026-02-20
-
-- [ ] Fixed
+`SystemStatus.swift` and `FeatureSettings.swift` deleted (confirmed zero references). `ProjectTabContent.swift:16` reported as unused import was a false positive — only `import SwiftUI` exists at line 1 and is used; no change needed.
 
 ---
 

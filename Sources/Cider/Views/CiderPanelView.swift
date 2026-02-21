@@ -27,6 +27,7 @@ struct CiderPanelView: View {
     @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     @State private var suppressSidebarAutoExpandForDetails = false
+    @State private var cardScaleSaveTask: Task<Void, Never>?
     @State private var newEventEditorContext: DateCardEditorContext?
     @State private var newContactEditorContext: ContactEditorContext?
 
@@ -98,9 +99,14 @@ struct CiderPanelView: View {
             config.save()
         }
         .onChange(of: homeCardSizeScale) { _, newValue in
-            var config = CiderConfig.load()
-            config.homeCardSizeScale = newValue
-            config.save()
+            cardScaleSaveTask?.cancel()
+            cardScaleSaveTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                var config = CiderConfig.load()
+                config.homeCardSizeScale = newValue
+                config.save()
+            }
         }
         .onChange(of: continueSectionCollapsed) { _, newValue in
             var config = CiderConfig.load()
