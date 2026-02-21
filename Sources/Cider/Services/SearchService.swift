@@ -29,7 +29,7 @@ struct SearchResult: Identifiable {
 
 @MainActor
 enum SearchService {
-    static func search(query: String, bookmarks: [Bookmark], notes: [Note]) -> [SearchResult] {
+    static func search(query: String, bookmarks: [Bookmark], notes: [Note]) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return [] }
 
@@ -37,7 +37,7 @@ enum SearchService {
         let contacts  = ContactStorage.shared.contacts
 
         let bookmarkResults  = searchBookmarks(trimmed, in: bookmarks)
-        let noteResults      = searchNotes(trimmed, in: notes)
+        let noteResults      = await searchNotes(trimmed, in: notes)
         let dateCardResults  = searchDateCards(trimmed, in: dateCards)
         let contactResults   = searchContacts(trimmed, in: contacts)
 
@@ -78,34 +78,10 @@ enum SearchService {
         }
     }
 
-    static func searchNotes(_ query: String, in notes: [Note]) -> [SearchResult] {
-        notes.compactMap { note in
-            let titleMatch   = note.title.lowercased().contains(query)
-            let strippedContent = noteStrippedContent(for: note)
-            let contentMatch = strippedContent.lowercased().contains(query)
-
-            guard titleMatch || contentMatch else { return nil }
-
-            let snippet: SearchSnippet?
-            let subtitle: String?
-            if titleMatch {
-                subtitle = String(strippedContent.prefix(80))
-                snippet  = nil
-            } else {
-                subtitle = nil
-                snippet  = extractSnippet(query: query, from: strippedContent)
-            }
-
-            return SearchResult(
-                id: note.id,
-                type: .note,
-                title: note.title,
-                subtitle: subtitle,
-                snippet: snippet,
-                date: note.modifiedAt,
-                note: note
-            )
-        }
+    // Note content is loaded off the main actor to avoid blocking the UI.
+    static func searchNotes(_ query: String, in notes: [Note]) async -> [SearchResult] {
+        let directoryURL = NotesStorage.shared.notesDirectoryURL
+        return await fetchNoteResults(query: query, notes: notes, directoryURL: directoryURL)
     }
 
     static func searchDateCards(_ query: String, in dateCards: [DateCard]) -> [SearchResult] {
@@ -169,7 +145,46 @@ enum SearchService {
         }
     }
 
-    private static func extractSnippet(query: String, from text: String, windowSize: Int = 60) -> SearchSnippet? {
+    // Runs off the main actor — safe to do synchronous disk reads here.
+    private nonisolated static func fetchNoteResults(
+        query: String,
+        notes: [Note],
+        directoryURL: URL
+    ) async -> [SearchResult] {
+        notes.compactMap { note in
+            let titleMatch = note.title.lowercased().contains(query)
+            let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+            let rawContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+            let strippedContent = rawContent
+                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let contentMatch = strippedContent.lowercased().contains(query)
+
+            guard titleMatch || contentMatch else { return nil }
+
+            let snippet: SearchSnippet?
+            let subtitle: String?
+            if titleMatch {
+                subtitle = String(strippedContent.prefix(80))
+                snippet  = nil
+            } else {
+                subtitle = nil
+                snippet  = extractSnippet(query: query, from: strippedContent)
+            }
+
+            return SearchResult(
+                id: note.id,
+                type: .note,
+                title: note.title,
+                subtitle: subtitle,
+                snippet: snippet,
+                date: note.modifiedAt,
+                note: note
+            )
+        }
+    }
+
+    nonisolated static func extractSnippet(query: String, from text: String, windowSize: Int = 60) -> SearchSnippet? {
         guard let range = text.range(of: query, options: .caseInsensitive) else { return nil }
         let contextStart = text.index(range.lowerBound, offsetBy: -windowSize, limitedBy: text.startIndex) ?? text.startIndex
         let contextEnd   = text.index(range.upperBound, offsetBy:  windowSize, limitedBy: text.endIndex)   ?? text.endIndex
@@ -177,12 +192,5 @@ enum SearchService {
         let match  = String(text[range])
         let suffix = String(text[range.upperBound..<contextEnd]) + (contextEnd < text.endIndex ? "…" : "")
         return SearchSnippet(prefix: prefix, match: match, suffix: suffix)
-    }
-
-    private static func noteStrippedContent(for note: Note) -> String {
-        let content = NotesStorage.shared.loadContent(for: note)
-        return content
-            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

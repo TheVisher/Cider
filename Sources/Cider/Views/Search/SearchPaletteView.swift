@@ -99,7 +99,13 @@ struct SearchPaletteView: View {
                     .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
-            .shadow(color: CiderColors.shadowHeavy, radius: 24, x: 0, y: 12)
+            .background {
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .fill(Color.black)
+                    .blur(radius: 24)
+                    .offset(y: 12)
+                    .opacity(CiderColors.shadowShapeFullOpacity)
+            }
             .padding(.top, proxy.size.height * 0.22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -118,7 +124,7 @@ struct SearchPaletteView: View {
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
-                results = SearchService.search(query: trimmed, bookmarks: bookmarks, notes: notes)
+                results = await SearchService.search(query: trimmed, bookmarks: bookmarks, notes: notes)
             }
         }
     }

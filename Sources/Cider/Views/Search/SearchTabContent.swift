@@ -8,9 +8,7 @@ struct SearchTabContent: View {
     let onOpenNote: (Note) -> Void
     var onSaveAsProject: ((String, [SearchResult]) -> Void)?
 
-    private var results: [SearchResult] {
-        SearchService.search(query: query, bookmarks: bookmarks, notes: notes)
-    }
+    @State private var results: [SearchResult] = []
 
     private var bookmarkResults: [SearchResult] {
         results.filter { $0.type == .bookmark }
@@ -29,6 +27,7 @@ struct SearchTabContent: View {
     }
 
     var body: some View {
+        Group {
         if results.isEmpty {
             emptyState
         } else {
@@ -73,6 +72,10 @@ struct SearchTabContent: View {
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.md)
             }
+        }
+        }
+        .task(id: query) {
+            results = await SearchService.search(query: query, bookmarks: bookmarks, notes: notes)
         }
     }
 

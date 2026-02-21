@@ -127,10 +127,7 @@ struct CiderConfig: Codable {
         case subFoldersCollapsed
         case homeDisplayMode
         case homeCardSizeScale
-        case enableDateCards
-        case enableStacks
         case enableSavedViewTabs
-        case enableCalendarProjection
         case enableLinkedSources
         case trashRetentionDays
         case captureToastPosition
@@ -163,11 +160,8 @@ struct CiderConfig: Codable {
     var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
     var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
     var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
-    var enableDateCards: Bool  // Feature flag for date card models + UI
-    var enableStacks: Bool  // Feature flag for stack models + UI
     var enableSavedViewTabs: Bool  // Feature flag for custom saved view tabs
-    var enableCalendarProjection: Bool  // Feature flag for calendar projection views
-    var enableLinkedSources: Bool       // Feature flag for external directory linking
+    var enableLinkedSources: Bool  // Feature flag for external directory linking
     var trashRetentionDays: Int  // 0 = never auto-purge, default 30
     var captureToastPosition: ToastPosition  // Position for bookmark capture toast
     var undoToastPosition: ToastPosition  // Position for undo action toast
@@ -199,10 +193,7 @@ struct CiderConfig: Codable {
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
             homeDisplayMode: .list,
-            enableDateCards: false,
-            enableStacks: false,
             enableSavedViewTabs: false,
-            enableCalendarProjection: false,
             enableLinkedSources: false,
             trashRetentionDays: 30,
             captureToastPosition: .topCenterScreen,
@@ -338,21 +329,9 @@ struct CiderConfig: Codable {
             Double.self,
             forKey: .homeCardSizeScale
         )
-        enableDateCards = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .enableDateCards
-        ) ?? false
-        enableStacks = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .enableStacks
-        ) ?? false
         enableSavedViewTabs = try container.decodeIfPresent(
             Bool.self,
             forKey: .enableSavedViewTabs
-        ) ?? false
-        enableCalendarProjection = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .enableCalendarProjection
         ) ?? false
         enableLinkedSources = try container.decodeIfPresent(
             Bool.self,
@@ -402,10 +381,7 @@ struct CiderConfig: Codable {
         subFoldersCollapsed: Bool = false,
         homeDisplayMode: LibraryDisplayMode = .list,
         homeCardSizeScale: Double? = nil,
-        enableDateCards: Bool = false,
-        enableStacks: Bool = false,
         enableSavedViewTabs: Bool = false,
-        enableCalendarProjection: Bool = false,
         enableLinkedSources: Bool = false,
         trashRetentionDays: Int = 30,
         captureToastPosition: ToastPosition = .topCenterScreen,
@@ -437,10 +413,7 @@ struct CiderConfig: Codable {
         self.subFoldersCollapsed = subFoldersCollapsed
         self.homeDisplayMode = homeDisplayMode
         self.homeCardSizeScale = homeCardSizeScale
-        self.enableDateCards = enableDateCards
-        self.enableStacks = enableStacks
         self.enableSavedViewTabs = enableSavedViewTabs
-        self.enableCalendarProjection = enableCalendarProjection
         self.enableLinkedSources = enableLinkedSources
         self.trashRetentionDays = trashRetentionDays
         self.captureToastPosition = captureToastPosition

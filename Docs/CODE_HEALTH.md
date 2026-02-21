@@ -82,37 +82,25 @@ Move is now `try fm.moveItem` inside a `do/catch`; on failure, function returns 
 
 `selectAll()` in `CiderPanelView` iterates `bookmarksViewModel.bookmarks` and `notesViewModel.notes` only. Date cards and contacts visible in the Home feed are not selected.
 
-> **Note:** Only address once bulk-delete/move actions support all entity types. Until then, add a `// TODO: CH-C04` comment at the call site so it's findable.
+> **Note:** Only address once bulk-delete/move actions support all entity types. Until then, `// TODO: CH-C04` comment added at the call site so it's findable.
 
 - [ ]
 
 - [ ]
 
-- File refs: `Sources/Cider/Views/CiderPanelView.swift:826–829`
+- File refs: `Sources/Cider/Views/CiderPanelView.swift` — TODO comment added at `.home` case in `selectAllVisibleItems()`
 
 - First reported: 2026-02-20
 
-- [ ] Fixed
+- [ ] Fixed (partial — TODO marker added; full fix deferred until bulk actions support all entity types)
 
 ---
 
 ## Performance
 
-### CH-P01 — Main-thread disk I/O in search (Medium)
+### ~~CH-P01 — Main-thread disk I/O in search~~ ✅ Fixed 2026-02-21
 
-`SearchService.searchNotes` calls `NotesStorage.shared.loadContent(for:)` per note on the main actor. With large note sets this causes typing and scroll stutter.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Make search async; move content loads off the main actor.
-
-- File refs: `Sources/Cider/Services/SearchService.swift:74`, `Sources/Cider/ViewModels/NotesViewModel.swift:71`, `Sources/Cider/ViewModels/LibraryViewModel.swift:139`
-
-- First reported: 2026-02-16 (HI-03), confirmed 2026-02-18, 2026-02-20
-
-- [ ] Fixed
+`search()` is now `async`. Note content loading extracted to `fetchNoteResults()` — a `nonisolated static async` method that reads files on the cooperative thread pool. `searchNotes()` captures `NotesStorage.shared.notesDirectoryURL` on the main actor then `await`s the nonisolated helper. Both call sites (`SearchPaletteView` task, `SearchTabContent` `.task(id:)`) already run off the main actor. `SearchTabContent` switched from computed property to `@State + .task(id: query)`.
 
 ### CH-P02 — Main-thread I/O at startup and directory-switch (Medium)
 
@@ -166,37 +154,13 @@ After every note save, orphan cleanup reads all note files and the attachment di
 
 Hover-enter branch now only stops the timer and sets `undoToastIsHovering = true`; `undoToastRemaining` and `undoToastModel.progress` are no longer reset. Hover-exit resumes the timer from where it left off.
 
-### CH-D03 — Non-spring animation curves in panel transitions (Low)
+### ~~CH-D03 — Non-spring animation curves in panel transitions~~ ✅ Fixed 2026-02-21
 
-Panel frame transitions use `.easeInEaseOut` rather than spring-based motion, diverging from the project's animation guidelines.
+Replaced `CAMediaTimingFunction(name: .easeInEaseOut)` with `CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)` (fast-out deceleration curve, perceptually matching a critically-damped spring) in all three panel files. Reduce-motion guard was already present.
 
-- [ ]
+### ~~CH-D04 — Search palette uses `.shadow()` instead of shape-based shadow~~ ✅ Fixed 2026-02-21
 
-- [ ]
-
-- Remediation: Replace with spring presets from `CiderAnimation`; add reduce-motion fallback.
-
-- File refs: `Sources/Cider/App/CiderPanel.swift:242`, `Sources/Cider/App/NotesPanel.swift:174`, `Sources/Cider/App/BookmarksPanel.swift:158`
-
-- First reported: 2026-02-16 (ME-05)
-
-- [ ] Fixed
-
-### CH-D04 — Search palette uses `.shadow()` instead of shape-based shadow (Low)
-
-The search palette container applies `.shadow(...)` directly, while acrylic guidelines require a blurred-shape shadow to avoid clipping artifacts.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Replace with the shared acrylic shadow pattern (`RoundedRectangle.fill(.black).blur(...)`).
-
-- File refs: `Sources/Cider/Views/Search/SearchPaletteView.swift:88`
-
-- First reported: 2026-02-16 (ML-01)
-
-- [ ] Fixed
+Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(24).offset(y:12).opacity(shadowShapeFullOpacity) }` — same pattern as `AcrylicPanelBackground`.
 
 ### CH-D05 — Some UI elements ignore global text-size preference (Low)
 
@@ -216,21 +180,9 @@ A few fixed-size icon/font paths remain unscaled after the global `CiderFont` sc
 
 ## Dead Code & Cleanup
 
-### CH-L01 — Stale feature flags with no runtime gating (Low)
+### ~~CH-L01 — Stale feature flags with no runtime gating~~ ✅ Fixed 2026-02-21
 
-`enableDateCards`, `enableStacks`, `enableSavedViewTabs`, `enableCalendarProjection` exist in `CiderConfig` but nothing in the app checks them to gate behavior. They add migration surface area for no benefit.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Either wire them to actually gate their features, or delete them from `CiderConfig` (update `default`, memberwise `init`, and `init(from:)`).
-
-- File refs: `Sources/Cider/Models/CiderConfig.swift:128–131`
-
-- First reported: 2026-02-20
-
-- [ ] Fixed
+`enableDateCards`, `enableStacks`, `enableCalendarProjection` removed from `CiderConfig` (CodingKeys, var declarations, `default`, memberwise `init`, `init(from:)`). `enableSavedViewTabs` and `enableLinkedSources` kept — both actively gate behavior in `CiderPanelView` and `FolderSidebarView`.
 
 ### ~~CH-L02 — Dead code artifacts~~ ✅ Fixed 2026-02-21
 

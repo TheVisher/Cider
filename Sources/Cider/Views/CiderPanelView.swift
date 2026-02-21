@@ -880,6 +880,8 @@ struct CiderPanelView: View {
         } else {
             switch selectedTab {
             case .home:
+                // TODO: CH-C04 — date cards and contacts visible in the feed are not selected here;
+                // address once bulk-delete/move actions support all entity types.
                 for b in bookmarksViewModel.bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
                 for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
             default:
