@@ -5,16 +5,11 @@ struct FolderSidebarView: View {
     let folders: [Folder]
     let bookmarks: [Bookmark]
     let notes: [Note]
-    let projects: [Project]
     @Binding var selectedFolderID: UUID?
     @Binding var expandedFolderIDs: Set<UUID>
     var onCreateFolder: ((String, UUID?) -> Folder?)?
     var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)?
     var onAssignNoteToFolder: ((Note, UUID?) -> Bool)?
-    var onOpenProject: ((UUID) -> Void)?
-    var onCreateProject: (() -> Void)?
-    var onDeleteProject: ((UUID) -> Void)?
-    var onRenameProject: ((UUID, String) -> Void)?
     var onRenameFolder: ((UUID, String) -> Void)?
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
@@ -39,8 +34,6 @@ struct FolderSidebarView: View {
     @State private var draftFolderName = ""
     @State private var subFolderParentID: UUID?
     @State private var draftSubFolderName = ""
-    @State private var renamingProjectID: UUID?
-    @State private var renamingProjectName = ""
     @State private var renamingFolderID: UUID?
     @State private var renamingFolderName = ""
 
@@ -133,10 +126,6 @@ struct FolderSidebarView: View {
                 }
             }
 
-            if !projects.isEmpty || onCreateProject != nil {
-                projectsSection
-            }
-
             if CiderConfig.load().enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
                 sourcesSection
             }
@@ -159,92 +148,6 @@ struct FolderSidebarView: View {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                     .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
-            }
-        }
-    }
-
-    // MARK: - Projects Section
-
-    private var projectsSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Divider()
-                .background(CiderColors.separator)
-                .padding(.vertical, Spacing.xs)
-
-            Label("Projects", systemImage: "tray.full")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.secondary)
-
-            ForEach(projects) { project in
-                projectSidebarRow(project)
-            }
-
-            if projects.isEmpty {
-                Text("No projects yet.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.tertiary)
-                    .padding(.horizontal, Spacing.xs)
-            }
-        }
-    }
-
-    private func projectSidebarRow(_ project: Project) -> some View {
-        let count = ProjectStorage.shared.itemCount(for: project.id)
-        let isRenaming = renamingProjectID == project.id
-        return HStack(spacing: Spacing.xs) {
-            Image(systemName: "tray.full")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.controlAccent)
-
-            if isRenaming {
-                TextField("Project name", text: $renamingProjectName)
-                    .textFieldStyle(.plain)
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.primary)
-                    .onSubmit { commitProjectRename() }
-                    .onExitCommand { renamingProjectID = nil }
-            } else {
-                Text(project.name)
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: Spacing.xs)
-
-            if count > 0 {
-                Text("\(count)")
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.tertiary)
-            }
-        }
-        .padding(.horizontal, Spacing.sm)
-        .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(CiderColors.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if !isRenaming {
-                onOpenProject?(project.id)
-            }
-        }
-        .contextMenu {
-            Button {
-                renamingProjectName = project.name
-                renamingProjectID = project.id
-            } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            Button(role: .destructive) {
-                onDeleteProject?(project.id)
-            } label: {
-                Label("Delete Project", systemImage: "trash")
             }
         }
     }
@@ -362,15 +265,6 @@ struct FolderSidebarView: View {
                 }
             }
         }
-    }
-
-    private func commitProjectRename() {
-        guard let id = renamingProjectID else { return }
-        let trimmed = renamingProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            onRenameProject?(id, trimmed)
-        }
-        renamingProjectID = nil
     }
 
     private func commitFolderRename() {

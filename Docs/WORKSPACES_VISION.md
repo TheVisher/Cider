@@ -1,13 +1,26 @@
-# Workspaces Vision: Folders, Projects, and Search
+# Workspaces Vision: Folders, Saved Views, and Search
 
-> This document captures the product vision for Cider's organizational system: universal folders, project workspaces, and search-to-tab flow.
+> This document captures the product vision for Cider's organizational system: universal folders, saved view tabs, and search-to-tab flow.
 >
 > **Implementation Status:**
 > - ✅ Phase 1 — Universal Folders (complete)
 > - ✅ Phase 2 — Center Search Palette (complete)
-> - ✅ Phase 3 — Custom Saved View Tabs (complete, `feature/custom-tabs-date-cards-stacks`)
-> - 🔲 Phase 4 — Projects UI (ProjectStorage exists; full sidebar + tab UI future)
-> - 🔲 Phase 5 — Tear-off windows, Kanban, archiving (future)
+> - ✅ Phase 3 — Custom Saved View Tabs (complete)
+> - ~~🔲 Phase 4 — Projects UI~~ — **Removed.** Projects removed from UI; `ProjectStorage` retained but dormant. See decision below.
+> - 🔲 Phase 4 (new) — Saved View expansion: manual item refs + "Send to view" context action
+> - 🔲 Phase 5 — Kanban display mode on Saved Views
+
+---
+
+## Design Decision: Projects Removed (Feb 2026)
+
+Projects were removed from the UI because:
+
+1. **Too much overlap with Saved Views.** Both produce a tab showing a curated list of items. The distinction wasn't meaningful enough at Cider's current scope.
+2. **Scope creep risk.** The "project workspace" concept (Kanban, timelines, team collaboration) belongs to heavier tools like Linear or Notion — not what Cider is.
+3. **Saved Views can absorb the use case.** Everything Projects was trying to do can be done via Saved Views with future enhancements (see roadmap below).
+
+`ProjectStorage`, `Project` model, and `ProjectItem` model are retained but dormant — dormant data layer, no UI. If the concept is revisited, the storage is ready.
 
 ---
 
@@ -73,9 +86,11 @@ Folders could support different view modes beyond a flat list:
 
 ---
 
-## Projects
+## Projects (Removed — Feb 2026)
 
-**Purpose:** Active workspaces for ongoing efforts. Workbench for things you're building or researching.
+> Projects have been removed from the UI. The section below is retained for historical context and to inform any future revisit. See the design decision at the top of this doc.
+
+**Original purpose:** Active workspaces for ongoing efforts. Workbench for things you're building or researching.
 
 ### Key Properties
 - **Persistent** — live in the sidebar under a "Projects" section. Closing a tab doesn't delete the project.
@@ -120,6 +135,29 @@ PROJECTS
 
 ---
 
+## Saved Views — Future Roadmap
+
+Saved Views are currently filter-only (dynamic). The roadmap expands them to absorb everything Projects was meant to do.
+
+### Phase 4 — Manual Item Refs ("Send to View")
+
+Add `manualItemRefs: [LibraryEntityRef]` to `SavedView`. A saved view can then be:
+- **Filter-driven** — content auto-populates from filter rules (current)
+- **Manually curated** — items pinned explicitly by the user
+- **Both** — filter provides the base set; manual refs add specific items on top
+
+**"Send to view" context action** — right-click any item anywhere in the library → "Add to [View Name]" → pins it to that saved view's `manualItemRefs`. This is how users build curated collections without a separate "Projects" concept. A saved view with no filter spec and only manual refs is effectively a "collection tab."
+
+This mirrors how Stacks already work (`matchRules` + `manualItemRefs`) — apply the same pattern to SavedView.
+
+### Phase 5 — Kanban Display Mode
+
+Add `kanban` as a display mode option on Saved Views (alongside list, grid, masonry). Columns map to a user-chosen attribute — label, folder, status field, or a custom column set. Dragging a card between columns reassigns that attribute on the item.
+
+Any saved view can become a Kanban — you don't need a separate "board" or "project" concept. A "Game Room renovation" Kanban is just a saved view in Kanban mode.
+
+---
+
 ## Search
 
 **Purpose:** Find things across all of Cider, with results that can become persistent.
@@ -145,7 +183,7 @@ PROJECTS
 - A search spawns a temporary tab in the tab bar.
 - Shows mixed results across all content types (bookmarks, notes, date cards, contacts).
 - Close anytime — nothing is lost, it's just a search view.
-- Can be **promoted to a project** if the search turns into ongoing work.
+- Can be **saved as a Saved View** if the search turns into ongoing work.
 
 ### Tab States
 
@@ -156,7 +194,7 @@ PROJECTS
 
 - **Fixed tabs** (Home, Bookmarks, Notes) — always present, not closeable.
 - **Search tabs** — ephemeral, closeable, show search results.
-- **Project tabs** — persistent (backed by sidebar project), closeable (project stays in sidebar).
+- **Saved View tabs** — persistent, closeable (view stays in saved views list).
 
 ---
 

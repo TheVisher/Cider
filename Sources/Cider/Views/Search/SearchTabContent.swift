@@ -6,7 +6,6 @@ struct SearchTabContent: View {
     let notes: [Note]
     let onOpenBookmark: (Bookmark) -> Void
     let onOpenNote: (Note) -> Void
-    var onSaveAsProject: ((String, [SearchResult]) -> Void)?
 
     @State private var results: [SearchResult] = []
 
@@ -33,10 +32,6 @@ struct SearchTabContent: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.md) {
-                    if onSaveAsProject != nil {
-                        saveAsProjectBar
-                    }
-
                     if !bookmarkResults.isEmpty {
                         resultsSection(
                             title: "Bookmarks",
@@ -77,46 +72,6 @@ struct SearchTabContent: View {
         .task(id: query) {
             results = await SearchService.search(query: query, bookmarks: bookmarks, notes: notes)
         }
-    }
-
-    private var saveAsProjectBar: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "tray.full")
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.controlAccent)
-
-            Text("\(results.count) results")
-                .font(CiderFont.label)
-                .foregroundColor(CiderColors.secondary)
-
-            Spacer()
-
-            Button {
-                let projectName = query.isEmpty ? "Search Results" : query
-                onSaveAsProject?(projectName, results)
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "plus.rectangle.on.folder")
-                        .font(CiderFont.bodyMedium)
-                    Text("Save as Project")
-                        .font(CiderFont.labelMedium)
-                }
-                .foregroundColor(CiderColors.controlAccent)
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.accentLight)
-                )
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, Spacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(CiderColors.surfaceSubtle)
-        )
     }
 
     private func resultsSection(title: String, icon: String, results: [SearchResult]) -> some View {

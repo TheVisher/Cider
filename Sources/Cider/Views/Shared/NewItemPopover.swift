@@ -9,7 +9,6 @@ struct NewItemPopover: View {
     var onCreateEvent: (String, Date, Bool) -> Void
     var onCreateContact: (String, String) -> Void
     var onCreateFolder: (String, UUID?) -> Void
-    var onCreateProject: (String) -> Void
     var onDismiss: () -> Void
 
     @State private var step: NewItemStep = .picker
@@ -67,15 +66,6 @@ struct NewItemPopover: View {
                     }
                 )
                 .transition(.opacity)
-            case .project:
-                ProjectCreationForm(
-                    onBack: back,
-                    onCreate: { name in
-                        onCreateProject(name)
-                        onDismiss()
-                    }
-                )
-                .transition(.opacity)
             }
         }
         .frame(width: 264)
@@ -107,7 +97,6 @@ struct NewItemPopover: View {
                 typeCard(.event)
                 typeCard(.contact)
                 typeCard(.folder)
-                typeCard(.project)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
@@ -146,7 +135,6 @@ struct NewItemPopover: View {
             case .event:    step = .event
             case .contact:  step = .contact
             case .folder:   step = .folder
-            case .project:  step = .project
             }
         }
     }
@@ -155,13 +143,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, folder, project
+    case picker, bookmark, note, event, contact, folder
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, folder, project
+    case bookmark, note, event, contact, folder
 
     var id: String { rawValue }
 
@@ -172,7 +160,6 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .event:    "Event"
         case .contact:  "Contact"
         case .folder:   "Folder"
-        case .project:  "Project"
         }
     }
 
@@ -183,7 +170,6 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .event:    "calendar.badge.plus"
         case .contact:  "person.badge.plus"
         case .folder:   "folder.badge.plus"
-        case .project:  "tray.full"
         }
     }
 }
@@ -630,57 +616,3 @@ private struct FolderCreationForm: View {
     }
 }
 
-// MARK: - Project Form
-
-private struct ProjectCreationForm: View {
-    let onBack: () -> Void
-    let onCreate: (String) -> Void
-
-    @State private var name = ""
-    @State private var errorMessage = ""
-    @FocusState private var nameFocused: Bool
-
-    var body: some View {
-        VStack(spacing: Spacing.sm) {
-            FormHeader(title: "New Project", onBack: onBack)
-
-            TextField("Project name", text: $name)
-                .textFieldStyle(.plain)
-                .font(CiderFont.body)
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.sm)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
-                .focused($nameFocused)
-                .onSubmit(commit)
-                .padding(.horizontal, Spacing.md)
-
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.destructive)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.md)
-            }
-
-            AddButton(label: "Create Project", action: commit)
-                .padding(.horizontal, Spacing.md)
-                .padding(.bottom, Spacing.md)
-        }
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            nameFocused = true
-        }
-    }
-
-    private func commit() {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            errorMessage = "Name is required"
-            return
-        }
-        onCreate(trimmedName)
-    }
-}
