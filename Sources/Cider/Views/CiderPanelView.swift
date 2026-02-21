@@ -72,11 +72,20 @@ struct CiderPanelView: View {
                     bookmarks: bookmarksViewModel.bookmarks,
                     notes: notesViewModel.notes,
                     onOpenBookmark: { bookmark in
-                        bookmarksViewModel.open(bookmark)
+                        if NSEvent.modifierFlags.contains(.command) {
+                            bookmarksViewModel.open(bookmark)
+                        } else {
+                            selectedFolderID = nil
+                            selectedTab = .home
+                            bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                        }
                     },
                     onOpenNote: { note in
-                        notesViewModel.selectNote(note)
-                        notesViewModel.show()
+                        NotificationCenter.default.post(
+                            name: .openNoteInPanel,
+                            object: note,
+                            userInfo: ["modal": true]
+                        )
                     },
                     onSpawnSearchTab: spawnSearchTab,
                     onDismiss: { isSearchPaletteVisible = false }
@@ -628,11 +637,20 @@ struct CiderPanelView: View {
                         libraryViewModel: libraryViewModel,
                         folders: bookmarksViewModel.folders,
                         onOpenBookmark: { bookmark in
-                            bookmarksViewModel.open(bookmark)
+                            if NSEvent.modifierFlags.contains(.command) {
+                                bookmarksViewModel.open(bookmark)
+                            } else {
+                                selectedFolderID = nil
+                                selectedTab = .home
+                                bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                            }
                         },
                         onOpenNote: { note in
-                            notesViewModel.selectNote(note)
-                            notesViewModel.show()
+                            NotificationCenter.default.post(
+                                name: .openNoteInPanel,
+                                object: note,
+                                userInfo: ["modal": true]
+                            )
                         },
                         onDeleteBookmark: { bookmark in
                             bookmarksViewModel.deleteBookmarks([bookmark])
@@ -671,10 +689,21 @@ struct CiderPanelView: View {
                     query: query,
                     bookmarks: bookmarksViewModel.bookmarks,
                     notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmarksViewModel.open($0) },
+                    onOpenBookmark: { bookmark in
+                        if NSEvent.modifierFlags.contains(.command) {
+                            bookmarksViewModel.open(bookmark)
+                        } else {
+                            selectedFolderID = nil
+                            selectedTab = .home
+                            bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                        }
+                    },
                     onOpenNote: { note in
-                        notesViewModel.selectNote(note)
-                        notesViewModel.show()
+                        NotificationCenter.default.post(
+                            name: .openNoteInPanel,
+                            object: note,
+                            userInfo: ["modal": true]
+                        )
                     },
                     onSaveAsProject: { name, results in
                         saveSearchAsProject(name: name, results: results)
@@ -685,10 +714,21 @@ struct CiderPanelView: View {
                     projectID: id,
                     bookmarks: bookmarksViewModel.bookmarks,
                     notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmarksViewModel.open($0) },
+                    onOpenBookmark: { bookmark in
+                        if NSEvent.modifierFlags.contains(.command) {
+                            bookmarksViewModel.open(bookmark)
+                        } else {
+                            selectedFolderID = nil
+                            selectedTab = .home
+                            bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                        }
+                    },
                     onOpenNote: { note in
-                        notesViewModel.selectNote(note)
-                        notesViewModel.show()
+                        NotificationCenter.default.post(
+                            name: .openNoteInPanel,
+                            object: note,
+                            userInfo: ["modal": true]
+                        )
                     }
                 )
             case .externalSource(let id, _):
@@ -725,9 +765,12 @@ struct CiderPanelView: View {
             NotesStorage.shared.save(note: note)
         }
 
-        // selectNote loads from disk — content and title are already persisted above
-        notesViewModel.selectNote(note)
-        notesViewModel.show()
+        // Open note via notification — same mechanism as tapping a note from search
+        NotificationCenter.default.post(
+            name: .openNoteInPanel,
+            object: note,
+            userInfo: ["modal": true]
+        )
     }
 
     // MARK: - Search Tab Management

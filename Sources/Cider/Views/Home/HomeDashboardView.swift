@@ -137,6 +137,13 @@ struct HomeDashboardView: View {
                     .animation(reduceMotion ? .none : .snappy, value: selectedContact != nil)
             }
         }
+        .onChange(of: bookmarksViewModel.pendingDetailBookmarkID) { _, bookmarkID in
+            guard let bookmarkID,
+                  let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID })
+            else { return }
+            bookmarksViewModel.pendingDetailBookmarkID = nil
+            presentDetails(for: bookmark)
+        }
         .onChange(of: bookmarksViewModel.bookmarks.map(\.id)) { _, bookmarkIDs in
             guard let detailsDraft else { return }
             if !bookmarkIDs.contains(detailsDraft.id) {
