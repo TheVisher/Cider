@@ -14,12 +14,17 @@ final class ProjectStorage: ObservableObject {
     @Published private(set) var items: [ProjectItem] = []
 
     private let fileName = "_cider_projects.json"
-    private var fileURL: URL
+    private var fileURL: URL {
+        let dir = StoragePaths.ciderDataDirectoryURL()
+        StoragePaths.ensureDirectory(dir)
+        return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
+    }
 
     private init() {
-        let directoryURL = StoragePaths.ciderDataDirectoryURL()
-        fileURL = StoragePaths.jsonFileURL(fileName: fileName, in: directoryURL)
-        StoragePaths.ensureDirectory(directoryURL)
+        load()
+    }
+
+    func reload() {
         load()
     }
 

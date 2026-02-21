@@ -275,7 +275,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
             return nil
         }
 
-        let basePath = NSString(string: CiderConfig.load().bookmarksDirectory).expandingTildeInPath
+        let basePath = NSString(string: CiderConfig.load().ciderDataDirectory).expandingTildeInPath
         return URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent(thumbnailRelativePath)
     }
 
@@ -284,7 +284,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
             return nil
         }
 
-        let basePath = NSString(string: CiderConfig.load().bookmarksDirectory).expandingTildeInPath
+        let basePath = NSString(string: CiderConfig.load().ciderDataDirectory).expandingTildeInPath
         return URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent(originalImageRelativePath)
     }
 }

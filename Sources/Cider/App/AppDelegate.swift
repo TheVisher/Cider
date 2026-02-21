@@ -215,8 +215,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotesStorage.shared.updateDirectory(to: expandedDir)
 
         // Update bookmarks directory if changed
-        let expandedBookmarksDir = NSString(string: config.bookmarksDirectory).expandingTildeInPath
+        let expandedBookmarksDir = NSString(string: config.ciderDataDirectory).expandingTildeInPath
         BookmarksStorage.shared.updateDirectory(to: expandedBookmarksDir)
+
+        // Reload shared-data storages (they use computed fileURL, just need a fresh load)
+        ContactStorage.shared.reload()
+        DateCardStorage.shared.reload()
+        CardLabelStorage.shared.reload()
+        CardStackStorage.shared.reload()
+        SavedViewStorage.shared.reload()
+        ProjectStorage.shared.reload()
+        ExternalSourceStorage.shared.reload()
 
         // Toggle automatic bookmark capture from copied URLs
         BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
@@ -649,7 +658,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onViewTrash: { [weak self] in
                 self?.dismissUndoToast()
                 NotificationCenter.default.post(name: .openCiderSettings, object: nil,
-                    userInfo: ["category": "storage"])
+                    userInfo: ["category": "data"])
             },
             onHoverChanged: { [weak self] hovering in
                 guard let self else { return }

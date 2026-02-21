@@ -12,12 +12,17 @@ final class CardLabelStorage: ObservableObject {
     @Published private(set) var labels: [CardLabel] = []
 
     private let fileName = "_cider_labels.json"
-    private var fileURL: URL
+    private var fileURL: URL {
+        let dir = StoragePaths.ciderDataDirectoryURL()
+        StoragePaths.ensureDirectory(dir)
+        return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
+    }
 
     private init() {
-        let directoryURL = StoragePaths.ciderDataDirectoryURL()
-        fileURL = StoragePaths.jsonFileURL(fileName: fileName, in: directoryURL)
-        StoragePaths.ensureDirectory(directoryURL)
+        load()
+    }
+
+    func reload() {
         load()
     }
 

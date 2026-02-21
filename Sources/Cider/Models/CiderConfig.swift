@@ -101,6 +101,44 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
 
 
 struct CiderConfig: Codable {
+    // CodingKeys: keeps JSON key "bookmarksDirectory" for backward compat with existing UserDefaults data
+    private enum CodingKeys: String, CodingKey {
+        case showMenuBarIcon
+        case textSize
+        case activationMode
+        case notesDirectory
+        case enableNotesHotkey
+        case rememberNotesPanelPositionPerNote
+        case notesEditorTextSize
+        case enableBookmarksHotkey
+        case enableBookmarksCaptureHotkey
+        case autoCaptureCopiedURLs
+        case confirmCopiedURLBeforeSave
+        case ciderDataDirectory = "bookmarksDirectory"
+        case rememberBookmarksPanelPosition
+        case bookmarksDefaultViewMode
+        case bookmarksCardSize
+        case bookmarksCardSizeScale
+        case notesDefaultViewMode
+        case notesCardSizeScale
+        case detailModalMode
+        case showContinueSection
+        case continueSectionCollapsed
+        case subFoldersCollapsed
+        case homeDisplayMode
+        case homeCardSizeScale
+        case enableDateCards
+        case enableStacks
+        case enableSavedViewTabs
+        case enableCalendarProjection
+        case enableLinkedSources
+        case trashRetentionDays
+        case captureToastPosition
+        case undoToastPosition
+        case homeSort
+        case homeEntityFilter
+    }
+
     var showMenuBarIcon: Bool
     var textSize: TextSize
     var activationMode: ActivationMode
@@ -112,7 +150,7 @@ struct CiderConfig: Codable {
     var enableBookmarksCaptureHotkey: Bool  // Enable Option+Shift+B to capture active browser tab
     var autoCaptureCopiedURLs: Bool  // Automatically save copied URLs as bookmarks
     var confirmCopiedURLBeforeSave: Bool  // Require explicit save/discard for copied URLs
-    var bookmarksDirectory: String  // Directory for bookmark files
+    var ciderDataDirectory: String  // Directory for Cider data (bookmarks, contacts, stacks, labels, date cards, saved views, projects)
     var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
@@ -151,7 +189,7 @@ struct CiderConfig: Codable {
             enableBookmarksCaptureHotkey: true,
             autoCaptureCopiedURLs: false,
             confirmCopiedURLBeforeSave: false,
-            bookmarksDirectory: "~/Documents/Cider/Bookmarks",
+            ciderDataDirectory: "~/Documents/Cider/Bookmarks",
             rememberBookmarksPanelPosition: false,
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
@@ -195,8 +233,8 @@ struct CiderConfig: Codable {
                 didMigrate = true
             }
 
-            if config.bookmarksDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                config.bookmarksDirectory = "~/Documents/Cider/Bookmarks"
+            if config.ciderDataDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                config.ciderDataDirectory = "~/Documents/Cider/Bookmarks"
                 didMigrate = true
             }
 
@@ -249,9 +287,9 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .confirmCopiedURLBeforeSave
         ) ?? false
-        bookmarksDirectory = try container.decodeIfPresent(
+        ciderDataDirectory = try container.decodeIfPresent(
             String.self,
-            forKey: .bookmarksDirectory
+            forKey: .ciderDataDirectory
         ) ?? "~/Documents/Cider/Bookmarks"
         rememberBookmarksPanelPosition = try container.decodeIfPresent(
             Bool.self,
@@ -352,7 +390,7 @@ struct CiderConfig: Codable {
         enableBookmarksCaptureHotkey: Bool = true,
         autoCaptureCopiedURLs: Bool = false,
         confirmCopiedURLBeforeSave: Bool = false,
-        bookmarksDirectory: String = "~/Documents/Cider/Bookmarks",
+        ciderDataDirectory: String = "~/Documents/Cider/Bookmarks",
         rememberBookmarksPanelPosition: Bool = false,
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
         bookmarksCardSize: BookmarkCardSize = .comfortable,
@@ -387,7 +425,7 @@ struct CiderConfig: Codable {
         self.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
-        self.bookmarksDirectory = bookmarksDirectory
+        self.ciderDataDirectory = ciderDataDirectory
         self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize

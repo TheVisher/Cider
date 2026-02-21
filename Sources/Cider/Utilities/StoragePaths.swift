@@ -2,7 +2,7 @@ import Foundation
 
 enum StoragePaths {
     static func ciderDataDirectoryURL(config: CiderConfig = CiderConfig.load()) -> URL {
-        let expanded = NSString(string: config.bookmarksDirectory).expandingTildeInPath
+        let expanded = NSString(string: config.ciderDataDirectory).expandingTildeInPath
         return URL(fileURLWithPath: expanded)
     }
 

@@ -39,7 +39,7 @@ final class BookmarksStorage: ObservableObject {
 
     private init() {
         let config = CiderConfig.load()
-        let expanded = NSString(string: config.bookmarksDirectory).expandingTildeInPath
+        let expanded = NSString(string: config.ciderDataDirectory).expandingTildeInPath
         directoryURL = URL(fileURLWithPath: expanded)
         ensureDirectory()
         load()

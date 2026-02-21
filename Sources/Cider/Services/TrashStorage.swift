@@ -74,7 +74,7 @@ final class TrashStorage {
 
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
@@ -200,7 +200,7 @@ final class TrashStorage {
     func allTrashItems() -> [TrashItem] {
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let notesDir = URL(
             fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
@@ -217,7 +217,7 @@ final class TrashStorage {
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let notesDir = URL(
             fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
@@ -251,7 +251,7 @@ final class TrashStorage {
         switch trashItem.itemType {
         case .bookmark:
             let bookmarksDir = URL(
-                fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
             )
             let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
@@ -273,7 +273,7 @@ final class TrashStorage {
     func emptyTrash() {
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let notesDir = URL(
             fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
