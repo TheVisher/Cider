@@ -157,6 +157,7 @@ enum SearchService {
             let rawContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
             let strippedContent = rawContent
                 .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let contentMatch = strippedContent.lowercased().contains(query)
 
