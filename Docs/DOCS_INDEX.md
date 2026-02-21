@@ -51,7 +51,7 @@ Each tab and major feature area has its own doc. These capture what's been built
 
 | Doc | What it covers | Status |
 | --- | --- | --- |
-| **WORKSPACES_VISION.md** | Folders, projects, search tabs, saved views, sidebar design, themed folders, multi-select, undo/trash | ✅ Phases 1-3 complete; Phase 4-5 (Projects UI, tear-off) future |
+| **WORKSPACES_VISION.md** | Folders, saved views, search tabs, sidebar design, themed folders, multi-select; Projects removed (dormant storage only); New Tab in +New popover | ✅ Phases 1-3 + New Tab complete; Phase 4-5 (manual item refs, Kanban) future |
 
 ### Future Integrations & AI
 

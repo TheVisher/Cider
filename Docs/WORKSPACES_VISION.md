@@ -7,6 +7,7 @@
 > - ✅ Phase 2 — Center Search Palette (complete)
 > - ✅ Phase 3 — Custom Saved View Tabs (complete)
 > - ~~🔲 Phase 4 — Projects UI~~ — **Removed.** Projects removed from UI; `ProjectStorage` retained but dormant. See decision below.
+> - ✅ "New Tab" in +New popover (complete, Feb 2026)
 > - 🔲 Phase 4 (new) — Saved View expansion: manual item refs + "Send to view" context action
 > - 🔲 Phase 5 — Kanban display mode on Saved Views
 
@@ -156,29 +157,24 @@ Add `kanban` as a display mode option on Saved Views (alongside list, grid, maso
 
 Any saved view can become a Kanban — you don't need a separate "board" or "project" concept. A "Game Room renovation" Kanban is just a saved view in Kanban mode.
 
-### Create Tab from +New Popover (Planned)
+### Create Tab from +New Popover ✅ Implemented (Feb 2026)
 
-The +New popover (pill button in the sidebar footer) now has an empty card slot where "Project" used to be. This should become **"New Tab"** — letting users create a saved view tab directly from the popover.
+The "Tab" card fills the slot left by the removed "Project" card. The +New picker is now a full 3×2 grid: Bookmark, Note, Event, Contact, Folder, Tab.
 
 **Flow:**
 1. Click +New → popover opens
-2. Click "New Tab" card
-3. Step 1 — **Name** — text field pre-focused, user types tab name
-4. Step 2 — **Content** — selector pills to choose what the tab shows:
-   - All Items (default — shows the full library, just like Home)
-   - Bookmarks only
-   - Notes only
-   - By label (show label picker)
-   - By folder (show folder picker)
-5. Confirm → saved view is created and immediately opens as a pinned tab
+2. Click "Tab" card (icon: `rectangle.badge.plus`)
+3. Name field — user types tab name (Create Tab button disabled until non-empty)
+4. Content pills — four toggleable pills: **Bookmarks**, **Notes**, **Events**, **Contacts** (all selected by default = "Everything"; last one can't be deselected)
+5. "Create Tab" — `SavedView` created with `isTabPinned: true` and selected `entityTypes` as `filterSpec`. Panel navigates immediately to the new tab.
 
-**Why this belongs in +New:**
-- Creating a tab is a meaningful action — not something you do mid-workflow from the search results menu
-- The popover is the natural home for "create new thing" actions (new folder, new note, new bookmark, new tab)
-- Removes the extra friction of "first search, then save as tab" for users who know what they want upfront
-- The existing "Save as tab" from search results stays — two entry points for the same feature
+**Two entry points for the same result:**
+- **+New → Tab** — for users who know what they want upfront (name it, pick content type)
+- **Search → Save as tab** — for users who discover a useful query mid-session
 
-**Implementation note:** The saved view creation form already exists as a multi-step flow in NewItemPopover.swift. The "New Tab" card just routes to a lightweight version of that flow — name field + content selector pills. No filter builder needed at creation time; users can refine the filter later via the tab's own view options.
+**Future refinements (not yet implemented):**
+- "By label" and "By folder" filter pills in the creation form
+- Folder picker integration so users can scope a tab to a specific folder at creation time
 
 ---
 
