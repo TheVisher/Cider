@@ -144,14 +144,17 @@ struct ContactCardCardView: View {
             return
         }
         let url = ContactStorage.shared.avatarURL(for: contact.id)
-        let data: Data? = await Task.detached(priority: .userInitiated) {
-            try? Data(contentsOf: url)
+        let image: NSImage? = await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 120,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         }.value
-        if let data, let image = NSImage(data: data) {
-            avatarImage = image
-        } else {
-            avatarImage = nil
-        }
+        avatarImage = image
     }
 }
 
@@ -259,13 +262,16 @@ struct ContactListRow: View {
             return
         }
         let url = ContactStorage.shared.avatarURL(for: contact.id)
-        let data: Data? = await Task.detached(priority: .userInitiated) {
-            try? Data(contentsOf: url)
+        let image: NSImage? = await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 120,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         }.value
-        if let data, let image = NSImage(data: data) {
-            avatarImage = image
-        } else {
-            avatarImage = nil
-        }
+        avatarImage = image
     }
 }

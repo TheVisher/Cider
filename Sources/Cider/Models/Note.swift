@@ -24,47 +24,50 @@ struct Note: Identifiable, Hashable {
     // MARK: - Computed Properties for Card Display
 
     /// The raw content to use for display — loads from disk if the in-memory field is empty.
-    private var resolvedContent: String {
+    /// Internal so NoteCardData.load() can call it once and pass through.
+    var resolvedContent: String {
         if !content.isEmpty { return content }
         guard !relativePath.isEmpty else { return "" }
-        let config = CiderConfig.load()
-        let expanded = NSString(string: config.notesDirectory).expandingTildeInPath
+        let expanded = NSString(string: StoragePaths.notesDirectoryPath).expandingTildeInPath
         let fileURL = URL(fileURLWithPath: expanded).appendingPathComponent(relativePath)
         return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
     }
 
+    // Pre-compiled regexes for image extraction
+    private static let mdImageRegex = try! NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^\)]+)\)"#)
+    private static let htmlImageRegex = try! NSRegularExpression(pattern: #"<img\s[^>]*src=[\"']([^\"']+)[\"']"#, options: .caseInsensitive)
+
     /// Extract image URLs from markdown/HTML content, resolved to absolute file URLs.
     var imageURLs: [URL] {
-        let text = resolvedContent
+        imageURLs(from: resolvedContent)
+    }
+
+    /// Extract image URLs from pre-loaded content (avoids redundant resolvedContent calls).
+    func imageURLs(from text: String) -> [URL] {
         guard !text.isEmpty else { return [] }
         var urls: [URL] = []
-        let config = CiderConfig.load()
-        let expanded = NSString(string: config.notesDirectory).expandingTildeInPath
+        let expanded = NSString(string: StoragePaths.notesDirectoryPath).expandingTildeInPath
         let baseURL = URL(fileURLWithPath: expanded)
 
         // Markdown images: ![alt](./.attachments/file.png) or ![alt](path)
-        if let mdRegex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^\)]+)\)"#) {
-            let matches = mdRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-            for match in matches {
-                if let range = Range(match.range(at: 1), in: text) {
-                    let path = String(text[range])
-                        .removingPercentEncoding ?? String(text[range])
-                    let resolved = resolveImagePath(path, base: baseURL)
-                    if let resolved { urls.append(resolved) }
-                }
+        let mdMatches = Self.mdImageRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        for match in mdMatches {
+            if let range = Range(match.range(at: 1), in: text) {
+                let path = String(text[range])
+                    .removingPercentEncoding ?? String(text[range])
+                let resolved = resolveImagePath(path, base: baseURL)
+                if let resolved { urls.append(resolved) }
             }
         }
 
         // HTML images: <img src="path">
-        if let htmlRegex = try? NSRegularExpression(pattern: #"<img\s[^>]*src=[\"']([^\"']+)[\"']"#, options: .caseInsensitive) {
-            let matches = htmlRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-            for match in matches {
-                if let range = Range(match.range(at: 1), in: text) {
-                    let path = String(text[range])
-                        .removingPercentEncoding ?? String(text[range])
-                    let resolved = resolveImagePath(path, base: baseURL)
-                    if let resolved, !urls.contains(resolved) { urls.append(resolved) }
-                }
+        let htmlMatches = Self.htmlImageRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        for match in htmlMatches {
+            if let range = Range(match.range(at: 1), in: text) {
+                let path = String(text[range])
+                    .removingPercentEncoding ?? String(text[range])
+                let resolved = resolveImagePath(path, base: baseURL)
+                if let resolved, !urls.contains(resolved) { urls.append(resolved) }
             }
         }
 
@@ -143,9 +146,12 @@ struct NoteCardData: Equatable {
     static let empty = NoteCardData(preview: "", wordCount: 0, imageURLs: [], thumbnails: [:])
 
     static func load(for note: Note) -> NoteCardData {
-        let preview = note.contentPreview
-        let wordCount = note.wordCount
-        let imageURLs = note.imageURLs
+        // Resolve content once — avoids 3x CiderConfig.load() + disk I/O
+        let raw = note.resolvedContent
+        let stripped = Self.stripMarkup(raw)
+        let preview = String(stripped.prefix(150))
+        let wordCount = Self.countWords(stripped)
+        let imageURLs = note.imageURLs(from: raw)
 
         var thumbnails: [URL: NSImage] = [:]
         for url in imageURLs.prefix(3) {
@@ -160,6 +166,27 @@ struct NoteCardData: Equatable {
             imageURLs: imageURLs,
             thumbnails: thumbnails
         )
+    }
+
+    static func stripMarkup(_ text: String) -> String {
+        guard !text.isEmpty else { return "" }
+        return text
+            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"!\[[^\]]*\]\([^\)]+\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\[([^\]]*)\]\([^\)]+\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"[#*_~`>]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func countWords(_ plain: String) -> Int {
+        guard !plain.isEmpty else { return 0 }
+        var count = 0
+        plain.enumerateSubstrings(in: plain.startIndex..., options: [.byWords, .substringNotRequired]) { _, _, _, _ in
+            count += 1
+        }
+        return count
     }
 
     private static func downsampledImage(at url: URL, maxDimension: CGFloat) -> NSImage? {

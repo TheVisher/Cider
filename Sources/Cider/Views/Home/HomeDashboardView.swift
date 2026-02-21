@@ -42,11 +42,7 @@ struct HomeDashboardView: View {
 
     /// Continue section always shows global recents regardless of folder/filter selection
     private var continueItems: [LibraryItemV2] {
-        Array(
-            libraryViewModel.items
-                .sorted { $0.updatedDate > $1.updatedDate }
-                .prefix(8)
-        )
+        libraryViewModel.recentItems
     }
 
     /// Library feed applies current filter + sort
@@ -72,7 +68,7 @@ struct HomeDashboardView: View {
     }
 
     private var isExpandMode: Bool {
-        (detailsPresentationMode ?? CiderConfig.load().detailModalMode) == .expand
+        (detailsPresentationMode ?? config.detailModalMode) == .expand
     }
 
     private var shouldBlurContent: Bool {
@@ -435,7 +431,7 @@ struct HomeDashboardView: View {
         detailsDraft = draft
         detailsErrorMessage = nil
 
-        let presentationMode = CiderConfig.load().detailModalMode
+        let presentationMode = config.detailModalMode
         detailsPresentationMode = presentationMode
 
         if presentationMode == .popover {
@@ -446,7 +442,7 @@ struct HomeDashboardView: View {
     }
 
     private func closeDetails() {
-        let presentationMode = detailsPresentationMode ?? CiderConfig.load().detailModalMode
+        let presentationMode = detailsPresentationMode ?? config.detailModalMode
         if presentationMode == .popover {
             NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
         } else {

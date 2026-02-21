@@ -10,6 +10,8 @@ struct StackSurfaceResult: Identifiable, Hashable {
 @MainActor
 final class LibraryViewModel: ObservableObject {
     @Published private(set) var items: [LibraryItemV2] = []
+    /// Top 8 most recently updated items — pre-sorted during rebuildItems().
+    @Published private(set) var recentItems: [LibraryItemV2] = []
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -25,7 +27,9 @@ final class LibraryViewModel: ObservableObject {
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
         let externalFileItems = ExternalSourceRegistry.shared.libraryFiles.map { LibraryItemV2.externalFile($0) }
 
-        items = bookmarkItems + noteItems + dateCardItems + contactItems + externalFileItems
+        let all = bookmarkItems + noteItems + dateCardItems + contactItems + externalFileItems
+        items = all
+        recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
     }
 
     func filteredItems(

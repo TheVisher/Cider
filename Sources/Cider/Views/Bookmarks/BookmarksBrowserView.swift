@@ -965,10 +965,16 @@ struct BookmarkThumbnailView: View {
     @Environment(\.textScale) private var textScale
     @State private var thumbnailImage: NSImage?
     @State private var rendersAsIconOverlay = false
-    @State private var loadedThumbnailFingerprint: String?
 
     private var palette: (Color, Color) {
         BookmarkVisualStyle.gradient(for: bookmark)
+    }
+
+    private var thumbnailFingerprint: String {
+        let path = bookmark.thumbnailFileURL?.path ?? ""
+        let ts = String(bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1)
+        let remote = bookmark.thumbnailRemoteURLString ?? ""
+        return "\(path)|\(ts)|\(remote)"
     }
 
     var body: some View {
@@ -976,15 +982,8 @@ struct BookmarkThumbnailView: View {
             .fill(Color.clear)
             .overlay(content: thumbnailContent)
             .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            .onAppear(perform: loadThumbnailIfNeeded)
-            .onChange(of: bookmark.thumbnailRelativePath) { _, _ in
-                loadThumbnailIfNeeded()
-            }
-            .onChange(of: bookmark.metadataUpdatedAt) { _, _ in
-                loadThumbnailIfNeeded()
-            }
-            .onChange(of: bookmark.thumbnailRemoteURLString) { _, _ in
-                loadThumbnailIfNeeded()
+            .task(id: thumbnailFingerprint) {
+                await loadThumbnailAsync()
             }
     }
 
@@ -1079,48 +1078,54 @@ struct BookmarkThumbnailView: View {
         }
     }
 
-    private func loadThumbnailIfNeeded() {
-        let path = bookmark.thumbnailFileURL?.path
-        let fingerprint = [
-            path ?? "",
-            String(bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1),
-            bookmark.thumbnailRemoteURLString ?? "",
-        ].joined(separator: "|")
-        guard loadedThumbnailFingerprint != fingerprint else { return }
-        loadedThumbnailFingerprint = fingerprint
-
-        guard let path else {
+    private func loadThumbnailAsync() async {
+        guard let fileURL = bookmark.thumbnailFileURL else {
             thumbnailImage = nil
             rendersAsIconOverlay = false
             onAspectRatioResolved?(nil)
             return
         }
 
-        thumbnailImage = NSImage(contentsOfFile: path)
-        if shouldSuppressDownloadedThumbnail {
+        let remoteURLString = bookmark.thumbnailRemoteURLString
+
+        let result: (NSImage, Bool, CGFloat?)? = await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+
+            let width = CGFloat(cgImage.width)
+            let height = CGFloat(cgImage.height)
+            guard width > 0, height > 0 else { return nil }
+
+            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+
+            let isIconOverlay = Self.shouldRenderAsIconOverlay(
+                width: width, height: height, remoteURLString: remoteURLString
+            )
+            let aspectRatio: CGFloat? = isIconOverlay ? nil : height / width
+
+            return (nsImage, isIconOverlay, aspectRatio)
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        if let (image, isIcon, aspectRatio) = result, !shouldSuppressDownloadedThumbnail {
+            thumbnailImage = image
+            rendersAsIconOverlay = isIcon
+            onAspectRatioResolved?(aspectRatio)
+        } else {
+            thumbnailImage = nil
             rendersAsIconOverlay = false
             onAspectRatioResolved?(nil)
-            return
         }
-        rendersAsIconOverlay = shouldRenderAsIconOverlay(
-            image: thumbnailImage,
-            remoteURLString: bookmark.thumbnailRemoteURLString
-        )
-        onAspectRatioResolved?(rendersAsIconOverlay ? nil : resolvedAspectRatio(from: thumbnailImage))
     }
 
-    private func resolvedAspectRatio(from image: NSImage?) -> CGFloat? {
-        guard let image else { return nil }
-        guard image.size.width > 0, image.size.height > 0 else { return nil }
-        return image.size.height / image.size.width
-    }
-
-    private func shouldRenderAsIconOverlay(image: NSImage?, remoteURLString: String?) -> Bool {
-        guard let image else { return false }
-        let width = image.size.width
-        let height = image.size.height
-        guard width > 0, height > 0 else { return false }
-
+    nonisolated private static func shouldRenderAsIconOverlay(
+        width: CGFloat, height: CGFloat, remoteURLString: String?
+    ) -> Bool {
         let aspectRatio = width / height
         let isSquareish = abs(aspectRatio - 1) <= BookmarksDesign.thumbnailIconCandidateMaxAspectDelta
         let maxDimension = max(width, height)

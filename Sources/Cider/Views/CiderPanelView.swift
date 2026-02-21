@@ -579,6 +579,10 @@ struct CiderPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var isHomeActive: Bool {
+        selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil
+    }
+
     @ViewBuilder
     private var tabContentBody: some View {
         if let sourceID = selectedSourceID,
@@ -603,8 +607,8 @@ struct CiderPanelView: View {
                 }
             )
         } else {
-            switch selectedTab {
-            case .home:
+            ZStack {
+                // Home is always alive — survives tab switches without resetting state
                 HomeDashboardView(
                     bookmarksViewModel: bookmarksViewModel,
                     notesViewModel: notesViewModel,
@@ -626,94 +630,104 @@ struct CiderPanelView: View {
                         newContactEditorContext = ContactEditorContext(existingContact: contact)
                     }
                 )
-            case .savedView(let id, _):
-                if let savedView = savedViewStorage.savedView(for: id) {
-                    SavedViewTabContent(
-                        savedView: savedView,
-                        libraryViewModel: libraryViewModel,
-                        folders: bookmarksViewModel.folders,
-                        onOpenBookmark: { bookmark in
-                            if NSEvent.modifierFlags.contains(.command) {
-                                bookmarksViewModel.open(bookmark)
-                            } else {
-                                selectedFolderID = nil
-                                selectedTab = .home
-                                bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
-                            }
-                        },
-                        onOpenNote: { note in
-                            NotificationCenter.default.post(
-                                name: .openNoteInPanel,
-                                object: note,
-                                userInfo: ["modal": true]
+                .opacity(isHomeActive ? 1 : 0)
+                .allowsHitTesting(isHomeActive)
+
+                // Other tabs are created/destroyed on demand
+                if !isHomeActive, selectedFolderID == nil, selectedSourceID == nil {
+                    switch selectedTab {
+                    case .home:
+                        EmptyView()
+                    case .savedView(let id, _):
+                        if let savedView = savedViewStorage.savedView(for: id) {
+                            SavedViewTabContent(
+                                savedView: savedView,
+                                libraryViewModel: libraryViewModel,
+                                folders: bookmarksViewModel.folders,
+                                onOpenBookmark: { bookmark in
+                                    if NSEvent.modifierFlags.contains(.command) {
+                                        bookmarksViewModel.open(bookmark)
+                                    } else {
+                                        selectedFolderID = nil
+                                        selectedTab = .home
+                                        bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                                    }
+                                },
+                                onOpenNote: { note in
+                                    NotificationCenter.default.post(
+                                        name: .openNoteInPanel,
+                                        object: note,
+                                        userInfo: ["modal": true]
+                                    )
+                                },
+                                onDeleteBookmark: { bookmark in
+                                    bookmarksViewModel.deleteBookmarks([bookmark])
+                                },
+                                onDeleteNote: { note in
+                                    notesViewModel.deleteNotes([note])
+                                },
+                                onRenameNote: { note, newTitle in
+                                    NotesStorage.shared.rename(note: note, to: newTitle)
+                                },
+                                onMoveBookmarkToFolder: { bookmark, folderID in
+                                    _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+                                },
+                                onMoveNoteToFolder: { note, folderID in
+                                    _ = notesViewModel.assignNote(note, toFolder: folderID)
+                                },
+                                onUpdateSavedView: { updated in
+                                    _ = savedViewStorage.updateSavedView(updated)
+                                    if case .savedView(let selectedID, _) = selectedTab,
+                                       selectedID == updated.id {
+                                        selectedTab = .savedView(id: updated.id, name: updated.name)
+                                    }
+                                },
+                                onDeleteSavedView: { savedViewID in
+                                    deleteSavedView(savedViewID)
+                                }
                             )
-                        },
-                        onDeleteBookmark: { bookmark in
-                            bookmarksViewModel.deleteBookmarks([bookmark])
-                        },
-                        onDeleteNote: { note in
-                            notesViewModel.deleteNotes([note])
-                        },
-                        onRenameNote: { note, newTitle in
-                            NotesStorage.shared.rename(note: note, to: newTitle)
-                        },
-                        onMoveBookmarkToFolder: { bookmark, folderID in
-                            _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
-                        },
-                        onMoveNoteToFolder: { note, folderID in
-                            _ = notesViewModel.assignNote(note, toFolder: folderID)
-                        },
-                        onUpdateSavedView: { updated in
-                            _ = savedViewStorage.updateSavedView(updated)
-                            if case .savedView(let selectedID, _) = selectedTab,
-                               selectedID == updated.id {
-                                selectedTab = .savedView(id: updated.id, name: updated.name)
-                            }
-                        },
-                        onDeleteSavedView: { savedViewID in
-                            deleteSavedView(savedViewID)
-                        }
-                    )
-                } else {
-                    EmptyStateView(
-                        icon: "square.grid.2x2",
-                        title: "Saved view not found"
-                    )
-                }
-            case .search(_, let query):
-                SearchTabContent(
-                    query: query,
-                    bookmarks: bookmarksViewModel.bookmarks,
-                    notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmark in
-                        if NSEvent.modifierFlags.contains(.command) {
-                            bookmarksViewModel.open(bookmark)
                         } else {
-                            selectedFolderID = nil
-                            selectedTab = .home
-                            bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                            EmptyStateView(
+                                icon: "square.grid.2x2",
+                                title: "Saved view not found"
+                            )
                         }
-                    },
-                    onOpenNote: { note in
-                        NotificationCenter.default.post(
-                            name: .openNoteInPanel,
-                            object: note,
-                            userInfo: ["modal": true]
+                    case .search(_, let query):
+                        SearchTabContent(
+                            query: query,
+                            bookmarks: bookmarksViewModel.bookmarks,
+                            notes: notesViewModel.notes,
+                            onOpenBookmark: { bookmark in
+                                if NSEvent.modifierFlags.contains(.command) {
+                                    bookmarksViewModel.open(bookmark)
+                                } else {
+                                    selectedFolderID = nil
+                                    selectedTab = .home
+                                    bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                                }
+                            },
+                            onOpenNote: { note in
+                                NotificationCenter.default.post(
+                                    name: .openNoteInPanel,
+                                    object: note,
+                                    userInfo: ["modal": true]
+                                )
+                            }
                         )
+                    case .externalSource(let id, _):
+                        if let source = externalSourceStorage.source(for: id) {
+                            SourceDetailView(
+                                source: source,
+                                displayMode: $homeDisplayMode,
+                                cardSizeScale: $homeCardSizeScale
+                            )
+                        } else {
+                            EmptyStateView(
+                                icon: "folder.badge.gear",
+                                title: "Source not found"
+                            )
+                        }
                     }
-                )
-            case .externalSource(let id, _):
-                if let source = externalSourceStorage.source(for: id) {
-                    SourceDetailView(
-                        source: source,
-                        displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale
-                    )
-                } else {
-                    EmptyStateView(
-                        icon: "folder.badge.gear",
-                        title: "Source not found"
-                    )
                 }
             }
         }

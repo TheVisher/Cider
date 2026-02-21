@@ -37,7 +37,11 @@ struct MasonryLayout: Layout {
         cache: inout Cache
     ) {
         let availableWidth = resolvedLayoutWidth(bounds.width)
-        computeFrames(availableWidth: availableWidth, subviews: subviews, cache: &cache)
+        // Reuse frames from sizeThatFits if width matches (same layout pass).
+        // Cross-pass subview size changes are caught by sizeThatFits which always recomputes.
+        if cache.measuredWidth != availableWidth || cache.frames.count != subviews.count {
+            computeFrames(availableWidth: availableWidth, subviews: subviews, cache: &cache)
+        }
 
         for index in subviews.indices {
             let frame = cache.frames[index]

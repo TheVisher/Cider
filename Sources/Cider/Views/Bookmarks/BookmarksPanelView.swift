@@ -729,7 +729,6 @@ struct BookmarkDetailsHeroPreview: View {
 
     @Environment(\.textScale) private var textScale
     @State private var thumbnailImage: NSImage?
-    @State private var loadedThumbnailFingerprint: String?
 
     private var palette: (Color, Color) {
         let seed = bookmark?.urlString ?? draft.urlString
@@ -756,15 +755,8 @@ struct BookmarkDetailsHeroPreview: View {
                     .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
             )
             .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-            .onAppear(perform: loadThumbnailIfNeeded)
-            .onChange(of: bookmark?.thumbnailRelativePath) { _, _ in
-                loadThumbnailIfNeeded()
-            }
-            .onChange(of: bookmark?.metadataUpdatedAt) { _, _ in
-                loadThumbnailIfNeeded()
-            }
-            .onChange(of: bookmark?.thumbnailRemoteURLString) { _, _ in
-                loadThumbnailIfNeeded()
+            .task(id: thumbnailFingerprint) {
+                await loadThumbnailAsync()
             }
     }
 
@@ -814,21 +806,31 @@ struct BookmarkDetailsHeroPreview: View {
         )
     }
 
-    private func loadThumbnailIfNeeded() {
-        let path = bookmark?.thumbnailFileURL?.path
-        let fingerprint = [
-            path ?? "",
-            String(bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1),
-            bookmark?.thumbnailRemoteURLString ?? "",
-        ].joined(separator: "|")
-        guard loadedThumbnailFingerprint != fingerprint else { return }
-        loadedThumbnailFingerprint = fingerprint
+    private var thumbnailFingerprint: String {
+        let path = bookmark?.thumbnailFileURL?.path ?? ""
+        let ts = String(bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1)
+        let remote = bookmark?.thumbnailRemoteURLString ?? ""
+        return "\(path)|\(ts)|\(remote)"
+    }
 
-        guard let path else {
+    private func loadThumbnailAsync() async {
+        guard let fileURL = bookmark?.thumbnailFileURL else {
             thumbnailImage = nil
             return
         }
-        thumbnailImage = NSImage(contentsOfFile: path)
+
+        let image: NSImage? = await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }.value
+
+        guard !Task.isCancelled else { return }
+        thumbnailImage = image
     }
 }
 

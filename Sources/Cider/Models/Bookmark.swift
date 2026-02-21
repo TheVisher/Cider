@@ -274,17 +274,13 @@ struct Bookmark: Identifiable, Hashable, Codable {
         guard let thumbnailRelativePath, !thumbnailRelativePath.isEmpty else {
             return nil
         }
-
-        let basePath = NSString(string: CiderConfig.load().ciderDataDirectory).expandingTildeInPath
-        return URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent(thumbnailRelativePath)
+        return StoragePaths.cachedCiderDataDirectoryURL.appendingPathComponent(thumbnailRelativePath)
     }
 
     var originalImageFileURL: URL? {
         guard let originalImageRelativePath, !originalImageRelativePath.isEmpty else {
             return nil
         }
-
-        let basePath = NSString(string: CiderConfig.load().ciderDataDirectory).expandingTildeInPath
-        return URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent(originalImageRelativePath)
+        return StoragePaths.cachedCiderDataDirectoryURL.appendingPathComponent(originalImageRelativePath)
     }
 }
