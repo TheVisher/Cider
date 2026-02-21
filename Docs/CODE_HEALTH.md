@@ -66,21 +66,9 @@ The editor enables HTML markdown parsing (`html: true`) and registers multiple `
 
 ## Correctness / Data
 
-### CH-C01 — Storage path split on directory change (High)
+### ~~CH-C01 — Storage path split on directory change~~ ✅ Fixed 2026-02-21
 
-`ContactStorage`, `ProjectStorage`, `DateCardStorage`, `CardStackStorage`, `CardLabelStorage`, and `SavedViewStorage` all capture their file path at init. Only `NotesStorage` and `BookmarksStorage` get `updateDirectory()` called in `AppDelegate.applySettings()`. If the user changes their storage directory in Settings, the remaining storages diverge — writing JSON to the new location but still referencing IDs from the old one.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Change each affected storage's `directoryURL` from a stored property to a computed property that calls `StoragePaths.ciderDataDirectoryURL()` lazily. `ContactStorage.avatarDirectoryURL()` already does this correctly — follow that pattern.
-
-- File refs: `Sources/Cider/Utilities/StoragePaths.swift:4`, `Sources/Cider/Services/ProjectStorage.swift:19`, `Sources/Cider/Services/CardLabelStorage.swift:18`, `Sources/Cider/Services/DateCardStorage.swift:18`, `Sources/Cider/Services/CardStackStorage.swift:18`, `Sources/Cider/Services/SavedViewStorage.swift:18`, `Sources/Cider/Services/ContactStorage.swift:19`, `Sources/Cider/App/AppDelegate.swift:173–177`
-
-- First reported: 2026-02-16 (ME-01), confirmed 2026-02-18, 2026-02-20
-
-- [ ] Fixed
+`fileURL` in ContactStorage, ProjectStorage, DateCardStorage, CardStackStorage, CardLabelStorage, SavedViewStorage, and ExternalSourceStorage changed from stored properties (set at `init()`) to computed properties that call `StoragePaths.ciderDataDirectoryURL()` at runtime. Each storage gained a public `reload()` method. `AppDelegate.handleConfigChanged()` calls `reload()` on all 6 after updating the BookmarksStorage directory. Also: `CiderConfig.bookmarksDirectory` renamed to `ciderDataDirectory`; CodingKeys alias keeps JSON key `"bookmarksDirectory"` for backward compat.
 
 ### CH-C02 — Note restore orphan risk in TrashStorage (High)
 
