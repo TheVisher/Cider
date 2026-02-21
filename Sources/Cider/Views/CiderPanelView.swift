@@ -4,7 +4,6 @@ import AppKit
 struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
-    @ObservedObject private var projectStorage = ProjectStorage.shared
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
     @ObservedObject private var externalSourceStorage = ExternalSourceStorage.shared
     @StateObject private var libraryViewModel = LibraryViewModel()
@@ -361,16 +360,11 @@ struct CiderPanelView: View {
             folders: bookmarksViewModel.folders,
             bookmarks: bookmarksViewModel.bookmarks,
             notes: notesViewModel.notes,
-            projects: projectStorage.activeProjects(),
             selectedFolderID: $selectedFolderID,
             expandedFolderIDs: $expandedFolderIDs,
             onCreateFolder: { bookmarksViewModel.createFolder(name: $0, parentID: $1) },
             onAssignBookmarkToFolder: { bookmarksViewModel.assign($0, toFolder: $1) },
             onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
-            onOpenProject: openProjectTab,
-            onCreateProject: createProject,
-            onDeleteProject: deleteProject,
-            onRenameProject: renameProject,
             onRenameFolder: { bookmarksViewModel.renameFolder($0, to: $1) },
             onDeleteFolder: deleteFolder,
             onTriggerSearch: { isSearchPaletteVisible = true },
@@ -521,10 +515,6 @@ struct CiderPanelView: View {
             },
             onCreateFolder: { name, parentID in
                 bvm.createFolder(name: name, parentID: parentID)
-            },
-            onCreateProject: { [self] name in
-                let project = ProjectStorage.shared.createProject(name: name)
-                openProjectTab(project.id)
             },
             onDismiss: { [self] in
                 showNewItemPicker = false
@@ -704,31 +694,6 @@ struct CiderPanelView: View {
                             object: note,
                             userInfo: ["modal": true]
                         )
-                    },
-                    onSaveAsProject: { name, results in
-                        saveSearchAsProject(name: name, results: results)
-                    }
-                )
-            case .project(let id, _):
-                ProjectTabContent(
-                    projectID: id,
-                    bookmarks: bookmarksViewModel.bookmarks,
-                    notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmark in
-                        if NSEvent.modifierFlags.contains(.command) {
-                            bookmarksViewModel.open(bookmark)
-                        } else {
-                            selectedFolderID = nil
-                            selectedTab = .home
-                            bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
-                        }
-                    },
-                    onOpenNote: { note in
-                        NotificationCenter.default.post(
-                            name: .openNoteInPanel,
-                            object: note,
-                            userInfo: ["modal": true]
-                        )
                     }
                 )
             case .externalSource(let id, _):
@@ -843,32 +808,6 @@ struct CiderPanelView: View {
         return "View \(index)"
     }
 
-    // MARK: - Project Management
-
-    private func openProjectTab(_ projectID: UUID) {
-        let projectName = ProjectStorage.shared.project(for: projectID)?.name ?? "Project"
-        let tab = CiderTab.project(id: projectID, name: projectName)
-        if !dynamicTabs.contains(where: { $0.projectID == projectID }) {
-            dynamicTabs.append(tab)
-        }
-        selectedTab = dynamicTabs.first(where: { $0.projectID == projectID }) ?? tab
-    }
-
-    private func createProject() {
-        let project = ProjectStorage.shared.createProject(name: "New Project")
-        openProjectTab(project.id)
-    }
-
-    private func renameProject(_ projectID: UUID, _ newName: String) {
-        ProjectStorage.shared.renameProject(projectID, to: newName)
-        if let idx = dynamicTabs.firstIndex(where: { $0.projectID == projectID }) {
-            dynamicTabs[idx] = .project(id: projectID, name: newName)
-            if case .project(let id, _) = selectedTab, id == projectID {
-                selectedTab = dynamicTabs[idx]
-            }
-        }
-    }
-
     private func expandPathToFolder(_ folderID: UUID) {
         let folderByID = Dictionary(uniqueKeysWithValues: bookmarksViewModel.folders.map { ($0.id, $0) })
         var cursorID: UUID? = folderID
@@ -895,21 +834,6 @@ struct CiderPanelView: View {
             selectedFolderID = nil
         }
         bookmarksViewModel.deleteFolder(folderID)
-    }
-
-    private func deleteProject(_ projectID: UUID) {
-        dynamicTabs.removeAll { $0.projectID == projectID }
-        if case .project(let id, _) = selectedTab, id == projectID {
-            selectedTab = .home
-        }
-        ProjectStorage.shared.deleteProject(projectID)
-    }
-
-    private func saveSearchAsProject(name: String, results: [SearchResult]) {
-        let project = ProjectStorage.shared.createProject(name: name)
-        ProjectStorage.shared.addSearchResults(results, toProject: project.id)
-        dynamicTabs.removeAll { $0 == selectedTab }
-        openProjectTab(project.id)
     }
 
     // MARK: - Select All
