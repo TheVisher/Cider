@@ -4,51 +4,62 @@ import SwiftUI
 struct HomeDashboardView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
+    @ObservedObject var libraryViewModel: LibraryViewModel
     var selectedFolderID: UUID?
     @Binding var displayMode: LibraryDisplayMode
     @Binding var cardSizeScale: Double
     @Binding var continueSectionCollapsed: Bool
     @Binding var selectedItemIDs: Set<String>
+    @Binding var sortMode: LibrarySortMode
+    @Binding var entityFilter: Set<LibraryEntityType>
+    var onEditDateCard: (DateCard) -> Void = { _ in }
+    var onEditContact: (ContactCard) -> Void = { _ in }
+
     @State private var config = CiderConfig.load()
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsPresentationMode: DetailModalMode?
     @State private var detailsErrorMessage: String?
+    @State private var selectedDateCard: DateCard?
+    @State private var selectedContact: ContactCard?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: - Library Items
 
-    /// Continue section always shows global recents regardless of folder selection
-    private var continueItems: [LibraryItem] {
-        let bookmarkItems = bookmarksViewModel.bookmarks.map { LibraryItem.bookmark($0) }
-        let noteItems = notesViewModel.notes.map { LibraryItem.note($0) }
-        return (bookmarkItems + noteItems)
-            .sorted { $0.date > $1.date }
-            .prefix(8)
-            .map { $0 }
+    private var filterSpec: SavedViewFilterSpec {
+        SavedViewFilterSpec(
+            entityTypes: entityFilter,
+            labelIDs: [],
+            folderID: selectedFolderID,
+            includeCompleted: true,
+            textQuery: ""
+        )
     }
 
-    /// Library feed filters by folder when one is selected
-    private var libraryItems: [LibraryItem] {
-        let bookmarks: [Bookmark]
-        let notes: [Note]
+    private var sortSpec: SavedViewSortSpec {
+        SavedViewSortSpec(mode: sortMode)
+    }
 
-        if let folderID = selectedFolderID {
-            bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
-            notes = notesViewModel.notes.filter { $0.folderID == folderID }
-        } else {
-            bookmarks = bookmarksViewModel.bookmarks
-            notes = notesViewModel.notes
-        }
+    /// Continue section always shows global recents regardless of folder/filter selection
+    private var continueItems: [LibraryItemV2] {
+        Array(
+            libraryViewModel.items
+                .sorted { $0.updatedDate > $1.updatedDate }
+                .prefix(8)
+        )
+    }
 
-        let bookmarkItems = bookmarks.map { LibraryItem.bookmark($0) }
-        let noteItems = notes.map { LibraryItem.note($0) }
-        return (bookmarkItems + noteItems)
-            .sorted { $0.createdDate > $1.createdDate }
+    /// Library feed applies current filter + sort
+    private var libraryItems: [LibraryItemV2] {
+        libraryViewModel.filteredItems(using: filterSpec, sort: sortSpec)
     }
 
     private var cardSizing: LibraryCardSizing {
         LibraryCardSizing(scale: cardSizeScale)
+    }
+
+    private func cardMinWidth(for mode: BookmarkCard.CardMode) -> CGFloat {
+        cardSizing.bookmarkSizing.cardMinWidth
     }
 
     private var foldersByID: [UUID: Folder] {
@@ -64,6 +75,10 @@ struct HomeDashboardView: View {
         (detailsPresentationMode ?? CiderConfig.load().detailModalMode) == .expand
     }
 
+    private var shouldBlurContent: Bool {
+        (isExpandMode && detailsDraft != nil) || selectedDateCard != nil || selectedContact != nil
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -72,8 +87,7 @@ struct HomeDashboardView: View {
                     if config.showContinueSection && !continueItems.isEmpty && !continueSectionCollapsed {
                         ContinueSectionView(
                             items: continueItems,
-                            onOpenBookmark: { presentDetails(for: $0) },
-                            onOpenNote: { note in openNoteInPanel(note) },
+                            onOpen: { handleContinueOpen($0) },
                             dragProviderForItem: continueDragProvider
                         )
                         .padding(.horizontal, Spacing.md)
@@ -85,8 +99,7 @@ struct HomeDashboardView: View {
                         CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
                             ContinueSectionView(
                                 items: continueItems,
-                                onOpenBookmark: { presentDetails(for: $0) },
-                                onOpenNote: { note in openNoteInPanel(note) },
+                                onOpen: { handleContinueOpen($0) },
                                 dragProviderForItem: continueDragProvider
                             )
                             .padding(.horizontal, Spacing.md)
@@ -105,12 +118,31 @@ struct HomeDashboardView: View {
                     .padding(.bottom, Spacing.md)
                 }
             }
-            .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
-            .animation(reduceMotion ? .none : .snappy, value: detailsDraft != nil)
+            .blur(radius: shouldBlurContent ? BookmarksDesign.detailsContentBlurRadius : 0)
+            .animation(reduceMotion ? .none : .snappy, value: shouldBlurContent)
 
             if isExpandMode, detailsDraft != nil {
                 detailsOverlay
             }
+
+            if selectedDateCard != nil {
+                dateCardDetailOverlay
+                    .transition(.opacity)
+                    .animation(reduceMotion ? .none : .snappy, value: selectedDateCard != nil)
+            }
+
+            if selectedContact != nil {
+                contactDetailOverlay
+                    .transition(.opacity)
+                    .animation(reduceMotion ? .none : .snappy, value: selectedContact != nil)
+            }
+        }
+        .onChange(of: bookmarksViewModel.pendingDetailBookmarkID) { _, bookmarkID in
+            guard let bookmarkID,
+                  let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID })
+            else { return }
+            bookmarksViewModel.pendingDetailBookmarkID = nil
+            presentDetails(for: bookmark)
         }
         .onChange(of: bookmarksViewModel.bookmarks.map(\.id)) { _, bookmarkIDs in
             guard let detailsDraft else { return }
@@ -162,7 +194,7 @@ struct HomeDashboardView: View {
     // MARK: - List Row
 
     @ViewBuilder
-    private func libraryListRow(_ item: LibraryItem) -> some View {
+    private func libraryListRow(_ item: LibraryItemV2) -> some View {
         switch item {
         case .bookmark(let bookmark):
             BookmarkListRow(
@@ -203,13 +235,41 @@ struct HomeDashboardView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
+        case .dateCard(let dateCard):
+            DateCardListRow(
+                dateCard: dateCard,
+                onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+            )
+        case .contact(let contact):
+            ContactListRow(
+                contact: contact,
+                onOpen: { handleNormalAction { presentContactDetail(contact) } },
+                onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+            )
+        case .externalFile(let file):
+            SourceCardView(
+                file: file,
+                width: .infinity,
+                isSelected: isItemSelected(item),
+                onOpen: {
+                    handleNormalAction {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("cider.openExternalFile"),
+                            object: nil,
+                            userInfo: ["fileURL": file.path]
+                        )
+                    }
+                },
+                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
+            )
         }
     }
 
     // MARK: - Card (Grid / Masonry)
 
     @ViewBuilder
-    private func libraryCard(_ item: LibraryItem, mode: BookmarkCard.CardMode) -> some View {
+    private func libraryCard(_ item: LibraryItemV2, mode: BookmarkCard.CardMode) -> some View {
         switch item {
         case .bookmark(let bookmark):
             BookmarkCard(
@@ -252,6 +312,34 @@ struct HomeDashboardView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
+        case .dateCard(let dateCard):
+            DateCardCardView(
+                dateCard: dateCard,
+                onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+            )
+        case .contact(let contact):
+            ContactCardCardView(
+                contact: contact,
+                onOpen: { handleNormalAction { presentContactDetail(contact) } },
+                onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+            )
+        case .externalFile(let file):
+            SourceCardView(
+                file: file,
+                width: cardMinWidth(for: mode),
+                isSelected: isItemSelected(item),
+                onOpen: {
+                    handleNormalAction {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("cider.openExternalFile"),
+                            object: nil,
+                            userInfo: ["fileURL": file.path]
+                        )
+                    }
+                },
+                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
+            )
         }
     }
 
@@ -282,21 +370,14 @@ struct HomeDashboardView: View {
 
     // MARK: - Selection Helpers
 
-    private func itemID(for item: LibraryItem) -> String {
-        switch item {
-        case .bookmark(let b): return "bookmark-\(b.id.uuidString)"
-        case .note(let n): return "note-\(n.id.uuidString)"
-        }
-    }
-
-    private func isItemSelected(_ item: LibraryItem) -> Bool {
-        selectedItemIDs.contains(itemID(for: item))
+    private func isItemSelected(_ item: LibraryItemV2) -> Bool {
+        selectedItemIDs.contains(item.id)
     }
 
     @State private var selectionAnchorID: String?
 
-    private func handleSelect(item: LibraryItem) {
-        let id = itemID(for: item)
+    private func handleSelect(item: LibraryItemV2) {
+        let id = item.id
         if selectedItemIDs.contains(id) {
             selectedItemIDs.remove(id)
         } else {
@@ -305,12 +386,12 @@ struct HomeDashboardView: View {
         selectionAnchorID = id
     }
 
-    private func handleShiftSelect(item: LibraryItem) {
-        let id = itemID(for: item)
+    private func handleShiftSelect(item: LibraryItemV2) {
+        let id = item.id
         let items = libraryItems
         guard let anchorID = selectionAnchorID,
-              let anchorIndex = items.firstIndex(where: { itemID(for: $0) == anchorID }),
-              let clickedIndex = items.firstIndex(where: { itemID(for: $0) == id }) else {
+              let anchorIndex = items.firstIndex(where: { $0.id == anchorID }),
+              let clickedIndex = items.firstIndex(where: { $0.id == id }) else {
             selectedItemIDs.insert(id)
             selectionAnchorID = id
             return
@@ -318,7 +399,7 @@ struct HomeDashboardView: View {
 
         let range = min(anchorIndex, clickedIndex) ... max(anchorIndex, clickedIndex)
         for i in range {
-            selectedItemIDs.insert(itemID(for: items[i]))
+            selectedItemIDs.insert(items[i].id)
         }
     }
 
@@ -519,22 +600,116 @@ struct HomeDashboardView: View {
         return min(preferredHeight, BookmarksDesign.detailsSheetMaxHeight)
     }
 
+    // MARK: - Date Card & Contact Detail
+
+    private func presentDateCardDetail(_ dateCard: DateCard) {
+        selectedDateCard = dateCard
+    }
+
+    private func presentContactDetail(_ contact: ContactCard) {
+        selectedContact = contact
+    }
+
+    @ViewBuilder
+    private var dateCardDetailOverlay: some View {
+        if let dateCard = selectedDateCard {
+            GeometryReader { proxy in
+                let sheetWidth = min(400, max(280, proxy.size.width - Spacing.xxxl * 2))
+                ZStack {
+                    CiderColors.backdropSubtle
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectedDateCard = nil }
+
+                    LibraryDetailModalContainer(
+                        onClose: { selectedDateCard = nil },
+                        onEdit: {
+                            selectedDateCard = nil
+                            onEditDateCard(dateCard)
+                        }
+                    ) {
+                        DateCardDetailView(
+                            dateCard: dateCard,
+                            onEdit: {
+                                selectedDateCard = nil
+                                onEditDateCard(dateCard)
+                            },
+                            onDismiss: { selectedDateCard = nil }
+                        )
+                    }
+                    .frame(width: sheetWidth)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.xxl)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contactDetailOverlay: some View {
+        if let contact = selectedContact {
+            GeometryReader { proxy in
+                let sheetWidth = min(420, max(280, proxy.size.width - Spacing.xxxl * 2))
+                ZStack {
+                    CiderColors.backdropSubtle
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectedContact = nil }
+
+                    LibraryDetailModalContainer(
+                        onClose: { selectedContact = nil },
+                        onEdit: {
+                            selectedContact = nil
+                            onEditContact(contact)
+                        }
+                    ) {
+                        ContactDetailView(
+                            contact: contact,
+                            onEdit: {
+                                selectedContact = nil
+                                onEditContact(contact)
+                            },
+                            onDismiss: { selectedContact = nil }
+                        )
+                    }
+                    .frame(width: sheetWidth)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.xxl)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
     // MARK: - Drag Providers
 
-    private func continueDragProvider(for item: LibraryItem) -> (() -> NSItemProvider)? {
+    private func handleContinueOpen(_ item: LibraryItemV2) {
         switch item {
-        case .bookmark(let bookmark):
-            return bookmarkDragProvider(for: bookmark)
-        case .note(let note):
-            return noteDragProvider(for: note)
+        case .bookmark(let bookmark): presentDetails(for: bookmark)
+        case .note(let note): openNoteInPanel(note)
+        case .dateCard(let dateCard): presentDateCardDetail(dateCard)
+        case .contact(let contact): presentContactDetail(contact)
+        case .externalFile(let file):
+            NotificationCenter.default.post(
+                name: Notification.Name("cider.openExternalFile"),
+                object: nil,
+                userInfo: ["fileURL": file.path]
+            )
+        }
+    }
+
+    private func continueDragProvider(for item: LibraryItemV2) -> (() -> NSItemProvider)? {
+        switch item {
+        case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
+        case .note(let note): return noteDragProvider(for: note)
+        case .dateCard, .contact, .externalFile: return nil
         }
     }
 
     private func bookmarkDragProvider(for bookmark: Bookmark) -> () -> NSItemProvider {
         return {
-            let bookmarkItemID = itemID(for: .bookmark(bookmark))
+            let itemID = "bookmark-\(bookmark.id.uuidString)"
 
-            if selectedItemIDs.contains(bookmarkItemID) && selectedItemIDs.count > 1 {
+            if selectedItemIDs.contains(itemID) && selectedItemIDs.count > 1 {
                 let allItems = CiderMultiDrag.parseSelectedItemIDs(selectedItemIDs)
                 return CiderMultiDrag.makeProvider(
                     primaryType: BookmarkDragPayload.typeIdentifier,
@@ -560,9 +735,9 @@ struct HomeDashboardView: View {
 
     private func noteDragProvider(for note: Note) -> () -> NSItemProvider {
         return {
-            let noteItemID = itemID(for: .note(note))
+            let itemID = "note-\(note.id.uuidString)"
 
-            if selectedItemIDs.contains(noteItemID) && selectedItemIDs.count > 1 {
+            if selectedItemIDs.contains(itemID) && selectedItemIDs.count > 1 {
                 let allItems = CiderMultiDrag.parseSelectedItemIDs(selectedItemIDs)
                 return CiderMultiDrag.makeProvider(
                     primaryType: NoteDragPayload.typeIdentifier,
@@ -588,23 +763,21 @@ struct HomeDashboardView: View {
 
     // MARK: - Multi-Drag Preview
 
-    private func multiDragPreview(for item: LibraryItem) -> AnyView? {
-        let id = itemID(for: item)
+    private func multiDragPreview(for item: LibraryItemV2) -> AnyView? {
+        let id = item.id
         guard selectedItemIDs.contains(id), selectedItemIDs.count > 1 else { return nil }
 
-        var previewItems: [MultiDragPreviewItem] = [multiDragPreviewItem(from: item)]
-        for libraryItem in libraryItems where isItemSelected(libraryItem) && itemID(for: libraryItem) != id {
-            previewItems.append(multiDragPreviewItem(from: libraryItem))
+        var previewItems: [MultiDragPreviewItem] = []
+        if case .bookmark(let b) = item { previewItems.append(.bookmark(b)) }
+        else if case .note(let n) = item { previewItems.append(.note(n)) }
+
+        for libraryItem in libraryItems where isItemSelected(libraryItem) && libraryItem.id != id {
+            if case .bookmark(let b) = libraryItem { previewItems.append(.bookmark(b)) }
+            else if case .note(let n) = libraryItem { previewItems.append(.note(n)) }
             if previewItems.count >= 3 { break }
         }
 
+        guard !previewItems.isEmpty else { return nil }
         return AnyView(MultiDragPreview(items: previewItems, totalCount: selectedItemIDs.count))
-    }
-
-    private func multiDragPreviewItem(from item: LibraryItem) -> MultiDragPreviewItem {
-        switch item {
-        case .bookmark(let b): return .bookmark(b)
-        case .note(let n): return .note(n)
-        }
     }
 }

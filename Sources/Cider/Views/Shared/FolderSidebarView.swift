@@ -21,6 +21,17 @@ struct FolderSidebarView: View {
     var onTriggerSearch: (() -> Void)?
     var showBackground: Bool = true
 
+    // Sources (optional — all default to no-ops so existing call sites compile unchanged)
+    var sources: [ExternalSource] = []
+    var selectedSourceID: Binding<UUID?> = .constant(nil)
+    var onAddSource: (() -> Void)? = nil
+    var onSelectSource: ((UUID) -> Void)? = nil
+    var onToggleSourceTab: ((UUID) -> Void)? = nil
+    var onToggleSourceLibrary: ((UUID) -> Void)? = nil
+    var onRemoveSource: ((UUID) -> Void)? = nil
+
+    @ObservedObject private var registry = ExternalSourceRegistry.shared
+
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -124,6 +135,10 @@ struct FolderSidebarView: View {
 
             if !projects.isEmpty || onCreateProject != nil {
                 projectsSection
+            }
+
+            if CiderConfig.load().enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
+                sourcesSection
             }
 
             Spacer(minLength: 0)
@@ -230,6 +245,121 @@ struct FolderSidebarView: View {
                 onDeleteProject?(project.id)
             } label: {
                 Label("Delete Project", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: - Sources Section
+
+    private var sourcesSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Divider()
+                .background(CiderColors.separator)
+                .padding(.vertical, Spacing.xs)
+
+            HStack(spacing: Spacing.xs) {
+                Label("Sources", systemImage: "folder.badge.gear")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+
+                Spacer(minLength: 0)
+
+                if let onAddSource {
+                    Button(action: onAddSource) {
+                        Image(systemName: "plus")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add linked source folder")
+                }
+            }
+
+            ForEach(sources) { source in
+                sourceSidebarRow(source)
+            }
+
+            if sources.isEmpty {
+                Text("No sources linked.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xs)
+            }
+        }
+    }
+
+    private func sourceSidebarRow(_ source: ExternalSource) -> some View {
+        let isSelected = selectedSourceID.wrappedValue == source.id
+        let fileCount = registry.files(for: source.id).count
+
+        return HStack(spacing: Spacing.xs) {
+            Image(systemName: "folder.badge.gear")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
+
+            Text(source.displayName)
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: Spacing.xs)
+
+            if fileCount > 0 {
+                Text("\(fileCount)")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+        }
+        .padding(.horizontal, Spacing.sm)
+        .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(isSelected ? CiderColors.selectedFill : CiderColors.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(isSelected ? CiderColors.selectedBorder : CiderColors.borderDefault,
+                        lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelectSource?(source.id)
+        }
+        .contextMenu {
+            if let onToggleSourceLibrary {
+                Button {
+                    onToggleSourceLibrary(source.id)
+                } label: {
+                    Label(
+                        source.showInLibrary ? "Remove from Library" : "Show in Library",
+                        systemImage: source.showInLibrary ? "minus.square" : "plus.square"
+                    )
+                }
+            }
+            if let onToggleSourceTab {
+                Button {
+                    onToggleSourceTab(source.id)
+                } label: {
+                    Label(
+                        source.isTabPinned ? "Unpin Tab" : "Pin as Tab",
+                        systemImage: source.isTabPinned ? "pin.slash" : "pin"
+                    )
+                }
+            }
+            Divider()
+            Button {
+                NSWorkspace.shared.open(URL(fileURLWithPath: source.path))
+            } label: {
+                Label("Open in Finder", systemImage: "folder")
+            }
+            if let onRemoveSource {
+                Button(role: .destructive) {
+                    onRemoveSource(source.id)
+                } label: {
+                    Label("Remove Source", systemImage: "trash")
+                }
             }
         }
     }

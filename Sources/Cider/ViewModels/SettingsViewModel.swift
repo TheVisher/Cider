@@ -50,7 +50,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var confirmCopiedURLBeforeSave: Bool {
         didSet { saveConfig() }
     }
-    @Published var bookmarksDirectory: String {
+    @Published var ciderDataDirectory: String {
         didSet { saveConfig() }
     }
     @Published var rememberBookmarksPanelPosition: Bool {
@@ -63,6 +63,9 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
     @Published var detailModalMode: DetailModalMode {
+        didSet { saveConfig() }
+    }
+    @Published var enableLinkedSources: Bool {
         didSet { saveConfig() }
     }
     @Published var trashRetentionDays: Int {
@@ -91,11 +94,12 @@ final class SettingsViewModel: ObservableObject {
         self.enableBookmarksCaptureHotkey = config.enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = config.autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = config.confirmCopiedURLBeforeSave
-        self.bookmarksDirectory = config.bookmarksDirectory
+        self.ciderDataDirectory = config.ciderDataDirectory
         self.rememberBookmarksPanelPosition = config.rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
         self.detailModalMode = config.detailModalMode
+        self.enableLinkedSources = config.enableLinkedSources
         self.trashRetentionDays = config.trashRetentionDays
         self.captureToastPosition = config.captureToastPosition
         self.undoToastPosition = config.undoToastPosition
@@ -120,12 +124,13 @@ final class SettingsViewModel: ObservableObject {
         config.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         config.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         config.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
-        config.bookmarksDirectory = bookmarksDirectory
+        config.ciderDataDirectory = ciderDataDirectory
         config.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.bookmarksCardSize = bookmarksCardSize
         config.bookmarksCardSizeScale = bookmarksCardSize.sliderValue
         config.detailModalMode = detailModalMode
+        config.enableLinkedSources = enableLinkedSources
         config.trashRetentionDays = trashRetentionDays
         config.captureToastPosition = captureToastPosition
         config.undoToastPosition = undoToastPosition

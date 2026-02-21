@@ -54,7 +54,7 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .settingsNavigate)) { notification in
             guard let category = notification.userInfo?["category"] as? String else { return }
             switch category {
-            case "storage": selectedCategory = .storage
+            case "data": selectedCategory = .data
             case "general": selectedCategory = .general
             case "appearance": selectedCategory = .appearance
             default: break
@@ -151,34 +151,20 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .notesStorage:
+        case .features:
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Storage") {
-                    HStack {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text("Notes directory")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.primary)
-
-                            Text(viewModel.notesDirectory)
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.tertiary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        Button("Choose...") {
-                            chooseNotesDirectory()
-                        }
-                        .controlSize(.small)
-                    }
+                SettingsSection(title: "Features") {
+                    SettingsToggleRow(
+                        title: "Linked Sources",
+                        subtitle: "Watch external folders and surface their .md files in Cider",
+                        isOn: $viewModel.enableLinkedSources
+                    )
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .bookmarksManage:
+        case .bookmarksBehavior:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Bookmarks") {
                     SettingsToggleRow(
@@ -228,30 +214,10 @@ struct SettingsView: View {
                         options: BookmarkCardSize.allCases,
                         label: { $0.displayName }
                     )
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text("Bookmarks directory")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.primary)
-
-                            Text(viewModel.bookmarksDirectory)
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.tertiary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        Button("Choose...") {
-                            chooseBookmarksDirectory()
-                        }
-                        .controlSize(.small)
-                    }
                 }
                 Spacer(minLength: 0)
             }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
         case .appearanceText:
             VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -321,8 +287,91 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .storageTrash:
+        case .dataDirectories:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Directories") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Cider data")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.primary)
+
+                            Text(viewModel.ciderDataDirectory)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+
+                            Text("Bookmarks, contacts, stacks, labels, date cards, saved views")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Button("Choose...") {
+                            chooseCiderDataDirectory()
+                        }
+                        .controlSize(.small)
+                    }
+
+                    Divider()
+                        .opacity(CiderColors.dividerSecondaryOpacity)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Notes")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.primary)
+
+                            Text(viewModel.notesDirectory)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+
+                            Text("Note files (.md)")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Button("Choose...") {
+                            chooseNotesDirectory()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .dataTrash:
             StorageSettingsView()
+
+        case .dataNotifications:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Toast Notifications") {
+                    SettingsPickerRow(
+                        title: "Capture toast position",
+                        subtitle: "Where the bookmark capture confirmation appears",
+                        selection: $viewModel.captureToastPosition,
+                        options: ToastPosition.allCases,
+                        label: { $0.displayName }
+                    )
+
+                    SettingsPickerRow(
+                        title: "Undo toast position",
+                        subtitle: "Where the undo action toast appears",
+                        selection: $viewModel.undoToastPosition,
+                        options: ToastPosition.allCases,
+                        label: { $0.displayName }
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
         case .aboutOverview:
             AboutSettingsView()
@@ -362,21 +411,21 @@ struct SettingsView: View {
         }
     }
 
-    private func chooseBookmarksDirectory() {
+    private func chooseCiderDataDirectory() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        panel.message = "Select a directory for Cider bookmarks"
+        panel.message = "Select a directory for Cider data"
 
         if panel.runModal() == .OK, let url = panel.url {
             let path = url.path
             let home = NSHomeDirectory()
             if path.hasPrefix(home) {
-                viewModel.bookmarksDirectory = "~" + path.dropFirst(home.count)
+                viewModel.ciderDataDirectory = "~" + path.dropFirst(home.count)
             } else {
-                viewModel.bookmarksDirectory = path
+                viewModel.ciderDataDirectory = path
             }
         }
     }
@@ -394,13 +443,13 @@ private enum SettingsCategory: String, CaseIterable {
     case notes = "Notes"
     case bookmarks = "Bookmarks"
     case appearance = "Appearance"
-    case storage = "Storage"
+    case data = "Data"
     case advanced = "Advanced"
     case about = "About"
     case account = "Account"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .notes, .bookmarks, .appearance, .storage, .advanced, .about]
+        [.general, .notes, .bookmarks, .appearance, .data, .advanced, .about]
     }
 
     var icon: String {
@@ -413,8 +462,8 @@ private enum SettingsCategory: String, CaseIterable {
             "square.grid.2x2"
         case .appearance:
             "paintbrush"
-        case .storage:
-            "trash"
+        case .data:
+            "externaldrive"
         case .advanced:
             "slider.horizontal.3"
         case .about:
@@ -427,15 +476,15 @@ private enum SettingsCategory: String, CaseIterable {
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation, .panelBehavior]
+            [.startup, .activation, .panelBehavior, .features]
         case .notes:
-            [.notesBehavior, .notesEditor, .notesStorage]
+            [.notesBehavior, .notesEditor]
         case .bookmarks:
-            [.bookmarksManage]
+            [.bookmarksBehavior]
         case .appearance:
             [.appearanceText, .appearanceMenuBar]
-        case .storage:
-            [.storageTrash]
+        case .data:
+            [.dataDirectories, .dataTrash, .dataNotifications]
         case .advanced:
             [.advancedAccessibility, .advancedReset]
         case .about:
@@ -450,13 +499,15 @@ private enum SettingsSubcategory: Hashable {
     case startup
     case activation
     case panelBehavior
+    case features
     case notesBehavior
     case notesEditor
-    case notesStorage
-    case bookmarksManage
+    case bookmarksBehavior
     case appearanceText
     case appearanceMenuBar
-    case storageTrash
+    case dataDirectories
+    case dataTrash
+    case dataNotifications
     case advancedAccessibility
     case advancedReset
     case aboutOverview
@@ -470,20 +521,24 @@ private enum SettingsSubcategory: Hashable {
             "Activation"
         case .panelBehavior:
             "Panel"
+        case .features:
+            "Features"
         case .notesBehavior:
             "Behavior"
         case .notesEditor:
             "Editor"
-        case .notesStorage:
-            "Storage"
-        case .bookmarksManage:
-            "Manage"
+        case .bookmarksBehavior:
+            "Behavior"
         case .appearanceText:
             "Text"
         case .appearanceMenuBar:
             "Menu Bar"
-        case .storageTrash:
+        case .dataDirectories:
+            "Directories"
+        case .dataTrash:
             "Trash"
+        case .dataNotifications:
+            "Notifications"
         case .advancedAccessibility:
             "Accessibility"
         case .advancedReset:

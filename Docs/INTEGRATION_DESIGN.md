@@ -1,7 +1,7 @@
 # Cider Integration Design
 
-> **Status:** Approved design (Feb 2026) — Panel refactor (Phase 1) complete. Integration work (Phases 2+) is future.
-> **Companion to:** `PIVOT_STRATEGY.md`
+> **Status:** Phase 1 (panel refactor) ✅ complete. Phase 2 (Obsidian vault) — foundation in place via Linked Sources; vault-specific pieces remain. Phases 3+ are future.
+> **Companion to:** `PIVOT_STRATEGY.md`, `LINKED_SOURCES_VISION.md`
 
 This document defines how Cider integrates with Obsidian and other knowledge bases, the sync adapter architecture, data format decisions, and cross-platform considerations.
 
@@ -48,6 +48,8 @@ This document defines how Cider integrates with Obsidian and other knowledge bas
 ---
 
 ## Obsidian Vault Integration
+
+> **Feb 2026:** The Linked Sources feature (see `LINKED_SOURCES_VISION.md`) provides the read/edit/watch foundation. An Obsidian vault is a Linked Source with extra requirements: nested scanning, wikilink rendering, frontmatter handling, and `.obsidian/` exclusion. The vault-specific UI (Connectors settings, onboarding flow, bookmark export) is still future work.
 
 ### Vault Discovery
 
@@ -735,28 +737,39 @@ protocol CiderSyncAdapter {
 
 ## Implementation Phases
 
-### Phase 1: Panel Refactor (Current Sprint Focus)
-- [ ] Replace command palette with floating panel + tab bar (Bookmarks | Notes)
-- [ ] Double-tap Option toggles panel visibility (show/hide all)
-- [ ] Bookmarks tab: embed existing BookmarksBrowserView
-- [ ] Notes tab: embed existing notes list/editor
-- [ ] Remove: pinned apps row, palette footer, palette search bar, windows tab
-- [ ] Add inline search within each tab
-- [ ] Disable tiling and Option+Tab via feature flags
-- [ ] Tear-off tabs: drag a tab out to create a second panel
-- [ ] Re-dock: drag a torn-off panel back to merge tabs
-- [ ] Remember panel position and size across sessions
+### Phase 1: Panel Refactor ✅ Complete
+- [x] Replace command palette with floating panel + tab bar (Bookmarks | Notes | Home)
+- [x] Double-tap Option toggles panel visibility (show/hide all)
+- [x] Bookmarks tab: BookmarksBrowserView with folder sidebar
+- [x] Notes tab: NotesBrowserView + TipTap editor
+- [x] Home tab: library feed (bookmarks + notes + date cards + contacts) + Continue section
+- [x] Saved views as custom tabs, folder sidebar, workspace organization
+- [x] Inline search within each tab
+- [x] Trash + undo system, acrylic panel, custom shadows, resize handles
 
 ### Phase 2: Obsidian Vault Connection
-- [ ] Vault discovery (scan known paths + read Obsidian config)
+
+**Foundation already in place via Linked Sources (Feb 2026):**
+- [x] Open/edit any `.md` file in the TipTap editor via `NotesViewModel.openExternalFile`
+- [x] Filesystem watching — live updates when external tools modify files
+- [x] Sort by filesystem mtime — most recently touched file floats to top
+- [x] mtime integrity — opening/closing a file in Cider never bumps the filesystem timestamp
+- [x] Files save back to their original path in place (no copying, no importing)
+- [x] Source detail view — browse a folder's `.md` files in card/grid/masonry layout
+- [x] Right-click → "Open in Default App" for files that need native Obsidian features
+
+**Still needed for Obsidian specifically:**
+- [ ] `[[wikilinks]]` — TipTap renders them as raw text; needs an extension to style + resolve them
+- [ ] YAML frontmatter (`---`) — should be hidden or rendered cleanly, not shown as raw text
+- [ ] Nested folder scanning — `ExternalSourceScanner` is likely flat; Obsidian vaults have arbitrary depth
+- [ ] `.obsidian/` folder exclusion — config directory must be filtered from file lists
+- [ ] Vault discovery (scan known paths + read `~/Library/Application Support/obsidian/obsidian.json`)
+- [ ] Read `.obsidian/app.json` — attachment folder path, new file location settings
 - [ ] Vault path setting in CiderConfig + Connectors settings panel
 - [ ] Vault onboarding: scaffold folder structure for new/empty vaults
 - [ ] Existing vault detection: minimal setup, ask where to put things
 - [ ] Create "Getting Started" note and starter templates (new vaults only)
 - [ ] Detect installed plugins, show recommendations in settings
-- [ ] Notes tab shows vault folder tree when connected
-- [ ] Open/edit vault files in TipTap editor
-- [ ] Markdown round-trip preservation (frontmatter, wiki-links, etc.)
 - [ ] Save images/attachments to vault attachment folder
 - [ ] Migration flow: import existing Cider library into vault (selective)
 

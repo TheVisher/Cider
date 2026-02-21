@@ -19,6 +19,7 @@ This means Cider can ship AI features as a **one-time purchase** rather than a s
 **Cloud AI (Tier 2) is optional and user-funded.** Users who want higher-quality summarization or custom prompts bring their own API keys. Cider facilitates the connection but bears no cost.
 
 **Cross-platform implications:** If Cider ever ships on Windows/Linux, Apple frameworks aren't available. Those platforms would need:
+
 - Bundled local models (Ollama, llama.cpp, Whisper) as the Tier 1 replacement
 - Or cloud APIs as the primary intelligence layer
 - This could justify a subscription model on non-Apple platforms where AI costs are real
@@ -34,16 +35,16 @@ Apple's on-device LLM, shipped with macOS. Same model powering Writing Tools, Si
 
 ```swift
 import FoundationModels
-
-let session = LanguageModelSession()
-let response = try await session.respond(to: "Summarize: ...")
 ```
+
+`let session = LanguageModelSession() let response = try await session.respond(to: "Summarize: ...")`
 
 **Runs on:** Apple Silicon Neural Engine (any Mac supporting Apple Intelligence)
 **Strengths:** Private, instant, free, no network needed
 **Limits:** Smaller model than cloud LLMs — good for summarization, extraction, classification. Not ideal for complex reasoning or long-form generation.
 
 **Cider use cases:**
+
 - Page summarization (Tier 1 in the tiered summary system)
 - Auto-generate bookmark titles from page content
 - Auto-tag bookmarks and notes with keywords/topics
@@ -57,6 +58,7 @@ let response = try await session.respond(to: "Summarize: ...")
 On-device speech-to-text. Powers Dictation and live captions on macOS.
 
 **Cider use cases:**
+
 - **YouTube transcription fallback** — most YouTube videos have captions available via YouTube's API (auto-generated or human-written). Pull those first — they're free, accurate, and already timestamped. For the rare video without captions, fall back to Speech framework: extract the audio stream and transcribe locally.
 - Voice note capture — dictate a note into Cider via speech-to-text
 - Audio bookmark annotation — record a voice memo about a bookmark
@@ -68,6 +70,7 @@ On-device speech-to-text. Powers Dictation and live captions on macOS.
 Mature on-device NLP. No Apple Intelligence requirement — works on any Mac.
 
 **Capabilities:**
+
 - Named entity recognition (extract people, places, organizations from text)
 - Sentiment analysis (article tone detection)
 - Language detection (auto-detect content language)
@@ -76,6 +79,7 @@ Mature on-device NLP. No Apple Intelligence requirement — works on any Mac.
 - Keyword extraction via TF-IDF scoring
 
 **Cider use cases:**
+
 - **Auto-tagging pipeline:** On bookmark capture → NaturalLanguage extracts entities and keywords → suggest tags and folder placement. "This article mentions React, TypeScript, and Vercel → tag: web-dev, suggest: Web Dev folder."
 - **"Find similar" items:** Every bookmark/note gets an embedding vector computed on save. When you open an item, Cider instantly shows related items by vector distance. No AI call needed — it's a math operation on precomputed vectors.
 - **Smart folder suggestions:** "You saved 12 React articles this week — create a folder?"
@@ -89,6 +93,7 @@ On-device image analysis and OCR. Powers **Live Text** on macOS — the feature 
 **OCR quality:** Genuinely excellent. Fast, handles multiple languages, works with messy fonts, complex layouts, and even handwriting. One of Apple's strongest on-device ML features.
 
 **Cider use cases:**
+
 - **Screenshot-to-text page capture:** Alternative to Chrome extension — screenshot the page, Vision OCR extracts all text, then summarize/index it. Works with any browser, any app, no extension needed.
 - **Image search indexing:** Extract text from bookmark thumbnails and note images → make them searchable. Search "recipe" and find a bookmark whose thumbnail contains recipe text.
 - **GIF Finder concept** (HOME_VISION.md): Screenshot a conversation → OCR the text → understand context → find the perfect reaction GIF.
@@ -99,6 +104,7 @@ On-device image analysis and OCR. Powers **Live Text** on macOS — the feature 
 Apple Intelligence Writing Tools (Summarize, Proofread, Rewrite) are available to any text view that adopts standard text input protocols. Native NSTextView/TextEditor gets this for free.
 
 **Cider considerations:**
+
 - TipTap editor is WKWebView-based — Writing Tools won't auto-integrate. Would need to bridge via JS or offer our own UI that calls Foundation Models.
 - Any native SwiftUI text fields in the app (note titles, bookmark descriptions, search) get Writing Tools automatically.
 - Could add a "Rewrite" or "Proofread" button in the notes editor that calls Foundation Models directly.
@@ -108,6 +114,7 @@ Apple Intelligence Writing Tools (Summarize, Proofread, Rewrite) are available t
 Index Cider content into macOS system search.
 
 **Cider use cases:**
+
 - Bookmark titles, URLs, and summaries indexed → users find bookmarks from Spotlight
 - Note titles and content previews indexed → notes searchable system-wide
 - Saved transcripts searchable from Spotlight
@@ -118,10 +125,11 @@ Index Cider content into macOS system search.
 Expose Cider actions to Siri and the Shortcuts app.
 
 **Potential intents:**
+
 - "Bookmark this URL" — capture current browser URL
 - "Create a note" — open Cider with a new note
 - "Summarize this page" — trigger summary from Siri
-- "Search my bookmarks for [query]" — search without opening Cider
+- "Search my bookmarks for \[query\]" — search without opening Cider
 - "Read my transcript" — speak the saved transcript of a video
 
 ---
@@ -132,14 +140,14 @@ When a user captures a bookmark, this happens automatically — all on-device, a
 
 ```
 URL captured
-  ├─ Tier 0: Fetch metadata (title, meta description, OG tags, headings)
-  ├─ Tier 0: Fetch/generate thumbnail
-  ├─ Tier 1: NaturalLanguage extracts entities and keywords → auto-tags
-  ├─ Tier 1: NaturalLanguage computes embedding vector → enables "find similar"
-  ├─ Tier 1: Vision OCR indexes text in thumbnail → image search
-  ├─ Tier 1: Foundation Models generates 2-sentence summary (if page content available)
-  │          Cross-checked against author's meta description for accuracy
-  └─ Index in Core Spotlight → searchable from macOS Spotlight
+├─ Tier 0: Fetch metadata (title, meta description, OG tags, headings)
+├─ Tier 0: Fetch/generate thumbnail
+├─ Tier 1: NaturalLanguage extracts entities and keywords → auto-tags
+├─ Tier 1: NaturalLanguage computes embedding vector → enables "find similar"
+├─ Tier 1: Vision OCR indexes text in thumbnail → image search
+├─ Tier 1: Foundation Models generates 2-sentence summary (if page content available)
+│          Cross-checked against author's meta description for accuracy
+└─ Index in Core Spotlight → searchable from macOS Spotlight
 ```
 
 The **hybrid summary validation** approach: when the page has a human-written meta description, use it as a ground truth anchor. Foundation Models generates its summary, then we compare — if the AI summary contradicts the author's description, weight the author's version. Display both: author's one-liner at top, AI deeper summary below.
@@ -148,11 +156,11 @@ For YouTube bookmarks, the pipeline extends:
 
 ```
 YouTube URL captured
-  ├─ All standard bookmark enrichment (above)
-  ├─ Fetch captions via YouTube API (preferred — already timestamped)
-  ├─ If no captions: Speech framework transcription (fallback)
-  ├─ Foundation Models summarizes transcript → bullet points
-  └─ Transcript stored as bookmark artifact → searchable, browsable
+├─ All standard bookmark enrichment (above)
+├─ Fetch captions via YouTube API (preferred — already timestamped)
+├─ If no captions: Speech framework transcription (fallback)
+├─ Foundation Models summarizes transcript → bullet points
+└─ Transcript stored as bookmark artifact → searchable, browsable
 ```
 
 ---
@@ -160,7 +168,7 @@ YouTube URL captured
 ## Feature Integration Map
 
 | Feature | Tier 0 (No AI) | Tier 1 (Apple On-Device) | Tier 2 (Cloud API) |
-|---------|----------------|--------------------------|---------------------|
+| --- | --- | --- | --- |
 | **Page summaries** | Meta description + headings + first paragraph | Foundation Models summarization, cross-checked against author metadata | Claude/GPT full summarization with custom prompts |
 | **Auto-tagging** | Domain-based tags (youtube.com → "Video") | NaturalLanguage NER + keyword extraction | LLM-powered topic classification |
 | **Smart search** | String matching + fuzzy search | NaturalLanguage embeddings for semantic similarity | LLM intent understanding ("what did I save last week about...") |
@@ -186,25 +194,27 @@ A chat bar or conversational surface in the panel where you talk to your collect
 ### How It Works
 
 Foundation Models supports:
+
 - **Conversation sessions** — back-and-forth where the model remembers prior messages
 - **System instructions** — tell the model its role and what data it has access to
 - **Structured output** — model returns typed Swift objects, not just text (e.g., returns a `[BookmarkID]` array)
 
 ```swift
 let session = LanguageModelSession(instructions: """
-    You are Cider's library assistant. The user has \(bookmarkCount) bookmarks
-    and \(noteCount) notes. Here are their folders: \(folderList).
-    Answer questions about their saved content.
-    """)
-
-// Feed it context about the user's library
-let response = try await session.respond(to: "What sci-fi movies do I have saved?")
-// Model responds based on the library data in its context
+You are Cider's library assistant. The user has (bookmarkCount) bookmarks
+and (noteCount) notes. Here are their folders: (folderList).
+Answer questions about their saved content.
+""")
 ```
+
+<p></p>
+
+`// Feed it context about the user's library let response = try await session.respond(to: "What sci-fi movies do I have saved?") // Model responds based on the library data in its context`
 
 ### Example Interactions
 
 **Querying your collection:**
+
 - "What did I save last week?"
 - "Find bookmarks about Swift concurrency"
 - "What recipes do I have that use chicken and take under 30 minutes?"
@@ -212,6 +222,7 @@ let response = try await session.respond(to: "What sci-fi movies do I have saved
 - "How many unread articles do I have in my Web Dev folder?"
 
 **Acting on your collection:**
+
 - "Move all React articles to my Frontend folder"
 - "Tag these 5 bookmarks as 'research'"
 - "Create a new folder called Travel and move my trip bookmarks there"
@@ -219,6 +230,7 @@ let response = try await session.respond(to: "What sci-fi movies do I have saved
 - "What bookmarks do I have that are similar to this one?"
 
 **Cross-referencing:**
+
 - "Do I have any notes that reference the same topics as this bookmark?"
 - "What's the overlap between my Work folder and my Learning folder?"
 - "Which of my saved recipes use ingredients I bookmarked from that grocery site?"
@@ -226,18 +238,21 @@ let response = try await session.respond(to: "What sci-fi movies do I have saved
 ### UX Options
 
 **Option A: Chat bar in panel**
+
 - Persistent text field at the bottom of the panel (like Spotlight but conversational)
 - Responses appear inline above the input, push content up
 - Tap a result to navigate to that item
 - Conversation clears when panel closes (ephemeral, not a chat history)
 
 **Option B: Chat overlay**
+
 - Triggered by hotkey (Cmd+L or similar) or a button
 - Slides up as an overlay within the panel
 - Fullscreen conversational surface with the library as context
 - Dismiss to return to normal browsing
 
 **Option C: Integrated into search**
+
 - Enhance the existing Cmd+K search palette with conversational mode
 - Simple queries → standard search results (as today)
 - Natural language queries → Foundation Models interprets and responds
@@ -254,11 +269,14 @@ The on-device model has a limited context window (smaller than cloud LLMs). Stra
 
 ```
 User asks: "What sci-fi movies do I have?"
-  1. NaturalLanguage embedding search: find items tagged/classified as sci-fi
-  2. Feed those 15 results into Foundation Models context
-  3. Model responds with a natural language list + structured IDs
-  4. Cider renders the referenced items as tappable cards below the response
 ```
+
+<p></p>
+
+1. `NaturalLanguage embedding search: find items tagged/classified as sci-fi`
+2. `Feed those 15 results into Foundation Models context`
+3. `Model responds with a natural language list + structured IDs`
+4. `Cider renders the referenced items as tappable cards below the response`
 
 ### Structured Output for Actions
 
@@ -267,15 +285,14 @@ Foundation Models can return typed Swift structs, not just text. This means the 
 ```swift
 @Generable
 struct LibraryAction {
-    let intent: ActionIntent  // .search, .move, .tag, .summarize, .create
-    let targetIDs: [String]   // bookmark/note IDs to act on
-    let destination: String?  // folder name for .move
-    let tags: [String]?       // tags for .tag
+let intent: ActionIntent  // .search, .move, .tag, .summarize, .create
+let targetIDs: [String]   // bookmark/note IDs to act on
+let destination: String?  // folder name for .move
+let tags: [String]?       // tags for .tag
 }
-
-// "Move my React articles to Frontend folder"
-// → LibraryAction(intent: .move, targetIDs: [...], destination: "Frontend")
 ```
+
+`// "Move my React articles to Frontend folder" // → LibraryAction(intent: .move, targetIDs: [...], destination: "Frontend")`
 
 This bridges natural language input to concrete app actions — the model understands intent, Cider executes it.
 
@@ -284,12 +301,14 @@ This bridges natural language input to concrete app actions — the model unders
 ## Implementation Priority
 
 **Phase 1: Non-AI foundations**
+
 - Tier 0 page summaries (metadata + headings + first paragraph)
 - Core Spotlight indexing for bookmarks and notes
 - NaturalLanguage keyword extraction for auto-tagging
 - NaturalLanguage embedding computation on save (prep for "find similar")
 
 **Phase 2: Foundation Models integration**
+
 - Page summarization via on-device LLM with author-metadata cross-check
 - Smart bookmark title generation
 - Note title suggestions
@@ -297,6 +316,7 @@ This bridges natural language input to concrete app actions — the model unders
 - Content classification for smarter organization
 
 **Phase 3: Conversational assistant**
+
 - Chat bar / overlay UI in the panel
 - Foundation Models session with library context injection
 - NaturalLanguage embedding pre-search to scope context for queries
@@ -304,6 +324,7 @@ This bridges natural language input to concrete app actions — the model unders
 - Natural language queries over themed folders (media, recipes)
 
 **Phase 4: Deeper intelligence**
+
 - NaturalLanguage embeddings powering "find similar" UI
 - Vision OCR for screenshot-based capture and image search indexing
 - Smart folder suggestions based on content patterns
@@ -311,6 +332,7 @@ This bridges natural language input to concrete app actions — the model unders
 - App Intents for Siri and Shortcuts integration
 
 **Phase 5: Cloud AI (optional, cross-platform prep)**
+
 - User-configurable API provider (OpenAI, Anthropic, Ollama)
 - Higher-quality summarization for complex content
 - Custom prompt support ("Summarize for a 5-year-old", "Extract action items")
@@ -327,3 +349,5 @@ This bridges natural language input to concrete app actions — the model unders
 - Embedding storage: compute on save and store in a local vector index? Or compute on-demand? Pre-computing enables instant "find similar" but increases storage.
 - Writing Tools in TipTap: bridge via JS message passing, or build our own summarize/rewrite UI?
 - YouTube caption fetching: use the public timedtext endpoint, or require YouTube Data API key? Public endpoint is fragile but free.
+
+<p></p>

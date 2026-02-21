@@ -30,9 +30,6 @@ struct BookmarkCard: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
-    var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
-    var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
-    var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -40,12 +37,6 @@ struct BookmarkCard: View {
     @State private var isThumbnailDropTargeted = false
     @State private var cardWidth: CGFloat = 220
     @State private var resolvedThumbnailAspectRatio: CGFloat?
-
-    private var supportsThumbnailDrops: Bool {
-        onAssignThumbnailFromDroppedString != nil
-            || onAssignThumbnailFromLocalFileURL != nil
-            || onAssignThumbnailFromImageData != nil
-    }
 
     private func handleClick(normalAction: () -> Void) {
         let flags = NSEvent.modifierFlags
@@ -108,23 +99,7 @@ struct BookmarkCard: View {
             }
         }
         .padding(Spacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
-                .fill(isHovered ? CiderColors.surfaceHover : CiderColors.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: BookmarksDesign.cardCornerRadius, style: .continuous)
-                .stroke(
-                    isSelected
-                        ? CiderColors.selectedBorder
-                        : supportsThumbnailDrops && isThumbnailDropTargeted
-                            ? CiderColors.dropTargetBorderStrong
-                            : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle,
-                    lineWidth: isSelected || (supportsThumbnailDrops && isThumbnailDropTargeted)
-                        ? CiderBorder.innerStrokeWidth
-                        : 1
-                )
-        )
+        .cardContainer(isHovered: isHovered, isSelected: isSelected, isDropTargeted: isThumbnailDropTargeted)
         .overlay(alignment: .topLeading) {
             if isSelected {
                 SelectionCheckmark()
@@ -188,24 +163,22 @@ struct BookmarkCard: View {
     }
 
     private func handleThumbnailDrop(providers: [NSItemProvider]) -> Bool {
-        guard supportsThumbnailDrops else { return false }
-
         for provider in providers where loadThumbnailDrop(from: provider) {
             return true
         }
-
         return false
     }
 
     private func loadThumbnailDrop(from provider: NSItemProvider) -> Bool {
+        let bookmarkID = bookmark.id
+
         if provider.canLoadObject(ofClass: NSImage.self) {
             provider.loadObject(ofClass: NSImage.self) { item, _ in
                 guard let image = item as? NSImage,
-                      let data = image.pngRepresentation else {
-                    return
-                }
-                DispatchQueue.main.async {
-                    _ = onAssignThumbnailFromImageData?(bookmark, data, "png")
+                      let data = image.pngRepresentation else { return }
+                Task { @MainActor in
+                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
+                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                 }
             }
             return true
@@ -219,12 +192,10 @@ struct BookmarkCard: View {
         for identifier in imageIdentifiers {
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
                 guard let data else { return }
-                DispatchQueue.main.async {
-                    _ = onAssignThumbnailFromImageData?(
-                        bookmark,
-                        data,
-                        preferredImageFileExtension(for: identifier)
-                    )
+                let ext = Self.preferredImageFileExtension(for: identifier)
+                Task { @MainActor in
+                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                 }
             }
             return true
@@ -233,17 +204,17 @@ struct BookmarkCard: View {
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
                 guard let data else { return }
-
                 if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
-                    DispatchQueue.main.async {
-                        _ = onAssignThumbnailFromLocalFileURL?(bookmark, droppedURL)
+                    Task { @MainActor in
+                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                     }
                     return
                 }
-
                 if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
-                    DispatchQueue.main.async {
-                        _ = onAssignThumbnailFromDroppedString?(bookmark, droppedString)
+                    Task { @MainActor in
+                        let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                 }
             }
@@ -253,11 +224,13 @@ struct BookmarkCard: View {
         if provider.canLoadObject(ofClass: NSURL.self) {
             provider.loadObject(ofClass: NSURL.self) { item, _ in
                 guard let droppedURL = item as? URL else { return }
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     if droppedURL.isFileURL {
-                        _ = onAssignThumbnailFromLocalFileURL?(bookmark, droppedURL)
+                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                     } else {
-                        _ = onAssignThumbnailFromDroppedString?(bookmark, droppedURL.absoluteString)
+                        let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedURL.absoluteString)
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                 }
             }
@@ -267,8 +240,9 @@ struct BookmarkCard: View {
         if provider.canLoadObject(ofClass: NSString.self) {
             provider.loadObject(ofClass: NSString.self) { item, _ in
                 guard let droppedString = item as? String else { return }
-                DispatchQueue.main.async {
-                    _ = onAssignThumbnailFromDroppedString?(bookmark, droppedString)
+                Task { @MainActor in
+                    let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
+                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                 }
             }
             return true
@@ -283,20 +257,21 @@ struct BookmarkCard: View {
         for identifier in fallbackIdentifiers where provider.hasItemConformingToTypeIdentifier(identifier) {
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
                 guard let data else { return }
-
                 if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
-                    DispatchQueue.main.async {
-                        _ = onAssignThumbnailFromDroppedString?(bookmark, droppedString)
+                    Task { @MainActor in
+                        let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                     return
                 }
-
                 if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         if droppedURL.isFileURL {
-                            _ = onAssignThumbnailFromLocalFileURL?(bookmark, droppedURL)
+                            let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
+                            Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                         } else {
-                            _ = onAssignThumbnailFromDroppedString?(bookmark, droppedURL.absoluteString)
+                            let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedURL.absoluteString)
+                            Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                         }
                     }
                 }
@@ -307,7 +282,15 @@ struct BookmarkCard: View {
         return false
     }
 
-    private func preferredImageFileExtension(for typeIdentifier: String) -> String? {
+    private static func postThumbnailToast(_ message: String, isSuccess: Bool) {
+        NotificationCenter.default.post(
+            name: .showBookmarkCaptureToast,
+            object: nil,
+            userInfo: ["message": message, "isSuccess": isSuccess]
+        )
+    }
+
+    private nonisolated static func preferredImageFileExtension(for typeIdentifier: String) -> String? {
         guard let type = UTType(typeIdentifier) else { return nil }
 
         if let extensionName = type.preferredFilenameExtension?.lowercased() {

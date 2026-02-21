@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import os
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -70,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startNotesHotkeyDetection()
         startBookmarksHotkeyDetection()
         observeUndoNotifications()
+        observeSourcesNotifications()
 
         Task { @MainActor in
             let config = CiderConfig.load()
@@ -90,6 +92,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillResignActive(_ notification: Notification) {
         flushNotesDraftIfNeeded()
+    }
+
+    // MARK: - File Open Handler
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+
+            if isDirectory.boolValue {
+                // User opened a directory URL — link it as a new source
+                ExternalSourceStorage.shared.addSource(
+                    path: url.path,
+                    displayName: url.lastPathComponent
+                )
+                // Bring Cider panel to front
+                NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+            } else if url.pathExtension.lowercased() == "md" {
+                // Markdown file — find or create its parent source, then select file
+                let parentPath = url.deletingLastPathComponent().path
+                let existingSource = ExternalSourceStorage.shared.sources.first(where: { $0.path == parentPath })
+                let source: ExternalSource
+                if let existing = existingSource {
+                    source = existing
+                } else {
+                    source = ExternalSourceStorage.shared.addSource(
+                        path: parentPath,
+                        displayName: url.deletingLastPathComponent().lastPathComponent
+                    )
+                }
+                NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+                NotificationCenter.default.post(
+                    name: .openExternalSourceAndSelectFile,
+                    object: nil,
+                    userInfo: [
+                        "sourceID": source.id,
+                        "fileURL": url
+                    ]
+                )
+            }
+        }
     }
 
     @objc private func quit() {
@@ -127,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleConfigChanged() {
         let config = CiderConfig.load()
+        CiderFont.invalidateScale()
 
         // Toggle status item visibility based on config
         if config.showMenuBarIcon {
@@ -172,8 +216,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotesStorage.shared.updateDirectory(to: expandedDir)
 
         // Update bookmarks directory if changed
-        let expandedBookmarksDir = NSString(string: config.bookmarksDirectory).expandingTildeInPath
+        let expandedBookmarksDir = NSString(string: config.ciderDataDirectory).expandingTildeInPath
         BookmarksStorage.shared.updateDirectory(to: expandedBookmarksDir)
+
+        // Reload shared-data storages (they use computed fileURL, just need a fresh load)
+        ContactStorage.shared.reload()
+        DateCardStorage.shared.reload()
+        CardLabelStorage.shared.reload()
+        CardStackStorage.shared.reload()
+        SavedViewStorage.shared.reload()
+        ProjectStorage.shared.reload()
+        ExternalSourceStorage.shared.reload()
 
         // Toggle automatic bookmark capture from copied URLs
         BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
@@ -441,7 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func flushNotesDraftIfNeeded() {
-        guard notesViewModel?.selectedNote != nil else { return }
+        guard notesViewModel?.selectedNote != nil || notesViewModel?.activeExternalFile != nil else { return }
         notesViewModel?.flushSave()
     }
 
@@ -546,6 +599,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
     }
 
+    // MARK: - External Sources
+
+    private func observeSourcesNotifications() {
+        NotificationCenter.default.publisher(for: Notification.Name("cider.openExternalFile"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self,
+                      let url = notification.userInfo?["fileURL"] as? URL,
+                      let viewModel = self.notesViewModel else { return }
+                let file = ExternalSourceRegistry.shared.libraryFiles.first(where: { $0.path == url })
+                    ?? ExternalFile(
+                        id: ExternalFile.stableID(for: url.path),
+                        title: url.deletingPathExtension().lastPathComponent,
+                        path: url,
+                        sourceID: UUID(),
+                        sourceName: url.deletingLastPathComponent().lastPathComponent,
+                        createdAt: Date(),
+                        modifiedAt: Date()
+                    )
+                viewModel.openExternalFile(file)
+                self.showNotesPanel()
+            }
+            .store(in: &cancellables)
+    }
+
     // MARK: - Undo Toast
 
     private func observeUndoNotifications() {
@@ -581,14 +659,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onViewTrash: { [weak self] in
                 self?.dismissUndoToast()
                 NotificationCenter.default.post(name: .openCiderSettings, object: nil,
-                    userInfo: ["category": "storage"])
+                    userInfo: ["category": "data"])
             },
             onHoverChanged: { [weak self] hovering in
                 guard let self else { return }
                 if hovering {
                     self.undoToastIsHovering = true
-                    self.undoToastRemaining = UndoToastDesign.autoHideDuration
-                    self.undoToastModel.progress = 1
                     self.stopUndoToastTimer()
                 } else {
                     self.undoToastIsHovering = false
@@ -1203,17 +1279,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Debug Logging
 
+    private let logger = Logger(subsystem: "com.cider.app", category: "AppDelegate")
+
     private func debugLog(_ message: String) {
-        let path = "/tmp/cider-debug.log"
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
-        guard let lineData = line.data(using: .utf8) else { return }
-        if let handle = FileHandle(forWritingAtPath: path) {
-            defer { handle.closeFile() }
-            handle.seekToEndOfFile()
-            handle.write(lineData)
-        } else {
-            FileManager.default.createFile(atPath: path, contents: lineData)
-        }
+        logger.debug("\(message, privacy: .public)")
     }
 }

@@ -21,23 +21,6 @@ struct StorageSettingsView: View {
                 trashContents
             }
 
-            SettingsSection(title: "Toast Notifications") {
-                SettingsPickerRow(
-                    title: "Capture toast position",
-                    subtitle: "Where to show the bookmark capture notification",
-                    selection: $viewModel.captureToastPosition,
-                    options: ToastPosition.allCases,
-                    label: { $0.displayName }
-                )
-                SettingsPickerRow(
-                    title: "Undo toast position",
-                    subtitle: "Where to show Undo after delete or move actions",
-                    selection: $viewModel.undoToastPosition,
-                    options: ToastPosition.allCases,
-                    label: { $0.displayName }
-                )
-            }
-
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -236,8 +236,8 @@ Cider uses **SF Pro** (macOS system font) exclusively. All font declarations use
 | `.microBold` | 9pt | Bold | Sidebar confirm/cancel icons |
 | `.badge` | 8pt | Bold | Tab bar badge count |
 | `.heroFallback` | 28pt | Bold | Bookmark hero fallback letter |
-| `.emptyStateIcon` | 36pt | Regular | Empty state icon |
-| `.appIcon` | 64pt | Regular | About screen app icon |
+| `.emptyStateIcon` | 36pt × scale | Regular | Empty state icon (scales with global text size) |
+| `.appIcon` | 64pt | Regular | About screen app icon (fixed — decorative) |
 
 #### Responsive Tokens (textScale-based)
 
@@ -918,7 +918,40 @@ Button("Cancel", action: cancel)
 
 ---
 
-## 16. Implementation Checklist
+## 16. Card Consistency Contract
+
+Cider has multiple card types (`BookmarkCard`, `NoteCardView`, `DateCardCardView`, `ContactCardCardView`). These are intentionally **separate files** — the content of each is different enough to justify it. The contract that ensures visual consistency is **shared primitives**, not a shared file.
+
+Every card view MUST use:
+- `.cardContainer(isHovered: isHovered)` — provides background fill, border, clipShape, and contentShape
+- `.hoverState($isHovered, animation: .snappy)` — hover tracking
+- `CiderColors.*` — no hardcoded colors
+- `CiderFont.*` — no `.font(.body)` etc.
+- `Spacing.*` — no magic number padding values
+- `Radius.*` — no hardcoded corner radii
+
+**Do not** build a new card by inlining `RoundedRectangle + .fill + .overlay(stroke)`. That is what `.cardContainer()` is for. Any visual change to the card shell (border width, hover color, corner radius) flows through the modifier and updates every card type automatically.
+
+### `cardContainer()` Parameters
+
+```swift
+func cardContainer(
+    isHovered: Bool,
+    isSelected: Bool = false,       // selected border (selectedBorder + innerStrokeWidth)
+    isDropTargeted: Bool = false,   // drop highlight (dropTargetBorderStrong + innerStrokeWidth); overrides hover, overridden by isSelected
+    cornerRadius: CGFloat = BookmarksDesign.cardCornerRadius
+) -> some View
+```
+
+Border priority (highest wins): `isSelected` → `isDropTargeted` → `isHovered` → default.
+
+### Drag-and-Drop Thumbnail (BookmarkCard)
+
+`BookmarkCard` owns its thumbnail drop handling entirely — it calls `BookmarksStorage.shared` directly and posts `.showBookmarkCaptureToast`. There are **no** `onAssignThumbnailFrom*` callbacks on `BookmarkCard` or `BookmarksBrowserView`. Do not add them back. Any view that renders `BookmarkCard` gets working drag-and-drop with zero call-site wiring.
+
+---
+
+## 17. Implementation Checklist
 
 When building or modifying any UI component, verify:
 
@@ -934,11 +967,12 @@ When building or modifying any UI component, verify:
 - [ ] Tab content padding matches the 12pt + 2pt = 14pt pattern
 - [ ] Shadows drawn as blurred shapes (not `.shadow()`)
 - [ ] `.help()` labels on interactive elements
+- [ ] Card views use `.cardContainer()` + `.hoverState()` — no inline RoundedRectangle container code
 - [ ] Compared against this document — no deviations
 
 ---
 
-## 17. File Reference
+## 18. File Reference
 
 | File | Contains |
 |------|----------|

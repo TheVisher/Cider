@@ -239,7 +239,7 @@ final class CiderPanel: NSPanel {
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = CiderPanelDesign.collapseToggleAnimationDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
             animator().setFrame(frame, display: true)
         }
     }

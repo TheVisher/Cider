@@ -155,7 +155,7 @@ final class NotesHotkeyDetector: @unchecked Sendable {
     }
 
     private func handleHotKeyEvent(_ eventRef: EventRef) -> OSStatus {
-        guard isEnabled else { return noErr }
+        guard isEnabled else { return OSStatus(eventNotHandledErr) }
 
         var hotKeyID = EventHotKeyID()
         let status = GetEventParameter(

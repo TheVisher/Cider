@@ -101,6 +101,41 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
 
 
 struct CiderConfig: Codable {
+    // CodingKeys: keeps JSON key "bookmarksDirectory" for backward compat with existing UserDefaults data
+    private enum CodingKeys: String, CodingKey {
+        case showMenuBarIcon
+        case textSize
+        case activationMode
+        case notesDirectory
+        case enableNotesHotkey
+        case rememberNotesPanelPositionPerNote
+        case notesEditorTextSize
+        case enableBookmarksHotkey
+        case enableBookmarksCaptureHotkey
+        case autoCaptureCopiedURLs
+        case confirmCopiedURLBeforeSave
+        case ciderDataDirectory = "bookmarksDirectory"
+        case rememberBookmarksPanelPosition
+        case bookmarksDefaultViewMode
+        case bookmarksCardSize
+        case bookmarksCardSizeScale
+        case notesDefaultViewMode
+        case notesCardSizeScale
+        case detailModalMode
+        case showContinueSection
+        case continueSectionCollapsed
+        case subFoldersCollapsed
+        case homeDisplayMode
+        case homeCardSizeScale
+        case enableSavedViewTabs
+        case enableLinkedSources
+        case trashRetentionDays
+        case captureToastPosition
+        case undoToastPosition
+        case homeSort
+        case homeEntityFilter
+    }
+
     var showMenuBarIcon: Bool
     var textSize: TextSize
     var activationMode: ActivationMode
@@ -112,7 +147,7 @@ struct CiderConfig: Codable {
     var enableBookmarksCaptureHotkey: Bool  // Enable Option+Shift+B to capture active browser tab
     var autoCaptureCopiedURLs: Bool  // Automatically save copied URLs as bookmarks
     var confirmCopiedURLBeforeSave: Bool  // Require explicit save/discard for copied URLs
-    var bookmarksDirectory: String  // Directory for bookmark files
+    var ciderDataDirectory: String  // Directory for Cider data (bookmarks, contacts, stacks, labels, date cards, saved views, projects)
     var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
@@ -125,9 +160,13 @@ struct CiderConfig: Codable {
     var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
     var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
     var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
+    var enableSavedViewTabs: Bool  // Feature flag for custom saved view tabs
+    var enableLinkedSources: Bool  // Feature flag for external directory linking
     var trashRetentionDays: Int  // 0 = never auto-purge, default 30
     var captureToastPosition: ToastPosition  // Position for bookmark capture toast
     var undoToastPosition: ToastPosition  // Position for undo action toast
+    var homeSort: LibrarySortMode  // Sort mode for the Home library feed
+    var homeEntityFilter: Set<LibraryEntityType>  // Which entity types to show in Home feed
 
     static let storageKey = "CiderConfig"
 
@@ -144,7 +183,7 @@ struct CiderConfig: Codable {
             enableBookmarksCaptureHotkey: true,
             autoCaptureCopiedURLs: false,
             confirmCopiedURLBeforeSave: false,
-            bookmarksDirectory: "~/Documents/Cider/Bookmarks",
+            ciderDataDirectory: "~/Documents/Cider/Bookmarks",
             rememberBookmarksPanelPosition: false,
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
@@ -154,9 +193,13 @@ struct CiderConfig: Codable {
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
             homeDisplayMode: .list,
+            enableSavedViewTabs: false,
+            enableLinkedSources: false,
             trashRetentionDays: 30,
             captureToastPosition: .topCenterScreen,
-            undoToastPosition: .bottomRightPanel
+            undoToastPosition: .bottomRightPanel,
+            homeSort: .createdDescending,
+            homeEntityFilter: Set(LibraryEntityType.allCases)
         )
     }
 
@@ -181,8 +224,8 @@ struct CiderConfig: Codable {
                 didMigrate = true
             }
 
-            if config.bookmarksDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                config.bookmarksDirectory = "~/Documents/Cider/Bookmarks"
+            if config.ciderDataDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                config.ciderDataDirectory = "~/Documents/Cider/Bookmarks"
                 didMigrate = true
             }
 
@@ -203,8 +246,6 @@ struct CiderConfig: Codable {
     func save() {
         if let data = try? JSONEncoder().encode(self) {
             UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
-            UserDefaults.standard.synchronize() // Force immediate write
-            NSLog("[Cider] Config saved: textSize=\(textSize)")
         }
     }
 
@@ -236,9 +277,9 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .confirmCopiedURLBeforeSave
         ) ?? false
-        bookmarksDirectory = try container.decodeIfPresent(
+        ciderDataDirectory = try container.decodeIfPresent(
             String.self,
-            forKey: .bookmarksDirectory
+            forKey: .ciderDataDirectory
         ) ?? "~/Documents/Cider/Bookmarks"
         rememberBookmarksPanelPosition = try container.decodeIfPresent(
             Bool.self,
@@ -288,6 +329,14 @@ struct CiderConfig: Codable {
             Double.self,
             forKey: .homeCardSizeScale
         )
+        enableSavedViewTabs = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .enableSavedViewTabs
+        ) ?? false
+        enableLinkedSources = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .enableLinkedSources
+        ) ?? false
         trashRetentionDays = try container.decodeIfPresent(Int.self, forKey: .trashRetentionDays) ?? 30
         captureToastPosition = try container.decodeIfPresent(
             ToastPosition.self,
@@ -297,6 +346,14 @@ struct CiderConfig: Codable {
             ToastPosition.self,
             forKey: .undoToastPosition
         ) ?? .bottomRightPanel
+        homeSort = try container.decodeIfPresent(
+            LibrarySortMode.self,
+            forKey: .homeSort
+        ) ?? .createdDescending
+        homeEntityFilter = try container.decodeIfPresent(
+            Set<LibraryEntityType>.self,
+            forKey: .homeEntityFilter
+        ) ?? Set(LibraryEntityType.allCases)
     }
 
     init(
@@ -311,7 +368,7 @@ struct CiderConfig: Codable {
         enableBookmarksCaptureHotkey: Bool = true,
         autoCaptureCopiedURLs: Bool = false,
         confirmCopiedURLBeforeSave: Bool = false,
-        bookmarksDirectory: String = "~/Documents/Cider/Bookmarks",
+        ciderDataDirectory: String = "~/Documents/Cider/Bookmarks",
         rememberBookmarksPanelPosition: Bool = false,
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
         bookmarksCardSize: BookmarkCardSize = .comfortable,
@@ -324,9 +381,13 @@ struct CiderConfig: Codable {
         subFoldersCollapsed: Bool = false,
         homeDisplayMode: LibraryDisplayMode = .list,
         homeCardSizeScale: Double? = nil,
+        enableSavedViewTabs: Bool = false,
+        enableLinkedSources: Bool = false,
         trashRetentionDays: Int = 30,
         captureToastPosition: ToastPosition = .topCenterScreen,
-        undoToastPosition: ToastPosition = .bottomRightPanel
+        undoToastPosition: ToastPosition = .bottomRightPanel,
+        homeSort: LibrarySortMode = .createdDescending,
+        homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases)
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -339,7 +400,7 @@ struct CiderConfig: Codable {
         self.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
-        self.bookmarksDirectory = bookmarksDirectory
+        self.ciderDataDirectory = ciderDataDirectory
         self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize
@@ -352,8 +413,12 @@ struct CiderConfig: Codable {
         self.subFoldersCollapsed = subFoldersCollapsed
         self.homeDisplayMode = homeDisplayMode
         self.homeCardSizeScale = homeCardSizeScale
+        self.enableSavedViewTabs = enableSavedViewTabs
+        self.enableLinkedSources = enableLinkedSources
         self.trashRetentionDays = trashRetentionDays
         self.captureToastPosition = captureToastPosition
         self.undoToastPosition = undoToastPosition
+        self.homeSort = homeSort
+        self.homeEntityFilter = homeEntityFilter
     }
 }

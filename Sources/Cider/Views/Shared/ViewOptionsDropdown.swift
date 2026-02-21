@@ -13,8 +13,22 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
     @Binding var displayMode: Mode
     @Binding var cardSizeScale: Double
 
+    // Home-tab-only extras — nil means the section is hidden
+    var sortMode: Binding<LibrarySortMode>? = nil
+    var entityFilter: Binding<Set<LibraryEntityType>>? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
+            if let sortMode {
+                sortSection(sortMode)
+                Divider().background(CiderColors.separator)
+            }
+
+            if let entityFilter {
+                entityFilterSection(entityFilter)
+                Divider().background(CiderColors.separator)
+            }
+
             // Card Size
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("Card Size")
@@ -63,9 +77,215 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
             }
         }
         .padding(Spacing.md)
-        .frame(width: 200)
+        .frame(width: 210)
+    }
+
+    // MARK: - Sort Section
+
+    @ViewBuilder
+    private func sortSection(_ binding: Binding<LibrarySortMode>) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Sort By")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+
+            VStack(spacing: Spacing.xxs) {
+                ForEach(SortGroup.allCases, id: \.self) { group in
+                    SortRow(
+                        group: group,
+                        currentMode: binding.wrappedValue,
+                        onTap: {
+                            if group.contains(binding.wrappedValue) {
+                                // Toggle direction
+                                binding.wrappedValue = group.isAscending(binding.wrappedValue)
+                                    ? group.descending
+                                    : group.ascending
+                            } else {
+                                binding.wrappedValue = group.defaultMode
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Entity Filter Section
+
+    @ViewBuilder
+    private func entityFilterSection(_ binding: Binding<Set<LibraryEntityType>>) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Content")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+
+            let columns = [GridItem(.flexible(), spacing: Spacing.xs), GridItem(.flexible(), spacing: Spacing.xs)]
+            LazyVGrid(columns: columns, spacing: Spacing.xs) {
+                ForEach(LibraryEntityType.allCases, id: \.self) { type in
+                    EntityFilterChip(
+                        type: type,
+                        isOn: binding.wrappedValue.contains(type),
+                        onTap: {
+                            if binding.wrappedValue.contains(type) {
+                                // Keep at least one type active
+                                if binding.wrappedValue.count > 1 {
+                                    binding.wrappedValue.remove(type)
+                                }
+                            } else {
+                                binding.wrappedValue.insert(type)
+                            }
+                        }
+                    )
+                }
+            }
+        }
     }
 }
+
+// MARK: - Sort Group
+
+private enum SortGroup: CaseIterable {
+    case dateAdded, lastModified, title, eventDate
+
+    var label: String {
+        switch self {
+        case .dateAdded: "Date Added"
+        case .lastModified: "Last Modified"
+        case .title: "Title"
+        case .eventDate: "Event Date"
+        }
+    }
+
+    var ascending: LibrarySortMode {
+        switch self {
+        case .dateAdded: .createdAscending
+        case .lastModified: .updatedAscending
+        case .title: .titleAscending
+        case .eventDate: .dateUpcoming
+        }
+    }
+
+    var descending: LibrarySortMode {
+        switch self {
+        case .dateAdded: .createdDescending
+        case .lastModified: .updatedDescending
+        case .title: .titleDescending
+        case .eventDate: .dateFarthest
+        }
+    }
+
+    var defaultMode: LibrarySortMode {
+        switch self {
+        case .dateAdded: .createdDescending
+        case .lastModified: .updatedDescending
+        case .title: .titleAscending
+        case .eventDate: .dateUpcoming
+        }
+    }
+
+    func contains(_ mode: LibrarySortMode) -> Bool {
+        mode == ascending || mode == descending
+    }
+
+    func isAscending(_ mode: LibrarySortMode) -> Bool {
+        mode == ascending
+    }
+}
+
+// MARK: - Sort Row
+
+private struct SortRow: View {
+    let group: SortGroup
+    let currentMode: LibrarySortMode
+    let onTap: () -> Void
+
+    @State private var isHovered = false
+
+    private var isSelected: Bool { group.contains(currentMode) }
+    private var showsAscending: Bool { group.isAscending(currentMode) }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: Spacing.xs) {
+                Text(group.label)
+                    .font(CiderFont.body)
+                    .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if isSelected {
+                    Image(systemName: showsAscending ? "chevron.up" : "chevron.down")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                    .fill(isSelected ? CiderColors.accentSelected : isHovered ? CiderColors.surfaceHover : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverState($isHovered)
+    }
+}
+
+// MARK: - Entity Filter Chip
+
+private struct EntityFilterChip: View {
+    let type: LibraryEntityType
+    let isOn: Bool
+    let onTap: () -> Void
+
+    @State private var isHovered = false
+
+    var label: String {
+        switch type {
+        case .bookmark: "Bookmarks"
+        case .note: "Notes"
+        case .dateCard: "Events"
+        case .contact: "Contacts"
+        case .externalFile: "Sources"
+        }
+    }
+
+    var icon: String {
+        switch type {
+        case .bookmark: "bookmark"
+        case .note: "note.text"
+        case .dateCard: "calendar"
+        case .contact: "person.crop.circle"
+        case .externalFile: "folder.badge.gear"
+        }
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: icon)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.tertiary)
+                Text(label)
+                    .font(CiderFont.caption)
+                    .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xs)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                    .fill(isOn ? CiderColors.accentSelected : isHovered ? CiderColors.surfaceHover : CiderColors.surfaceInput)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverState($isHovered)
+    }
+}
+
+// MARK: - View Mode Icon
 
 private struct ViewModeIcon: View {
     let icon: String

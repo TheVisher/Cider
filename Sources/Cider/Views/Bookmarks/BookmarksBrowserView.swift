@@ -14,9 +14,6 @@ struct BookmarksBrowserView: View {
     var onDeleteBookmark: ((Bookmark) -> Void)? = nil
     var onAddBookmark: (String, String?) -> Bool
     var onUpdateBookmarkDetails: ((Bookmark, String, String, [String]) -> Bool)? = nil
-    var onAssignThumbnailFromDroppedString: ((Bookmark, String) -> Bool)? = nil
-    var onAssignThumbnailFromLocalFileURL: ((Bookmark, URL) -> Bool)? = nil
-    var onAssignThumbnailFromImageData: ((Bookmark, Data, String?) -> Bool)? = nil
     var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)? = nil
     var onCreateFolder: ((String, UUID?) -> Folder?)? = nil
     var showsInternalFolderSidebar = true
@@ -224,10 +221,7 @@ struct BookmarksBrowserView: View {
                         onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
                         isSelected: isBookmarkSelected(bookmark),
                         onSelect: { handleSelect(bookmark: bookmark) },
-                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) },
-                        onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
-                        onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
-                        onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
+                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) }
                     )
                 }
             }
@@ -252,10 +246,7 @@ struct BookmarksBrowserView: View {
                         onMoveToFolder: { _ = onAssignBookmarkToFolder?(bookmark, $0) },
                         isSelected: isBookmarkSelected(bookmark),
                         onSelect: { handleSelect(bookmark: bookmark) },
-                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) },
-                        onAssignThumbnailFromDroppedString: onAssignThumbnailFromDroppedString,
-                        onAssignThumbnailFromLocalFileURL: onAssignThumbnailFromLocalFileURL,
-                        onAssignThumbnailFromImageData: onAssignThumbnailFromImageData
+                        onShiftSelect: { handleShiftSelect(bookmark: bookmark) }
                     )
                 }
             }

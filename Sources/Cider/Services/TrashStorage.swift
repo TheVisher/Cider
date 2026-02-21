@@ -74,7 +74,7 @@ final class TrashStorage {
 
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
@@ -167,15 +167,18 @@ final class TrashStorage {
         }
 
         if fm.fileExists(atPath: srcURL.path) {
-            try? fm.moveItem(at: srcURL, to: destURL)
+            do {
+                try fm.moveItem(at: srcURL, to: destURL)
+            } catch {
+                return  // bail — leave manifest intact so item remains visible in trash
+            }
+            NotesStorage.shared.restoreFromTrash(
+                noteID: trashItem.itemID,
+                filename: destURL.lastPathComponent,
+                folderID: payload.folderID,
+                createdAt: payload.createdAt
+            )
         }
-
-        NotesStorage.shared.restoreFromTrash(
-            noteID: trashItem.itemID,
-            filename: destURL.lastPathComponent,
-            folderID: payload.folderID,
-            createdAt: payload.createdAt
-        )
 
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
@@ -200,7 +203,7 @@ final class TrashStorage {
     func allTrashItems() -> [TrashItem] {
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let notesDir = URL(
             fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
@@ -217,7 +220,7 @@ final class TrashStorage {
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let notesDir = URL(
             fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
@@ -251,7 +254,7 @@ final class TrashStorage {
         switch trashItem.itemType {
         case .bookmark:
             let bookmarksDir = URL(
-                fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
             )
             let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
@@ -273,7 +276,7 @@ final class TrashStorage {
     func emptyTrash() {
         let config = CiderConfig.load()
         let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.bookmarksDirectory).expandingTildeInPath
+            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
         )
         let notesDir = URL(
             fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath

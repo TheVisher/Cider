@@ -328,7 +328,7 @@ struct PanelTrafficLightButton: View {
                 .overlay {
                     if isHovered {
                         Image(systemName: symbol)
-                            .font(.system(size: CiderPanelDesign.trafficLightSymbolSize, weight: .semibold))
+                            .font(.system(size: CiderPanelDesign.trafficLightSymbolSize * CiderFont.scale, weight: .semibold))
                             .foregroundColor(CiderColors.trafficLightSymbol)
                     }
                 }

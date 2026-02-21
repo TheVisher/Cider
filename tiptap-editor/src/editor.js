@@ -529,23 +529,24 @@ const CiderImage = Image.extend({
       ...parentStorage,
       markdown: {
         ...parentStorage.markdown,
-        serialize(state, node) {
-          const width = parsePositiveInt(node.attrs.width);
-          const alt = state.esc(node.attrs.alt || '');
-          const src = String(node.attrs.src || '').replace(/[\(\)]/g, '\\$&');
-          const title = node.attrs.title
-            ? ` "${String(node.attrs.title).replace(/"/g, '\\"')}"`
-            : '';
-
-          if (!width) {
-            state.write(`![${alt}](${src}${title})`);
-            return;
-          }
-
+        serialize(state, node, _parent) {
+          // Always serialize as <img> HTML (never ![]() markdown).
+          // Reason: markdown ![]() inside a <p style="text-align: ..."> block is
+          // treated as raw text by markdown-it (CommonMark HTML block rule), which
+          // would cause the image to render as literal text on reload. Using <img>
+          // avoids this for aligned paragraphs, and is equally stable for plain
+          // paragraphs (markdown-it wraps a bare <img> in <p>, TipTap parses it
+          // back to an inline image node correctly). Alignment is preserved by
+          // CiderParagraph.serialize wrapping aligned content in <p style="...">.
           const htmlSrc = escapeHtmlAttr(node.attrs.src || '');
           const htmlAlt = escapeHtmlAttr(node.attrs.alt || '');
           const htmlTitle = node.attrs.title ? ` title="${escapeHtmlAttr(node.attrs.title)}"` : '';
-          state.write(`<img src="${htmlSrc}" alt="${htmlAlt}"${htmlTitle} width="${width}" data-width="${width}" />`);
+          const width = parsePositiveInt(node.attrs.width);
+          if (width) {
+            state.write(`<img src="${htmlSrc}" alt="${htmlAlt}"${htmlTitle} width="${width}" data-width="${width}" />`);
+          } else {
+            state.write(`<img src="${htmlSrc}" alt="${htmlAlt}"${htmlTitle} />`);
+          }
         },
       },
     };
@@ -888,10 +889,29 @@ function decodeHtmlEntities(value) {
   return el.value;
 }
 
+function convertMarkdownImagesInHtmlParagraphs(value) {
+  // When a <p> HTML block contains markdown image syntax like ![alt](src),
+  // markdown-it treats the entire block as raw HTML text (not markdown).
+  // That means ![alt](src) renders as a literal string instead of an image.
+  // Convert any such occurrences to <img> tags so TipTap creates proper image nodes.
+  if (!value.includes('![')) return value;
+  return value.replace(/<p(?:\s+[^>]*)?>[\s\S]*?<\/p>/g, (pBlock) => {
+    if (!pBlock.includes('![')) return pBlock;
+    return pBlock.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+      return `<img src="${escapeHtmlAttr(src)}" alt="${escapeHtmlAttr(alt)}" />`;
+    });
+  });
+}
+
 function normalizeIncomingMarkdown(value) {
   if (typeof value !== 'string') return '';
 
   let normalized = value.replace(fileProtocolPathPattern, '(/$1)');
+
+  // Convert markdown image syntax inside HTML <p> blocks to <img> tags.
+  // Needed because markdown-it treats <p>...</p> as a raw HTML block,
+  // so ![alt](src) inside renders as literal text rather than an image node.
+  normalized = convertMarkdownImagesInHtmlParagraphs(normalized);
 
   // Recovery path for previously saved escaped HTML content.
   if (escapedHtmlTagPattern.test(normalized)) {

@@ -14,14 +14,17 @@ final class ProjectStorage: ObservableObject {
     @Published private(set) var items: [ProjectItem] = []
 
     private let fileName = "_cider_projects.json"
-    private var fileURL: URL
+    private var fileURL: URL {
+        let dir = StoragePaths.ciderDataDirectoryURL()
+        StoragePaths.ensureDirectory(dir)
+        return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
+    }
 
     private init() {
-        let config = CiderConfig.load()
-        let expanded = NSString(string: config.bookmarksDirectory).expandingTildeInPath
-        let directoryURL = URL(fileURLWithPath: expanded)
-        fileURL = directoryURL.appendingPathComponent(fileName)
-        ensureDirectory(directoryURL)
+        load()
+    }
+
+    func reload() {
         load()
     }
 
@@ -159,6 +162,8 @@ final class ProjectStorage: ObservableObject {
                     items.append(item)
                     order += 1
                 }
+            case .dateCard, .contact:
+                break
             }
         }
         touchProject(projectID)
@@ -193,14 +198,6 @@ final class ProjectStorage: ObservableObject {
         } catch {
             // Silent fail — storage is best-effort
         }
-    }
-
-    private func ensureDirectory(_ directoryURL: URL) {
-        try? FileManager.default.createDirectory(
-            at: directoryURL,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
     }
 
     private func touchProject(_ projectID: UUID) {

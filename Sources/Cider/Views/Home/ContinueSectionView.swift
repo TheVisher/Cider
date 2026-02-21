@@ -1,21 +1,20 @@
 import SwiftUI
 
 struct ContinueSectionView: View {
-    let items: [LibraryItem]
-    let onOpenBookmark: (Bookmark) -> Void
-    let onOpenNote: (Note) -> Void
-    var dragProviderForItem: ((LibraryItem) -> (() -> NSItemProvider)?)? = nil
+    let items: [LibraryItemV2]
+    let onOpen: (LibraryItemV2) -> Void
+    var dragProviderForItem: ((LibraryItemV2) -> (() -> NSItemProvider)?)? = nil
 
     /// Threshold below which we hide the right column.
     /// Set high enough that the sidebar hiding (~200pt freed) doesn't push
     /// the content area above this threshold, preventing column flicker.
     private static let compactWidthThreshold: CGFloat = 700
 
-    private var leftItems: [LibraryItem] {
+    private var leftItems: [LibraryItemV2] {
         Array(items.prefix(4))
     }
 
-    private var rightItems: [LibraryItem] {
+    private var rightItems: [LibraryItemV2] {
         Array(items.dropFirst(4).prefix(4))
     }
 
@@ -60,18 +59,11 @@ struct ContinueSectionView: View {
 
     // MARK: - Row
 
-    private func makeRow(_ item: LibraryItem) -> some View {
+    private func makeRow(_ item: LibraryItemV2) -> some View {
         ContinueRow(
             item: item,
             rowHeight: rowHeight,
-            onOpen: {
-                switch item {
-                case .bookmark(let bookmark):
-                    onOpenBookmark(bookmark)
-                case .note(let note):
-                    onOpenNote(note)
-                }
-            },
+            onOpen: { onOpen(item) },
             dragProvider: dragProviderForItem?(item)
         )
     }
@@ -80,7 +72,7 @@ struct ContinueSectionView: View {
 // MARK: - ContinueRow
 
 private struct ContinueRow: View {
-    let item: LibraryItem
+    let item: LibraryItemV2
     let rowHeight: CGFloat
     let onOpen: () -> Void
     var dragProvider: (() -> NSItemProvider)?
@@ -92,7 +84,7 @@ private struct ContinueRow: View {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: item.iconName)
                     .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.tertiary)
+                    .foregroundColor(item.iconColor)
                     .frame(width: 16)
 
                 Text(item.title)
@@ -102,14 +94,9 @@ private struct ContinueRow: View {
 
                 Spacer(minLength: Spacing.sm)
 
-                if case .bookmark(let bookmark) = item {
-                    Text(bookmark.hostDisplay)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
-                }
+                item.subtitleView
 
-                Text(item.date.formatted(.relative(presentation: .named)))
+                Text(item.updatedDate.formatted(.relative(presentation: .named)))
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
             }
@@ -137,15 +124,48 @@ private struct ContinueRow: View {
     }
 }
 
-// MARK: - LibraryItem Helpers
+// MARK: - LibraryItemV2 Continue Helpers
 
-extension LibraryItem {
+extension LibraryItemV2 {
     var iconName: String {
         switch self {
-        case .bookmark:
-            "bookmark"
-        case .note:
-            "note.text"
+        case .bookmark: "bookmark"
+        case .note: "note.text"
+        case .dateCard(let dc): dc.isCompleted ? "checkmark.circle.fill" : "calendar"
+        case .contact: "person.crop.circle"
+        case .externalFile: "folder.badge.gear"
+        }
+    }
+
+    var iconColor: Color {
+        switch self {
+        case .bookmark, .note, .externalFile: CiderColors.tertiary
+        case .dateCard(let dc): dc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
+        case .contact: CiderColors.controlAccent
+        }
+    }
+
+    @ViewBuilder
+    var subtitleView: some View {
+        switch self {
+        case .bookmark(let b):
+            Text(b.hostDisplay)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+        case .dateCard(let dc):
+            Text(dc.allDay ? dc.startAt.formatted(.dateTime.month(.abbreviated).day()) :
+                 dc.startAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+        case .contact(let c) where !c.relationshipLabel.isEmpty:
+            Text(c.relationshipLabel)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+        default:
+            EmptyView()
         }
     }
 }

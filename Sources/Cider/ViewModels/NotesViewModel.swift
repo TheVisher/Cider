@@ -19,6 +19,7 @@ final class NotesViewModel: ObservableObject {
     @Published var displayMode: NoteDisplayMode
     @Published var cardSizeScale: Double
     @Published var selectedNote: Note?
+    @Published var activeExternalFile: ExternalFile?
     @Published var editingContent: String = ""
     @Published var searchText: String = ""
     @Published var isCollapsed: Bool = false
@@ -50,6 +51,9 @@ final class NotesViewModel: ObservableObject {
     private var saveWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var lastSyncedDiskContent: String = ""
+    /// True while waiting for TipTap's first `contentChanged` after loading an external file.
+    /// TipTap normalizes markdown on parse; we absorb that round-trip without writing to disk.
+    private var isLoadingExternalFile = false
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
     private static let formattingToolbarPinnedStorageKey = "cider.notes.formattingToolbarPinned"
@@ -196,7 +200,7 @@ final class NotesViewModel: ObservableObject {
         }
 
         if let resourceURL = Bundle.module.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
-            let readAccessRoot = URL(fileURLWithPath: "/", isDirectory: true)
+            let readAccessRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
         }
 
@@ -224,6 +228,10 @@ final class NotesViewModel: ObservableObject {
             editingContent = content
             lastSyncedDiskContent = content
             pushContentToEditor(content)
+        } else if activeExternalFile != nil {
+            // External file was opened before editor was ready — push its content now
+            isLoadingExternalFile = true
+            pushContentToEditor(editingContent)
         }
     }
 
@@ -257,7 +265,7 @@ final class NotesViewModel: ObservableObject {
         guard let note = selectedNote else { return }
         let imageURL = NotesStorage.shared.saveImage(data: data, filename: filename, for: note)
         guard let webView = editorWebView else { return }
-        let src = imageURL.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? imageURL.path
+        let src = imageURL.absoluteString
         let alt = filename
         guard let srcData = try? JSONSerialization.data(withJSONObject: src, options: .fragmentsAllowed),
               let altData = try? JSONSerialization.data(withJSONObject: alt, options: .fragmentsAllowed),
@@ -286,6 +294,8 @@ final class NotesViewModel: ObservableObject {
     func selectNote(_ note: Note) {
         // Save current note before switching
         flushSave()
+        activeExternalFile = nil
+        isLoadingExternalFile = false
 
         var loaded = note
         loaded.content = loadPersistedContent(for: note)
@@ -303,6 +313,26 @@ final class NotesViewModel: ObservableObject {
         hasPendingSave = false
 
         pushContentToEditor(loaded.content)
+    }
+
+    func openExternalFile(_ file: ExternalFile) {
+        flushSave()
+        activeExternalFile = file
+        selectedNote = nil
+        let content = (try? String(contentsOf: file.path, encoding: .utf8)) ?? ""
+        editingContent = content
+        editingTitle = file.title
+        charCount = content.count
+        isFindBarVisible = false
+        findQuery = ""
+        resetFindResults()
+        lastSyncedDiskContent = content
+        pendingExternalDiskContent = nil
+        ignoredExternalDiskContent = nil
+        externalChangeState = nil
+        hasPendingSave = false
+        isLoadingExternalFile = true
+        pushContentToEditor(content)
     }
 
     // MARK: - CRUD
@@ -372,9 +402,45 @@ final class NotesViewModel: ObservableObject {
         let persistedContent = NotesStorage.shared.markdownForPersistence(newContent)
         editingContent = persistedContent
         charCount = persistedContent.count
+        hasPendingSave = true
+
+        if let externalFile = activeExternalFile {
+            // Absorb the TipTap normalization round-trip on initial load.
+            // Raw disk content ≠ TipTap-serialized markdown, so we update the
+            // reference without writing to avoid a spurious mtime bump.
+            if isLoadingExternalFile {
+                isLoadingExternalFile = false
+                lastSyncedDiskContent = persistedContent
+                hasPendingSave = false
+                return
+            }
+            // Don't save if content hasn't changed from what we loaded from disk
+            guard persistedContent != lastSyncedDiskContent else {
+                hasPendingSave = false
+                return
+            }
+            // Auto-save back to the external file path
+            saveWorkItem?.cancel()
+            let fileURL = externalFile.path
+            let workItem = DispatchWorkItem { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, self.activeExternalFile?.path == fileURL else { return }
+                    let content = self.editingContent
+                    self.lastSyncedDiskContent = content
+                    self.pendingExternalDiskContent = nil
+                    self.ignoredExternalDiskContent = nil
+                    self.externalChangeState = nil
+                    try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+                    self.hasPendingSave = false
+                }
+            }
+            saveWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
+            return
+        }
+
         guard var note = selectedNote else { return }
         note.content = persistedContent
-        hasPendingSave = true
 
         saveWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -397,6 +463,22 @@ final class NotesViewModel: ObservableObject {
     func flushSave() {
         saveWorkItem?.cancel()
         saveWorkItem = nil
+
+        if let externalFile = activeExternalFile {
+            let content = editingContent
+            guard content != lastSyncedDiskContent else {
+                hasPendingSave = false
+                return
+            }
+            lastSyncedDiskContent = content
+            pendingExternalDiskContent = nil
+            ignoredExternalDiskContent = nil
+            externalChangeState = nil
+            try? content.write(to: externalFile.path, atomically: true, encoding: .utf8)
+            hasPendingSave = false
+            return
+        }
+
         guard var note = selectedNote else { return }
 
         // Save the latest known content immediately.
@@ -411,6 +493,30 @@ final class NotesViewModel: ObservableObject {
         // Then ask the editor for current content to catch any final keystrokes
         // that haven't crossed the JS->Swift bridge yet.
         syncContentFromEditor(noteID: note.id)
+    }
+
+    private func syncExternalContentFromEditor(fileURL: URL) {
+        guard editorIsReady, let webView = editorWebView else { return }
+        webView.evaluateJavaScript("window.editorAPI.getContent()") { [weak self] result, _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let markdown = result as? String,
+                      self.activeExternalFile?.path == fileURL else { return }
+                let content = NotesStorage.shared.markdownForPersistence(markdown)
+                editingContent = content
+                charCount = content.count
+                pendingExternalDiskContent = nil
+                ignoredExternalDiskContent = nil
+                externalChangeState = nil
+                guard content != self.lastSyncedDiskContent else {
+                    hasPendingSave = false
+                    return
+                }
+                lastSyncedDiskContent = content
+                try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+                hasPendingSave = false
+            }
+        }
     }
 
     private func syncContentFromEditor(noteID: UUID) {
@@ -871,8 +977,8 @@ final class NotesViewModel: ObservableObject {
 
     func show() {
         isVisible = true
-        // If no note selected and notes exist, select the most recent
-        if selectedNote == nil, let first = notes.first {
+        // If no note selected (and not viewing an external file) and notes exist, select the most recent
+        if selectedNote == nil, activeExternalFile == nil, let first = notes.first {
             selectNote(first)
         }
     }

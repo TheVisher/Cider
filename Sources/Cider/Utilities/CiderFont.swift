@@ -9,8 +9,16 @@ import SwiftUI
 /// For textScale-responsive views (BookmarksBrowserView, BookmarksPanelView),
 /// use the `(scale:)` function variants.
 enum CiderFont {
-    private static var globalScale: CGFloat { CiderConfig.load().textSize.scale }
+    private nonisolated(unsafe) static var _cachedScale: CGFloat = CiderConfig.load().textSize.scale
+    private static var globalScale: CGFloat { _cachedScale }
     private static func scaled(_ size: CGFloat) -> CGFloat { size * globalScale }
+    /// Expose the current global scale for callers that need to scale raw CGFloat sizes.
+    static var scale: CGFloat { _cachedScale }
+
+    /// Call once after saving config so all font tokens reflect the new text size.
+    static func invalidateScale() {
+        _cachedScale = CiderConfig.load().textSize.scale
+    }
 
     // MARK: - Body (11pt) — Primary text size
 
@@ -93,7 +101,7 @@ enum CiderFont {
     /// 28pt bold — bookmark hero fallback letter
     static var heroFallback: Font { Font.system(size: scaled(28), weight: .bold) }
     /// 36pt regular — empty state icon
-    static let emptyStateIcon = Font.system(size: 36)
+    static var emptyStateIcon: Font { Font.system(size: scaled(36)) }
     /// 64pt regular — about screen app icon
     static let appIcon = Font.system(size: 64)
 

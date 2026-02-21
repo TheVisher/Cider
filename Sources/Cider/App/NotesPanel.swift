@@ -171,7 +171,7 @@ final class NotesPanel: NSPanel {
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = NotesDesign.collapseToggleAnimationDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
             animator().setFrame(frame, display: true)
         }
     }

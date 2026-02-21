@@ -25,6 +25,9 @@ The floating panel is the main way users interact with Cider:
 
 ## Documentation Reference
 
+### Full Docs Map
+**Read:** `Docs/DOCS_INDEX.md` — lists every doc, what it covers, and its implementation status. Start here when you need to find, read, or update the right doc.
+
 ### Before Writing ANY UI Code
 **Read:** `Docs/DESIGN_SYSTEM.md`
 - Color palette, typography, spacing tokens
@@ -254,9 +257,18 @@ LibraryDisplayMode: .list | .grid | .masonry
 
 Card sizing: Continuous slider (0-3 scale) via LibraryCardSizing struct
 - Delegates to CardSizing (bookmarks) and NoteCardSizing (notes)
-- Mixed content: BookmarkCard/BookmarkListRow + NoteCardView/NoteListRow
+- Mixed content: BookmarkCard/BookmarkListRow + NoteCardView/NoteListRow + DateCardCardView + ContactCardCardView
 - Continue section: sticky 8-item recents, two-column, collapsible
 - Library feed: scrollable mixed feed, filters by folder selection
+
+LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard(DateCard) | .contact(ContactCard)
+- dateAnchor: Date? — key property for calendar projection; dateCards use startAt, contacts use birthday, bookmarks/notes nil
+- isCompleted: Bool — only meaningful for dateCards; used by stack surfacing rules like pinUntilDone
+
+LibraryViewModel — unified query engine reading from all 4 storages; rebuilds on any storage change
+- Produces: filtered library feed, calendar buckets, stack resolutions
+- Stacks: CardStack has matchRules + manualItemRefs, resolves items dynamically (not containers)
+- SavedViews: isTabPinned: Bool controls tab bar presence; calendar is a view mode toggle, not a separate tab
 
 State: CiderPanelView owns @State, passes Bindings to HomeDashboardView
 Persistence: homeDisplayMode + homeCardSizeScale on CiderConfig
@@ -264,7 +276,7 @@ Persistence: homeDisplayMode + homeCardSizeScale on CiderConfig
 
 ## Settings Architecture
 
-Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Appearance, Storage.
+Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Notes, Bookmarks, Appearance, Data, Advanced, About. Data subcategories: Directories (ciderDataDirectory + notesDirectory pickers), Trash (`StorageSettingsView`), Notifications (toast position pickers). Notes subcategories: Behavior, Editor. Bookmarks subcategory: Behavior (no directory picker — moved to Data → Directories). Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category).
 
 ## TipTap Editor Architecture
 
@@ -275,7 +287,13 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Editor resources** — `Resources/TipTapEditor/editor.html` + `editor.css` + `editor.js` (minified bundle)
 - **CSS gotcha** — `line-height` on `<pre>` (block) controls code block spacing, NOT on `<code>` (inline child). The `<pre>` inherits body's `line-height` if not explicitly set.
 - **Table CSS** — `width:auto; table-layout:auto` for content-sized tables (not `width:100%` which stretches to fill)
-- **Accepted risk:** `allowingReadAccessTo` is filesystem root (`/`) so the editor can load images from any local path the user drags in. Navigation delegate filters external URLs. This is appropriate for a local-only desktop app with bundled editor HTML and ProseMirror schema validation.
+- **WebView access scope:** `allowingReadAccessTo` is set to `NSHomeDirectory()` — the editor can load images from any path under the user's home directory (notes, attachments, dragged images). Navigation policy is deny-by-default: only `file://` and `about:` are allowed; all other schemes are blocked regardless of how the navigation was triggered. User-clicked external links are opened in the system browser then cancelled.
+- **Image serialization format:** `CiderImage.serialize` ALWAYS uses `<img src="..." alt="..." />` HTML — never `![]()` markdown. Reason: `![]()` inside a `<p style="text-align: ...">` block is treated as raw literal text by markdown-it (CommonMark type-6 HTML block rule). `<img>` is safe in both aligned and plain paragraphs; markdown-it wraps a bare `<img>` in `<p>` on reload and TipTap parses it back correctly. Don't revert to `![]()`.
+- **CommonMark HTML block rule:** `<p>...</p>` (and other block-level HTML tags) are CommonMark type-6 HTML blocks — markdown-it does NOT parse markdown syntax inside them. So `<p style="text-align: center">![alt](src)</p>` renders the `![]()` as raw text, not an image. Always use `<img>` inside any `<p>` block.
+- **Legacy note migration:** `normalizeIncomingMarkdown` calls `convertMarkdownImagesInHtmlParagraphs` (in `editor.js`) to convert any `<p>..![]()</p>` patterns to `<p>..<img /></p>` on load. One-time migration for old notes; the correct serialized format going forward is `<img>` everywhere.
+- **TipTap normalization round-trip:** Pushing raw markdown via `pushContentToEditor` fires `contentChanged` with TipTap-serialized output that may differ from the input even with zero edits. When loading external files, set a flag (`isLoadingExternalFile`) and absorb the first `contentChanged` by updating `lastSyncedDiskContent` to the normalized value without writing to disk.
+- **`syncExternalContentFromEditor` vs external files:** The async JS eval safety net exists to catch final keystrokes for native notes. For external files it causes spurious writes — the async eval path may serialize differently than `contentChanged`, bypassing equality guards. Use `editingContent` as authoritative for external files; do not call `syncExternalContentFromEditor` from `flushSave`.
+- **External file mtime integrity:** Every save path (`contentChanged` debounce, `flushSave`, any async sync) must guard with `content != lastSyncedDiskContent` before writing. Opening and closing a file with no edits must never touch the filesystem.
 
 ## SwiftUI + NSPanel Gotchas
 
@@ -290,7 +308,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **SourceKit false positives:** "Cannot find 'CiderFont' in scope" (and similar cross-file type errors) are SourceKit indexing noise, not real build errors. Ignore them — verify with `swift build` instead.
 - **Shadow shapes use literal `Color.black`** — this is correct, not a CiderColors violation. The custom shadow pattern (blurred black RoundedRectangle) is intentional.
 - **AppKit Reduce Motion:** For `NSAnimationContext` code (panel collapse), check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` — `@Environment(\.accessibilityReduceMotion)` is SwiftUI-only.
-- **CiderFont tokens are now global/dynamic:** All `CiderFont.*` tokens are `static var` computed properties that read `CiderConfig.load().textSize.scale` on every access. No need for explicit `(scale:)` variants for standard tokens — they all respond to the global text size setting automatically. Only `heroDisplay(scale:)` still requires an explicit parameter.
+- **CiderFont scale is cached:** `CiderFont._cachedScale` (`nonisolated(unsafe) static var`) is set at startup and refreshed by `CiderFont.invalidateScale()` at the top of `handleConfigChanged()`. Font tokens read the cached value — no UserDefaults decode per render. If you add a new config-driven font property, call `invalidateScale()` from `handleConfigChanged()`. Only `heroDisplay(scale:)` takes an explicit parameter; all other tokens respond automatically.
 - **ScrollView bottom padding:** Padding on content INSIDE a ScrollView doesn't prevent clipping at the panel edge — the scroll area itself still extends to the edge. Put bottom padding OUTSIDE the ScrollView (on the ScrollView itself) so the scroll area is inset from the panel.
 - **MasonryLayout cache:** `computeFrames` intentionally has NO width-only cache optimization. Subview sizes can change independently (e.g., `BookmarkCard.@State cardWidth` updating via GeometryReader after initial layout). Always recompute when SwiftUI calls layout methods.
 - **Prefer inline GeometryReader over PreferenceKey:** `onPreferenceChange` fires with the `defaultValue` (often `0`) before the real measurement arrives, causing incorrect initial state. Inline `GeometryReader { proxy in let x = proxy.size.width ... }` is simpler and avoids this race.
@@ -314,3 +332,7 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Carbon hotkey fallback:** `BookmarksHotkeyDetector` and `NotesHotkeyDetector` fall back to Carbon `RegisterEventHotKey` / `InstallEventHandler` when `CGEventTap` creation fails (e.g., no Accessibility permission). Both detectors now work without full accessibility access — Opt+N and Opt+B hotkeys register via Carbon API in that case.
 - **Delete is non-destructive:** `BookmarksStorage.remove()`, `removeAll()`, and `NotesStorage.delete()` all delegate to `TrashStorage` and return `@discardableResult TrashItem`. Callers in ViewModels capture the result and pass it to `CiderUndoManager.shared.record()` to enable undo. Never add a direct file-deletion path — always go through TrashStorage.
 - **Undo toast progress bar:** Both capture toast and undo toast use a repeating `Timer` at `BookmarksToastDesign.reviewProgressTickInterval` (1/30s). Model is an `ObservableObject` with `@Published var progress: CGFloat = 1`. Hover pauses the timer; unhover resumes. Match this pattern for any future timed toast.
+- **Card container contract:** Every card view (BookmarkCard, NoteCardView, DateCardCardView, ContactCardCardView) MUST use `.cardContainer(isHovered:isSelected:isDropTargeted:)` — never inline a `RoundedRectangle` with manual background/border/clip. Border priority inside `cardContainer`: selected > dropTargeted > hovered > default. `isDropTargeted` defaults to `false` so existing call sites need no changes when adding drop support.
+- **BookmarkCard thumbnail drop is self-contained:** `BookmarkCard` calls `BookmarksStorage.shared.assignThumbnail(...)` directly and posts `.showBookmarkCaptureToast` itself. There are NO `onAssignThumbnailFrom*` callback properties — do not add them back. Any view that renders `BookmarkCard` gets drag-and-drop thumbnail assignment for free with no wiring.
+- **`nonisolated static` for View helpers called off main thread:** Pure utility static methods on SwiftUI `View` structs that are called from `NSItemProvider` callbacks (non-isolated background threads) must be marked `nonisolated static`. Without it, the compiler emits a main-actor isolation warning. Example: `BookmarkCard.preferredImageFileExtension(for:)`.
+- **Popovers anchored to SwiftUI views — always use `.popover()`, never manual NSPopover:** SwiftUI's `.popover(isPresented:, arrowEdge:)` positions correctly for views inside `NSHostingView` in non-activating panels. Manual `NSPopover.show(relativeTo:of:)` with a `PopoverAnchorView` NSView is unreliable — the NSView's reported frame in the AppKit hierarchy is misaligned with the visual position due to coordinate system inconsistencies between the flipped `NSHostingView` and its non-flipped NSView children. Despite concerns about ViewBridge crashes, SwiftUI `.popover()` works fine in practice (see `ViewOptionsDropdown`). `PopoverAnchorView.swift` is kept only for possible future use but should not be used for popover anchoring.

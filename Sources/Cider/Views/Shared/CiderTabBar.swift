@@ -3,11 +3,11 @@ import SwiftUI
 struct CiderTabBar: View {
     @Binding var selectedTab: CiderTab
     let tabs: [CiderTab]
-    let bookmarkCount: Int
-    let noteCount: Int
     @Binding var selectedFolderID: UUID?
+    @Binding var selectedSourceID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -23,12 +23,13 @@ struct CiderTabBar: View {
 
     @ViewBuilder
     private func tabButton(for tab: CiderTab) -> some View {
-        let isSelected = selectedTab == tab && selectedFolderID == nil
+        let isSelected = selectedTab == tab && selectedFolderID == nil && selectedSourceID == nil
         let count = badgeCount(for: tab)
 
         Button {
             withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
                 selectedFolderID = nil
+                selectedSourceID = nil
                 selectedTab = tab
             }
         } label: {
@@ -80,10 +81,10 @@ struct CiderTabBar: View {
     private func badgeCount(for tab: CiderTab) -> Int {
         switch tab {
         case .home: 0
-        case .bookmarks: bookmarkCount
-        case .notes: noteCount
+        case .savedView: 0
         case .search: 0
         case .project(let id, _): ProjectStorage.shared.itemCount(for: id)
+        case .externalSource(let id, _): externalSourceRegistry.files(for: id).count
         }
     }
 }
