@@ -366,7 +366,14 @@ private struct EventCreationForm: View {
     let onCreate: (String, Date, Bool) -> Void
 
     @State private var title = ""
-    @State private var date = Date()
+    @State private var dateText: String = {
+        let f = DateFormatter(); f.dateFormat = "MMM d, yyyy"
+        return f.string(from: Date())
+    }()
+    @State private var timeText: String = {
+        let f = DateFormatter(); f.dateFormat = "h:mm a"
+        return f.string(from: Date())
+    }()
     @State private var allDay = false
     @State private var errorMessage = ""
 
@@ -375,16 +382,7 @@ private struct EventCreationForm: View {
             FormHeader(title: "New Event", onBack: onBack)
 
             VStack(spacing: Spacing.xs) {
-                TextField("Title", text: $title)
-                    .textFieldStyle(.plain)
-                    .font(CiderFont.body)
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
-                    .onSubmit(commit)
+                inputField("Title", text: $title, onSubmit: commit)
 
                 Toggle("All Day", isOn: $allDay)
                     .font(CiderFont.body)
@@ -397,22 +395,11 @@ private struct EventCreationForm: View {
                             .fill(CiderColors.surfaceInput)
                     )
 
-                // .field and .compact DatePicker styles crash in .nonactivatingPanel —
-                // they open a popup calendar that calls through nil AppKit function pointers.
-                // .graphical is fully inline (no popup) and safe.
-                DatePicker(
-                    "",
-                    selection: $date,
-                    displayedComponents: allDay ? [.date] : [.date, .hourAndMinute]
-                )
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
+                inputField("Date (e.g. Feb 21, 2026)", text: $dateText, onSubmit: commit)
+
+                if !allDay {
+                    inputField("Time (e.g. 2:30 PM)", text: $timeText, onSubmit: commit)
+                }
             }
             .padding(.horizontal, Spacing.md)
 
@@ -430,13 +417,63 @@ private struct EventCreationForm: View {
         }
     }
 
+    private func resolvedDate() -> Date {
+        let trimmedDate = dateText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTime = timeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentYear = Calendar.current.component(.year, from: Date())
+
+        // Try date formats in order of specificity; handle year-less formats explicitly
+        let dateFormats: [(String, Bool)] = [
+            ("MMM d, yyyy",    true),
+            ("MMMM d, yyyy",   true),
+            ("M/d/yyyy",       true),
+            ("yyyy-MM-dd",     true),
+            ("MMM d",          false),   // year-less
+            ("MMMM d",         false),
+            ("M/d",            false)
+        ]
+        let df = DateFormatter()
+        var parsedDate: Date?
+        for (format, hasYear) in dateFormats {
+            df.dateFormat = format
+            if let d = df.date(from: trimmedDate) {
+                if hasYear {
+                    parsedDate = d
+                } else {
+                    // Inject current year into year-less parse result
+                    var comps = Calendar.current.dateComponents([.month, .day], from: d)
+                    comps.year = currentYear
+                    parsedDate = Calendar.current.date(from: comps)
+                }
+                break
+            }
+        }
+        var result = parsedDate ?? Date()
+
+        if !allDay {
+            let timeFormats = ["h:mm a", "H:mm", "h:mma", "ha", "h a"]
+            let tf = DateFormatter()
+            for format in timeFormats {
+                tf.dateFormat = format
+                if let t = tf.date(from: trimmedTime) {
+                    let cal = Calendar.current
+                    let h = cal.component(.hour, from: t)
+                    let m = cal.component(.minute, from: t)
+                    result = cal.date(bySettingHour: h, minute: m, second: 0, of: result) ?? result
+                    break
+                }
+            }
+        }
+        return result
+    }
+
     private func commit() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {
             errorMessage = "Title is required"
             return
         }
-        onCreate(trimmedTitle, date, allDay)
+        onCreate(trimmedTitle, resolvedDate(), allDay)
     }
 }
 
