@@ -234,6 +234,7 @@ Card sizing: Continuous slider (0-3 scale) via CardSizing struct
   - `.originals/` keeps full-size source image
   - `.thumbnails/` stores downsampled runtime PNG (currently max 720px)
   - Existing legacy thumbnails are normalized on load
+- Async thumbnail loading: `.task(id: fingerprint)` + `Task.detached` + `CGImageSourceCreateWithURL` — never `NSImage(contentsOfFile:)` on main thread
 
 View options: Dropdown popover in sidebar header (ViewOptionsDropdown.swift)
 ```
@@ -246,6 +247,8 @@ Card sizing: Continuous slider (0-3 scale) via NoteCardSizing struct
 - Text-forward cards: wider min widths, side images instead of top images
 - Images downsampled to 240px thumbnails via CGImageSource (not full NSImage)
 - Card data (preview, word count, images) loaded async via NoteCardData.load()
+- NoteCardData.load() calls resolvedContent once, passes to stripMarkup/countWords/imageURLs(from:) — never call resolvedContent multiple times
+- Image URL regexes are static let on Note (compiled once, not per call)
 - Sorted by persisted createdAt (stored in notes index, not filesystem)
 
 ViewOptionsDropdown is generic over DisplayModeOption protocol
@@ -267,6 +270,7 @@ LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard
 
 LibraryViewModel — unified query engine reading from all 4 storages; rebuilds on any storage change
 - Produces: filtered library feed, calendar buckets, stack resolutions
+- Pre-computes `recentItems` (top 8 by updatedDate) during rebuildItems() — HomeDashboardView reads this directly, no O(N log N) sort in body
 - Stacks: CardStack has matchRules + manualItemRefs, resolves items dynamically (not containers)
 - SavedViews: isTabPinned: Bool controls tab bar presence; calendar is a view mode toggle, not a separate tab
 
@@ -309,11 +313,13 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Shadow shapes use literal `Color.black`** — this is correct, not a CiderColors violation. The custom shadow pattern (blurred black RoundedRectangle) is intentional.
 - **AppKit Reduce Motion:** For `NSAnimationContext` code (panel collapse), check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` — `@Environment(\.accessibilityReduceMotion)` is SwiftUI-only.
 - **CiderFont scale is cached:** `CiderFont._cachedScale` (`nonisolated(unsafe) static var`) is set at startup and refreshed by `CiderFont.invalidateScale()` at the top of `handleConfigChanged()`. Font tokens read the cached value — no UserDefaults decode per render. If you add a new config-driven font property, call `invalidateScale()` from `handleConfigChanged()`. Only `heroDisplay(scale:)` takes an explicit parameter; all other tokens respond automatically.
+- **StoragePaths directory caching:** `cachedCiderDataDirectoryURL` and `notesDirectoryPath` are `nonisolated(unsafe) static var` caches that avoid `CiderConfig.load()` (UserDefaults decode) on every access. Invalidated by `StoragePaths.invalidateCachedDirectory()` in `handleConfigChanged()`. `Bookmark.thumbnailFileURL`/`originalImageFileURL` and `Note.resolvedContent`/`imageURLs` use these cached paths. Never call `CiderConfig.load()` in view body or computed properties that run during render — use cached paths or `@State config` instead.
 - **ScrollView bottom padding:** Padding on content INSIDE a ScrollView doesn't prevent clipping at the panel edge — the scroll area itself still extends to the edge. Put bottom padding OUTSIDE the ScrollView (on the ScrollView itself) so the scroll area is inset from the panel.
-- **MasonryLayout cache:** `computeFrames` intentionally has NO width-only cache optimization. Subview sizes can change independently (e.g., `BookmarkCard.@State cardWidth` updating via GeometryReader after initial layout). Always recompute when SwiftUI calls layout methods.
+- **MasonryLayout cache:** `computeFrames` has no width-only cache across layout passes — subview sizes can change independently (e.g., `BookmarkCard.@State cardWidth` updating via GeometryReader). However, `placeSubviews` skips recomputation when width matches `sizeThatFits` (safe within same layout pass). `sizeThatFits` always recomputes to catch subview size changes.
 - **Prefer inline GeometryReader over PreferenceKey:** `onPreferenceChange` fires with the `defaultValue` (often `0`) before the real measurement arrives, causing incorrect initial state. Inline `GeometryReader { proxy in let x = proxy.size.width ... }` is simpler and avoids this race.
 - **GeometryReader threshold anti-oscillation:** When a threshold controls layout (e.g., 1 vs 2 columns), set it high enough that sidebar show/hide (~200pt delta) can't flip the result. Otherwise content width jumps when sidebar toggles, causing column flicker.
-- **Folder view condition order:** In `tabContentBody`, check `selectedFolderID != nil` BEFORE `selectedTab == .home` — otherwise Home tab content renders instead of FolderDetailView when a folder is selected on the Home tab.
+- **Home tab kept alive:** `HomeDashboardView` is always in the view tree (ZStack with `opacity(isHomeActive ? 1 : 0)` + `allowsHitTesting`). Switching tabs doesn't destroy it — thumbnails, card data, and scroll position persist. Other tabs (saved views, search, external sources) still create/destroy on demand. `isHomeActive = selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil`.
+- **Folder view condition order:** In `tabContentBody`, check `selectedFolderID != nil` BEFORE the ZStack that contains Home — otherwise Home renders instead of FolderDetailView when a folder is selected on the Home tab.
 - **Tab deselection in folder view:** CiderTabBar takes `selectedFolderID` binding. `isSelected = selectedTab == tab && selectedFolderID == nil`. Clicking a tab sets `selectedFolderID = nil` so re-clicking the same tab works to exit folder view.
 - **Notes panel modal pattern:** `.openNoteInPanel` with `userInfo: ["modal": true]` installs NSEvent local monitor. Click inside notes panel → remove monitor (normal behavior). Click outside → dismiss AND return `nil` to swallow the event (prevents underlying cards from activating).
 - **onDrop concurrency:** `loadDataRepresentation` callbacks are non-isolated. Capture view model references locally before the closure, then do lookups inside `Task { @MainActor in }` to avoid main-actor-isolation warnings.

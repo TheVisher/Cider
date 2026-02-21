@@ -36,10 +36,17 @@ The Home tab is the library — the unified view of all Cider content. A sticky 
 - `LibraryItemV2.dateAnchor: Date?` — the key property for calendar projection; dateCards use `startAt`, contacts use `birthday`, bookmarks and notes have nil
 - `LibraryItemV2.isCompleted: Bool` — only meaningful for dateCards; used by surfacing rules like `pinUntilDone`
 - `LibraryViewModel` — unified query engine reading from all four storages; produces filtered feeds, calendar buckets, and stack resolutions; rebuilds on any storage change
+- `LibraryViewModel.recentItems` — pre-sorted top 8 by `updatedDate`, computed in `rebuildItems()` so Home body doesn't sort on every render
 - `LibraryDisplayMode` enum conforming to `DisplayModeOption` — plugs into ViewOptionsDropdown
 - `LibraryCardSizing` struct with 4-stop interpolation, produces `bookmarkSizing` and `noteSizing` for downstream components
 - View state (display mode, card size, continue collapsed) persisted in CiderConfig
 - Display mode and card size controlled by CiderPanelView via bindings, persisted on change
+
+### Performance
+
+- **Home kept alive across tab switches** — `HomeDashboardView` stays in the view tree via ZStack + opacity/allowsHitTesting, so thumbnails, card data, and scroll position persist when switching to other tabs. Other tabs (saved views, search) create/destroy on demand.
+- **Async image loading** — All card thumbnails (bookmarks, notes, contacts) load via `Task.detached` + `CGImageSource` to prevent main-thread blocking during scroll.
+- **No `CiderConfig.load()` in body** — `HomeDashboardView` uses `@State config` and `StoragePaths` cached paths instead of decoding UserDefaults on every render.
 
 ### Sidebar Changes
 

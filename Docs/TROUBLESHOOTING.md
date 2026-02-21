@@ -249,16 +249,27 @@ if rebuiltIndex != previousIndex {
 
 ### Watch For: Image decoding on the main thread
 
-**Status:** Notes handle this correctly via async `NoteCardData.load()`. Bookmarks should follow the same pattern.
+**Status:** Implemented. All card types now decode images async on background threads:
+- **Bookmarks:** `BookmarkThumbnailView` and `BookmarkDetailsHeroPreview` use `.task(id: fingerprint)` + `Task.detached` + `CGImageSourceCreateWithURL`. Fingerprint combines path + metadataUpdatedAt + remoteURLString.
+- **Notes:** `NoteCardData.load()` on `Task.detached` with `CGImageSourceCreateThumbnailAtIndex` (240px max). `resolvedContent` called once, passed to `stripMarkup`/`countWords`/`imageURLs(from:)` to avoid repeated disk I/O.
+- **Contacts:** `ContactCardCardView` and `ContactListRow` use `CGImageSourceCreateThumbnailAtIndex` with 120px max dimension inside `Task.detached`.
 
-**Risk:** If bookmark thumbnails are decoded on the main thread during scroll, frame drops will appear in masonry/grid views — especially with large images or fast scrolling. The symptom is visible jank or stuttering when scrolling through cards.
-
-**Mitigation:**
-- Decode and downsample via `CGImageSource` on a background queue.
-- Dispatch the final downsampled `NSImage`/`CGImage` back to main for display.
-- Notes already do this — bookmarks should follow the same `async` loading pattern.
-
-**Priority:** High. This is the single most likely source of scroll jank as the collection grows. Fix this before other optimizations.
+**Pattern for new image-loading views:**
+```swift
+.task(id: imageFingerprint) {
+    let image = await Task.detached(priority: .userInitiated) {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }.value
+    guard !Task.isCancelled else { return }
+    self.displayImage = image
+}
+```
 
 ---
 
@@ -301,3 +312,7 @@ if rebuiltIndex != previousIndex {
 5. **Use `onTapGesture` instead of `Button` in popovers.** Button's press animation adds delay and visual noise inside dropdown menus. `onTapGesture` fires immediately.
 
 6. **Guard against same-value ViewModel updates.** When a `didSet` handler posts a notification that triggers the same property to be set again, add `if self.value != newValue` guards to prevent double re-renders.
+
+7. **All images in scrollable views must load async.** Use `.task(id:)` with `Task.detached` and `CGImageSource` decoding on a background thread. Never call `NSImage(contentsOfFile:)` or `NSImage(data:)` on the main thread during scroll — it causes frame drops in masonry/grid views.
+
+8. **Never call `CiderConfig.load()` in view body or computed properties.** Use cached paths (`StoragePaths.cachedCiderDataDirectoryURL`, `StoragePaths.notesDirectoryPath`) or `@State config` instead. Each `CiderConfig.load()` does a UserDefaults read + JSONDecoder decode.

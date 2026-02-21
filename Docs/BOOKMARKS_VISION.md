@@ -89,13 +89,14 @@ The standalone bookmarks panel (`BookmarksPanelView`) uses a single-corner resiz
 - Imports/exports round-trip with mainstream browser bookmark files.
 
 ## Phase 5: Polish and Performance
-1. Progressive image loading refinements.
-2. Smarter thumbnail invalidation/retry policy.
-3. Large-library performance pass (scrolling, filtering, search latency).
+1. ✅ Async thumbnail loading via `.task(id: fingerprint)` + `Task.detached` + `CGImageSourceCreateWithURL` — no main-thread image decoding during scroll.
+2. ✅ `Bookmark.thumbnailFileURL` / `originalImageFileURL` use `StoragePaths.cachedCiderDataDirectoryURL` instead of per-access `CiderConfig.load()`.
+3. Smarter thumbnail invalidation/retry policy.
+4. Large-library performance pass (scrolling, filtering, search latency).
 
 ### Acceptance Criteria
-- Smooth interaction at high bookmark counts.
-- No layout jank in masonry during enrichment updates.
+- ✅ Smooth interaction at high bookmark counts — async loading prevents scroll jank in masonry/grid.
+- ✅ No layout jank in masonry during enrichment updates — `.task(id: fingerprint)` auto-cancels and re-fires on enrichment changes.
 - Thumbnail memory/perf can be tuned without code changes (future settings toggle target).
 
 ### Thumbnail Dimension Options (Documented for Future Settings)
