@@ -3,8 +3,6 @@ import SwiftUI
 struct CiderTabBar: View {
     @Binding var selectedTab: CiderTab
     let tabs: [CiderTab]
-    let bookmarkCount: Int
-    let noteCount: Int
     @Binding var selectedFolderID: UUID?
     @Binding var selectedSourceID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
@@ -83,8 +81,6 @@ struct CiderTabBar: View {
     private func badgeCount(for tab: CiderTab) -> Int {
         switch tab {
         case .home: 0
-        case .bookmarks: bookmarkCount
-        case .notes: noteCount
         case .savedView: 0
         case .search: 0
         case .project(let id, _): ProjectStorage.shared.itemCount(for: id)

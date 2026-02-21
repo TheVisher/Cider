@@ -150,6 +150,30 @@ extension View {
         })
     }
 
+    /// Context menu for date card (event) cards — Open, Delete.
+    func dateCardContextMenu(
+        onOpen: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> some View {
+        modifier(CardContextMenuModifier {
+            [.action(title: "Open", callback: onOpen),
+             .separator,
+             .destructive(title: "Delete", callback: onDelete)]
+        })
+    }
+
+    /// Context menu for contact cards — Open, Delete.
+    func contactContextMenu(
+        onOpen: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> some View {
+        modifier(CardContextMenuModifier {
+            [.action(title: "Open", callback: onOpen),
+             .separator,
+             .destructive(title: "Delete", callback: onDelete)]
+        })
+    }
+
     /// Context menu for bookmark cards — Open in Browser, Show Details, Move to Folder, Delete.
     func bookmarkContextMenu(
         bookmark: Bookmark,

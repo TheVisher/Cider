@@ -229,9 +229,17 @@ struct HomeDashboardView: View {
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .dateCard(let dateCard):
-            DateCardListRow(dateCard: dateCard, onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } })
+            DateCardListRow(
+                dateCard: dateCard,
+                onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+            )
         case .contact(let contact):
-            ContactListRow(contact: contact, onOpen: { handleNormalAction { presentContactDetail(contact) } })
+            ContactListRow(
+                contact: contact,
+                onOpen: { handleNormalAction { presentContactDetail(contact) } },
+                onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+            )
         case .externalFile(let file):
             SourceCardView(
                 file: file,
@@ -298,9 +306,17 @@ struct HomeDashboardView: View {
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .dateCard(let dateCard):
-            DateCardCardView(dateCard: dateCard, onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } })
+            DateCardCardView(
+                dateCard: dateCard,
+                onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+            )
         case .contact(let contact):
-            ContactCardCardView(contact: contact, onOpen: { handleNormalAction { presentContactDetail(contact) } })
+            ContactCardCardView(
+                contact: contact,
+                onOpen: { handleNormalAction { presentContactDetail(contact) } },
+                onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+            )
         case .externalFile(let file):
             SourceCardView(
                 file: file,

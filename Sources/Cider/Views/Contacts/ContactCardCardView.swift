@@ -5,6 +5,7 @@ import SwiftUI
 struct ContactCardCardView: View {
     let contact: ContactCard
     var onOpen: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @State private var isHovered = false
     @State private var avatarImage: NSImage?
@@ -83,6 +84,10 @@ struct ContactCardCardView: View {
         .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered)
         .hoverState($isHovered, animation: .snappy)
+        .contactContextMenu(
+            onOpen: { onOpen?() },
+            onDelete: { onDelete?() }
+        )
         .task(id: contact.updatedAt) {
             await loadAvatar()
         }
@@ -155,6 +160,7 @@ struct ContactCardCardView: View {
 struct ContactListRow: View {
     let contact: ContactCard
     var onOpen: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @State private var avatarImage: NSImage?
 
@@ -210,6 +216,10 @@ struct ContactListRow: View {
             )
         }
         .buttonStyle(.plain)
+        .contactContextMenu(
+            onOpen: { onOpen?() },
+            onDelete: { onDelete?() }
+        )
         .task(id: contact.updatedAt) {
             await loadAvatar()
         }

@@ -662,16 +662,20 @@ struct SavedViewTabContent: View {
             )
         case .dateCard(let dateCard):
             return AnyView(
-                DateCardListRow(dateCard: dateCard) {
-                    editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
-                }
+                DateCardListRow(
+                    dateCard: dateCard,
+                    onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
+                    onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+                )
             )
         case .contact:
             if case .contact(let contact) = item {
                 return AnyView(
-                    ContactListRow(contact: contact) {
-                        contactEditorContext = ContactEditorContext(existingContact: contact)
-                    }
+                    ContactListRow(
+                        contact: contact,
+                        onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
+                        onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+                    )
                 )
             }
             return AnyView(genericRow(item))
@@ -801,14 +805,18 @@ struct SavedViewTabContent: View {
                 onMoveToFolder: { folderID in onMoveNoteToFolder?(note, folderID) }
             )
         case .dateCard(let dateCard):
-            DateCardCardView(dateCard: dateCard) {
-                editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
-            }
+            DateCardCardView(
+                dateCard: dateCard,
+                onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
+                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+            )
         case .contact:
             if case .contact(let contact) = item {
-                ContactCardCardView(contact: contact) {
-                    contactEditorContext = ContactEditorContext(existingContact: contact)
-                }
+                ContactCardCardView(
+                    contact: contact,
+                    onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
+                    onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+                )
             } else {
                 GenericLibraryItemCard(item: item)
             }

@@ -3,6 +3,7 @@ import SwiftUI
 struct DateCardCardView: View {
     let dateCard: DateCard
     var onOpen: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @State private var isHovered = false
 
@@ -101,6 +102,10 @@ struct DateCardCardView: View {
         .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered)
         .hoverState($isHovered, animation: .snappy)
+        .dateCardContextMenu(
+            onOpen: { onOpen?() },
+            onDelete: { onDelete?() }
+        )
     }
 
     private func detailRow(icon: String, text: String) -> some View {
@@ -127,6 +132,7 @@ struct DateCardCardView: View {
 struct DateCardListRow: View {
     let dateCard: DateCard
     var onOpen: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         Button {
@@ -187,6 +193,10 @@ struct DateCardListRow: View {
             )
         }
         .buttonStyle(.plain)
+        .dateCardContextMenu(
+            onOpen: { onOpen?() },
+            onDelete: { onDelete?() }
+        )
     }
 
     private static let currencyFormatter: NumberFormatter = {

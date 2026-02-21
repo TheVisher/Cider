@@ -16,9 +16,8 @@ struct CiderPanelView: View {
     @State private var expandedFolderIDs: Set<UUID> = []
     @State private var isSearchPaletteVisible = false
     @State private var dynamicTabs: [CiderTab] = []
-    @State private var isViewOptionsVisible = false
-    @State private var isNoteViewOptionsVisible = false
     @State private var isHomeViewOptionsVisible = false
+    @State private var newItemAnchor: NSView?
     @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
     @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
@@ -76,7 +75,7 @@ struct CiderPanelView: View {
                     },
                     onOpenNote: { note in
                         notesViewModel.selectNote(note)
-                        selectedTab = .notes
+                        notesViewModel.show()
                     },
                     onSpawnSearchTab: spawnSearchTab,
                     onDismiss: { isSearchPaletteVisible = false }
@@ -218,25 +217,21 @@ struct CiderPanelView: View {
         CiderTabBar(
             selectedTab: $selectedTab,
             tabs: allTabs,
-            bookmarkCount: bookmarksViewModel.bookmarks.count,
-            noteCount: notesViewModel.notes.count,
             selectedFolderID: $selectedFolderID,
             selectedSourceID: $selectedSourceID,
             onCloseTab: closeTab
         )
         .frame(maxWidth: .infinity)
 
-        if selectedTab == .bookmarks {
-            Image(systemName: "safari")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.secondary)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
-                }
-                .help("Capture active browser tab")
-        }
+        Image(systemName: "safari")
+            .font(CiderFont.bodySemibold)
+            .foregroundColor(CiderColors.secondary)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
+            }
+            .help("Capture active browser tab")
 
         if selectedTab == .home && selectedFolderID == nil {
             Image(systemName: "plus.square.on.square")
@@ -436,55 +431,9 @@ struct CiderPanelView: View {
 
                 Spacer(minLength: 0)
 
-                // + pill menu
-                Menu {
-                    Button {
-                        NotificationCenter.default.post(name: .showFolderCreationField, object: nil)
-                    } label: {
-                        Label("New Folder", systemImage: "folder.badge.plus")
-                    }
-                    Button(action: createProject) {
-                        Label("New Project", systemImage: "tray.full")
-                    }
-                    Button {
-                        selectedTab = .bookmarks
-                        selectedFolderID = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            NotificationCenter.default.post(name: .showBookmarkAddForm, object: nil)
-                        }
-                    } label: {
-                        Label("New Bookmark", systemImage: "bookmark")
-                    }
-                    Button {
-                        selectedTab = .notes
-                        selectedFolderID = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            NotificationCenter.default.post(name: .triggerNewNoteInTab, object: nil)
-                        }
-                    } label: {
-                        Label("New Note", systemImage: "note.text")
-                    }
-                    Button {
-                        newEventEditorContext = DateCardEditorContext(existingCard: nil, defaultDate: Date())
-                    } label: {
-                        Label("New Event", systemImage: "calendar.badge.plus")
-                    }
-                    Button {
-                        newContactEditorContext = ContactEditorContext(existingContact: nil)
-                    } label: {
-                        Label("New Contact", systemImage: "person.badge.plus")
-                    }
-                    Divider()
-                    Button {
-                        _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
-                    } label: {
-                        Label("Capture Browser Tab", systemImage: "safari")
-                    }
-                    Button {
-                        _ = bookmarksViewModel.addBookmarkFromPasteboard()
-                    } label: {
-                        Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
-                    }
+                // + pill button → NewItemPopover via NSPopover (avoids ViewBridge crashes)
+                Button {
+                    showNewItemPopover()
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
@@ -501,10 +450,12 @@ struct CiderPanelView: View {
                     )
                     .contentShape(Capsule())
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
                 .fixedSize()
                 .help("Create new item")
+                .background(
+                    PopoverAnchorView { [self] view in newItemAnchor = view }
+                )
 
                 Spacer(minLength: 0)
 
@@ -537,46 +488,6 @@ struct CiderPanelView: View {
                     ViewOptionsDropdown(
                         displayMode: $homeDisplayMode,
                         cardSizeScale: $homeCardSizeScale
-                    )
-                }
-        } else if selectedTab == .bookmarks {
-            Image(systemName: "slider.horizontal.3")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(isViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
-                .contentShape(Rectangle())
-                .onTapGesture { isViewOptionsVisible.toggle() }
-                .help("View options")
-                .popover(isPresented: $isViewOptionsVisible) {
-                    ViewOptionsDropdown(
-                        displayMode: Binding(
-                            get: { bookmarksViewModel.displayMode },
-                            set: { bookmarksViewModel.setDisplayMode($0) }
-                        ),
-                        cardSizeScale: Binding(
-                            get: { bookmarksViewModel.cardSizeScale },
-                            set: { bookmarksViewModel.setCardSizeScale($0) }
-                        )
-                    )
-                }
-        } else if selectedTab == .notes {
-            Image(systemName: "slider.horizontal.3")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(isNoteViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
-                .contentShape(Rectangle())
-                .onTapGesture { isNoteViewOptionsVisible.toggle() }
-                .help("View options")
-                .popover(isPresented: $isNoteViewOptionsVisible) {
-                    ViewOptionsDropdown(
-                        displayMode: Binding(
-                            get: { notesViewModel.displayMode },
-                            set: { notesViewModel.setDisplayMode($0) }
-                        ),
-                        cardSizeScale: Binding(
-                            get: { notesViewModel.cardSizeScale },
-                            set: { notesViewModel.setCardSizeScale($0) }
-                        )
                     )
                 }
         } else if selectedTab == .home {
@@ -656,20 +567,6 @@ struct CiderPanelView: View {
                         newContactEditorContext = ContactEditorContext(existingContact: contact)
                     }
                 )
-            case .bookmarks:
-                BookmarksTabContent(
-                    viewModel: bookmarksViewModel,
-                    selectedFolderID: nil,
-                    selectedItemIDs: $selectedItemIDs
-                )
-            case .notes:
-                NotesTabContent(
-                    viewModel: notesViewModel,
-                    searchText: "",
-                    folders: bookmarksViewModel.folders,
-                    selectedFolderID: nil,
-                    selectedItemIDs: $selectedItemIDs
-                )
             case .savedView(let id, _):
                 if let savedView = savedViewStorage.savedView(for: id) {
                     SavedViewTabContent(
@@ -681,7 +578,7 @@ struct CiderPanelView: View {
                         },
                         onOpenNote: { note in
                             notesViewModel.selectNote(note)
-                            selectedTab = .notes
+                            notesViewModel.show()
                         },
                         onDeleteBookmark: { bookmark in
                             bookmarksViewModel.deleteBookmarks([bookmark])
@@ -723,7 +620,7 @@ struct CiderPanelView: View {
                     onOpenBookmark: { bookmarksViewModel.open($0) },
                     onOpenNote: { note in
                         notesViewModel.selectNote(note)
-                        selectedTab = .notes
+                        notesViewModel.show()
                     },
                     onSaveAsProject: { name, results in
                         saveSearchAsProject(name: name, results: results)
@@ -737,7 +634,7 @@ struct CiderPanelView: View {
                     onOpenBookmark: { bookmarksViewModel.open($0) },
                     onOpenNote: { note in
                         notesViewModel.selectNote(note)
-                        selectedTab = .notes
+                        notesViewModel.show()
                     }
                 )
             case .externalSource(let id, _):
@@ -755,6 +652,94 @@ struct CiderPanelView: View {
                 }
             }
         }
+    }
+
+    // MARK: - New Item Popover (NSPopover — avoids ViewBridge/RemoteViewService crashes)
+
+    private func showNewItemPopover() {
+        guard let anchor = newItemAnchor else { return }
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+
+        let folders = bookmarksViewModel.folders
+        let bvm = bookmarksViewModel
+
+        // Capture @State bindings via their backing State wrappers so mutations
+        // propagate back to the SwiftUI tree even from AppKit callbacks.
+        let eventContextSetter = _newEventEditorContext
+        let contactContextSetter = _newContactEditorContext
+
+        let content = NewItemPopover(
+            folders: folders,
+            onCreateBookmark: { urlString, title in
+                _ = bvm.addBookmark(urlString: urlString, title: title)
+            },
+            onCreateNote: { [self] title, content in
+                createNoteAndOpen(title: title, content: content)
+            },
+            onCreateEvent: { title, date, allDay in
+                let card = DateCardStorage.shared.createDateCard(
+                    title: title,
+                    startAt: date,
+                    allDay: allDay
+                )
+                DispatchQueue.main.async {
+                    eventContextSetter.wrappedValue = DateCardEditorContext(
+                        existingCard: card,
+                        defaultDate: date
+                    )
+                }
+            },
+            onCreateContact: { name, relationship in
+                var contact = ContactStorage.shared.createContact(displayName: name)
+                if !relationship.isEmpty {
+                    contact.relationshipLabel = relationship
+                    ContactStorage.shared.updateContact(contact)
+                }
+                DispatchQueue.main.async {
+                    contactContextSetter.wrappedValue = ContactEditorContext(existingContact: contact)
+                }
+            },
+            onCreateFolder: { name, parentID in
+                bvm.createFolder(name: name, parentID: parentID)
+            },
+            onCreateProject: { [self] name in
+                let project = ProjectStorage.shared.createProject(name: name)
+                openProjectTab(project.id)
+            },
+            onDismiss: { [weak popover] in
+                popover?.close()
+            }
+        )
+
+        let controller = NSHostingController(rootView: content)
+        controller.sizingOptions = [.intrinsicContentSize]
+        popover.contentViewController = controller
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
+
+    // MARK: - Note Creation
+
+    private func createNoteAndOpen(title: String, content: String) {
+        // Create on disk first so selectNote picks up the right path/content
+        var note = NotesStorage.shared.createNew()
+
+        if !title.isEmpty {
+            NotesStorage.shared.rename(note: note, to: title)
+            // Refresh from storage so we have the updated filename/title
+            note = NotesStorage.shared.notes.first(where: { $0.id == note.id }) ?? note
+        }
+
+        if !content.isEmpty {
+            note.content = content
+            NotesStorage.shared.save(note: note)
+        }
+
+        // selectNote loads from disk — content and title are already persisted above
+        notesViewModel.selectNote(note)
+        notesViewModel.show()
     }
 
     // MARK: - Search Tab Management
@@ -908,10 +893,6 @@ struct CiderPanelView: View {
             switch selectedTab {
             case .home:
                 for b in bookmarksViewModel.bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
-                for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
-            case .bookmarks:
-                for b in bookmarksViewModel.filteredBookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
-            case .notes:
                 for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
             default:
                 break
