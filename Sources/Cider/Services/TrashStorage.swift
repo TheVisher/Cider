@@ -167,15 +167,18 @@ final class TrashStorage {
         }
 
         if fm.fileExists(atPath: srcURL.path) {
-            try? fm.moveItem(at: srcURL, to: destURL)
+            do {
+                try fm.moveItem(at: srcURL, to: destURL)
+            } catch {
+                return  // bail — leave manifest intact so item remains visible in trash
+            }
+            NotesStorage.shared.restoreFromTrash(
+                noteID: trashItem.itemID,
+                filename: destURL.lastPathComponent,
+                folderID: payload.folderID,
+                createdAt: payload.createdAt
+            )
         }
-
-        NotesStorage.shared.restoreFromTrash(
-            noteID: trashItem.itemID,
-            filename: destURL.lastPathComponent,
-            folderID: payload.folderID,
-            createdAt: payload.createdAt
-        )
 
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }

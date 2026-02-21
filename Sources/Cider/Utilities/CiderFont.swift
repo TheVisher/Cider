@@ -9,8 +9,14 @@ import SwiftUI
 /// For textScale-responsive views (BookmarksBrowserView, BookmarksPanelView),
 /// use the `(scale:)` function variants.
 enum CiderFont {
-    private static var globalScale: CGFloat { CiderConfig.load().textSize.scale }
+    private nonisolated(unsafe) static var _cachedScale: CGFloat = CiderConfig.load().textSize.scale
+    private static var globalScale: CGFloat { _cachedScale }
     private static func scaled(_ size: CGFloat) -> CGFloat { size * globalScale }
+
+    /// Call once after saving config so all font tokens reflect the new text size.
+    static func invalidateScale() {
+        _cachedScale = CiderConfig.load().textSize.scale
+    }
 
     // MARK: - Body (11pt) — Primary text size
 

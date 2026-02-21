@@ -170,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleConfigChanged() {
         let config = CiderConfig.load()
+        CiderFont.invalidateScale()
 
         // Toggle status item visibility based on config
         if config.showMenuBarIcon {

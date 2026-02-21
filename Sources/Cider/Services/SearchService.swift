@@ -54,8 +54,8 @@ enum SearchService {
     static func searchNotes(_ query: String, in notes: [Note]) -> [SearchResult] {
         notes.compactMap { note in
             let titleMatch = note.title.lowercased().contains(query)
-            let contentPreview = notePreview(for: note)
-            let contentMatch = contentPreview.lowercased().contains(query)
+            let strippedContent = noteStrippedContent(for: note)
+            let contentMatch = strippedContent.lowercased().contains(query)
 
             guard titleMatch || contentMatch else { return nil }
 
@@ -63,18 +63,17 @@ enum SearchService {
                 id: note.id,
                 type: .note,
                 title: note.title,
-                subtitle: contentPreview,
+                subtitle: String(strippedContent.prefix(120)),
                 date: note.modifiedAt,
                 note: note
             )
         }
     }
 
-    private static func notePreview(for note: Note) -> String {
+    private static func noteStrippedContent(for note: Note) -> String {
         let content = NotesStorage.shared.loadContent(for: note)
-        let stripped = content
+        return content
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return String(stripped.prefix(120))
     }
 }

@@ -70,37 +70,13 @@ The editor enables HTML markdown parsing (`html: true`) and registers multiple `
 
 `fileURL` in ContactStorage, ProjectStorage, DateCardStorage, CardStackStorage, CardLabelStorage, SavedViewStorage, and ExternalSourceStorage changed from stored properties (set at `init()`) to computed properties that call `StoragePaths.ciderDataDirectoryURL()` at runtime. Each storage gained a public `reload()` method. `AppDelegate.handleConfigChanged()` calls `reload()` on all 6 after updating the BookmarksStorage directory. Also: `CiderConfig.bookmarksDirectory` renamed to `ciderDataDirectory`; CodingKeys alias keeps JSON key `"bookmarksDirectory"` for backward compat.
 
-### CH-C02 — Note restore orphan risk in TrashStorage (High)
+### ~~CH-C02 — Note restore orphan risk in TrashStorage~~ ✅ Fixed 2026-02-21
 
-`TrashStorage.restoreNote` can continue its cleanup phase after a failed file move from trash. If the move fails mid-operation, the note file can be orphaned — gone from trash, not yet in the notes directory.
+Move is now `try fm.moveItem` inside a `do/catch`; on failure, function returns early leaving the manifest intact. `restoreFromTrash` and `removeFromManifest` only called on success. If the trash file is already gone (manual deletion), manifest is cleaned but index is not updated.
 
-- [ ]
+### ~~CH-C03 — Note search false negatives from 120-char cap~~ ✅ Fixed 2026-02-21
 
-- [ ]
-
-- Remediation: Guard cleanup behind a successful move; bail early on failure.
-
-- File refs: `Sources/Cider/Services/TrashStorage.swift:162, 180`
-
-- First reported: 2026-02-18
-
-- [ ] Fixed
-
-### CH-C03 — Note search false negatives from 120-char cap (High)
-
-`SearchService.notePreview` loads full note content from disk but then truncates to 120 characters before running the match. Anything after the first \~120 characters is invisible to search.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Match against the full stripped content; only apply `prefix(120)` to the `subtitle` field in the returned `SearchResult`.
-
-- File refs: `Sources/Cider/Services/SearchService.swift:57–58, 78`
-
-- First reported: 2026-02-20
-
-- [ ] Fixed
+`notePreview` renamed `noteStrippedContent` and returns the full stripped string. `searchNotes` matches against the full content; `prefix(120)` applied only to the `subtitle` field in the returned `SearchResult`.
 
 ### CH-C04 — Select All skips date cards and contacts on Home tab (High)
 
@@ -186,21 +162,9 @@ Every slider tick (e.g., card size) triggers `config.save()` immediately. Slow d
 
 - [ ] Fixed
 
-### CH-P05 — CiderFont decodes config on every render access (Medium)
+### ~~CH-P05 — CiderFont decodes config on every render access~~ ✅ Fixed 2026-02-21
 
-All `CiderFont.*` tokens are `static var` computed properties that call `CiderConfig.load()` on each access. In busy render paths this means repeated full config decodes.
-
-- [ ]
-
-- [ ]
-
-- Remediation: Cache the scale value and invalidate on settings change rather than decoding on every access.
-
-- File refs: `Sources/Cider/Utilities/CiderFont.swift:11`, `Sources/Cider/Models/CiderConfig.swift:163`
-
-- First reported: 2026-02-18
-
-- [ ] Fixed
+`_cachedScale` (`nonisolated(unsafe) static var`) is set once at startup. `invalidateScale()` re-reads config and updates the cache; called at the top of `AppDelegate.handleConfigChanged()`. Font tokens now read the cached value with no UserDefaults decode per access.
 
 ---
 
