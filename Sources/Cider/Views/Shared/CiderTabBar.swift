@@ -6,6 +6,7 @@ struct CiderTabBar: View {
     let bookmarkCount: Int
     let noteCount: Int
     @Binding var selectedFolderID: UUID?
+    @Binding var selectedSourceID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
@@ -24,12 +25,13 @@ struct CiderTabBar: View {
 
     @ViewBuilder
     private func tabButton(for tab: CiderTab) -> some View {
-        let isSelected = selectedTab == tab && selectedFolderID == nil
+        let isSelected = selectedTab == tab && selectedFolderID == nil && selectedSourceID == nil
         let count = badgeCount(for: tab)
 
         Button {
             withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
                 selectedFolderID = nil
+                selectedSourceID = nil
                 selectedTab = tab
             }
         } label: {

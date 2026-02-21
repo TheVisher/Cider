@@ -221,6 +221,7 @@ struct CiderPanelView: View {
             bookmarkCount: bookmarksViewModel.bookmarks.count,
             noteCount: notesViewModel.notes.count,
             selectedFolderID: $selectedFolderID,
+            selectedSourceID: $selectedSourceID,
             onCloseTab: closeTab
         )
         .frame(maxWidth: .infinity)
