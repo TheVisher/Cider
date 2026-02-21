@@ -212,6 +212,33 @@ struct NoteCardData: Equatable {
     }
 }
 
+// MARK: - NoteCardData Cache
+
+/// Cross-view cache for NoteCardData. Keyed by note ID + modifiedAt so that
+/// switching tabs or scrolling cards back into view doesn't re-fetch from disk.
+/// Access only from main actor (inside `.task` closures).
+@MainActor
+enum NoteCardDataCache {
+    private static var entries: [UUID: (modifiedAt: Date, data: NoteCardData)] = [:]
+
+    static func get(noteID: UUID, modifiedAt: Date) -> NoteCardData? {
+        guard let entry = entries[noteID], entry.modifiedAt == modifiedAt else { return nil }
+        return entry.data
+    }
+
+    static func set(_ data: NoteCardData, noteID: UUID, modifiedAt: Date) {
+        entries[noteID] = (modifiedAt, data)
+    }
+
+    static func invalidate(noteID: UUID) {
+        entries.removeValue(forKey: noteID)
+    }
+
+    static func invalidateAll() {
+        entries.removeAll()
+    }
+}
+
 // MARK: - Date Formatting
 
 extension Date {

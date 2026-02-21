@@ -13,6 +13,9 @@ final class LibraryViewModel: ObservableObject {
     /// Top 8 most recently updated items — pre-sorted during rebuildItems().
     @Published private(set) var recentItems: [LibraryItemV2] = []
 
+    /// Cache for filteredItems — avoids re-filtering+sorting on unrelated body evaluations.
+    private var filteredItemsCache: (filter: SavedViewFilterSpec, sort: SavedViewSortSpec, result: [LibraryItemV2])?
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -30,12 +33,17 @@ final class LibraryViewModel: ObservableObject {
         let all = bookmarkItems + noteItems + dateCardItems + contactItems + externalFileItems
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
+        filteredItemsCache = nil
     }
 
     func filteredItems(
         using filterSpec: SavedViewFilterSpec,
         sort sortSpec: SavedViewSortSpec
     ) -> [LibraryItemV2] {
+        if let cache = filteredItemsCache, cache.filter == filterSpec, cache.sort == sortSpec {
+            return cache.result
+        }
+
         let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         let filtered = items.filter { item in
@@ -60,7 +68,9 @@ final class LibraryViewModel: ObservableObject {
             return true
         }
 
-        return sortItems(filtered, using: sortSpec.mode)
+        let result = sortItems(filtered, using: sortSpec.mode)
+        filteredItemsCache = (filterSpec, sortSpec, result)
+        return result
     }
 
     func calendarBuckets(for month: Date, using filterSpec: SavedViewFilterSpec) -> [Date: [LibraryItemV2]] {

@@ -142,9 +142,16 @@ struct NoteListRow: View {
             }
         }
         .task(id: note.modifiedAt) {
-            cardData = await Task.detached(priority: .userInitiated) {
-                NoteCardData.load(for: note)
-            }.value
+            if let cached = NoteCardDataCache.get(noteID: note.id, modifiedAt: note.modifiedAt) {
+                cardData = cached
+            } else {
+                let data = await Task.detached(priority: .userInitiated) {
+                    NoteCardData.load(for: note)
+                }.value
+                guard !Task.isCancelled else { return }
+                NoteCardDataCache.set(data, noteID: note.id, modifiedAt: note.modifiedAt)
+                cardData = data
+            }
         }
     }
 }

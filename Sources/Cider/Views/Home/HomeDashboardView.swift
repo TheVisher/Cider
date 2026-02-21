@@ -59,7 +59,7 @@ struct HomeDashboardView: View {
     }
 
     private var foldersByID: [UUID: Folder] {
-        Dictionary(uniqueKeysWithValues: bookmarksViewModel.folders.map { ($0.id, $0) })
+        bookmarksViewModel.foldersByID
     }
 
     private var selectedDetailsBookmark: Bookmark? {

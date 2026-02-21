@@ -12,6 +12,9 @@ final class BookmarksViewModel: ObservableObject {
     @Published var isCollapsed = false
     @Published var pendingDetailBookmarkID: UUID?
 
+    /// Pre-computed folder lookup — rebuilt when folders change.
+    private(set) var foldersByID: [UUID: Folder] = [:]
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -29,10 +32,14 @@ final class BookmarksViewModel: ObservableObject {
 
         BookmarksStorage.shared.$folders
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] folders in
+                self?.foldersByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
+
+        // Initialize foldersByID from current state
+        foldersByID = Dictionary(uniqueKeysWithValues: BookmarksStorage.shared.folders.map { ($0.id, $0) })
 
         NotificationCenter.default.publisher(for: .ciderConfigChanged)
             .receive(on: DispatchQueue.main)
