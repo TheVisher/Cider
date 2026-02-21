@@ -9,6 +9,7 @@ struct NewItemPopover: View {
     var onCreateEvent: (String, Date, Bool) -> Void
     var onCreateContact: (String, String) -> Void
     var onCreateFolder: (String, UUID?) -> Void
+    var onCreateTab: (String, Set<LibraryEntityType>) -> Void
     var onDismiss: () -> Void
 
     @State private var step: NewItemStep = .picker
@@ -59,6 +60,14 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
+            case .tab:
+                TabCreationForm(
+                    onBack: back,
+                    onCreate: { name, entityTypes in
+                        onCreateTab(name, entityTypes)
+                        onDismiss()
+                    }
+                )
             }
         }
         // No animation on step changes: animating popover content size via ViewBridge
@@ -89,6 +98,7 @@ struct NewItemPopover: View {
                 typeCard(.event)
                 typeCard(.contact)
                 typeCard(.folder)
+                typeCard(.tab)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
@@ -126,6 +136,7 @@ struct NewItemPopover: View {
         case .event:    step = .event
         case .contact:  step = .contact
         case .folder:   step = .folder
+        case .tab:      step = .tab
         }
     }
 }
@@ -133,13 +144,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, folder
+    case picker, bookmark, note, event, contact, folder, tab
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, folder
+    case bookmark, note, event, contact, folder, tab
 
     var id: String { rawValue }
 
@@ -150,6 +161,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .event:    "Event"
         case .contact:  "Contact"
         case .folder:   "Folder"
+        case .tab:      "Tab"
         }
     }
 
@@ -160,6 +172,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .event:    "calendar.badge.plus"
         case .contact:  "person.badge.plus"
         case .folder:   "folder.badge.plus"
+        case .tab:      "rectangle.badge.plus"
         }
     }
 }
@@ -616,3 +629,102 @@ private struct FolderCreationForm: View {
     }
 }
 
+// MARK: - Tab Form
+
+private struct TabCreationForm: View {
+    let onBack: () -> Void
+    let onCreate: (String, Set<LibraryEntityType>) -> Void
+
+    @State private var name = ""
+    @State private var selectedTypes: Set<LibraryEntityType> = Set(LibraryEntityType.allCases)
+    @State private var errorMessage = ""
+
+    // Entity types shown as content filter pills (excludes externalFile — edge case)
+    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact]
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            FormHeader(title: "New Tab", onBack: onBack)
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                inputField("Tab name", text: $name, onSubmit: commit)
+
+                Text("Show")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xxs)
+                    .padding(.top, Spacing.xxs)
+
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible())],
+                    spacing: Spacing.xs
+                ) {
+                    ForEach(filterableTypes, id: \.self) { type in
+                        contentTypePill(type)
+                    }
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+            }
+
+            AddButton(
+                label: "Create Tab",
+                disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                action: commit
+            )
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private func contentTypePill(_ type: LibraryEntityType) -> some View {
+        let isSelected = selectedTypes.contains(type)
+        return Button {
+            if isSelected && selectedTypes.count == 1 {
+                // Can't deselect the last type
+            } else if isSelected {
+                selectedTypes.remove(type)
+            } else {
+                selectedTypes.insert(type)
+            }
+        } label: {
+            Text(pillLabel(for: type))
+                .font(CiderFont.label)
+                .foregroundColor(isSelected ? CiderColors.primary : CiderColors.tertiary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isSelected ? CiderColors.surfaceElevated : CiderColors.surfaceInput)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func pillLabel(for type: LibraryEntityType) -> String {
+        switch type {
+        case .bookmark:     return "Bookmarks"
+        case .note:         return "Notes"
+        case .dateCard:     return "Events"
+        case .contact:      return "Contacts"
+        case .externalFile: return "Files"
+        }
+    }
+
+    private func commit() {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            errorMessage = "Name is required"
+            return
+        }
+        let types = selectedTypes.isEmpty ? Set(LibraryEntityType.allCases) : selectedTypes
+        onCreate(trimmedName, types)
+    }
+}

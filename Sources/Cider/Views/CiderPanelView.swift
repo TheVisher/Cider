@@ -516,6 +516,12 @@ struct CiderPanelView: View {
             onCreateFolder: { name, parentID in
                 bvm.createFolder(name: name, parentID: parentID)
             },
+            onCreateTab: { [self] name, entityTypes in
+                let filter = SavedViewFilterSpec(entityTypes: entityTypes)
+                let savedView = savedViewStorage.createSavedView(name: name, filterSpec: filter)
+                selectedFolderID = nil
+                selectedTab = .savedView(id: savedView.id, name: savedView.name)
+            },
             onDismiss: { [self] in
                 showNewItemPicker = false
             }
