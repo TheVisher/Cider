@@ -6,7 +6,7 @@
 
 The Whiteboard is a freeform canvas for dumping thoughts, images, links, and quotes. It's the "junk drawer of your brain" — a place to capture anything without structure, then optionally promote clusters of content into structured notes.
 
-It will be a **dedicated tab** in the title bar. The planned full lineup: **Home | Bookmarks | Notes | Whiteboard | Documents | Books | Todos**
+It will appear as a **saved view tab** in the tab bar — created by the user via the +New popover. There is no fixed Whiteboard tab; the user opts in by creating one.
 
 Notes is for deliberate structured writing, Whiteboard is for impulsive brain-dumping. Different mental modes, different tabs.
 

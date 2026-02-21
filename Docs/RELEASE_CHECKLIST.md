@@ -30,7 +30,7 @@
 - [ ] Settings persist across launches.
 
 ## Title Bar QA
-- [ ] Tab bar shows Home, Bookmarks, Notes tabs.
+- [ ] Tab bar shows Home tab (only fixed tab). Saved view tabs, search tabs, and external source tabs appear as created.
 - [ ] Sidebar toggle button works.
 - [ ] View options dropdown (bookmarks tab) — slider + view mode icons.
 - [ ] Capture button (bookmarks tab) — captures active browser tab.

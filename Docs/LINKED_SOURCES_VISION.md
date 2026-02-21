@@ -47,7 +47,7 @@ New Website`
 A source can be pinned as a tab in the tab bar (same `isTabPinned` pattern as SavedViews). This gives you a dedicated tab showing just that source's files. Close the tab, the source stays in the sidebar.
 
 ```
-[Home] [Bookmarks] [Notes] [📂 Cider Docs ×]
+[Home] [📂 Cider Docs ×]
 ```
 
 ### 3\. Library — Ambient

@@ -18,8 +18,8 @@ The floating panel is the main way users interact with Cider:
 - **Activation:** Double-tap Option key
 - **Opens on:** Screen where mouse is located
 - **Style:** Dark acrylic with custom shadows, resizable from all edges
-- **Tabs:** Home, Bookmarks, Notes (fixed tabs in title bar)
-- **Sidebar:** Full-height floating column for folders & projects (organization only — no "All Items"). Traffic lights + view options in sidebar header. Auto-hides at compact widths.
+- **Tabs:** Home (only fixed tab) + user-created saved view tabs, search tabs, and external source tabs — all closeable
+- **Sidebar:** Full-height floating column for folders and linked sources (organization only — no "All Items"). Traffic lights + view options in sidebar header. Auto-hides at compact widths.
 - **Title bar:** Sidebar toggle + tab bar + capture button. Right-click context menu for window controls.
 - **Dismissal:** Escape key, click outside, or double-tap Option again
 

@@ -52,8 +52,7 @@ The Home tab is the library — the unified view of all Cider content. A sticky 
 | Surface | Shows |
 | --- | --- |
 | **Home tab** | Everything, mixed. Your library. |
-| **Bookmarks tab** | Just bookmarks (to be replaced by saved views over time) |
-| **Notes tab** | Just notes (to be replaced by saved views over time) |
+| **Saved view tab** | User-defined filter: any combination of types, labels, folders — replaces the old fixed Bookmarks and Notes tabs |
 | **Custom saved-view tab** | User-defined filter: any combination of types, labels, folders |
 | **Sidebar folders** | Standalone mixed-content card view (independent of tabs) |
 

@@ -156,6 +156,30 @@ Add `kanban` as a display mode option on Saved Views (alongside list, grid, maso
 
 Any saved view can become a Kanban — you don't need a separate "board" or "project" concept. A "Game Room renovation" Kanban is just a saved view in Kanban mode.
 
+### Create Tab from +New Popover (Planned)
+
+The +New popover (pill button in the sidebar footer) now has an empty card slot where "Project" used to be. This should become **"New Tab"** — letting users create a saved view tab directly from the popover.
+
+**Flow:**
+1. Click +New → popover opens
+2. Click "New Tab" card
+3. Step 1 — **Name** — text field pre-focused, user types tab name
+4. Step 2 — **Content** — selector pills to choose what the tab shows:
+   - All Items (default — shows the full library, just like Home)
+   - Bookmarks only
+   - Notes only
+   - By label (show label picker)
+   - By folder (show folder picker)
+5. Confirm → saved view is created and immediately opens as a pinned tab
+
+**Why this belongs in +New:**
+- Creating a tab is a meaningful action — not something you do mid-workflow from the search results menu
+- The popover is the natural home for "create new thing" actions (new folder, new note, new bookmark, new tab)
+- Removes the extra friction of "first search, then save as tab" for users who know what they want upfront
+- The existing "Save as tab" from search results stays — two entry points for the same feature
+
+**Implementation note:** The saved view creation form already exists as a multi-step flow in NewItemPopover.swift. The "New Tab" card just routes to a lightweight version of that flow — name field + content selector pills. No filter builder needed at creation time; users can refine the filter later via the tab's own view options.
+
 ---
 
 ## Search
@@ -188,13 +212,14 @@ Any saved view can become a Kanban — you don't need a separate "board" or "pro
 ### Tab States
 
 ```
-[Home] [Bookmarks] [Notes] [🔍 "react hooks" ×] [🔍 "standing desks" ×] [📌 Game Room ×]
- fixed   fixed      fixed     search tab            search tab           project tab
+[Home] [📌 Design Inspo ×] [📌 Work ×] [🔍 "react hooks" ×] [📂 Cider Docs ×]
+ fixed    saved view          saved view    search tab          external source
 ```
 
-- **Fixed tabs** (Home, Bookmarks, Notes) — always present, not closeable.
-- **Search tabs** — ephemeral, closeable, show search results.
-- **Saved View tabs** — persistent, closeable (view stays in saved views list).
+- **Home** — only fixed tab, always present, not closeable.
+- **Saved View tabs** — user-created, persistent, closeable.
+- **Search tabs** — ephemeral, closeable, show mixed search results.
+- **External Source tabs** — linked filesystem directories, closeable.
 
 ---
 
@@ -204,8 +229,8 @@ The folder sidebar is **universal** — visible across views, not scoped to book
 
 ### Design Principle: Sidebar = Organization, Tab Bar = Views
 
-- **Tab bar** shows *what you're looking at* — Home (library), Bookmarks, Notes, future content types
-- **Sidebar** shows *how you've organized it* — folders, projects
+- **Tab bar** shows *what you're looking at* — Home (your full library), plus saved views and search tabs the user creates
+- **Sidebar** shows *how you've organized it* — folders and linked sources
 - "All Items" was removed from the sidebar because it's a view, not a folder
 - Clicking a folder opens a standalone folder view (deselects tabs)
 - Clicking any tab exits the folder view and returns to tab content
@@ -217,15 +242,13 @@ FOLDERS
   Work
     └── Internal Tools (5 bookmarks)
 
-PROJECTS
-  Game Room            (8 items)
-  New Website          (15 items)
-  Trip to Japan        (22 items)
+SOURCES
+  📂 Cider Docs        (12 files)
 ```
 
-- Clicking a folder filters the current view to show its contents.
-- Clicking a project opens it as a tab.
-- Both folders and projects show item counts.
+- Clicking a folder opens a standalone folder view (deselects the current tab).
+- Clicking any tab exits the folder view.
+- Folders show item counts.
 - Notes can be assigned to folders (new capability — notes currently have no folder system).
 
 ---
@@ -349,7 +372,7 @@ Dragging an unselected item while others are selected drags only that single ite
 - 2 items: 2-card fan
 - 3+ items: 3-card fan + count badge (capsule, accent bg, white text) when total > 3
 - Fan geometry: 6° rotation, 16pt X offset, 8pt Y offset per successive card
-- Works across all tabs (Home, Bookmarks, Notes, Folders) and all display modes
+- Works across all tabs (Home, saved views, folders) and all display modes
 - Mixed content: bookmarks and notes can be multi-dragged together (Home tab, folder views)
 
 - Selection title bar replaces normal title bar: `[X] "N items selected" [Move to Folder ▾] [Delete]`
@@ -357,7 +380,7 @@ Dragging an unselected item while others are selected drags only that single ite
 - State: `Set<String>` with type-prefixed IDs (`"bookmark-{uuid}"`, `"note-{uuid}"`) owned by CiderPanelView
 - Clears on tab switch, folder switch, Escape, or X button
 - Continue section (Home tab) excluded from selection
-- Works in all display modes (list, grid, masonry) and all tabs (Home, Bookmarks, Notes, Folders)
+- Works in all display modes (list, grid, masonry) and all tabs (Home, saved views, folders)
 - Escape key: hidden `Button` + `.keyboardShortcut(.escape)` — `.onExitCommand` doesn't work with `.nonactivatingPanel`
 - Future: bulk tag, bulk export
 
