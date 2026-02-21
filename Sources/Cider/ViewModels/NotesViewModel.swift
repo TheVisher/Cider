@@ -51,6 +51,9 @@ final class NotesViewModel: ObservableObject {
     private var saveWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var lastSyncedDiskContent: String = ""
+    /// True while waiting for TipTap's first `contentChanged` after loading an external file.
+    /// TipTap normalizes markdown on parse; we absorb that round-trip without writing to disk.
+    private var isLoadingExternalFile = false
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
     private static let formattingToolbarPinnedStorageKey = "cider.notes.formattingToolbarPinned"
@@ -227,6 +230,7 @@ final class NotesViewModel: ObservableObject {
             pushContentToEditor(content)
         } else if activeExternalFile != nil {
             // External file was opened before editor was ready — push its content now
+            isLoadingExternalFile = true
             pushContentToEditor(editingContent)
         }
     }
@@ -291,6 +295,7 @@ final class NotesViewModel: ObservableObject {
         // Save current note before switching
         flushSave()
         activeExternalFile = nil
+        isLoadingExternalFile = false
 
         var loaded = note
         loaded.content = loadPersistedContent(for: note)
@@ -326,6 +331,7 @@ final class NotesViewModel: ObservableObject {
         ignoredExternalDiskContent = nil
         externalChangeState = nil
         hasPendingSave = false
+        isLoadingExternalFile = true
         pushContentToEditor(content)
     }
 
@@ -399,6 +405,15 @@ final class NotesViewModel: ObservableObject {
         hasPendingSave = true
 
         if let externalFile = activeExternalFile {
+            // Absorb the TipTap normalization round-trip on initial load.
+            // Raw disk content ≠ TipTap-serialized markdown, so we update the
+            // reference without writing to avoid a spurious mtime bump.
+            if isLoadingExternalFile {
+                isLoadingExternalFile = false
+                lastSyncedDiskContent = persistedContent
+                hasPendingSave = false
+                return
+            }
             // Don't save if content hasn't changed from what we loaded from disk
             guard persistedContent != lastSyncedDiskContent else {
                 hasPendingSave = false
