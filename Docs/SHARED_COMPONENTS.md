@@ -80,7 +80,7 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **File:** `Utilities/HighlightedText.swift`
 - **Used by:** Notes cards/rows (titles and previews)
 - **What:** SwiftUI `Text` view with search match highlighting — preserves all Text modifiers (font, color, lineLimit)
-- **Reuse opportunity:** Bookmark cards, search results, any list with filtering
+- **Note:** Search palette and search tab result rows use inline `AttributedString` snippet rendering instead (see `SearchService.SearchSnippet` + `snippetAttributedString()` in both search views) — `HighlightedText` is for card titles/previews in context, not search result rows
 
 ### CiderFont
 - **File:** `Utilities/CiderFont.swift`
@@ -97,6 +97,28 @@ When building a new feature, check this doc first. If a component or pattern alr
 ### VisualEffectView
 - **File:** `Utilities/VisualEffectView.swift`
 - **What:** NSViewRepresentable for `NSVisualEffectView` — use instead of `.glassEffect()`
+
+---
+
+## Search System (`Services/` + `Views/Search/`)
+
+### SearchService
+- **File:** `Services/SearchService.swift`
+- **What:** `@MainActor` enum with static search methods across all content types
+- **Types searched:** Bookmarks, Notes, DateCards, Contacts (reads from storage singletons internally)
+- **`SearchResult`:** `id`, `type` (`SearchResultType`), `title`, `subtitle: String?`, `snippet: SearchSnippet?`, `date`, plus optional typed payload (`bookmark`, `note`, `dateCard`, `contact`)
+- **`SearchSnippet`:** `prefix`, `match`, `suffix` — 60-char context window around the query hit, with `…` truncation markers. `match` preserves original casing.
+- **Rule:** `subtitle` is set when the match is in a short metadata field (host, date, tag, relationship label). `snippet` is set when the match is in a long body field (note content, bookmark notes, date card details/location, contact notes). Exactly one is non-nil.
+- **`extractSnippet(query:from:windowSize:)`** — finds first case-insensitive match, returns ±60 chars of context.
+
+### SearchPaletteView
+- **File:** `Views/Search/SearchPaletteView.swift`
+- **What:** Center-screen overlay palette (Cmd+K). Debounces search 100ms via `@State searchTask: Task`. Shows four result sections (Bookmarks, Notes, Date Cards, Contacts). Recent section shows 2 bookmarks + 2 notes + 2 date cards + 2 contacts when query is empty.
+- **Snippet rendering:** `snippetAttributedString(_:)` → `AttributedString` with `.swiftUI.foregroundColor` per range (tertiary/primary/tertiary).
+
+### SearchTabContent
+- **File:** `Views/Search/SearchTabContent.swift`
+- **What:** Full-height tab content for search tabs spawned from the palette. Same four-section layout + snippet rendering as the palette. Query is a fixed prop (no debounce needed — tab is created once per query).
 
 ---
 

@@ -9,12 +9,10 @@ struct SearchPaletteView: View {
     let onDismiss: () -> Void
 
     @State private var query = ""
+    @State private var results: [SearchResult] = []
+    @State private var searchTask: Task<Void, Never>?
     @FocusState private var isSearchFieldFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var results: [SearchResult] {
-        SearchService.search(query: query, bookmarks: bookmarks, notes: notes)
-    }
 
     private var bookmarkResults: [SearchResult] {
         results.filter { $0.type == .bookmark }
@@ -22,6 +20,14 @@ struct SearchPaletteView: View {
 
     private var noteResults: [SearchResult] {
         results.filter { $0.type == .note }
+    }
+
+    private var dateCardResults: [SearchResult] {
+        results.filter { $0.type == .dateCard }
+    }
+
+    private var contactResults: [SearchResult] {
+        results.filter { $0.type == .contact }
     }
 
     private var hasResults: Bool {
@@ -46,6 +52,14 @@ struct SearchPaletteView: View {
                 .sorted { $0.modifiedAt > $1.modifiedAt }
                 .prefix(SearchPaletteDesign.recentNoteCount)
         )
+    }
+
+    private var recentDateCards: [DateCard] {
+        Array(DateCardStorage.shared.dateCards.sorted { $0.updatedAt > $1.updatedAt }.prefix(2))
+    }
+
+    private var recentContacts: [ContactCard] {
+        Array(ContactStorage.shared.contacts.sorted { $0.updatedAt > $1.updatedAt }.prefix(2))
     }
 
     var body: some View {
@@ -97,6 +111,16 @@ struct SearchPaletteView: View {
             }
         }
         .onExitCommand { onDismiss() }
+        .onChange(of: query) { _, newQuery in
+            searchTask?.cancel()
+            let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { results = []; return }
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                results = SearchService.search(query: trimmed, bookmarks: bookmarks, notes: notes)
+            }
+        }
     }
 
     // MARK: - Search Field
@@ -107,7 +131,7 @@ struct SearchPaletteView: View {
                 .font(CiderFont.titleMedium)
                 .foregroundColor(CiderColors.tertiary)
 
-            TextField("Search bookmarks and notes\u{2026}", text: $query)
+            TextField("Search everything\u{2026}", text: $query)
                 .textFieldStyle(.plain)
                 .font(CiderFont.title)
                 .foregroundColor(CiderColors.primary)
@@ -147,7 +171,9 @@ struct SearchPaletteView: View {
 
     private var defaultContent: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            if !recentBookmarks.isEmpty || !recentNotes.isEmpty {
+            let hasRecents = !recentBookmarks.isEmpty || !recentNotes.isEmpty
+                          || !recentDateCards.isEmpty || !recentContacts.isEmpty
+            if hasRecents {
                 recentItemsSection
             }
         }
@@ -197,6 +223,24 @@ struct SearchPaletteView: View {
                     )
                 }
                 .buttonStyle(.plain)
+            }
+
+            ForEach(recentDateCards) { card in
+                recentRowContent(
+                    icon: "calendar",
+                    title: card.title,
+                    subtitle: card.startAt.formatted(.dateTime.month().day().year()),
+                    date: card.updatedAt
+                )
+            }
+
+            ForEach(recentContacts) { contact in
+                recentRowContent(
+                    icon: "person",
+                    title: contact.displayName,
+                    subtitle: contact.relationshipLabel.isEmpty ? nil : contact.relationshipLabel,
+                    date: contact.updatedAt
+                )
             }
         }
     }
@@ -253,6 +297,22 @@ struct SearchPaletteView: View {
                         results: noteResults
                     )
                 }
+
+                if !dateCardResults.isEmpty {
+                    resultsSection(
+                        title: "Date Cards",
+                        icon: "calendar",
+                        results: dateCardResults
+                    )
+                }
+
+                if !contactResults.isEmpty {
+                    resultsSection(
+                        title: "Contacts",
+                        icon: "person",
+                        results: contactResults
+                    )
+                }
             }
             .padding(Spacing.md)
         }
@@ -295,10 +355,12 @@ struct SearchPaletteView: View {
                     onOpenNote(note)
                     onDismiss()
                 }
+            case .dateCard, .contact:
+                onDismiss()
             }
         } label: {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: result.type == .bookmark ? "bookmark" : "note.text")
+                Image(systemName: iconName(for: result.type))
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
@@ -309,10 +371,16 @@ struct SearchPaletteView: View {
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(result.subtitle)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
+                    if let snippet = result.snippet {
+                        Text(snippetAttributedString(snippet))
+                            .font(CiderFont.body)
+                            .lineLimit(1)
+                    } else if let subtitle = result.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: Spacing.sm)
@@ -330,6 +398,25 @@ struct SearchPaletteView: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(CiderColors.surfaceSubtle)
         )
+    }
+
+    private func iconName(for type: SearchResultType) -> String {
+        switch type {
+        case .bookmark:  return "bookmark"
+        case .note:      return "note.text"
+        case .dateCard:  return "calendar"
+        case .contact:   return "person"
+        }
+    }
+
+    private func snippetAttributedString(_ snippet: SearchSnippet) -> AttributedString {
+        var prefix = AttributedString(snippet.prefix)
+        prefix.swiftUI.foregroundColor = CiderColors.tertiary
+        var match = AttributedString(snippet.match)
+        match.swiftUI.foregroundColor = CiderColors.primary
+        var suffix = AttributedString(snippet.suffix)
+        suffix.swiftUI.foregroundColor = CiderColors.tertiary
+        return prefix + match + suffix
     }
 
     // MARK: - No Results

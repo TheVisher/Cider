@@ -162,6 +162,8 @@ final class ProjectStorage: ObservableObject {
                     items.append(item)
                     order += 1
                 }
+            case .dateCard, .contact:
+                break
             }
         }
         touchProject(projectID)

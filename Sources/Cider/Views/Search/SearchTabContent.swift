@@ -20,6 +20,14 @@ struct SearchTabContent: View {
         results.filter { $0.type == .note }
     }
 
+    private var dateCardResults: [SearchResult] {
+        results.filter { $0.type == .dateCard }
+    }
+
+    private var contactResults: [SearchResult] {
+        results.filter { $0.type == .contact }
+    }
+
     var body: some View {
         if results.isEmpty {
             emptyState
@@ -43,6 +51,22 @@ struct SearchTabContent: View {
                             title: "Notes",
                             icon: "note.text",
                             results: noteResults
+                        )
+                    }
+
+                    if !dateCardResults.isEmpty {
+                        resultsSection(
+                            title: "Date Cards",
+                            icon: "calendar",
+                            results: dateCardResults
+                        )
+                    }
+
+                    if !contactResults.isEmpty {
+                        resultsSection(
+                            title: "Contacts",
+                            icon: "person",
+                            results: contactResults
                         )
                     }
                 }
@@ -126,10 +150,12 @@ struct SearchTabContent: View {
                 if let note = result.note {
                     onOpenNote(note)
                 }
+            case .dateCard, .contact:
+                break
             }
         } label: {
             HStack(spacing: Spacing.sm) {
-                Image(systemName: result.type == .bookmark ? "bookmark" : "note.text")
+                Image(systemName: iconName(for: result.type))
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
@@ -140,10 +166,16 @@ struct SearchTabContent: View {
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(result.subtitle)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
+                    if let snippet = result.snippet {
+                        Text(snippetAttributedString(snippet))
+                            .font(CiderFont.body)
+                            .lineLimit(1)
+                    } else if let subtitle = result.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: Spacing.sm)
@@ -161,6 +193,25 @@ struct SearchTabContent: View {
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(CiderColors.surfaceSubtle)
         )
+    }
+
+    private func iconName(for type: SearchResultType) -> String {
+        switch type {
+        case .bookmark:  return "bookmark"
+        case .note:      return "note.text"
+        case .dateCard:  return "calendar"
+        case .contact:   return "person"
+        }
+    }
+
+    private func snippetAttributedString(_ snippet: SearchSnippet) -> AttributedString {
+        var prefix = AttributedString(snippet.prefix)
+        prefix.swiftUI.foregroundColor = CiderColors.tertiary
+        var match = AttributedString(snippet.match)
+        match.swiftUI.foregroundColor = CiderColors.primary
+        var suffix = AttributedString(snippet.suffix)
+        suffix.swiftUI.foregroundColor = CiderColors.tertiary
+        return prefix + match + suffix
     }
 
     private var emptyState: some View {

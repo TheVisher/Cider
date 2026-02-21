@@ -127,14 +127,23 @@ PROJECTS
 ### Search Flow
 1. **Trigger** — Click search field in title bar, press Cmd+K, or type `/`.
 2. **Center palette opens** — Zen-style overlay, blurs background content.
-3. **Live results** — Split by type: bookmarks, notes, (future: projects, folders).
+3. **Live results** — Split by type: bookmarks, notes, date cards, contacts. Debounced 100ms.
 4. **Actions on results:**
    - Click → opens the item.
    - Enter → spawns a search tab showing all results for that query.
 
+### Result Display
+- **Title match** → subtitle shows host URL (bookmark), first 80 chars of content (note), formatted date (date card), or relationship label (contact).
+- **Body-only match** → snippet shown instead of subtitle: `…prefix **match** suffix…` where the matched portion renders in primary color and surrounding context in tertiary. Implemented via `SearchSnippet` struct + inline `AttributedString` in result rows.
+- Fields searched per type:
+  - **Bookmark:** title, URL, host, tags, notes field
+  - **Note:** title, stripped HTML body
+  - **DateCard:** title, details, location
+  - **Contact:** displayName, relationshipLabel, notes
+
 ### Search Tabs (Ephemeral)
 - A search spawns a temporary tab in the tab bar.
-- Shows mixed results (bookmarks + notes matching the query).
+- Shows mixed results across all content types (bookmarks, notes, date cards, contacts).
 - Close anytime — nothing is lost, it's just a search view.
 - Can be **promoted to a project** if the search turns into ongoing work.
 
