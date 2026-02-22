@@ -173,7 +173,7 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 Sources/Cider/
 ├── App/              # Entry point, AppDelegate, Panels (CiderPanel, DetailPopover, Settings)
 ├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, TrashItem, CiderTab, LibraryDisplayMode)
-├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, TrashStorage, CiderUndoManager, etc.)
+├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, TrashStorage, CiderUndoManager, SpotlightIndexer, etc.)
 ├── Utilities/        # Constants, CiderFont, CiderColors, ButtonStyles, ContainerStyles, HoverState, helpers
 ├── ViewModels/       # ObservableObject view models (BookmarksViewModel, NotesViewModel, SettingsViewModel)
 └── Views/
@@ -219,7 +219,7 @@ CiderPanelView
 - **Traffic lights:** sidebarHeader uses `HStack(alignment: .top)` + `.frame(height:, alignment: .top)` so lights stay pinned regardless of conditional content.
 - **View options button:** frame height = `trafficLightTapTarget` (16pt), not `buttonTapTarget` (28pt), to center with traffic lights.
 - **Search bar:** FolderSidebarView has no top padding — search bar top aligns with the divider line.
-- **Sidebar live search:** `FolderSidebarView` has a `searchText: Binding<String>` TextField (not a button). `CiderPanelView` owns `@State sidebarSearchText` and passes it to HomeDashboardView, FolderDetailView, and SavedViewTabContent. Search is scoped to the active view. Cleared on tab/folder change. `SourceDetailView` does NOT support search yet.
+- **Sidebar live search:** `FolderSidebarView` has a `searchText: Binding<String>` TextField (not a button). `CiderPanelView` owns `@State sidebarSearchText` (raw binding for instant TextField feedback) and `@State debouncedSearchText` (150ms debounce via `Task.sleep` with cancellation). Content views (HomeDashboardView, FolderDetailView, SavedViewTabContent) receive the debounced value. Cleared on tab/folder change. `SourceDetailView` does NOT support search yet.
 - **Escape priority chain:** sidebarSearchText non-empty → clear search; else editor active → close editor; else selection → clear selection. Order matters — search clears first.
 - **Right column top padding:** `Spacing.sm - 1` (7pt) so title bar center aligns with traffic light circle center.
 
@@ -273,12 +273,31 @@ LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard
 LibraryViewModel — unified query engine reading from all 4 storages; rebuilds on any storage change
 - Produces: filtered library feed, calendar buckets, stack resolutions
 - Pre-computes `recentItems` (top 8 by updatedDate) during rebuildItems() — HomeDashboardView reads this directly, no O(N log N) sort in body
+- `filteredItemsCache` memoizes the last filter+sort result — avoids re-filtering on unrelated body evaluations
+- `matchesTextQuery` uses token-based matching: splits query on spaces, each token must match in at least one field via `localizedStandardContains` (diacritic- and case-insensitive, same as Finder)
+- `externalFileContentCache` (static) caches external file disk reads during text search — cleared in `rebuildItems()`
+- `NoteCardDataCache` (Note.swift) — cross-view cache for `NoteCardData`, keyed by `(noteID, modifiedAt)`. Used by `NoteCardView` and `NoteListRow` to avoid re-loading card data when scrolling/switching tabs.
+- `NotesStorage.contentCache` — in-memory cache for note file content, keyed by `(noteID, modifiedAt)`. Avoids repeated disk reads during search. Invalidated in `save()`, `delete()`, `scanNotes()`.
 - Stacks: CardStack has matchRules + manualItemRefs, resolves items dynamically (not containers)
 - SavedViews: isTabPinned: Bool controls tab bar presence; calendar is a view mode toggle, not a separate tab
 
 State: CiderPanelView owns @State, passes Bindings to HomeDashboardView
 Persistence: homeDisplayMode + homeCardSizeScale on CiderConfig
 ```
+
+## Search Architecture
+
+Two search systems: **SearchService** (search palette / search tab) and **LibraryViewModel.matchesTextQuery** (sidebar live search / saved view filtering). Both use the same token-based matching pattern:
+- Split query on spaces into tokens
+- Each token must match in at least one field via `localizedStandardContains` (Apple's diacritic- and case-insensitive matching — same as Finder)
+- Bookmarks search: title, URL, host, notes, tags
+- Notes search: title + full file content (loaded via `NotesStorage.loadContent`, cached in-memory)
+- Date cards: title, details, location
+- Contacts: display name, relationship label, notes
+
+**SearchService** also produces `SearchSnippet` (prefix/match/suffix with ellipsis) for body-only matches. Uses `extractSnippet(tokens:from:windowSize:)` to find the first matching token and return surrounding context.
+
+**SpotlightIndexer** (`Services/SpotlightIndexer.swift`) indexes all items into Core Spotlight for system-wide search (Spotlight, Raycast, Alfred). Subscribes to storage `$published` properties with 2-second debounce. Gated by `CiderConfig.enableSpotlightIndexing`. Note: Core Spotlight requires a proper `.app` bundle — SPM executables silently fail to surface items. Indexing code is ready but dormant during development builds.
 
 ## Settings Architecture
 

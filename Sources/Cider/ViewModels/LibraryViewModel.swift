@@ -16,6 +16,9 @@ final class LibraryViewModel: ObservableObject {
     /// Cache for filteredItems — avoids re-filtering+sorting on unrelated body evaluations.
     private var filteredItemsCache: (filter: SavedViewFilterSpec, sort: SavedViewSortSpec, result: [LibraryItemV2])?
 
+    /// Cache for external file content read during text search — cleared on rebuildItems.
+    private static var externalFileContentCache: [UUID: String] = [:]
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -34,6 +37,7 @@ final class LibraryViewModel: ObservableObject {
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
+        Self.externalFileContentCache.removeAll()
     }
 
     func filteredItems(
@@ -44,7 +48,7 @@ final class LibraryViewModel: ObservableObject {
             return cache.result
         }
 
-        let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let filtered = items.filter { item in
             guard filterSpec.entityTypes.contains(item.entityType) else { return false }
@@ -148,28 +152,37 @@ final class LibraryViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Token-based search: splits query into words, each must match in at least one field.
+    /// Uses `localizedStandardContains` for diacritic- and case-insensitive matching.
     static func matchesTextQuery(_ query: String, in item: LibraryItemV2) -> Bool {
+        let tokens = query.split(separator: " ").map(String.init)
+        guard !tokens.isEmpty else { return true }
+
+        let fields: [String]
         switch item {
         case .bookmark(let bookmark):
-            return bookmark.title.lowercased().contains(query)
-                || bookmark.urlString.lowercased().contains(query)
-                || bookmark.notes.lowercased().contains(query)
-                || bookmark.tags.contains(where: { $0.lowercased().contains(query) })
+            fields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
         case .note(let note):
-            let content = NotesStorage.shared.loadContent(for: note).lowercased()
-            return note.title.lowercased().contains(query) || content.contains(query)
+            let content = NotesStorage.shared.loadContent(for: note)
+            fields = [note.title, content]
         case .dateCard(let dateCard):
-            return dateCard.title.lowercased().contains(query)
-                || dateCard.details.lowercased().contains(query)
-                || dateCard.location.lowercased().contains(query)
+            fields = [dateCard.title, dateCard.details, dateCard.location]
         case .contact(let contact):
-            return contact.displayName.lowercased().contains(query)
-                || contact.relationshipLabel.lowercased().contains(query)
-                || contact.notes.lowercased().contains(query)
+            fields = [contact.displayName, contact.relationshipLabel, contact.notes]
         case .externalFile(let file):
-            if file.title.lowercased().contains(query) { return true }
-            let content = (try? String(contentsOf: file.path, encoding: .utf8))?.lowercased() ?? ""
-            return content.contains(query)
+            let content: String
+            if let cached = externalFileContentCache[file.id] {
+                content = cached
+            } else {
+                let loaded = (try? String(contentsOf: file.path, encoding: .utf8)) ?? ""
+                externalFileContentCache[file.id] = loaded
+                content = loaded
+            }
+            fields = [file.title, content]
+        }
+
+        return tokens.allSatisfy { token in
+            fields.contains { $0.localizedStandardContains(token) }
         }
     }
 

@@ -27,6 +27,10 @@ final class NotesStorage: ObservableObject {
     private let attachmentCleanupDelaySeconds: TimeInterval = 2
     private let orphanAttachmentGracePeriodSeconds: TimeInterval = 5 * 60
 
+    /// In-memory cache for note content, avoiding disk reads on every search query.
+    /// Keyed by note ID, validated against modifiedAt to auto-invalidate on edits.
+    private var contentCache: [UUID: (modifiedAt: Date, content: String)] = [:]
+
     /// Per-note metadata persisted in the index file.
 private struct NoteIndexEntry: Codable, Equatable, Sendable {
         var filename: String
@@ -63,6 +67,7 @@ private struct NoteIndexEntry: Codable, Equatable, Sendable {
     // MARK: - Directory Management
 
     func updateDirectory(to newPath: String) {
+        contentCache.removeAll()
         stopDirectoryWatcher()
         attachmentCleanupWorkItem?.cancel()
         attachmentCleanupWorkItem = nil
@@ -134,6 +139,7 @@ private struct NoteIndexEntry: Codable, Equatable, Sendable {
     // MARK: - Scanning
 
     func scanNotes() {
+        contentCache.removeAll()
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]) else {
             notes = []
@@ -318,8 +324,13 @@ private struct NoteIndexEntry: Codable, Equatable, Sendable {
     }
 
     func loadContent(for note: Note) -> String {
+        if let cached = contentCache[note.id], cached.modifiedAt == note.modifiedAt {
+            return cached.content
+        }
         let fileURL = directoryURL.appendingPathComponent(note.relativePath)
-        return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        let content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        contentCache[note.id] = (note.modifiedAt, content)
+        return content
     }
 
     /// Convert stored markdown to editor-friendly markdown (absolute image paths).
@@ -345,6 +356,9 @@ private struct NoteIndexEntry: Codable, Equatable, Sendable {
         if previousContent != note.content {
             scheduleAttachmentCleanup()
         }
+
+        // Invalidate content cache for this note
+        contentCache.removeValue(forKey: note.id)
 
         // Update in-memory list
         if let idx = notes.firstIndex(where: { $0.id == note.id }) {
@@ -410,6 +424,7 @@ private struct NoteIndexEntry: Codable, Equatable, Sendable {
 
     @discardableResult
     func delete(note: Note) -> TrashItem {
+        contentCache.removeValue(forKey: note.id)
         let trashItem = TrashStorage.shared.trashNote(note, notesDir: directoryURL)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
         index.removeValue(forKey: note.id)

@@ -28,6 +28,8 @@ struct CiderPanelView: View {
     @State private var suppressSidebarAutoExpandForDetails = false
     @State private var cardScaleSaveTask: Task<Void, Never>?
     @State private var sidebarSearchText: String = ""
+    @State private var debouncedSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var editingNoteID: UUID?
     @State private var isEditingNoteTitle = false
     @State private var showRestoreSnapshotAlert = false
@@ -94,15 +96,31 @@ struct CiderPanelView: View {
         }
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .environment(\.textScale, textScale)
+        .onChange(of: sidebarSearchText) { _, newValue in
+            searchDebounceTask?.cancel()
+            if newValue.isEmpty {
+                debouncedSearchText = ""
+            } else {
+                searchDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    guard !Task.isCancelled else { return }
+                    debouncedSearchText = newValue
+                }
+            }
+        }
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
             selectedSourceID = nil
             selectedItemIDs.removeAll()
+            searchDebounceTask?.cancel()
             sidebarSearchText = ""
+            debouncedSearchText = ""
         }
         .onChange(of: selectedFolderID) { _, _ in
             selectedItemIDs.removeAll()
+            searchDebounceTask?.cancel()
             sidebarSearchText = ""
+            debouncedSearchText = ""
         }
         .onChange(of: homeDisplayMode) { _, newValue in
             var config = CiderConfig.load()
@@ -234,7 +252,9 @@ struct CiderPanelView: View {
 
             Button("") {
                 if !sidebarSearchText.isEmpty {
+                    searchDebounceTask?.cancel()
                     sidebarSearchText = ""
+                    debouncedSearchText = ""
                 } else if isEditorActive {
                     closeNoteEditor()
                 } else if !selectedItemIDs.isEmpty {
@@ -893,7 +913,7 @@ struct CiderPanelView: View {
                 cardSizeScale: $homeCardSizeScale,
                 selectedItemIDs: $selectedItemIDs,
                 subFoldersCollapsed: $subFoldersCollapsed,
-                searchText: sidebarSearchText,
+                searchText: debouncedSearchText,
                 onSelectSubFolder: { subFolderID in
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)
@@ -920,7 +940,7 @@ struct CiderPanelView: View {
                     selectedItemIDs: $selectedItemIDs,
                     sortMode: $homeSort,
                     entityFilter: $homeEntityFilter,
-                    searchText: sidebarSearchText,
+                    searchText: debouncedSearchText,
                     onOpenNote: { note in openNoteInline(note) },
                     onEditDateCard: { dateCard in
                         newEventEditorContext = DateCardEditorContext(
@@ -973,7 +993,7 @@ struct CiderPanelView: View {
                                 onMoveNoteToFolder: { note, folderID in
                                     _ = notesViewModel.assignNote(note, toFolder: folderID)
                                 },
-                                searchText: sidebarSearchText,
+                                searchText: debouncedSearchText,
                                 onUpdateSavedView: { updated in
                                     _ = savedViewStorage.updateSavedView(updated)
                                     if case .savedView(let selectedID, _) = selectedTab,

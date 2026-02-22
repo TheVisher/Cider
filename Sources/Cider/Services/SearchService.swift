@@ -30,40 +30,38 @@ struct SearchResult: Identifiable {
 @MainActor
 enum SearchService {
     static func search(query: String, bookmarks: [Bookmark], notes: [Note]) async -> [SearchResult] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
+
+        let tokens = trimmed.split(separator: " ").map(String.init)
+        guard !tokens.isEmpty else { return [] }
 
         let dateCards = DateCardStorage.shared.dateCards
         let contacts  = ContactStorage.shared.contacts
 
-        let bookmarkResults  = searchBookmarks(trimmed, in: bookmarks)
-        let noteResults      = await searchNotes(trimmed, in: notes)
-        let dateCardResults  = searchDateCards(trimmed, in: dateCards)
-        let contactResults   = searchContacts(trimmed, in: contacts)
+        let bookmarkResults  = searchBookmarks(tokens, in: bookmarks)
+        let noteResults      = await searchNotes(tokens, in: notes)
+        let dateCardResults  = searchDateCards(tokens, in: dateCards)
+        let contactResults   = searchContacts(tokens, in: contacts)
 
         return bookmarkResults + noteResults + dateCardResults + contactResults
     }
 
-    static func searchBookmarks(_ query: String, in bookmarks: [Bookmark]) -> [SearchResult] {
+    static func searchBookmarks(_ tokens: [String], in bookmarks: [Bookmark]) -> [SearchResult] {
         bookmarks.compactMap { bookmark in
-            let titleMatch  = bookmark.title.lowercased().contains(query)
-            let urlMatch    = bookmark.urlString.lowercased().contains(query)
-            let hostMatch   = bookmark.hostDisplay.lowercased().contains(query)
-            let tagMatch    = bookmark.tags.contains { $0.lowercased().contains(query) }
-            let notesMatch  = bookmark.notes.lowercased().contains(query)
+            let fields = [bookmark.title, bookmark.urlString, bookmark.hostDisplay, bookmark.notes] + bookmark.tags
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
 
-            guard titleMatch || urlMatch || hostMatch || tagMatch || notesMatch else {
-                return nil
-            }
+            let titleMatch = fieldsMatch(tokens, in: [bookmark.title, bookmark.urlString, bookmark.hostDisplay] + bookmark.tags)
 
             let snippet: SearchSnippet?
             let subtitle: String?
-            if !notesMatch || titleMatch || urlMatch || hostMatch || tagMatch {
+            if titleMatch {
                 subtitle = bookmark.hostDisplay
                 snippet  = nil
             } else {
                 subtitle = nil
-                snippet  = extractSnippet(query: query, from: bookmark.notes)
+                snippet  = extractSnippet(tokens: tokens, from: bookmark.notes)
             }
 
             return SearchResult(
@@ -79,18 +77,17 @@ enum SearchService {
     }
 
     // Note content is loaded off the main actor to avoid blocking the UI.
-    static func searchNotes(_ query: String, in notes: [Note]) async -> [SearchResult] {
+    static func searchNotes(_ tokens: [String], in notes: [Note]) async -> [SearchResult] {
         let directoryURL = NotesStorage.shared.notesDirectoryURL
-        return await fetchNoteResults(query: query, notes: notes, directoryURL: directoryURL)
+        return await fetchNoteResults(tokens: tokens, notes: notes, directoryURL: directoryURL)
     }
 
-    static func searchDateCards(_ query: String, in dateCards: [DateCard]) -> [SearchResult] {
+    static func searchDateCards(_ tokens: [String], in dateCards: [DateCard]) -> [SearchResult] {
         dateCards.compactMap { card in
-            let titleMatch    = card.title.lowercased().contains(query)
-            let detailsMatch  = card.details.lowercased().contains(query)
-            let locationMatch = card.location.lowercased().contains(query)
+            let fields = [card.title, card.details, card.location]
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
 
-            guard titleMatch || detailsMatch || locationMatch else { return nil }
+            let titleMatch = card.title.localizedStandardContains(tokens.first ?? "")
 
             let snippet: SearchSnippet?
             let subtitle: String?
@@ -100,7 +97,7 @@ enum SearchService {
             } else {
                 subtitle = nil
                 let bodyText = card.details.isEmpty ? card.location : card.details
-                snippet  = extractSnippet(query: query, from: bodyText)
+                snippet  = extractSnippet(tokens: tokens, from: bodyText)
             }
 
             return SearchResult(
@@ -115,22 +112,21 @@ enum SearchService {
         }
     }
 
-    static func searchContacts(_ query: String, in contacts: [ContactCard]) -> [SearchResult] {
+    static func searchContacts(_ tokens: [String], in contacts: [ContactCard]) -> [SearchResult] {
         contacts.compactMap { contact in
-            let nameMatch  = contact.displayName.lowercased().contains(query)
-            let labelMatch = contact.relationshipLabel.lowercased().contains(query)
-            let notesMatch = contact.notes.lowercased().contains(query)
+            let fields = [contact.displayName, contact.relationshipLabel, contact.notes]
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
 
-            guard nameMatch || labelMatch || notesMatch else { return nil }
+            let headerMatch = fieldsMatch(tokens, in: [contact.displayName, contact.relationshipLabel])
 
             let snippet: SearchSnippet?
             let subtitle: String?
-            if nameMatch || labelMatch {
+            if headerMatch {
                 subtitle = contact.relationshipLabel.isEmpty ? nil : contact.relationshipLabel
                 snippet  = nil
             } else {
                 subtitle = nil
-                snippet  = extractSnippet(query: query, from: contact.notes)
+                snippet  = extractSnippet(tokens: tokens, from: contact.notes)
             }
 
             return SearchResult(
@@ -147,21 +143,22 @@ enum SearchService {
 
     // Runs off the main actor — safe to do synchronous disk reads here.
     private nonisolated static func fetchNoteResults(
-        query: String,
+        tokens: [String],
         notes: [Note],
         directoryURL: URL
     ) async -> [SearchResult] {
         notes.compactMap { note in
-            let titleMatch = note.title.lowercased().contains(query)
             let fileURL = directoryURL.appendingPathComponent(note.relativePath)
             let rawContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
             let strippedContent = rawContent
                 .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let contentMatch = strippedContent.lowercased().contains(query)
 
-            guard titleMatch || contentMatch else { return nil }
+            let fields = [note.title, strippedContent]
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
+
+            let titleMatch = fieldsMatch(tokens, in: [note.title])
 
             let snippet: SearchSnippet?
             let subtitle: String?
@@ -170,7 +167,7 @@ enum SearchService {
                 snippet  = nil
             } else {
                 subtitle = nil
-                snippet  = extractSnippet(query: query, from: strippedContent)
+                snippet  = extractSnippet(tokens: tokens, from: strippedContent)
             }
 
             return SearchResult(
@@ -185,13 +182,33 @@ enum SearchService {
         }
     }
 
-    nonisolated static func extractSnippet(query: String, from text: String, windowSize: Int = 60) -> SearchSnippet? {
-        guard let range = text.range(of: query, options: .caseInsensitive) else { return nil }
-        let contextStart = text.index(range.lowerBound, offsetBy: -windowSize, limitedBy: text.startIndex) ?? text.startIndex
-        let contextEnd   = text.index(range.upperBound, offsetBy:  windowSize, limitedBy: text.endIndex)   ?? text.endIndex
-        let prefix = (contextStart > text.startIndex ? "…" : "") + String(text[contextStart..<range.lowerBound])
-        let match  = String(text[range])
-        let suffix = String(text[range.upperBound..<contextEnd]) + (contextEnd < text.endIndex ? "…" : "")
-        return SearchSnippet(prefix: prefix, match: match, suffix: suffix)
+    // MARK: - Token Matching Helpers
+
+    /// Returns true if every token matches in at least one field.
+    nonisolated static func matchesAllTokens(_ tokens: [String], in fields: [String]) -> Bool {
+        tokens.allSatisfy { token in
+            fields.contains { $0.localizedStandardContains(token) }
+        }
+    }
+
+    /// Returns true if all tokens can be satisfied by the given subset of fields.
+    private nonisolated static func fieldsMatch(_ tokens: [String], in fields: [String]) -> Bool {
+        matchesAllTokens(tokens, in: fields)
+    }
+
+    /// Extract a snippet around the first token match found in the text.
+    nonisolated static func extractSnippet(tokens: [String], from text: String, windowSize: Int = 60) -> SearchSnippet? {
+        // Find the first token that has a match range in the text
+        for token in tokens {
+            if let range = text.range(of: token, options: .caseInsensitive) {
+                let contextStart = text.index(range.lowerBound, offsetBy: -windowSize, limitedBy: text.startIndex) ?? text.startIndex
+                let contextEnd   = text.index(range.upperBound, offsetBy:  windowSize, limitedBy: text.endIndex)   ?? text.endIndex
+                let prefix = (contextStart > text.startIndex ? "…" : "") + String(text[contextStart..<range.lowerBound])
+                let match  = String(text[range])
+                let suffix = String(text[range.upperBound..<contextEnd]) + (contextEnd < text.endIndex ? "…" : "")
+                return SearchSnippet(prefix: prefix, match: match, suffix: suffix)
+            }
+        }
+        return nil
     }
 }

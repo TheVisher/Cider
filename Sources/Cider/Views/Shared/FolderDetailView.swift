@@ -52,7 +52,7 @@ struct FolderDetailView: View {
         var all = (bookmarks + notes + dateCards + contacts)
             .sorted { $0.createdDate > $1.createdDate }
 
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
             all = all.filter { LibraryViewModel.matchesTextQuery(query, in: $0) }
         }

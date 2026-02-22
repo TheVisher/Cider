@@ -492,7 +492,8 @@ Enhance the search palette with:
 - Type filter chips (Bookmarks, Notes, or both)
 - Folder filter (search within a specific folder)
 - Date range filter
-- Fuzzy matching for typo tolerance
+- ✅ Token matching — query split into words, each must match independently. "nuts nerdy" finds "Nerdy Nuts". Uses `localizedStandardContains` for diacritic/case-insensitive matching ("cafe" → "Café").
+- True fuzzy matching (Sublime Text / fzf style) — characters appear in order but not adjacently ("nrdnts" → "Nerdy Nuts"). Needs scoring to rank results by match quality. Useful for power users but produces noisier results than token matching. Consider as opt-in or for the command palette only.
 - Recent searches list
 
 ### Search Scope Modifiers (Future)
