@@ -25,7 +25,7 @@ final class CiderPanel: NSPanel {
 
         super.init(
             contentRect: initialFrame,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -39,7 +39,7 @@ final class CiderPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
 
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         isReleasedWhenClosed = false
 
         self.minSize = NSSize(
@@ -50,6 +50,12 @@ final class CiderPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    // Allow the panel to be dragged freely across all monitors.
+    // The default implementation constrains to the current screen's visibleFrame.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 
     // MARK: - Window Dragging via Title Bar
 

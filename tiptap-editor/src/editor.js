@@ -419,7 +419,15 @@ const CiderParagraph = Paragraph.extend({
 
           if (hasCustomAlignment) {
             state.write(`<p style="text-align: ${escapeHtmlAttr(textAlign)}">`);
-            state.renderInline(node);
+            // Disable markdown escaping — content is inside an HTML block where
+            // backslash escapes are literal text, causing doubling each round-trip.
+            const origEsc = state.esc;
+            state.esc = (str) => str;
+            try {
+              state.renderInline(node);
+            } finally {
+              state.esc = origEsc;
+            }
             state.write('</p>');
           } else {
             state.renderInline(node);
@@ -462,7 +470,13 @@ const CiderHeading = Heading.extend({
 
           const headingLevel = Math.max(1, Math.min(6, Number(node.attrs?.level) || 1));
           state.write(`<h${headingLevel} style="text-align: ${escapeHtmlAttr(textAlign)}">`);
-          state.renderInline(node);
+          const origEsc = state.esc;
+          state.esc = (str) => str;
+          try {
+            state.renderInline(node);
+          } finally {
+            state.esc = origEsc;
+          }
           state.write(`</h${headingLevel}>`);
           state.closeBlock(node);
         },
@@ -907,6 +921,18 @@ function normalizeIncomingMarkdown(value) {
   if (typeof value !== 'string') return '';
 
   let normalized = value.replace(fileProtocolPathPattern, '(/$1)');
+
+  // Strip accumulated backslash escapes inside aligned <p>/<h> HTML blocks.
+  // The markdown serializer previously escaped backslashes and dots inside
+  // HTML blocks where they're literal text, doubling them each round-trip.
+  normalized = normalized.replace(
+    /(<(?:p|h[1-6])\b[^>]*style="[^"]*text-align[^"]*"[^>]*>)([\s\S]*?)(<\/(?:p|h[1-6])>)/gi,
+    (match, open, content, close) => {
+      // Replace \+. after digits with just . (e.g. "1\\\\." → "1.")
+      const cleaned = content.replace(/(\d+)\\+\./g, '$1.');
+      return open + cleaned + close;
+    },
+  );
 
   // Convert markdown image syntax inside HTML <p> blocks to <img> tags.
   // Needed because markdown-it treats <p>...</p> as a raw HTML block,
