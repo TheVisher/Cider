@@ -38,6 +38,7 @@ extension Notification.Name {
     static let pauseUndoToastDismiss = Notification.Name("cider.pauseUndoToastDismiss")
     static let resumeUndoToastDismiss = Notification.Name("cider.resumeUndoToastDismiss")
     static let toggleNoteEditor = Notification.Name("cider.toggleNoteEditor")
+    static let editorRequestClose = Notification.Name("cider.editorRequestClose")
     static let captureBookmark = Notification.Name("cider.captureBookmark")
     static let trashContentsChanged = Notification.Name("cider.trashContentsChanged")
     static let openExternalSourceAndSelectFile = Notification.Name("cider.openExternalSourceAndSelectFile")

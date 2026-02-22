@@ -116,7 +116,7 @@ Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(2
 
 ### ~~CH-D05 — Some UI elements ignore global text-size preference~~ ✅ Fixed 2026-02-21
 
-Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from `static let` to `static var` using `scaled(36)`. Fixed traffic light symbol fonts in `NotesPanelView.swift` (2 instances), `CiderPanelShell.swift`, and `BookmarksPanelView.swift` to multiply by `CiderFont.scale`. `appIcon` left as fixed 64pt (purely decorative on About screen).
+Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from `static let` to `static var` using `scaled(36)`. Fixed traffic light symbol fonts in `CiderPanelShell.swift` to multiply by `CiderFont.scale`. `appIcon` left as fixed 64pt (purely decorative on About screen). (Note: NotesPanelView and BookmarksPanelView references removed — standalone panels deleted in Feb 2026 consolidation.)
 
 ---
 

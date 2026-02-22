@@ -83,6 +83,15 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
                     webView.updateFloatingToolbarState(payload)
                 }
 
+            case "editorRequestClose":
+                NotificationCenter.default.post(name: .editorRequestClose, object: nil)
+
+            case "linkClicked":
+                if let urlString = message.body as? String,
+                   let url = URL(string: urlString) {
+                    NSWorkspace.shared.open(url)
+                }
+
             case "editorError":
                 if let payload = message.body as? [String: Any],
                    let kind = payload["kind"] as? String,
@@ -138,9 +147,11 @@ final class TipTapWebView: WKWebView {
 
     private static let textFileExtensions: Set<String> = ["md", "markdown", "txt", "text"]
 
+    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "heic"]
+
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frame, configuration: configuration)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, .tiff, .png, .URL])
     }
 
     @available(*, unavailable)
@@ -251,17 +262,17 @@ final class TipTapWebView: WKWebView {
         return super.performKeyEquivalent(with: event)
     }
 
-    // MARK: - Drag & Drop (UTF-8 text file interception)
+    // MARK: - Drag & Drop (UTF-8 text file + web image interception)
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if hasTextFileDrop(sender) {
+        if hasTextFileDrop(sender) || hasWebImageDrop(sender) {
             return .copy
         }
         return super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if hasTextFileDrop(sender) {
+        if hasTextFileDrop(sender) || hasWebImageDrop(sender) {
             return .copy
         }
         return super.draggingUpdated(sender)
@@ -272,6 +283,9 @@ final class TipTapWebView: WKWebView {
             Task { @MainActor [weak viewModel] in
                 viewModel?.handleDroppedTextFileContent(content)
             }
+            return true
+        }
+        if handleWebImageDrop(sender) {
             return true
         }
         return super.performDragOperation(sender)
@@ -300,6 +314,90 @@ final class TipTapWebView: WKWebView {
             return nil
         }
         return try? String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    // MARK: - Web Image Drag & Drop
+
+    private func hasWebImageDrop(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+
+        // Check for image data on the pasteboard
+        if pb.data(forType: .tiff) != nil || pb.data(forType: .png) != nil {
+            return true
+        }
+
+        // Check for image file URLs (not text files — those are handled separately)
+        if let urls = pb.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL],
+           urls.contains(where: { Self.imageExtensions.contains($0.pathExtension.lowercased()) }) {
+            return true
+        }
+
+        // Check for web URLs that look like images
+        if let urlString = pb.string(forType: .URL) ?? pb.string(forType: .string),
+           let url = URL(string: urlString),
+           (url.scheme == "http" || url.scheme == "https"),
+           Self.imageExtensions.contains(url.pathExtension.lowercased()) {
+            return true
+        }
+
+        return false
+    }
+
+    private func handleWebImageDrop(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+
+        // Priority 1: Image data directly on pasteboard (Safari drags)
+        if let tiffData = pb.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: tiffData),
+           let pngData = rep.representation(using: .png, properties: [:]) {
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleImageDrop(data: pngData, filename: "dropped-image.png")
+            }
+            return true
+        }
+
+        if let pngData = pb.data(forType: .png) {
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleImageDrop(data: pngData, filename: "dropped-image.png")
+            }
+            return true
+        }
+
+        // Priority 2: Local image file URLs
+        if let urls = pb.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL],
+           let imageURL = urls.first(where: { Self.imageExtensions.contains($0.pathExtension.lowercased()) }),
+           let data = try? Data(contentsOf: imageURL) {
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleImageDrop(data: data, filename: imageURL.lastPathComponent)
+            }
+            return true
+        }
+
+        // Priority 3: Remote image URLs — download asynchronously
+        if let urlString = pb.string(forType: .URL) ?? pb.string(forType: .string),
+           let url = URL(string: urlString),
+           (url.scheme == "http" || url.scheme == "https"),
+           Self.imageExtensions.contains(url.pathExtension.lowercased()) {
+            Task { @MainActor [weak viewModel] in
+                guard let viewModel else { return }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    let filename = url.lastPathComponent.isEmpty ? "web-image.png" : url.lastPathComponent
+                    viewModel.handleImageDrop(data: data, filename: filename)
+                } catch {
+                    NSLog("[TipTapWebView] Failed to download web image: \(error.localizedDescription)")
+                }
+            }
+            return true
+        }
+
+        return false
     }
 
     // MARK: - Slash Popup / Floating Toolbar Hit Testing

@@ -241,7 +241,7 @@ Cider uses **SF Pro** (macOS system font) exclusively. All font declarations use
 
 #### Responsive Tokens (textScale-based)
 
-For views with a continuous card size slider (BookmarksBrowserView, BookmarksPanelView), use the `(scale:)` function variants:
+For views with a continuous card size slider (BookmarksBrowserView), use the `(scale:)` function variants:
 
 ```swift
 .font(CiderFont.body(scale: textScale))
@@ -273,7 +273,7 @@ Available: `body`, `bodyMedium`, `bodySemibold`, `caption`, `captionMedium`, `ca
 
 **Reduce Motion:** Check `@Environment(\.accessibilityReduceMotion)`. Replace springs with `.none` (instant) or `.linear(duration: 0.2)` opacity crossfade.
 
-**AppKit exception:** `NSAnimationContext` window-frame animations use `CAMediaTimingFunction(.easeInEaseOut)` — AppKit has no spring timing API. This applies to panel collapse/expand in `CiderPanel`, `BookmarksPanel`, and `NotesPanel`. Check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` for these (not `@Environment`).
+**AppKit exception:** `NSAnimationContext` window-frame animations use `CAMediaTimingFunction(controlPoints:)` — AppKit has no spring timing API. This applies to panel collapse/expand in `CiderPanel`. Check `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` for these (not `@Environment`).
 
 ---
 
@@ -783,73 +783,21 @@ The entire overlay is clipped to the panel's rounded rect to prevent overflow.
 
 ---
 
-## 12. Standalone Windows
+<!-- Section 12: Standalone Windows — REMOVED in Feb 2026 panel consolidation.
+Standalone BookmarksPanel and NotesPanel were removed. All content now lives in the
+main CiderPanel. The notes editor opens inline via push/pop navigation. Bookmarks are
+browsed exclusively in the main panel's saved view tabs or Home feed.
 
-The standalone Bookmarks and Notes windows (`BookmarksPanelView`, `NotesPanelView`) are separate floating panels. **They must use the same two-column layout as the main panel.** This means:
+If standalone windows are re-introduced in the future, refer to this archived spec
+for the required structure (must match main panel: same acrylic, shadow, sidebar,
+traffic lights, resize handles, compact mode, etc. — see sections 4-11 above).
 
-### 12.1 Required Structure (same as main panel)
-
-Every standalone window must implement:
-
-```
-NSPanel (borderless, nonactivatingPanel, clear background, no system shadow)
-└── ZStack
-    ├── AcrylicPanelBackground (same shadow + acrylic + border)
-    ├── HStack(spacing: 0)
-    │   ├── Sidebar Column (see section 8)
-    │   │   ├── sidebarHeader (traffic lights + collapse toggle)
-    │   │   ├── [window-specific sidebar content]
-    │   │   └── sidebarFooter (if applicable)
-    │   └── Right Column (VStack, spacing: 0)
-    │       ├── .padding(.top, 7pt)  ← same alignment rule
-    │       ├── Title bar (40pt height, 12pt horizontal padding)
-    │       ├── Divider (14pt horizontal inset)
-    │       └── Content area
-    │   .clipShape(RoundedRectangle(14pt, .continuous))
-    ├── Compact overlay sidebar (same behavior, same threshold)
-    └── PanelEdgeResizeView overlay (same resize handles)
-```
-
-### 12.2 What Must Be Identical
-
-| Element | Specification |
-|---------|---------------|
-| Acrylic background | Same `AcrylicPanelBackground` component (section 4) |
-| Shadow | Full: blur 18, offset 18, opacity 0.7 (section 4.2) |
-| Panel border | white 25%, 1.5pt stroke, 0.75pt inset |
-| Panel corner radius | 14pt (`Radius.lg`) |
-| Window padding | 40pt horizontal, 28pt top, 55pt bottom (section 5.2) |
-| Sidebar container | Same width (224pt), background, border, padding (section 8.1) |
-| Sidebar header | Same traffic lights + collapse toggle layout (section 8.2) |
-| Traffic lights | Same geometry: 12pt circles, 16pt tap targets, 4pt spacing |
-| Right column top padding | 7pt (`Spacing.sm - 1`) for traffic light alignment |
-| Title bar height | 40pt |
-| Divider inset | 14pt (`Spacing.md + Spacing.xxs`) |
-| Content padding | 12pt + 2pt = 14pt pattern (section 9) |
-| Resize handles | Same `PanelEdgeResizeView` with same hit zones (section 10) |
-| Compact mode | Same 680pt threshold, same overlay behavior (section 11) |
-
-### 12.3 What Varies Per Window
-
-The **sidebar content** and **title bar content** change per window:
-
-| Window | Sidebar Content | Title Bar Content |
-|--------|----------------|-------------------|
-| Main panel | Folders + projects + search (section 8.3) | Tab bar + tab-specific trailing controls (Bookmarks capture button, Home Continue toggle) |
-| Standalone Notes | Scrollable notes list | Title / toolbar |
-| Standalone Bookmarks | TBD (currently folders) | Title / toolbar |
-
-The sidebar content is the only part that is window-specific. Everything else — the container, the spacing, the background, the header, the footer pattern — comes from this document.
-
-### 12.4 Current Status
-
-**These windows currently need updating to match the main panel.** When fixing them:
-1. Read sections 4-11 of this document
-2. Rebuild the window shell to match the main panel structure exactly
-3. Replace the sidebar with the correct container pattern + window-specific content
-4. Verify every measurement against this document before finishing
-
-Once standalone windows are brought into conformance, their window-specific details (sidebar content, title bar layout) will be added to this document.
+Previous section covered:
+- 12.1 Required Structure (NSPanel + CiderPanelShell two-column layout)
+- 12.2 What Must Be Identical (acrylic, shadow, border, sidebar, resize handles, compact mode)
+- 12.3 What Varies Per Window (sidebar content + title bar content)
+- 12.4 Current Status (needed updating — now moot)
+-->
 
 ---
 

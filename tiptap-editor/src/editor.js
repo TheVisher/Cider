@@ -313,6 +313,51 @@ const CiderLink = Mark.create({
       unsetLink: () => ({ commands }) => commands.unsetMark(this.name),
     };
   },
+
+  addStorage() {
+    return {
+      markdown: {
+        serialize: {
+          open(_state, mark) {
+            return `<a href="${escapeHtmlAttr(mark.attrs.href || '')}">`;
+          },
+          close() {
+            return '</a>';
+          },
+        },
+        parse: {
+          // handled by markdown-it + parseHTML
+        },
+      },
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const markType = this.name;
+    return [
+      new Plugin({
+        props: {
+          handleClick(view, pos, event) {
+            if (!event.metaKey) return false;
+
+            const { doc } = view.state;
+            const resolved = doc.resolve(pos);
+            const marks = resolved.marks();
+            const linkMark = marks.find(m => m.type.name === markType);
+            if (!linkMark?.attrs?.href) return false;
+
+            // Post to Swift to open in system browser (window.open is
+            // blocked by WKWebView navigation policy)
+            if (window.webkit?.messageHandlers?.linkClicked) {
+              window.webkit.messageHandlers.linkClicked.postMessage(linkMark.attrs.href);
+            }
+            event.preventDefault();
+            return true;
+          },
+        },
+      }),
+    ];
+  },
 });
 
 const CiderFontSize = Mark.create({
@@ -2050,6 +2095,37 @@ const editor = new Editor({
 
 initializeFloatingToolbar(editor);
 
+// Toggle pointer cursor on links when Cmd key is held
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Meta') {
+    editor.view.dom.classList.add('cmd-held');
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Meta') {
+    editor.view.dom.classList.remove('cmd-held');
+  }
+});
+window.addEventListener('blur', () => {
+  editor.view.dom.classList.remove('cmd-held');
+});
+
+// Forward Escape to Swift to close the editor when no popups/overlays are active.
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+
+  // Let the image preview overlay handle its own Escape
+  if (imagePreviewOverlay && imagePreviewOverlay.backdrop.style.display !== 'none') return;
+
+  // Slash popup and floating toolbar dismiss themselves
+  if (isSlashPopupActive() || window._floatingToolbar?.active) return;
+
+  if (window.webkit?.messageHandlers?.editorRequestClose) {
+    event.preventDefault();
+    window.webkit.messageHandlers.editorRequestClose.postMessage('close');
+  }
+});
+
 function resetEditorPluginState() {
   const nextState = EditorState.create({
     schema: editor.state.schema,
@@ -2227,7 +2303,22 @@ window.editorAPI = {
       return false;
     }
 
-    return editor.chain().focus().setLink({ href: href.trim() }).run();
+    const url = href.trim();
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      // No text selected — insert the URL as linked text
+      return editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'text',
+          text: url,
+          marks: [{ type: 'link', attrs: { href: url } }],
+        })
+        .run();
+    }
+
+    return editor.chain().focus().setLink({ href: url }).run();
   },
   unsetLink() {
     return editor.chain().focus().unsetLink().run();

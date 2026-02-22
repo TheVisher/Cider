@@ -46,19 +46,28 @@ final class PanelEdgeResizeNSView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let zone = resolveZone(at: point)
-        updateCursor(for: zone)
+        if zone != .none {
+            updateCursor(for: zone)
+        } else if currentZone != .none {
+            // Was in a resize zone, now leaving — restore default
+            NSCursor.arrow.set()
+        }
         currentZone = zone
     }
 
     override func mouseEntered(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let zone = resolveZone(at: point)
-        updateCursor(for: zone)
+        if zone != .none {
+            updateCursor(for: zone)
+        }
         currentZone = zone
     }
 
     override func mouseExited(with event: NSEvent) {
-        NSCursor.arrow.set()
+        if currentZone != .none {
+            NSCursor.arrow.set()
+        }
         currentZone = .none
     }
 

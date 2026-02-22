@@ -171,7 +171,7 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 ## File Structure
 ```
 Sources/Cider/
-├── App/              # Entry point, AppDelegate, Panels (CiderPanel, Bookmarks, Notes, Settings)
+├── App/              # Entry point, AppDelegate, Panels (CiderPanel, DetailPopover, Settings)
 ├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, TrashItem, CiderTab, LibraryDisplayMode)
 ├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, TrashStorage, CiderUndoManager, etc.)
 ├── Utilities/        # Constants, CiderFont, CiderColors, ButtonStyles, ContainerStyles, HoverState, helpers
@@ -323,14 +323,14 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **Home tab kept alive:** `HomeDashboardView` is always in the view tree (ZStack with `opacity(isHomeActive ? 1 : 0)` + `allowsHitTesting`). Switching tabs doesn't destroy it — thumbnails, card data, and scroll position persist. Other tabs (saved views, search, external sources) still create/destroy on demand. `isHomeActive = selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil`.
 - **Folder view condition order:** In `tabContentBody`, check `selectedFolderID != nil` BEFORE the ZStack that contains Home — otherwise Home renders instead of FolderDetailView when a folder is selected on the Home tab.
 - **Tab deselection in folder view:** CiderTabBar takes `selectedFolderID` binding. `isSelected = selectedTab == tab && selectedFolderID == nil`. Clicking a tab sets `selectedFolderID = nil` so re-clicking the same tab works to exit folder view.
-- **Notes panel modal pattern:** `.openNoteInPanel` with `userInfo: ["modal": true]` installs NSEvent local monitor. Click inside notes panel → remove monitor (normal behavior). Click outside → dismiss AND return `nil` to swallow the event (prevents underlying cards from activating).
+- **Inline note editor:** Notes open inline within CiderPanelView via push/pop navigation (`editingNoteID` state). Editor takes over the content area; title bar swaps to back button + editable title + formatting controls. Escape or back button closes the editor, flushes save, and returns to the previous view.
 - **onDrop concurrency:** `loadDataRepresentation` callbacks are non-isolated. Capture view model references locally before the closure, then do lookups inside `Task { @MainActor in }` to avoid main-actor-isolation warnings.
 - **Escape key in NSPanel:** `.onExitCommand` does NOT work with `.nonactivatingPanel` — use a hidden `Button("") { ... }.keyboardShortcut(.escape, modifiers: [])` in `.background {}` instead.
 - **Modifier detection in Button actions:** Use `NSEvent.modifierFlags` (static property) to check `.command` / `.shift` at click time. Works inside Button action closures without needing gesture composition.
 - **Custom UTIs in `.onDrop`:** `hasItemConformingToTypeIdentifier()` and `registeredTypeIdentifiers.contains()` both fail for unregistered custom UTIs (e.g., `com.cider.multi-drag`). Encode payloads in `public.utf8-plain-text` with a distinctive prefix (e.g., `cider-multi-drag:JSON`) and detect via text parsing in drop handlers.
 - **Drag preview clipping:** `scaleEffect`, `rotationEffect`, and `offset` on `.onDrag(preview:)` views push content outside the view's natural bounds. macOS clips the preview window to those bounds. Add explicit `.padding()` before transforms to prevent clipping.
 - **Multi-drag provider types:** Don't register single-item type identifiers on multi-drag providers — the single-item drop handler fires first (by order in `handleFolderDrop`) and intercepts the drop, ignoring the multi-drag payload.
-- **Shared view parameter changes:** `BookmarksBrowserView` is used by both `CiderPanelView` and standalone `BookmarksPanelView`. When adding required parameters, update ALL call sites.
+- **Shared view parameter changes:** `BookmarksBrowserView` is used by `CiderPanelView` (and potentially multiple call sites within it). When adding required parameters, update ALL call sites.
 - **NSOpenPanel from non-activating panel:** Call `NSApp.activate(ignoringOtherApps: true)` before `runModal()` — otherwise the file picker sidebar isn't fully interactive (requires multiple clicks). Don't set `panel.level = .floating` on the open panel.
 - **Mouse event capture on NSViewRepresentable:** For overlays that MUST capture mouse events (e.g., cover image drag), override `mouseDownCanMoveWindow` → `false`, `hitTest` → return `self`, `acceptsFirstMouse` → `true`, and use `.activeAlways` tracking area (not `.activeInKeyWindow` — non-activating panels are never key). Use `window.nextEvent(matching:)` event loop pattern (see `PanelEdgeResizeView` and `CoverRepositionNSView`).
 - **`.task(id:)` for file replacement:** When file content changes but the path stays the same (e.g., replacing a cover image), include `updatedAt` timestamp in the task ID — not just the file path.

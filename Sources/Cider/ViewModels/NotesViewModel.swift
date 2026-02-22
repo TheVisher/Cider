@@ -187,6 +187,8 @@ final class NotesViewModel: ObservableObject {
         contentController.add(coordinator, name: "slashPopupState")
         contentController.add(coordinator, name: "floatingToolbarState")
         contentController.add(coordinator, name: "editorError")
+        contentController.add(coordinator, name: "editorRequestClose")
+        contentController.add(coordinator, name: "linkClicked")
 
         let webView = TipTapWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = coordinator
@@ -952,7 +954,7 @@ final class NotesViewModel: ObservableObject {
     private func promptForLinkURL() -> String? {
         let alert = NSAlert()
         alert.messageText = "Add Link"
-        alert.informativeText = "Enter a URL for the selected text."
+        alert.informativeText = "Enter a URL to insert or apply to the selected text."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Insert")
         alert.addButton(withTitle: "Cancel")

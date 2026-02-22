@@ -81,9 +81,7 @@ Add the same view options button to the Notes tab title bar area:
 
 ---
 
-## Bug Fix: Standalone Panel Resize Handles
-
-The standalone notes panel (`NotesPanelView`) still uses the old single-corner resize handle (`NotesResizeHandle`). Needs to be updated to use all-edge resize handles matching the main panel's `PanelEdgeResizeView` pattern. Currently only resizes from the bottom-right corner.
+<!-- Removed: Standalone panel resize handle bug fix — standalone NotesPanel was removed in Feb 2026 panel consolidation. Notes editor now opens inline within the main panel (push/pop navigation). -->
 
 ---
 
@@ -163,7 +161,7 @@ Once the Whiteboard tab is implemented as its own dedicated tab, the Notes tab f
 Click a note in the browser to open it in the adjacent editor without leaving the panel. This provides a browse-and-edit workflow similar to Apple Notes / Bear / Obsidian.
 
 **Width behavior:**
-- **Narrow panel (< ~500pt):** Card browser only. Click opens note in expand modal or dedicated panel (Opt+B)
+- **Narrow panel (< ~500pt):** Card browser only. Click opens note in inline editor (push/pop navigation)
 - **Wide panel (> ~500pt):** Split view with resizable divider
 
 **Empty state (no note selected):**
@@ -171,7 +169,7 @@ Click a note in the browser to open it in the adjacent editor without leaving th
 - No scratchpad or capture area — that's what the Whiteboard tab is for
 - The Notes tab stays focused on structured reading and writing
 
-This is distinct from the Opt+B dedicated notes panel, which remains available at any time for focused editing.
+<!-- Previous: "This is distinct from the Opt+B dedicated notes panel" — standalone panel removed in Feb 2026 consolidation. Opt+B now captures a bookmark from the active browser. -->
 
 ### What Differentiates Notes Cards from Bookmark Cards
 
@@ -227,7 +225,11 @@ The current "pin toolbar" toggle becomes unnecessary — the compact toolbar is 
 
 ---
 
-## Standalone Panel Sidebar (Upcoming)
+<!-- Standalone Panel Sidebar section — standalone NotesPanel was removed in Feb 2026 panel consolidation.
+The inline editor now lives inside the main panel, which already has the full sidebar.
+Keeping the sidebar vision below for reference in case a future dedicated editor surface is added.
+
+## Standalone Panel Sidebar (Archived — panel removed)
 
 **Prerequisite:** Redesign the main app's sidebar first, then reuse the same component in the standalone notes panel.
 
@@ -256,6 +258,7 @@ The search bar in the standalone sidebar has two modes:
 2. **Cross-note search** — below the in-note results, shows other notes containing the query with context snippets (the matching line with surrounding text). Clicking a result switches to that note and scrolls to the match.
 
 This is sometimes called "universal search" or "omnisearch" (Obsidian's pattern).
+End of archived standalone panel sidebar section. -->
 
 ---
 

@@ -1,7 +1,7 @@
 # Bookmarks Tab Vision
 
 ## Goal
-Build a fast, low-friction bookmarking system in Cider with strong capture flows, high-quality metadata, and a polished visual browsing experience (List/Grid/Masonry + standalone panel).
+Build a fast, low-friction bookmarking system in Cider with strong capture flows, high-quality metadata, and a polished visual browsing experience (List/Grid/Masonry).
 
 ## Current Status (Implemented)
 - Command Palette tab and standalone Bookmarks window.
@@ -31,9 +31,7 @@ Bookmarks participate in the cross-entity label and stack system alongside date 
   - Tag concert/event bookmarks with a "Tickets" label → a stack filters for upcoming events
   - Color-code bookmarks by project or person for quick visual scanning in mixed-content views
 
-## Bug Fix: Standalone Panel Resize Handles
-
-The standalone bookmarks panel (`BookmarksPanelView`) uses a single-corner resize handle (`BookmarksResizeHandle`). Needs to be updated to use all-edge resize handles matching the main panel's `PanelEdgeResizeView` pattern.
+<!-- Removed: Standalone panel resize handle bug fix — standalone BookmarksPanel was removed in Feb 2026 panel consolidation. Bookmarks are now browsed exclusively in the main panel. -->
 
 ---
 

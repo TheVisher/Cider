@@ -237,7 +237,7 @@ When a toast is showing, Cider's existing hotkeys double as accept gestures:
 - **Option+B** → save directly as a **Bookmark** (skips Whiteboard, adds to bookmarks)
 - **Ignore / let it expire** → nothing is captured
 
-When no toast is showing, these hotkeys work as normal (open Cider, open Notes panel, open Bookmarks panel).
+When no toast is showing, these hotkeys work as normal (double-tap Option opens Cider, Option+N creates a new note, Option+B captures a bookmark from the active browser).
 
 This means:
 - No new hotkeys to learn — same gestures you already use for Cider

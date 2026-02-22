@@ -164,6 +164,11 @@ struct CiderPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .captureBookmark)) { _ in
             _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .editorRequestClose)) { _ in
+            if isEditorActive {
+                closeNoteEditor()
+            }
+        }
         .sheet(item: $newEventEditorContext) { context in
             DateCardEditorSheet(
                 existingCard: context.existingCard,

@@ -34,11 +34,19 @@ Run this checklist before shipping any notes/editor changes.
 - Resize image and verify width persists after reopen.
 - Move image with drag handle and confirm drop indicator appears.
 - Close/reopen and confirm no stray `\` lines appear.
+- Center an image (select paragraph, apply center alignment), close/reopen, and confirm centering persists.
+
+## Text Alignment Persistence
+- Create centered text paragraph, close/reopen, confirm alignment persists.
+- Create centered paragraph with image, close/reopen, confirm both image and alignment persist.
+- Create numbered list items in a centered paragraph, close/reopen multiple times, confirm no backslash accumulation (e.g., `1\\\\.` growing).
 
 ## Focus and Hotkeys
-- With notes panel open, verify `Option+Tab` still cycles windows.
-- Close notes panel and verify `Option+Tab` still works.
-- Verify notes panel does not trigger hidden command palette key handlers.
+- With inline editor open, verify `Option+Tab` still cycles windows.
+- Close inline editor (Escape or back button) and verify `Option+Tab` still works.
+- Verify inline editor does not trigger hidden command palette key handlers.
+- Verify opening a note from Home, folder view, search, and saved view tabs all work correctly.
+- Verify Escape closes editor and returns to previous view (not just clears selection).
 
 ## Search
 - Search by note title from command palette and open matching note.

@@ -98,11 +98,12 @@ Traditional calendars make time the primary axis — every day gets equal visual
 ### Click Behavior
 
 - **Bookmark card click** → Opens bookmark detail modal within the Home view (not tab switch)
-- **Note card click** → Opens standalone notes panel on top, with click-outside-to-dismiss modal behavior
-  
-  - First click outside the notes panel → dismisses it (event is swallowed so underlying cards don't activate)
-  - First click inside the notes panel → removes the monitor, panel becomes a normal sticky panel
+- **Note card click** → Opens inline note editor within the main panel (push/pop navigation — editor takes over the content area, title bar shows note title + back button)
+
+  - Press Escape or click the back arrow to return to the previous view
+  - Auto-save flushes on editor close
 - **Rejected approach:** Tab-switching on click (loses scroll position, feels disruptive)
+- **Previous approach (removed):** Standalone notes panel with modal click-outside-to-dismiss — replaced by inline editor in Feb 2026 panel consolidation
 
 ## Planned: Sorting Options
 
@@ -114,6 +115,48 @@ Sort controls in ViewOptionsDropdown for the Home library feed:
 - Currently the feed sorts by `createdDate` descending — this becomes configurable
 
 ---
+
+## Planned: Date Card Surfacing
+
+Date cards should behave like calendar events — they surface near the top of the library feed when their scheduled date approaches, not just when they were created.
+
+### Behavior
+
+- A date card created in January for a June birthday should sit in the library at its creation position, then **resurface near the top** as the date approaches
+- Surfacing window is configurable: "Show N days before" (default: 7 days)
+- Once surfaced, the card stays promoted until the event passes or is marked completed
+- Completed date cards stop surfacing regardless of date proximity
+
+### Sort Integration
+
+The library feed sort should support a **hybrid mode** (likely the default) that:
+1. Evaluates each date card's `startAt` against the current date + surfacing window
+2. Promotes matching date cards above the normal sort order
+3. Among promoted cards, sorts by nearest `startAt` first (most urgent on top)
+4. Non-promoted items follow the user's chosen sort (created, modified, title, etc.)
+
+### Configuration
+
+- **Global default**: `CiderConfig.dateCardSurfaceDaysBefore: Int` (default 7) — applies to all date cards without per-card rules
+- **Per-card override**: `DateCard.rules: [SurfacingRule]` already exists (stored but not evaluated) — `surfaceDaysBeforeDate(N)` should override the global default when present
+- **Settings UI**: slider or stepper in Settings → General or a dedicated "Surfacing" section
+
+### Implementation Notes
+
+- `DateCard.rules` field is already persisted in JSON — just needs evaluation in `LibraryViewModel`
+- `LibraryItemV2.dateAnchor` already extracts `startAt` — the surfacing check is: `dateAnchor >= now && dateAnchor <= now + N days`
+- Stack surfacing logic (`isSurfaceRuleTriggered`) already implements `surfaceDaysBeforeDate(N)` — the same logic applies to individual date cards
+- The Continue section (top 8 recents) could optionally include surfaced date cards, or surfacing could be limited to the library feed only
+
+### Examples
+
+| Scenario | Surfacing window | Behavior |
+| --- | --- | --- |
+| Birthday on June 15, created Jan 10 | 14 days | Appears at creation position until June 1, then surfaces to top |
+| Bill due March 1, created Feb 20 | 7 days | Surfaces Feb 22 (7 days before) |
+| Meeting tomorrow, created today | 1 day | Surfaces immediately (within window) |
+| Past event (Feb 10), today is Feb 21 | any | Does not surface (date has passed) |
+| Completed event | any | Does not surface |
 
 ## Future Ideas (Not Yet Prioritized)
 

@@ -439,8 +439,8 @@ Apply these defaults to any new companion window unless there is a strong reason
 
 ## File References
 
-- `NotesPanel.swift` — Reference NSPanel implementation (resizable, draggable, pinnable)
-- `NotesPanelView.swift` — Reference view with resize handle, title bar, acrylic background
-- `CommandPalettePanel.swift` — Fixed-size panel variant (no resize)
+- `CiderPanel.swift` — Main NSPanel implementation (resizable, draggable, cross-monitor movement)
+- `CiderPanelView.swift` — Main panel view with sidebar, tab bar, inline note editor, resize handles
+- <!-- Removed: NotesPanel.swift / NotesPanelView.swift — standalone panels removed in Feb 2026 consolidation -->
 - `PaletteBackgroundView.swift` — Shared acrylic + shadow background component
 - `ACRYLIC_STYLE.md` — Full shadow/border/material documentation

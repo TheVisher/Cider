@@ -54,7 +54,7 @@ When building a new feature, check this doc first. If a component or pattern alr
 
 ### CiderPanelShell
 - **File:** `Views/Shared/CiderPanelShell.swift`
-- **Used by:** CiderPanelView, BookmarksPanelView, NotesPanelView
+- **Used by:** CiderPanelView
 - **What:** Generic structural shell for all panel windows — encapsulates two-column layout, sidebar container, traffic lights, title bar, divider, compact mode logic, resize handles, and shadow padding
 - **Generic params:** `SidebarContent`, `SidebarFooter`, `TitleBarContent`, `Content`, `PanelOverlay`
 - **Init params:** `isCollapsed`, `onClose`, `onCollapse`, `onMaximize`, plus `@ViewBuilder` closures for each generic slot
@@ -67,7 +67,7 @@ When building a new feature, check this doc first. If a component or pattern alr
 
 ### EmptyStateView
 - **File:** `Views/Shared/EmptyStateView.swift`
-- **Used by:** NotesTabContent, NotesPanelView, SearchTabContent, ProjectTabContent, FolderContentView, RootFolderOverviewView
+- **Used by:** NotesTabContent, SearchTabContent, ProjectTabContent, FolderContentView, RootFolderOverviewView
 - **What:** Vertically centered empty state with icon (36pt), title, optional subtitle, optional action button
 - **Params:** `icon: String`, `title: String`, `subtitle: String?`, `actionLabel: String?`, `action: (() -> Void)?`
 - **Note:** BookmarksBrowserView has its own inline empty state that scales with `textScale` — don't use this shared component there

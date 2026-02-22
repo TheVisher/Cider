@@ -55,6 +55,24 @@ html, body {
   margin-top: 0;
 }
 
+/* Links */
+.tiptap-editor a {
+  color: #6cb4ee;
+  text-decoration: underline;
+  text-decoration-color: rgba(108, 180, 238, 0.35);
+  text-underline-offset: 2px;
+  cursor: text;
+  transition: text-decoration-color 0.15s;
+}
+
+.tiptap-editor a:hover {
+  text-decoration-color: rgba(108, 180, 238, 0.7);
+}
+
+.tiptap-editor.cmd-held a {
+  cursor: pointer;
+}
+
 /* Placeholder */
 .tiptap-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
