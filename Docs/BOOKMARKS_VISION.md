@@ -45,24 +45,24 @@ Bookmarks participate in the cross-entity label and stack system alongside date 
 - Metadata title quality is improved on major sites.
 - Thumbnail fallback coverage improves without regressions in speed.
 
-## Phase 2: Bookmark Details Surface
-1. Add bookmark details panel (on thumbnail click / info action).
-2. Show/edit metadata:
-- canonical URL
-- title
-- tags
-- notes
-- thumbnail source/local status
-3. Add actions:
-- replace/remove thumbnail
-- copy URL
-- open in browser
-- open original image (if local original exists, else remote fallback)
+## Phase 2: Bookmark Details Surface ✅
+1. ✅ Add bookmark details panel (on thumbnail click / info action).
+2. ✅ Show/edit metadata:
+- ✅ canonical URL
+- ✅ title
+- ✅ tags
+- ✅ notes
+- thumbnail source/local status (partial — hero preview, no separate indicator)
+3. ✅ Add actions:
+- replace/remove thumbnail (drag-and-drop on card)
+- ✅ copy URL
+- ✅ open in browser
+- ✅ open original image (if local original exists, else remote fallback)
 
 ### Acceptance Criteria
-- Details panel opens reliably from cards in all layouts.
-- Edits persist and reflect immediately in card/list views.
-- Keyboard navigation and accessibility behavior match existing panel standards.
+- ✅ Details panel opens reliably from cards in all layouts (BookmarksTabContent, HomeDashboardView, FolderDetailView).
+- ✅ Edits persist and reflect immediately in card/list views.
+- ✅ Keyboard navigation and accessibility behavior match existing panel standards.
 
 ## Phase 3: Library Management
 1. **Multi-select** ✓ — Shift-click range, Cmd-click toggle, Cmd+A select all. Bulk move/delete implemented. Multi-drag with fanned preview implemented. Bulk tag future. See `WORKSPACES_VISION.md`.
