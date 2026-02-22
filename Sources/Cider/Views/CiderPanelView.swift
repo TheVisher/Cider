@@ -27,6 +27,10 @@ struct CiderPanelView: View {
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     @State private var suppressSidebarAutoExpandForDetails = false
     @State private var cardScaleSaveTask: Task<Void, Never>?
+    @State private var editingNoteID: UUID?
+    @State private var isEditingNoteTitle = false
+    @State private var showRestoreSnapshotAlert = false
+    @State private var pendingSnapshotChoice: NotesRecoverySnapshotChoice?
     @State private var newEventEditorContext: DateCardEditorContext?
     @State private var newContactEditorContext: ContactEditorContext?
 
@@ -80,11 +84,7 @@ struct CiderPanelView: View {
                         }
                     },
                     onOpenNote: { note in
-                        NotificationCenter.default.post(
-                            name: .openNoteInPanel,
-                            object: note,
-                            userInfo: ["modal": true]
-                        )
+                        openNoteInline(note)
                     },
                     onSpawnSearchTab: spawnSearchTab,
                     onDismiss: { isSearchPaletteVisible = false }
@@ -144,9 +144,25 @@ struct CiderPanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .dismissCiderPanel)) { _ in
             suppressSidebarAutoExpandForDetails = false
+            if isEditorActive {
+                closeNoteEditor()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
             textScale = CiderConfig.load().textSize.scale
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
+            if isEditorActive {
+                closeNoteEditor()
+            } else if let note = notification.object as? Note {
+                openNoteInline(note)
+            } else {
+                let note = NotesStorage.shared.createNew()
+                openNoteInline(note)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .captureBookmark)) { _ in
+            _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
         }
         .sheet(item: $newEventEditorContext) { context in
             DateCardEditorSheet(
@@ -204,7 +220,9 @@ struct CiderPanelView: View {
                 .hidden()
 
             Button("") {
-                if !selectedItemIDs.isEmpty {
+                if isEditorActive {
+                    closeNoteEditor()
+                } else if !selectedItemIDs.isEmpty {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         selectedItemIDs.removeAll()
                     }
@@ -219,7 +237,9 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var titleBarContent: some View {
-        if !selectedItemIDs.isEmpty {
+        if isEditorActive {
+            noteEditorTitleBar
+        } else if !selectedItemIDs.isEmpty {
             selectionTitleBar
         } else {
             normalTitleBar
@@ -343,6 +363,250 @@ struct CiderPanelView: View {
         }
         .buttonStyle(.plain)
         .help("Delete selected items")
+    }
+
+    // MARK: - Note Editor Title Bar
+
+    @ViewBuilder
+    private var noteEditorTitleBar: some View {
+        // Back button
+        Button {
+            closeNoteEditor()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Back")
+
+        // Editable title
+        if isEditingNoteTitle {
+            TextField("Note title", text: $notesViewModel.editingTitle, onCommit: {
+                notesViewModel.renameCurrentNote(to: notesViewModel.editingTitle)
+                isEditingNoteTitle = false
+            })
+            .textFieldStyle(.plain)
+            .font(CiderFont.subheadingSemibold)
+            .foregroundColor(CiderColors.primary)
+        } else {
+            let displayTitle = notesViewModel.activeExternalFile?.title ?? notesViewModel.selectedNote?.title ?? "Note"
+            Text(displayTitle)
+                .font(CiderFont.subheadingSemibold)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+                .onTapGesture(count: 2) {
+                    if notesViewModel.selectedNote != nil {
+                        isEditingNoteTitle = true
+                    }
+                }
+        }
+
+        Spacer(minLength: Spacing.sm)
+
+        // Note switcher dropdown
+        Menu {
+            Button {
+                let note = NotesStorage.shared.createNew()
+                openNoteInline(note)
+            } label: {
+                Label("New Note", systemImage: "plus")
+            }
+
+            if !notesViewModel.notes.isEmpty {
+                Divider()
+                ForEach(notesViewModel.notes) { note in
+                    Button {
+                        openNoteInline(note)
+                    } label: {
+                        if note.id == notesViewModel.selectedNote?.id {
+                            Label(note.title, systemImage: "checkmark")
+                        } else {
+                            Text(note.title)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "doc.text")
+                .font(CiderFont.label)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 24)
+        .help("Switch note")
+
+        // Formatting menu
+        noteFormattingMenu
+    }
+
+    @ViewBuilder
+    private var noteFormattingMenu: some View {
+        Menu {
+            Button {
+                notesViewModel.toggleFormattingToolbarPinned()
+            } label: {
+                Label(
+                    notesViewModel.isFormattingToolbarPinned ? "Unpin Toolbar" : "Pin Toolbar",
+                    systemImage: notesViewModel.isFormattingToolbarPinned ? "pin.slash" : "pin"
+                )
+            }
+
+            Divider()
+
+            Section("History") {
+                Button {
+                    notesViewModel.showFindBar()
+                } label: {
+                    Label("Find in Note", systemImage: "magnifyingglass")
+                }
+
+                Divider()
+
+                Button {
+                    notesViewModel.editorUndo()
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                }
+                Button {
+                    notesViewModel.editorRedo()
+                } label: {
+                    Label("Redo", systemImage: "arrow.uturn.forward")
+                }
+            }
+
+            Section("Recovery") {
+                if notesViewModel.recoverySnapshotChoices.isEmpty {
+                    Button("No snapshots yet") {}
+                        .disabled(true)
+                } else {
+                    Menu {
+                        ForEach(notesViewModel.recoverySnapshotChoices) { choice in
+                            Button {
+                                pendingSnapshotChoice = choice
+                                showRestoreSnapshotAlert = true
+                            } label: {
+                                Text(
+                                    "\(choice.title) (\(choice.snapshotDate.formatted(.relative(presentation: .named))))"
+                                )
+                            }
+                        }
+                    } label: {
+                        Label("Quick Restore", systemImage: "clock.arrow.circlepath")
+                    }
+
+                    Menu {
+                        ForEach(Array(notesViewModel.allRecoverySnapshotChoices.prefix(12))) { choice in
+                            Button {
+                                pendingSnapshotChoice = choice
+                                showRestoreSnapshotAlert = true
+                            } label: {
+                                Text(choice.title)
+                            }
+                        }
+
+                        if notesViewModel.allRecoverySnapshotChoices.count > 12 {
+                            Divider()
+                            Text("Showing 12 newest snapshots")
+                        }
+                    } label: {
+                        Label("All Snapshots", systemImage: "clock")
+                    }
+                }
+            }
+
+            Section("Alignment") {
+                Button { notesViewModel.editorAlignLeft() } label: {
+                    Label("Align Left", systemImage: "text.alignleft")
+                }
+                Button { notesViewModel.editorAlignCenter() } label: {
+                    Label("Align Center", systemImage: "text.aligncenter")
+                }
+                Button { notesViewModel.editorAlignRight() } label: {
+                    Label("Align Right", systemImage: "text.alignright")
+                }
+            }
+
+            Section("Text Style") {
+                Button { notesViewModel.editorToggleBold() } label: { Label("Bold", systemImage: "bold") }
+                Button { notesViewModel.editorToggleItalic() } label: { Label("Italic", systemImage: "italic") }
+                Button { notesViewModel.editorToggleUnderline() } label: { Label("Underline", systemImage: "underline") }
+                Button { notesViewModel.editorPromptForLink() } label: { Label("Add Link", systemImage: "link.badge.plus") }
+                Button { notesViewModel.editorRemoveLink() } label: { Label("Remove Link", systemImage: "link") }
+            }
+
+            Section("Selection Text Size") {
+                Button("Small") { notesViewModel.editorSetTextSizeSmall() }
+                Button("Normal") { notesViewModel.editorSetTextSizeNormal() }
+                Button("Large") { notesViewModel.editorSetTextSizeLarge() }
+                Button("Extra Large") { notesViewModel.editorSetTextSizeExtraLarge() }
+                Button("Reset Size") { notesViewModel.editorResetTextSize() }
+            }
+
+            Section("Note Text Size") {
+                ForEach(NotesEditorTextSize.allCases, id: \.self) { size in
+                    Button {
+                        notesViewModel.setNotesEditorTextSize(size)
+                    } label: {
+                        if notesViewModel.notesEditorTextSize == size {
+                            Label(size.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(size.displayName)
+                        }
+                    }
+                }
+            }
+
+            Section("Lists") {
+                Button { notesViewModel.editorToggleBulletList() } label: { Label("Bullet List", systemImage: "list.bullet") }
+                Button { notesViewModel.editorToggleOrderedList() } label: { Label("Numbered List", systemImage: "list.number") }
+                Button { notesViewModel.editorToggleTaskList() } label: { Label("Task List", systemImage: "checklist") }
+            }
+
+            Section("Table") {
+                Button("Insert Table") { notesViewModel.editorInsertTable() }
+                Button("Add Row Above") { notesViewModel.editorAddRowBefore() }
+                Button("Add Row Below") { notesViewModel.editorAddRowAfter() }
+                Button("Delete Row") { notesViewModel.editorDeleteRow() }
+                Button("Add Column Left") { notesViewModel.editorAddColumnBefore() }
+                Button("Add Column Right") { notesViewModel.editorAddColumnAfter() }
+                Button("Delete Column") { notesViewModel.editorDeleteColumn() }
+                Button("Merge Cells") { notesViewModel.editorMergeCells() }
+                Button("Split Cell") { notesViewModel.editorSplitCell() }
+                Button("Toggle Header Row") { notesViewModel.editorToggleHeaderRow() }
+                Button("Toggle Header Column") { notesViewModel.editorToggleHeaderColumn() }
+                Button("Delete Table") { notesViewModel.editorDeleteTable() }
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(CiderFont.labelMedium)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 24)
+        .disabled(notesViewModel.selectedNote == nil)
+        .help("Formatting")
+        .alert("Restore snapshot?", isPresented: $showRestoreSnapshotAlert) {
+            Button("Restore", role: .destructive) {
+                if let choice = pendingSnapshotChoice {
+                    notesViewModel.restoreSnapshot(choice)
+                }
+                pendingSnapshotChoice = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSnapshotChoice = nil
+            }
+        } message: {
+            if let choice = pendingSnapshotChoice {
+                Text(
+                    "This replaces the current note with the \(choice.title.lowercased()) snapshot from \(choice.snapshotDate.formatted(date: .abbreviated, time: .shortened))."
+                )
+            } else {
+                Text("This replaces the current note with the latest saved snapshot.")
+            }
+        }
     }
 
     // MARK: - Section Toggles
@@ -574,13 +838,25 @@ struct CiderPanelView: View {
 
     // MARK: - Content Area
 
+    private var isEditorActive: Bool {
+        editingNoteID != nil || notesViewModel.activeExternalFile != nil
+    }
+
     private var contentArea: some View {
-        tabContentBody
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack {
+            tabContentBody
+                .opacity(isEditorActive ? 0 : 1)
+                .allowsHitTesting(!isEditorActive)
+
+            if isEditorActive {
+                InlineNoteEditorView(viewModel: notesViewModel)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var isHomeActive: Bool {
-        selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil
+        selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil && !isEditorActive
     }
 
     @ViewBuilder
@@ -604,7 +880,8 @@ struct CiderPanelView: View {
                 onSelectSubFolder: { subFolderID in
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)
-                }
+                },
+                onOpenNote: { note in openNoteInline(note) }
             )
         } else {
             ZStack {
@@ -620,6 +897,7 @@ struct CiderPanelView: View {
                     selectedItemIDs: $selectedItemIDs,
                     sortMode: $homeSort,
                     entityFilter: $homeEntityFilter,
+                    onOpenNote: { note in openNoteInline(note) },
                     onEditDateCard: { dateCard in
                         newEventEditorContext = DateCardEditorContext(
                             existingCard: dateCard,
@@ -654,11 +932,7 @@ struct CiderPanelView: View {
                                     }
                                 },
                                 onOpenNote: { note in
-                                    NotificationCenter.default.post(
-                                        name: .openNoteInPanel,
-                                        object: note,
-                                        userInfo: ["modal": true]
-                                    )
+                                    openNoteInline(note)
                                 },
                                 onDeleteBookmark: { bookmark in
                                     bookmarksViewModel.deleteBookmarks([bookmark])
@@ -707,11 +981,7 @@ struct CiderPanelView: View {
                                 }
                             },
                             onOpenNote: { note in
-                                NotificationCenter.default.post(
-                                    name: .openNoteInPanel,
-                                    object: note,
-                                    userInfo: ["modal": true]
-                                )
+                                openNoteInline(note)
                             }
                         )
                     case .externalSource(let id, _):
@@ -750,12 +1020,26 @@ struct CiderPanelView: View {
             NotesStorage.shared.save(note: note)
         }
 
-        // Open note via notification — same mechanism as tapping a note from search
-        NotificationCenter.default.post(
-            name: .openNoteInPanel,
-            object: note,
-            userInfo: ["modal": true]
-        )
+        openNoteInline(note)
+    }
+
+    // MARK: - Inline Note Editor
+
+    private func openNoteInline(_ note: Note) {
+        notesViewModel.selectNote(note)
+        editingNoteID = note.id
+        isEditingNoteTitle = false
+
+        DispatchQueue.main.async {
+            notesViewModel.focusEditorIfFindBarHidden()
+        }
+    }
+
+    private func closeNoteEditor() {
+        notesViewModel.flushSave()
+        editingNoteID = nil
+        notesViewModel.activeExternalFile = nil
+        isEditingNoteTitle = false
     }
 
     // MARK: - Search Tab Management

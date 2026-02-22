@@ -2035,13 +2035,96 @@ function resetEditorPluginState() {
   editor.view.updateState(nextState);
 }
 
+/**
+ * After setContent(), ProseMirror's DOMParser may fail to read text-align
+ * from <p style="text-align: center"> when the paragraph contains inline
+ * images. This function repairs the document model by comparing the input
+ * HTML's text-align values with the parsed document and applying any
+ * missing alignments via a transaction.
+ */
+function repairTextAlignAfterParse(inputMarkdown) {
+  if (!inputMarkdown.includes('text-align')) return;
+
+  // Parse the input into a DOM tree to extract expected text-align values
+  // for each top-level paragraph/heading block.
+  const inputDOM = new DOMParser().parseFromString(
+    `<body>${inputMarkdown}</body>`,
+    'text/html',
+  ).body;
+
+  // Collect expected textAlign by top-level block index (only p and h1-h6).
+  const expectedAligns = [];
+  for (const child of inputDOM.childNodes) {
+    if (child.nodeType !== Node.ELEMENT_NODE) {
+      // Text nodes between blocks become paragraphs in ProseMirror.
+      if (child.nodeType === Node.TEXT_NODE && child.textContent.trim()) {
+        expectedAligns.push(null);
+      }
+      continue;
+    }
+    const tag = child.tagName.toLowerCase();
+    if (tag === 'p' || /^h[1-6]$/.test(tag)) {
+      const align = child.style?.textAlign;
+      expectedAligns.push(
+        align && supportedTextAlignments.includes(align) && align !== 'left'
+          ? align
+          : null,
+      );
+    } else {
+      // Other block elements (table, blockquote, list, hr, etc.) also
+      // count as a top-level block in ProseMirror.
+      expectedAligns.push(null);
+    }
+  }
+
+  if (!expectedAligns.some(Boolean)) return;
+
+  // Walk the ProseMirror document's top-level children in parallel with
+  // expectedAligns and apply any missing textAlign values.
+  let { tr } = editor.state;
+  let changed = false;
+  const doc = editor.state.doc;
+  const blockCount = Math.min(doc.childCount, expectedAligns.length);
+
+  for (let i = 0; i < blockCount; i++) {
+    const expected = expectedAligns[i];
+    if (!expected) continue;
+
+    const node = doc.child(i);
+    if (
+      (node.type.name === 'paragraph' || node.type.name === 'heading')
+      && node.attrs.textAlign !== expected
+    ) {
+      // doc.child(i) offset = sum of sizes of children before i.
+      let offset = 0;
+      for (let j = 0; j < i; j++) {
+        offset += doc.child(j).nodeSize;
+      }
+      tr = tr.setNodeMarkup(offset, undefined, {
+        ...node.attrs,
+        textAlign: expected,
+      });
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    tr.setMeta('addToHistory', false);
+    editor.view.dispatch(tr);
+  }
+}
+
 function replaceEditorContent(markdown) {
   clearNoteFindState();
   closeImagePreview();
   resetPendingImageInsertions();
-  editor.commands.setContent(normalizeIncomingMarkdown(markdown), false, {
+  const normalized = normalizeIncomingMarkdown(markdown);
+
+  editor.commands.setContent(normalized, false, {
     preserveWhitespace: 'full',
   });
+
+  repairTextAlignAfterParse(normalized);
   stripTaskItemLeadingSpaceArtifacts();
   resetEditorPluginState();
   requestFloatingToolbarUpdate(true);

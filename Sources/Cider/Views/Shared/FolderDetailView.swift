@@ -10,6 +10,7 @@ struct FolderDetailView: View {
     @Binding var selectedItemIDs: Set<String>
     @Binding var subFoldersCollapsed: Bool
     var onSelectSubFolder: ((UUID) -> Void)?
+    var onOpenNote: ((Note) -> Void)?
 
     @State private var selectionAnchorID: String?
     @State private var detailsDraft: BookmarkDetailsDraft?
@@ -687,11 +688,7 @@ struct FolderDetailView: View {
     // MARK: - Note Panel
 
     private func openNoteInPanel(_ note: Note) {
-        NotificationCenter.default.post(
-            name: .openNoteInPanel,
-            object: note,
-            userInfo: ["modal": true]
-        )
+        onOpenNote?(note)
     }
 
     // MARK: - Bookmark Details

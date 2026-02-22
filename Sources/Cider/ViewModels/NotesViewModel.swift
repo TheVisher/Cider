@@ -22,8 +22,6 @@ final class NotesViewModel: ObservableObject {
     @Published var activeExternalFile: ExternalFile?
     @Published var editingContent: String = ""
     @Published var searchText: String = ""
-    @Published var isCollapsed: Bool = false
-    @Published var isVisible: Bool = false
     @Published var pendingNoteToOpen: UUID?
     @Published var editingTitle: String = ""
     @Published var charCount: Int = 0
@@ -51,8 +49,9 @@ final class NotesViewModel: ObservableObject {
     private var saveWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var lastSyncedDiskContent: String = ""
-    /// True while waiting for TipTap's first `contentChanged` after loading an external file.
+    /// True while waiting for TipTap's first `contentChanged` after loading a note or external file.
     /// TipTap normalizes markdown on parse; we absorb that round-trip without writing to disk.
+    private var isLoadingNote = false
     private var isLoadingExternalFile = false
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
@@ -227,6 +226,7 @@ final class NotesViewModel: ObservableObject {
             let content = loadPersistedContent(for: note)
             editingContent = content
             lastSyncedDiskContent = content
+            isLoadingNote = true
             pushContentToEditor(content)
         } else if activeExternalFile != nil {
             // External file was opened before editor was ready — push its content now
@@ -296,6 +296,7 @@ final class NotesViewModel: ObservableObject {
         flushSave()
         activeExternalFile = nil
         isLoadingExternalFile = false
+        isLoadingNote = false
 
         var loaded = note
         loaded.content = loadPersistedContent(for: note)
@@ -311,6 +312,7 @@ final class NotesViewModel: ObservableObject {
         ignoredExternalDiskContent = nil
         externalChangeState = nil
         hasPendingSave = false
+        isLoadingNote = true
 
         pushContentToEditor(loaded.content)
     }
@@ -379,7 +381,6 @@ final class NotesViewModel: ObservableObject {
         for note in notes {
             let trashItem = NotesStorage.shared.delete(note: note)
             trashItems.append(trashItem)
-            NotesPanelPositionStore.shared.removeFrame(for: note.id)
         }
         if !trashItems.isEmpty {
             CiderUndoManager.shared.record(.bulkDeletedToTrash(trashItems))
@@ -439,8 +440,25 @@ final class NotesViewModel: ObservableObject {
             return
         }
 
+        // Absorb the TipTap normalization round-trip on initial note load.
+        // TipTap re-serializes on parse; we update the reference to the normalized
+        // content without writing to avoid overwriting disk content (e.g. centered
+        // images losing their <p style="text-align: center"> wrapper).
+        if isLoadingNote {
+            isLoadingNote = false
+            lastSyncedDiskContent = persistedContent
+            hasPendingSave = false
+            return
+        }
+
         guard var note = selectedNote else { return }
         note.content = persistedContent
+
+        // Don't save if content hasn't changed from what we loaded from disk
+        guard persistedContent != lastSyncedDiskContent else {
+            hasPendingSave = false
+            return
+        }
 
         saveWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -532,11 +550,15 @@ final class NotesViewModel: ObservableObject {
                 let persistedMarkdown = NotesStorage.shared.markdownForPersistence(markdown)
                 editingContent = persistedMarkdown
                 charCount = persistedMarkdown.count
-                current.content = persistedMarkdown
-                lastSyncedDiskContent = persistedMarkdown
                 pendingExternalDiskContent = nil
                 ignoredExternalDiskContent = nil
                 externalChangeState = nil
+                guard persistedMarkdown != self.lastSyncedDiskContent else {
+                    hasPendingSave = false
+                    return
+                }
+                current.content = persistedMarkdown
+                lastSyncedDiskContent = persistedMarkdown
                 NotesStorage.shared.save(note: current)
                 hasPendingSave = false
             }
@@ -971,38 +993,6 @@ final class NotesViewModel: ObservableObject {
         config.notesCardSizeScale = clamped
         config.save()
         NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
-    }
-
-    // MARK: - Panel State
-
-    func show() {
-        isVisible = true
-        // If no note selected (and not viewing an external file) and notes exist, select the most recent
-        if selectedNote == nil, activeExternalFile == nil, let first = notes.first {
-            selectNote(first)
-        }
-    }
-
-    func dismiss() {
-        flushSave()
-        isFindBarVisible = false
-        isVisible = false
-        NotificationCenter.default.post(name: .dismissNotes, object: nil)
-    }
-
-    func toggleCollapsed() {
-        NotificationCenter.default.post(name: .toggleNotesCollapse, object: nil)
-    }
-
-    func setCollapsed(_ collapsed: Bool) {
-        isCollapsed = collapsed
-        if collapsed {
-            isFindBarVisible = false
-        }
-    }
-
-    func moveToNextDisplay() {
-        NotificationCenter.default.post(name: .moveNotesToNextDisplay, object: nil)
     }
 
     private func clearSelectedNote() {

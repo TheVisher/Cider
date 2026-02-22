@@ -1,11 +1,9 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// Detects Option+N keyboard shortcut to toggle the notes panel.
-/// Uses CGEventTap for reliable detection when other apps have focus.
+/// Detects Option+N keyboard shortcut to toggle the inline note editor.
+/// Posts `.toggleNoteEditor` notification.
 final class NotesHotkeyDetector: @unchecked Sendable {
-
-    private let onToggle: @MainActor @Sendable () -> Void
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -14,10 +12,6 @@ final class NotesHotkeyDetector: @unchecked Sendable {
     private var isEnabled = true
     private var retainedForEventTap = false
     private var retainedForHotKey = false
-
-    init(onToggle: @escaping @MainActor @Sendable () -> Void) {
-        self.onToggle = onToggle
-    }
 
     func start() {
         guard eventTap == nil, hotKeyRef == nil else { return }
@@ -172,8 +166,9 @@ final class NotesHotkeyDetector: @unchecked Sendable {
         }
 
         DoubleTapDetector.suppressUntilNextOptionDown = true
-        let callback = onToggle
-        Task { @MainActor in callback() }
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .toggleNoteEditor, object: nil)
+        }
         return noErr
     }
 
@@ -213,9 +208,8 @@ final class NotesHotkeyDetector: @unchecked Sendable {
         // Suppress DoubleTapDetector so Option release doesn't also open the palette
         DoubleTapDetector.suppressUntilNextOptionDown = true
 
-        let callback = onToggle
         Task { @MainActor in
-            callback()
+            NotificationCenter.default.post(name: .toggleNoteEditor, object: nil)
         }
 
         // Consume event to prevent n-tilde character

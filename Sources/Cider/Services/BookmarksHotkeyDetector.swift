@@ -1,32 +1,21 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// Detects Option+B to toggle bookmarks and Option+Shift+B to capture active browser tab.
-/// Uses CGEventTap so the shortcut works while other apps have focus.
+/// Detects Option+B and Option+Shift+B to capture bookmarks.
+/// Posts `.captureBookmark` notification.
 final class BookmarksHotkeyDetector: @unchecked Sendable {
-
-    private let onToggle: @MainActor @Sendable () -> Void
-    private let onCapture: @MainActor @Sendable () -> Void
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var toggleHotKeyRef: EventHotKeyRef?
     private var captureHotKeyRef: EventHotKeyRef?
+    private var captureShiftHotKeyRef: EventHotKeyRef?
     private var hotKeyHandler: EventHandlerRef?
     private var isEnabled = true
     private var retainedForEventTap = false
     private var retainedForHotKey = false
 
-    init(
-        onToggle: @escaping @MainActor @Sendable () -> Void,
-        onCapture: @escaping @MainActor @Sendable () -> Void
-    ) {
-        self.onToggle = onToggle
-        self.onCapture = onCapture
-    }
-
     func start() {
-        guard eventTap == nil, toggleHotKeyRef == nil, captureHotKeyRef == nil else { return }
+        guard eventTap == nil, captureHotKeyRef == nil, captureShiftHotKeyRef == nil else { return }
 
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
@@ -82,14 +71,14 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
             retainedForEventTap = false
         }
 
-        if let toggleHotKeyRef {
-            UnregisterEventHotKey(toggleHotKeyRef)
-            self.toggleHotKeyRef = nil
-        }
-
         if let captureHotKeyRef {
             UnregisterEventHotKey(captureHotKeyRef)
             self.captureHotKeyRef = nil
+        }
+
+        if let captureShiftHotKeyRef {
+            UnregisterEventHotKey(captureShiftHotKeyRef)
+            self.captureShiftHotKeyRef = nil
         }
 
         if let hotKeyHandler {
@@ -114,7 +103,7 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
                 return
             }
             CGEvent.tapEnable(tap: eventTap, enable: enabled)
-        } else if toggleHotKeyRef == nil && captureHotKeyRef == nil && enabled {
+        } else if captureHotKeyRef == nil && captureShiftHotKeyRef == nil && enabled {
             start()
         }
     }
@@ -140,35 +129,37 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
         )
         guard installStatus == noErr else { return false }
 
-        let toggleID = EventHotKeyID(signature: Self.signature, id: 1)
-        let toggleStatus = RegisterEventHotKey(
-            UInt32(kVK_ANSI_B),
-            UInt32(optionKey),
-            toggleID,
-            GetApplicationEventTarget(),
-            0,
-            &toggleHotKeyRef
-        )
-
-        let captureID = EventHotKeyID(signature: Self.signature, id: 2)
+        // Opt+B
+        let captureID = EventHotKeyID(signature: Self.signature, id: 1)
         let captureStatus = RegisterEventHotKey(
             UInt32(kVK_ANSI_B),
-            UInt32(optionKey | shiftKey),
+            UInt32(optionKey),
             captureID,
             GetApplicationEventTarget(),
             0,
             &captureHotKeyRef
         )
 
-        guard toggleStatus == noErr, captureStatus == noErr,
-              toggleHotKeyRef != nil, captureHotKeyRef != nil else {
-            if let toggleHotKeyRef {
-                UnregisterEventHotKey(toggleHotKeyRef)
-                self.toggleHotKeyRef = nil
-            }
+        // Opt+Shift+B
+        let captureShiftID = EventHotKeyID(signature: Self.signature, id: 2)
+        let captureShiftStatus = RegisterEventHotKey(
+            UInt32(kVK_ANSI_B),
+            UInt32(optionKey | shiftKey),
+            captureShiftID,
+            GetApplicationEventTarget(),
+            0,
+            &captureShiftHotKeyRef
+        )
+
+        guard captureStatus == noErr, captureShiftStatus == noErr,
+              captureHotKeyRef != nil, captureShiftHotKeyRef != nil else {
             if let captureHotKeyRef {
                 UnregisterEventHotKey(captureHotKeyRef)
                 self.captureHotKeyRef = nil
+            }
+            if let captureShiftHotKeyRef {
+                UnregisterEventHotKey(captureShiftHotKeyRef)
+                self.captureShiftHotKeyRef = nil
             }
             if let hotKeyHandler {
                 RemoveEventHandler(hotKeyHandler)
@@ -200,19 +191,10 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
         }
 
         DoubleTapDetector.suppressUntilNextOptionDown = true
-
-        switch hotKeyID.id {
-        case 1:
-            let callback = onToggle
-            Task { @MainActor in callback() }
-            return noErr
-        case 2:
-            let callback = onCapture
-            Task { @MainActor in callback() }
-            return noErr
-        default:
-            return OSStatus(eventNotHandledErr)
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .captureBookmark, object: nil)
         }
+        return noErr
     }
 
     private static let signature: OSType = 0x43424B59 // "CBKY"
@@ -244,9 +226,8 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
 
         DoubleTapDetector.suppressUntilNextOptionDown = true
 
-        let callback = flags.contains(.maskShift) ? onCapture : onToggle
         Task { @MainActor in
-            callback()
+            NotificationCenter.default.post(name: .captureBookmark, object: nil)
         }
 
         return nil

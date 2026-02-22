@@ -12,16 +12,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var doubleTapDetector: DoubleTapDetector?
 
     // Notes
-    private var notesPanel: NotesPanel?
     private var notesViewModel: NotesViewModel?
     private var notesHotkeyDetector: NotesHotkeyDetector?
-    private let notesPanelPositionStore = NotesPanelPositionStore.shared
 
     // Bookmarks
-    private var bookmarksPanel: BookmarksPanel?
     private var bookmarksViewModel: BookmarksViewModel?
     private var bookmarksHotkeyDetector: BookmarksHotkeyDetector?
-    private let bookmarksPanelPositionStore = BookmarksPanelPositionStore.shared
     private var bookmarkCaptureToastPanel: BookmarkCaptureToastPanel?
     private var bookmarkCaptureToastHideWorkItem: DispatchWorkItem?
     private let bookmarkClipboardReviewToastModel = BookmarkClipboardReviewToastModel()
@@ -37,9 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Detail popover
     private var detailPopoverPanel: DetailPopoverPanel?
     private var ciderPanelFrameBeforeDetailModalExpand: NSRect?
-
-    // Notes panel modal behavior (click-outside-to-dismiss from Home tab)
-    private var notesPanelModalMonitor: Any?
 
     // Undo toast
     private var undoToastPanel: BookmarkCaptureToastPanel?
@@ -62,7 +55,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureCiderPanel()
         configureStatusItem()
         observeSettingsNotifications()
-        observeNotesNotifications()
         observeBookmarksNotifications()
         observeCiderPanelNotifications()
         observeConfigChanges()
@@ -315,183 +307,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Notes
 
     private func configureNotes() {
-        let viewModel = NotesViewModel()
-        self.notesViewModel = viewModel
-
-        let panel = NotesPanel()
-        self.notesPanel = panel
-
-        updateNotesPanelView()
-    }
-
-    private func updateNotesPanelView() {
-        guard let panel = notesPanel, let viewModel = notesViewModel else { return }
-
-        let notesView = NotesPanelView(viewModel: viewModel)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        let hostingView = NotesPanelHostingView(rootView: notesView)
-        panel.contentView = hostingView
-
-        // Size panel to fit content plus shadow padding
-        let width = NotesDesign.panelDefaultWidth
-        let height = NotesDesign.panelDefaultHeight
-        panel.setContentSize(NSSize(width: width, height: height))
+        notesViewModel = NotesViewModel()
     }
 
     private func startNotesHotkeyDetection() {
         let config = CiderConfig.load()
         guard config.enableNotesHotkey else { return }
 
-        notesHotkeyDetector = NotesHotkeyDetector(
-            onToggle: { [weak self] in
-                self?.toggleNotesPanel()
-            }
-        )
+        notesHotkeyDetector = NotesHotkeyDetector()
         notesHotkeyDetector?.start()
-    }
-
-    private func observeNotesNotifications() {
-        NotificationCenter.default.publisher(for: .toggleNotes)
-            .sink { [weak self] _ in
-                self?.toggleNotesPanel()
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .dismissNotes)
-            .sink { [weak self] _ in
-                self?.hideNotesPanel()
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .openNoteInPanel)
-            .sink { [weak self] notification in
-                if let note = notification.object as? Note {
-                    let modal = notification.userInfo?["modal"] as? Bool ?? false
-                    self?.showNotesPanel(with: note)
-                    if modal {
-                        self?.installNotesPanelModalMonitor()
-                    }
-                }
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .toggleNotesCollapse)
-            .sink { [weak self] _ in
-                self?.toggleNotesCollapsed()
-            }
-            .store(in: &cancellables)
-    }
-
-    private func toggleNotesPanel() {
-        guard let panel = notesPanel else { return }
-
-        if panel.isVisible {
-            hideNotesPanel()
-        } else {
-            showNotesPanel()
-        }
-    }
-
-    private func showNotesPanel(with note: Note? = nil) {
-        guard let panel = notesPanel, let viewModel = notesViewModel else { return }
-
-        debugLog("[Notes] showNotesPanel called")
-        if panel.isVisible {
-            persistCurrentNotePanelFrameIfNeeded()
-        }
-
-        if let note {
-            viewModel.selectNote(note)
-        }
-        viewModel.show()
-
-        let config = CiderConfig.load()
-        let noteToRestore = note ?? viewModel.selectedNote
-        if config.rememberNotesPanelPositionPerNote,
-           let noteToRestore,
-           let savedFrame = notesPanelPositionStore.frame(for: noteToRestore.id) {
-            panel.show(frame: savedFrame)
-        } else {
-            panel.showAtMouse()
-        }
-
-        viewModel.setCollapsed(false)
-        updateGlobalHotkeyEnablement()
-
-        // Ensure the editor takes keyboard focus after the panel appears.
-        DispatchQueue.main.async { [weak viewModel] in
-            viewModel?.focusEditorIfFindBarHidden()
-        }
-    }
-
-    private func hideNotesPanel() {
-        debugLog("[Notes] hideNotesPanel called")
-        removeNotesPanelModalMonitor()
-        persistCurrentNotePanelFrameIfNeeded()
-        flushNotesDraftIfNeeded()
-        notesPanel?.orderOut(nil)
-        notesViewModel?.isVisible = false
-        updateGlobalHotkeyEnablement()
-    }
-
-    private func installNotesPanelModalMonitor() {
-        removeNotesPanelModalMonitor()
-
-        // Wait briefly for the panel to fully appear before monitoring
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self, self.notesPanel?.isVisible == true else { return }
-
-            self.notesPanelModalMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-                guard let self else { return event }
-
-                let mouseScreen = NSEvent.mouseLocation
-                let isInsideNotesPanel = self.notesPanel?.frame.contains(mouseScreen) == true
-
-                if isInsideNotesPanel {
-                    // Click inside notes panel — remove monitor, let panel behave normally
-                    self.removeNotesPanelModalMonitor()
-                    return event
-                } else {
-                    // Click outside notes panel — dismiss and swallow the event
-                    // so the underlying panel doesn't open another item
-                    self.hideNotesPanel()
-                    return nil
-                }
-            }
-        }
-    }
-
-    private func removeNotesPanelModalMonitor() {
-        if let monitor = notesPanelModalMonitor {
-            NSEvent.removeMonitor(monitor)
-            notesPanelModalMonitor = nil
-        }
     }
 
     private func updateGlobalHotkeyEnablement() {
         let config = CiderConfig.load()
-        let notesVisible = notesPanel?.isVisible == true
-
-        debugLog(
-            "[Hotkeys] updateGlobalHotkeyEnablement " +
-            "notesVisible=\(notesVisible) " +
-            "notesHotkeyEnabled=\(config.enableNotesHotkey) " +
-            "bookmarksHotkeyEnabled=\(config.enableBookmarksHotkey) " +
-            "bookmarksCaptureHotkeyEnabled=\(config.enableBookmarksCaptureHotkey)"
-        )
-
         notesHotkeyDetector?.setEnabled(config.enableNotesHotkey)
         bookmarksHotkeyDetector?.setEnabled(config.enableBookmarksHotkey || config.enableBookmarksCaptureHotkey)
-    }
-
-    private func persistCurrentNotePanelFrameIfNeeded() {
-        let config = CiderConfig.load()
-        guard config.rememberNotesPanelPositionPerNote else { return }
-        guard let panel = notesPanel, panel.isVisible else { return }
-        guard let noteID = notesViewModel?.selectedNote?.id else { return }
-
-        notesPanelPositionStore.setFrame(panel.persistableFrame, for: noteID)
     }
 
     private func flushNotesDraftIfNeeded() {
@@ -499,91 +329,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notesViewModel?.flushSave()
     }
 
-    private func toggleNotesCollapsed() {
-        guard let panel = notesPanel, panel.isVisible else { return }
-        panel.toggleCollapsed()
-        notesViewModel?.setCollapsed(panel.isCollapsed)
-        persistCurrentNotePanelFrameIfNeeded()
-
-        if !panel.isCollapsed {
-            DispatchQueue.main.async { [weak self] in
-                self?.notesViewModel?.focusEditor()
-            }
-        }
-    }
-
     // MARK: - Bookmarks
 
     private func configureBookmarks() {
-        let viewModel = BookmarksViewModel()
-        self.bookmarksViewModel = viewModel
-
-        let panel = BookmarksPanel()
-        self.bookmarksPanel = panel
-
-        updateBookmarksPanelView()
+        bookmarksViewModel = BookmarksViewModel()
 
         let config = CiderConfig.load()
         BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
-    }
-
-    private func updateBookmarksPanelView() {
-        guard let panel = bookmarksPanel, let viewModel = bookmarksViewModel else { return }
-
-        let bookmarksView = BookmarksPanelView(viewModel: viewModel)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        let hostingView = BookmarksPanelHostingView(rootView: bookmarksView)
-        panel.contentView = hostingView
-
-        panel.setContentSize(NSSize(
-            width: BookmarksDesign.panelContentWidth,
-            height: BookmarksDesign.panelContentHeight
-        ))
     }
 
     private func startBookmarksHotkeyDetection() {
         let config = CiderConfig.load()
         guard config.enableBookmarksHotkey || config.enableBookmarksCaptureHotkey else { return }
 
-        bookmarksHotkeyDetector = BookmarksHotkeyDetector(
-            onToggle: { [weak self] in
-                guard CiderConfig.load().enableBookmarksHotkey else { return }
-                self?.toggleBookmarksPanel()
-            },
-            onCapture: { [weak self] in
-                guard CiderConfig.load().enableBookmarksCaptureHotkey else { return }
-                self?.captureBookmarkFromHotkey()
-            }
-        )
+        bookmarksHotkeyDetector = BookmarksHotkeyDetector()
         bookmarksHotkeyDetector?.start()
     }
 
+    private func captureBookmarkFromHotkey() {
+        guard let viewModel = bookmarksViewModel else { return }
+        _ = viewModel.captureBookmarkFromActiveBrowserOrClipboard()
+    }
+
     private func observeBookmarksNotifications() {
-        NotificationCenter.default.publisher(for: .toggleBookmarks)
-            .sink { [weak self] _ in
-                self?.toggleBookmarksPanel()
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .showBookmarks)
-            .sink { [weak self] _ in
-                self?.showBookmarksPanel()
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .dismissBookmarks)
-            .sink { [weak self] _ in
-                self?.hideBookmarksPanel()
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .toggleBookmarksCollapse)
-            .sink { [weak self] _ in
-                self?.toggleBookmarksCollapsed()
-            }
-            .store(in: &cancellables)
-
         NotificationCenter.default.publisher(for: .showBookmarkCaptureToast)
             .sink { [weak self] notification in
                 let message = notification.userInfo?["message"] as? String ?? "Bookmark updated"
@@ -620,7 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         modifiedAt: Date()
                     )
                 viewModel.openExternalFile(file)
-                self.showNotesPanel()
+                self.showCiderPanel()
             }
             .store(in: &cancellables)
     }
@@ -776,64 +544,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopUndoToastTimer()
         undoToastPanel?.orderOut(nil)
         CiderUndoManager.shared.discard()
-    }
-
-    private func toggleBookmarksPanel() {
-        guard let panel = bookmarksPanel else { return }
-
-        if panel.isVisible {
-            hideBookmarksPanel()
-        } else {
-            showBookmarksPanel()
-        }
-    }
-
-    private func showBookmarksPanel() {
-        guard let panel = bookmarksPanel, let viewModel = bookmarksViewModel else { return }
-
-        if panel.isVisible {
-            persistCurrentBookmarksPanelFrameIfNeeded()
-        }
-
-        viewModel.show()
-        viewModel.setCollapsed(false)
-        panel.setCollapsed(false, animated: false)
-
-        let config = CiderConfig.load()
-        if config.rememberBookmarksPanelPosition,
-           let savedFrame = bookmarksPanelPositionStore.frame() {
-            panel.show(frame: savedFrame)
-        } else {
-            panel.showAtMouse()
-        }
-
-        updateGlobalHotkeyEnablement()
-    }
-
-    private func hideBookmarksPanel() {
-        persistCurrentBookmarksPanelFrameIfNeeded()
-        bookmarksPanel?.orderOut(nil)
-        bookmarksViewModel?.isVisible = false
-        updateGlobalHotkeyEnablement()
-    }
-
-    private func toggleBookmarksCollapsed() {
-        guard let panel = bookmarksPanel, panel.isVisible else { return }
-        panel.toggleCollapsed()
-        bookmarksViewModel?.setCollapsed(panel.isCollapsed)
-        persistCurrentBookmarksPanelFrameIfNeeded()
-    }
-
-    private func captureBookmarkFromHotkey() {
-        guard let viewModel = bookmarksViewModel else { return }
-        _ = viewModel.captureBookmarkFromActiveBrowserOrClipboard()
-    }
-
-    private func persistCurrentBookmarksPanelFrameIfNeeded() {
-        let config = CiderConfig.load()
-        guard config.rememberBookmarksPanelPosition else { return }
-        guard let panel = bookmarksPanel, panel.isVisible else { return }
-        bookmarksPanelPositionStore.setFrame(panel.persistableFrame)
     }
 
     private func showBookmarkCaptureToast(message: String, isSuccess: Bool) {
@@ -1107,6 +817,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.publisher(for: .restoreCiderPanelAfterDetailModal)
             .sink { [weak self] _ in
                 self?.restoreCiderPanelAfterDetailModal()
+            }
+            .store(in: &cancellables)
+
+        // Note editor hotkey — show panel if hidden, CiderPanelView handles the rest
+        NotificationCenter.default.publisher(for: .toggleNoteEditor)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if self.ciderPanel?.isVisible != true {
+                    self.showCiderPanel()
+                }
+            }
+            .store(in: &cancellables)
+
+        // Bookmark capture hotkey
+        NotificationCenter.default.publisher(for: .captureBookmark)
+            .sink { [weak self] _ in
+                self?.captureBookmarkFromHotkey()
             }
             .store(in: &cancellables)
     }

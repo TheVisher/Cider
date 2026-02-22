@@ -12,6 +12,7 @@ struct HomeDashboardView: View {
     @Binding var selectedItemIDs: Set<String>
     @Binding var sortMode: LibrarySortMode
     @Binding var entityFilter: Set<LibraryEntityType>
+    var onOpenNote: (Note) -> Void = { _ in }
     var onEditDateCard: (DateCard) -> Void = { _ in }
     var onEditContact: (ContactCard) -> Void = { _ in }
 
@@ -417,11 +418,7 @@ struct HomeDashboardView: View {
     // MARK: - Note Panel
 
     private func openNoteInPanel(_ note: Note) {
-        NotificationCenter.default.post(
-            name: .openNoteInPanel,
-            object: note,
-            userInfo: ["modal": true]
-        )
+        onOpenNote(note)
     }
 
     // MARK: - Bookmark Details

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import QuartzCore
+import WebKit
 
 final class CiderPanel: NSPanel {
     private(set) var isCollapsed = false
@@ -115,6 +116,7 @@ final class CiderPanel: NSPanel {
             var view: NSView? = hitView
             while let v = view, v !== contentView {
                 if v is NSControl { return false }
+                if v is WKWebView { return false }
                 if v is PanelEdgeResizeNSView { return false }
                 view = v.superview
             }

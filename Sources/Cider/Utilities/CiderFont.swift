@@ -6,7 +6,7 @@ import SwiftUI
 /// one of these tokens. When the brand identity is finalized, changing typography
 /// means editing this one file.
 ///
-/// For textScale-responsive views (BookmarksBrowserView, BookmarksPanelView),
+/// For textScale-responsive views (BookmarksBrowserView),
 /// use the `(scale:)` function variants.
 enum CiderFont {
     private nonisolated(unsafe) static var _cachedScale: CGFloat = CiderConfig.load().textSize.scale
@@ -107,7 +107,7 @@ enum CiderFont {
 
     // MARK: - Responsive (textScale-based)
 
-    /// Body at responsive scale — BookmarksBrowserView, BookmarksPanelView
+    /// Body at responsive scale — BookmarksBrowserView
     static func body(scale: CGFloat) -> Font { .system(size: 11 * scale) }
     static func bodyMedium(scale: CGFloat) -> Font { .system(size: 11 * scale, weight: .medium) }
     static func bodySemibold(scale: CGFloat) -> Font { .system(size: 11 * scale, weight: .semibold) }
