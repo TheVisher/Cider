@@ -264,6 +264,9 @@ End of archived standalone panel sidebar section. -->
 
 ## Future Ideas (Not Yet Prioritized)
 
+### Drag Out to External Apps
+Drag a note card out of Cider onto Finder, a text editor, or a CLI and it drops the actual `.md` file. Currently drag providers only register internal Cider IDs — adding `public.file-url` with the note's resolved file path enables this. Full spec in `WORKSPACES_VISION.md` → "Drag Out to External Apps".
+
 ### UX Ideas from Note App Research
 
 Patterns worth stealing from other note apps:

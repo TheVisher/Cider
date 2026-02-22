@@ -175,6 +175,20 @@ The "Tab" card fills the slot left by the removed "Project" card. The +New picke
 **Future refinements (not yet implemented):**
 - "By label" and "By folder" filter pills in the creation form
 - Folder picker integration so users can scope a tab to a specific folder at creation time
+- "Unfiled items only" toggle — `requireUnfiled: Bool` on `SavedViewFilterSpec`, filters to items where `folderID == nil`
+
+### Inbox as a User-Created View
+
+An "Inbox" is not a built-in concept — it's a saved view the user creates with the "Unfiled" filter enabled. This keeps the architecture simple: the inbox is just a filter, not a special mode.
+
+**How to create one:**
+1. +New → Tab → name it "Inbox"
+2. Enable "Unfiled only" filter (once the `requireUnfiled` chip is implemented)
+3. The tab now shows every item that hasn't been organized into a folder yet
+
+**Workflow:** Capture freely without thinking about organization. Items land in the library with no folder. When you're ready to triage, open your Inbox tab and drag items into folders. As items get organized, they disappear from the Inbox view automatically.
+
+This is the same approach as Resurf's inbox-first workflow, but opt-in and user-configured rather than forced.
 
 ---
 
@@ -182,7 +196,34 @@ The "Tab" card fills the slot left by the removed "Project" card. The +New picke
 
 **Purpose:** Find things across all of Cider, with results that can become persistent.
 
-### Search Flow
+### Live Search (Planned — Replaces Command Palette for Item Search)
+
+The current search palette (Cmd+K overlay) shows results in a separate floating list. A better model: **search filters the current view in-place**.
+
+**How it works:**
+- Double-tap Option → panel opens → search field in title bar is auto-focused
+- User starts typing immediately — no extra shortcut needed
+- The current tab's content filters live as you type (same masonry/grid/list layout, just fewer items)
+- Search "YouTube" on the Home tab → all YouTube bookmarks appear in the familiar card layout, scrollable and browsable
+- Clear the search → full view returns instantly
+
+**Why this is better:**
+- Results stay in context — you see cards with thumbnails, not a flat list of titles
+- You can browse filtered results (scroll, right-click, open details) just like normal
+- No mode switch — search IS the view, not a separate overlay
+- Double-tap Option + type = instant access to anything in your library
+
+**Implementation:**
+- `SavedViewFilterSpec.textQuery` already supports live text filtering in saved view tabs
+- Extend this to the Home tab's library feed (bind a search field to `LibraryViewModel` filtering)
+- Auto-focus the search field on panel open (with the existing 150ms delay for `@FocusState` in NSPanel)
+
+**Command palette repurposed:**
+- Cmd+K becomes an **action palette** — create note, open settings, switch tab, run shortcuts
+- Item search moves entirely to the inline search field
+- The action palette is a command runner (like Raycast), not a content finder
+
+### Search Flow (Current)
 1. **Trigger** — Click search field in title bar, press Cmd+K, or type `/`.
 2. **Center palette opens** — Zen-style overlay, blurs background content.
 3. **Live results** — Split by type: bookmarks, notes, date cards, contacts. Debounced 100ms.
@@ -380,6 +421,29 @@ Dragging an unselected item while others are selected drags only that single ite
 - Escape key: hidden `Button` + `.keyboardShortcut(.escape)` — `.onExitCommand` doesn't work with `.nonactivatingPanel`
 - Future: bulk tag, bulk export
 
+#### Drag Out to External Apps
+
+Currently drag providers only register internal Cider type identifiers (`com.cider.bookmark-id`, `com.cider.note-id`). External apps can't consume these. To enable drag-out, register standard UTTypes alongside the internal ones on the same `NSItemProvider`:
+
+| Item type | Register | External behavior |
+|---|---|---|
+| Bookmark | `public.url` with the bookmark's URL | Browsers open the URL; Finder creates `.webloc` |
+| Note | `public.file-url` with the `.md` file path | Editors, CLIs, Finder receive the actual file |
+| Bookmark thumbnail | `public.file-url` with local thumbnail path | Image editors receive the image file |
+
+Implementation notes:
+- Add `provider.register(NSString(string: bookmark.urlString) as NSURL)` (or equivalent `public.url` registration) to each `bookmarkDragProvider` function
+- Add `provider.register(note.fileURL as NSURL)` (or equivalent `public.file-url` registration) to each `noteDragProvider` function
+- Internal Cider types stay registered so Cider-to-Cider drag (folder shelf, reorder) still works
+- Multi-drag: register standard types on the primary item's provider; secondary items are internal-only
+- Drag providers exist in 3 places: `BookmarksBrowserView`, `HomeDashboardView`, `FolderDetailView` — all must be updated
+
+Use cases:
+- Drag a bookmark onto a browser tab bar → opens the URL
+- Drag a note onto Claude Code CLI → CLI reads the `.md` file path
+- Drag a bookmark card onto Finder → creates a `.webloc` shortcut
+- Drag a note onto a text editor → editor opens the markdown file
+
 ### Undo System ✓
 Reversible actions should support undo via a transient toast:
 - Toast appears for ~5 seconds after destructive/organizational actions with an "Undo" button
@@ -430,6 +494,30 @@ Enhance the search palette with:
 - Date range filter
 - Fuzzy matching for typo tolerance
 - Recent searches list
+
+### macOS Services Integration
+
+Register Cider as a macOS Services provider so users can right-click selected content in any app and send it to Cider.
+
+**How it works:**
+- Select text, a URL, or an image in any app → right-click → Services → "Send to Cider"
+- Cider routes by content type:
+  - **URL detected** → captured as a bookmark (triggers enrichment pipeline)
+  - **Plain text** → created as a new note
+  - **Image** → saved as a document/image (future Documents tab) or attached to a new note
+- Capture toast confirms the action (reuses existing toast system)
+
+**Implementation:**
+- Register service in `Info.plist` with `NSServices` array (send types: `NSStringPboardType`, `NSURLPboardType`, `NSPasteboardTypePNG/TIFF`)
+- Handle `NSPerformService` in AppDelegate — inspect pasteboard, route to `BookmarksStorage.capture()` or `NotesStorage.create()` based on content type
+- URL detection reuses the existing `normalizedURL()` logic from `BookmarksStorage`
+- No UI needed beyond the existing capture toast
+
+**Complements existing capture flows:**
+- Hotkeys (Opt+B, Opt+N) — fastest, muscle memory
+- Clipboard monitoring — automatic, passive
+- Drag & drop — visual, intentional
+- **Services** — contextual, from any app's right-click menu
 
 ### Card Customization Sliders (Future)
 Additional sliders in ViewOptionsDropdown alongside the existing card size slider:

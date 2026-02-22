@@ -81,10 +81,12 @@ Bookmarks participate in the cross-entity label and stack system alongside date 
 1. Finalize storage layout under `~/Documents/Cider/bookmarks` (with migration support).
 2. Continue Netscape HTML import/export compatibility.
 3. Add richer import feedback for malformed/partial bookmark files.
+4. **Drag-out to external apps** — register `public.url` on bookmark drag providers so dragging a bookmark onto a browser opens the URL, onto Finder creates a `.webloc`, etc. See `WORKSPACES_VISION.md` → "Drag Out to External Apps" for full spec.
 
 ### Acceptance Criteria
 - Existing users migrate safely.
 - Imports/exports round-trip with mainstream browser bookmark files.
+- Dragging a bookmark out of Cider onto a browser/Finder works as expected.
 
 ## Phase 5: Polish and Performance
 1. ✅ Async thumbnail loading via `.task(id: fingerprint)` + `Task.detached` + `CGImageSourceCreateWithURL` — no main-thread image decoding during scroll.
@@ -209,6 +211,63 @@ These features lean into Cider's unique position as a floating panel open alongs
 - Privacy: some users won't want page content sent to cloud APIs — local-first tiers solve this
 - Could summaries update when a page changes (re-summarize stale bookmarks)?
 - Should Tier 0 metadata extraction happen automatically on every bookmark capture?
+
+---
+
+### Reader Mode
+
+**Concept:** Open saved links in a clean, distraction-free reading view inside Cider's panel — no ads, no navigation chrome, no cookie banners. Read articles, blog posts, and documentation without leaving Cider or opening a browser tab.
+
+**Core experience:**
+- Click "Read" on a bookmark card (or a dedicated button in the detail popover)
+- Cider fetches the page content and runs it through a Readability parser (strip ads, nav, sidebars → extract article body)
+- Clean article renders in a reader view inside the panel — title, author, date, body text, images
+- Typography and spacing match Cider's design system (CiderFont, CiderColors)
+- Reader view can be scrolled, text selected, passages highlighted or copied to a note
+
+**Why this fits Cider:**
+- Cider is already a reading companion — it saves links. Reader mode makes it a reading *tool*, not just a link repository.
+- The floating panel is the perfect surface for focused reading alongside your browser
+- Reader content can be saved as a permanent offline copy (see Web Archival below)
+- Future integration with the Books tab — reader mode is the core reading experience for both web articles and longer-form content
+
+**Technical approach:**
+- Readability.js (Mozilla's open-source parser) runs in a lightweight WKWebView — same pattern as the TipTap editor
+- Alternatively, use the existing enrichment pipeline to fetch HTML and parse article content server-side (no extra WebView)
+- Reader view renders in the DetailPopoverPanel or inline in the content area (push/pop like the notes editor)
+- CSS theme matches the panel aesthetic (dark mode, acrylic-compatible)
+
+**Open questions:**
+- Should reader mode be a separate view or replace the detail popover?
+- Should reader content be cached locally for offline access?
+- Support for multi-page articles (auto-pagination)?
+
+---
+
+### Web Archival
+
+**Concept:** Save a full snapshot of a web page locally so it survives if the original goes offline. The archived version is viewable inside Cider forever.
+
+**Core experience:**
+- Right-click a bookmark → "Archive Page" (or auto-archive on capture, configurable)
+- Cider saves a complete snapshot of the page (HTML, CSS, images)
+- Badge on the card indicates "Archived" — the bookmark is now immune to link rot
+- Click to view the archived version inside Cider, even if the live URL is dead
+
+**Technical approach:**
+- `WKWebView.createWebArchiveData()` — macOS native API that saves a `.webarchive` bundle (HTML + all assets)
+- Store alongside bookmark data in the Cider data directory (`.archives/{bookmark-id}.webarchive`)
+- View archived pages in a WKWebView inside the detail popover or a dedicated viewer
+- Storage could be significant — make archival opt-in per bookmark or per folder, with a storage indicator in Settings → Data
+
+**Tiered approach:**
+- *Tier 0:* Reader-mode text only (Readability-parsed article body saved as HTML/markdown — tiny, fast)
+- *Tier 1:* Full `.webarchive` snapshot (complete page with styles and images — larger but faithful)
+- *Tier 2:* Screenshot fallback (PNG of the rendered page — works for any page, even SPAs)
+
+**Relationship to Documents tab:**
+- Archived web pages could appear in the Documents tab as a "Web Archive" file type
+- Or they stay attached to the bookmark as metadata — viewable via the bookmark's detail view
 
 ---
 

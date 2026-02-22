@@ -158,6 +158,58 @@ The library feed sort should support a **hybrid mode** (likely the default) that
 | Past event (Feb 10), today is Feb 21 | any | Does not surface (date has passed) |
 | Completed event | any | Does not surface |
 
+## Planned: Resurfacing & Rediscovery
+
+Items you save shouldn't disappear into a void. Cider should proactively surface items you've forgotten about — not by age alone, but by actual engagement.
+
+### The Problem with "Sort by Oldest"
+
+Sorting by oldest doesn't surface forgotten items — it surfaces items you may have seen many times. A bookmark created a year ago that you've opened 10 times isn't forgotten. A bookmark created 9 months ago that you've never opened IS forgotten. The sort order can't distinguish these.
+
+### Engagement-Based Resurfacing
+
+Track lightweight engagement signals per item:
+- **`lastOpenedAt: Date?`** — last time the user clicked/opened the item (nil = never opened)
+- **`openCount: Int`** — total number of opens
+
+The resurfacing algorithm prioritizes items with:
+1. **Never opened** (`lastOpenedAt == nil`) — highest priority, sorted oldest first
+2. **Not opened recently** (`lastOpenedAt` is far in the past) — weighted by staleness
+3. **Low open count** — items opened once 6 months ago rank higher than items opened 10 times
+
+**Scoring formula (conceptual):**
+```
+resurfaceScore = daysSinceLastOpen * (1 / (openCount + 1))
+```
+Items with high scores are good candidates for resurfacing. Never-opened items get `daysSinceLastOpen = daysSinceCreation` and `openCount = 0`, giving them the highest scores.
+
+### Resurfacing as a Saved View
+
+Resurfacing is not a built-in mode — it's a **saved view filter dimension** that users opt into:
+- Add `sortMode: .resurfacing` to `LibrarySortMode` — sorts by resurface score descending
+- Users create a saved view called "Rediscover" with this sort mode
+- The view shows their most-forgotten items in the familiar card layout
+- Optionally limit to items older than N days (skip very recent captures)
+
+### Resurfacing in the Continue Section
+
+Alternatively (or additionally), the Continue section on Home could mix in 1-2 resurfaced items alongside the 8 most recent. A subtle "You saved this 6 months ago" label distinguishes them from recents.
+
+### AI-Enhanced Discovery
+
+With Apple Intelligence (see `AI_VISION.md`):
+- **Similar items** — when viewing a bookmark, Cider suggests related items via NaturalLanguage embedding similarity. "You might also want to revisit these."
+- **Contextual resurfacing** — AI notices you're saving React articles and surfaces that React tutorial you bookmarked 8 months ago but never opened
+- These suggestions could appear in the detail popover, as a sidebar section, or as cards in the Resurfacing saved view
+
+### Model Changes Required
+- Add `lastOpenedAt: Date?` and `openCount: Int` to `Bookmark` and `Note` models
+- Increment on every open action (`BookmarksViewModel.open()`, `NotesViewModel` note open)
+- Add `resurfacing` case to `LibrarySortMode`
+- Add resurfacing score computation to `LibraryViewModel`
+
+---
+
 ## Future Ideas (Not Yet Prioritized)
 
 - Pinned items section (show pinned notes/bookmarks at the top)

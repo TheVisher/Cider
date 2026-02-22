@@ -81,7 +81,7 @@ Mature on-device NLP. No Apple Intelligence requirement — works on any Mac.
 **Cider use cases:**
 
 - **Auto-tagging pipeline:** On bookmark capture → NaturalLanguage extracts entities and keywords → suggest tags and folder placement. "This article mentions React, TypeScript, and Vercel → tag: web-dev, suggest: Web Dev folder."
-- **"Find similar" items:** Every bookmark/note gets an embedding vector computed on save. When you open an item, Cider instantly shows related items by vector distance. No AI call needed — it's a math operation on precomputed vectors.
+- **"Find similar" items:** Every bookmark/note gets an embedding vector computed on save. When you open an item, Cider instantly shows related items by vector distance. No AI call needed — it's a math operation on precomputed vectors. See **Similar Items Discovery** section below for full spec.
 - **Smart folder suggestions:** "You saved 12 React articles this week — create a folder?"
 - **Extractive summarization:** TextRank powered by NaturalLanguage tokenization. Sentences scored by graph centrality, top N picked as summary. Real sentences from the page — never "wrong" — but selection quality is mediocre and output feels choppy compared to AI summaries.
 - **Search ranking:** Weight results by semantic similarity, not just string matching. Search "performance optimization" and find articles about "speeding up React renders" even if they don't contain those exact words.
@@ -131,6 +131,51 @@ Expose Cider actions to Siri and the Shortcuts app.
 - "Summarize this page" — trigger summary from Siri
 - "Search my bookmarks for \[query\]" — search without opening Cider
 - "Read my transcript" — speak the saved transcript of a video
+
+---
+
+## Similar Items Discovery
+
+When viewing any item in Cider, show related items the user may have forgotten about or not connected mentally. This turns Cider from a passive storage tool into an active knowledge network.
+
+### How It Works
+
+1. **On save:** Compute a text embedding vector for each bookmark/note using `NLEmbedding` (Apple's on-device sentence embeddings)
+   - Bookmarks: embed `title + description + tags + notes`
+   - Notes: embed `title + first 500 chars of body`
+   - Store the vector alongside the item (compact float array, ~2KB per item)
+
+2. **On view:** When the user opens a bookmark detail or note editor, compute cosine similarity between that item's vector and all other stored vectors
+   - Return the top 3-5 most similar items
+   - Exclude items in the same folder (the user already knows those are related)
+   - Computation is pure math on local vectors — instant, no network, no AI API call
+
+3. **Display:** "Related items" section in the detail popover or a sidebar panel
+   - Small card previews with title + thumbnail
+   - Click to navigate directly to the related item
+   - Builds serendipitous connections: "I forgot I saved that React performance article when I'm looking at this webpack config bookmark"
+
+### Integration with Resurfacing
+
+Similar items discovery complements the resurfacing system (see `HOME_VISION.md` → Resurfacing & Rediscovery):
+- Resurfacing surfaces **forgotten** items proactively (low engagement score)
+- Similar items surfaces **related** items contextually (when you're already looking at something)
+- Together they keep the library feeling alive and interconnected
+
+### Card Metadata Enrichment
+
+With Foundation Models (macOS 26+), AI can go further:
+- Auto-generate a "related to" field in each item's metadata listing similar item IDs
+- Pre-compute relationships on save (background task), not just on view
+- Enable a "knowledge graph" view showing clusters of related content (future visualization)
+
+### Implementation Priority
+
+This is a Tier 1 feature (NaturalLanguage framework, no Apple Intelligence required):
+- `NLEmbedding.wordEmbedding(for: .english)` is available on any Mac
+- Sentence-level embeddings via `NLEmbedding.sentenceEmbedding(for: .english)` for better quality
+- No API keys, no cloud, no privacy concerns
+- Only dependency: embedding model download on first use (~50MB)
 
 ---
 

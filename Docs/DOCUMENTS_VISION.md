@@ -61,11 +61,37 @@ Introduce a dedicated Documents surface for non-URL assets (PDFs, images, files)
 1. Import from common export bundles.
 2. Optional sync/export strategy.
 3. Optional “Attach to Bookmark” linking between Documents and Bookmarks.
+4. Web archive viewing — `.webarchive` files from the bookmark archival feature (see `BOOKMARKS_VISION.md` → Web Archival) appear as viewable documents.
 
 ### Acceptance Criteria
 - Cross-feature linking is optional and does not complicate base capture flow.
+
+## Phase 5: Filesystem Watcher & Universal Organizer
+
+**Vision:** Cider becomes the organizer for your files — not just things you manually capture, but your existing filesystem. Watch folders like Pictures, Documents, Downloads and surface their contents inside the floating panel, browsable and searchable without opening Finder.
+
+**How it works:**
+- User configures watched directories in Settings (e.g., `~/Pictures`, `~/Documents`, `~/Downloads`)
+- Cider indexes file metadata (name, type, size, dates, thumbnails) via `FSEvents` or `DispatchSource`
+- Files appear in the Documents tab alongside manually captured items
+- No file copying — Cider references files in-place (like Spotlight, not like Photos.app)
+- Full-text search across watched files (PDF text via PDFKit, image text via Vision OCR)
+
+**Why this fits Cider:**
+- Cider's floating panel is already the “quick access to everything” surface
+- Finder requires a full app switch and loses your context. Cider doesn't.
+- Combines with the existing folder/saved view system — create a saved view filtered to “PDFs in ~/Documents” or “Images from this week”
+- External sources (`ExternalSourceRegistry`) already watch filesystem folders — this extends that pattern to richer file types with previews
+
+**Scope control:**
+- Watched folders are opt-in, not automatic
+- Index metadata only by default (fast, lightweight). Full content indexing is opt-in.
+- Large files are referenced, not copied. Cider's data directory stays small.
+- File operations (move, rename, delete) go through Finder / filesystem — Cider is a viewer and organizer, not a file manager
 
 ## Open Questions
 - Should Documents support OCR/transcription in scope, or stay file-management only at first?
 - Should downloads captured from browsers auto-route to Documents?
 - What file size limits should be enforced for local previews/caching?
+- Should watched folder indexing be lazy (on-demand) or eager (background scan on launch)?
+- How should Cider handle files that move or get deleted from watched folders?
