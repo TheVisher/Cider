@@ -12,6 +12,7 @@ struct HomeDashboardView: View {
     @Binding var selectedItemIDs: Set<String>
     @Binding var sortMode: LibrarySortMode
     @Binding var entityFilter: Set<LibraryEntityType>
+    var searchText: String = ""
     var onOpenNote: (Note) -> Void = { _ in }
     var onEditDateCard: (DateCard) -> Void = { _ in }
     var onEditContact: (ContactCard) -> Void = { _ in }
@@ -33,8 +34,12 @@ struct HomeDashboardView: View {
             labelIDs: [],
             folderID: selectedFolderID,
             includeCompleted: true,
-            textQuery: ""
+            textQuery: searchText
         )
+    }
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var sortSpec: SavedViewSortSpec {
@@ -81,7 +86,7 @@ struct HomeDashboardView: View {
             VStack(spacing: 0) {
                 if libraryItems.isEmpty {
                     // No scrollable content — show recents normally above empty state
-                    if config.showContinueSection && !continueItems.isEmpty && !continueSectionCollapsed {
+                    if config.showContinueSection && !isSearching && !continueItems.isEmpty && !continueSectionCollapsed {
                         ContinueSectionView(
                             items: continueItems,
                             onOpen: { handleContinueOpen($0) },
@@ -92,7 +97,7 @@ struct HomeDashboardView: View {
                     }
                     emptyState
                 } else {
-                    if config.showContinueSection && !continueItems.isEmpty {
+                    if config.showContinueSection && !isSearching && !continueItems.isEmpty {
                         CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
                             ContinueSectionView(
                                 items: continueItems,

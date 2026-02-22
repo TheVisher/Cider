@@ -21,7 +21,7 @@ The floating panel is the main way users interact with Cider:
 - **Tabs:** Home (only fixed tab) + user-created saved view tabs, search tabs, and external source tabs — all closeable
 - **Sidebar:** Full-height floating column for folders and linked sources (organization only — no "All Items"). Traffic lights + view options in sidebar header. Auto-hides at compact widths.
 - **Title bar:** Sidebar toggle + tab bar + capture button. Right-click context menu for window controls.
-- **Dismissal:** Escape key, click outside, or double-tap Option again
+- **Dismissal:** Escape key (clears search first, then dismisses), click outside, or double-tap Option again
 
 ## Documentation Reference
 
@@ -219,6 +219,8 @@ CiderPanelView
 - **Traffic lights:** sidebarHeader uses `HStack(alignment: .top)` + `.frame(height:, alignment: .top)` so lights stay pinned regardless of conditional content.
 - **View options button:** frame height = `trafficLightTapTarget` (16pt), not `buttonTapTarget` (28pt), to center with traffic lights.
 - **Search bar:** FolderSidebarView has no top padding — search bar top aligns with the divider line.
+- **Sidebar live search:** `FolderSidebarView` has a `searchText: Binding<String>` TextField (not a button). `CiderPanelView` owns `@State sidebarSearchText` and passes it to HomeDashboardView, FolderDetailView, and SavedViewTabContent. Search is scoped to the active view. Cleared on tab/folder change. `SourceDetailView` does NOT support search yet.
+- **Escape priority chain:** sidebarSearchText non-empty → clear search; else editor active → close editor; else selection → clear selection. Order matters — search clears first.
 - **Right column top padding:** `Spacing.sm - 1` (7pt) so title bar center aligns with traffic light circle center.
 
 ## Bookmark Display Modes

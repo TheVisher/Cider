@@ -61,7 +61,7 @@ final class LibraryViewModel: ObservableObject {
                 return false
             }
 
-            if !query.isEmpty, !matchesTextQuery(query, in: item) {
+            if !query.isEmpty, !Self.matchesTextQuery(query, in: item) {
                 return false
             }
 
@@ -148,7 +148,7 @@ final class LibraryViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func matchesTextQuery(_ query: String, in item: LibraryItemV2) -> Bool {
+    static func matchesTextQuery(_ query: String, in item: LibraryItemV2) -> Bool {
         switch item {
         case .bookmark(let bookmark):
             return bookmark.title.lowercased().contains(query)

@@ -15,6 +15,7 @@ struct SavedViewTabContent: View {
     @ObservedObject private var contactStorage = ContactStorage.shared
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @ObservedObject private var stackStorage = CardStackStorage.shared
+    var searchText: String = ""
     var onUpdateSavedView: ((SavedView) -> Void)? = nil
     var onDeleteSavedView: ((UUID) -> Void)? = nil
 
@@ -33,9 +34,24 @@ struct SavedViewTabContent: View {
         LibraryCardSizing(scale: savedView.layoutSpec.cardSizeScale)
     }
 
+    private var effectiveFilterSpec: SavedViewFilterSpec {
+        let sidebarQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if sidebarQuery.isEmpty {
+            return savedView.filterSpec
+        }
+        // Combine sidebar search with any existing persistent textQuery
+        var spec = savedView.filterSpec
+        if spec.textQuery.isEmpty {
+            spec.textQuery = sidebarQuery
+        } else {
+            spec.textQuery = spec.textQuery + " " + sidebarQuery
+        }
+        return spec
+    }
+
     private var filteredItems: [LibraryItemV2] {
         libraryViewModel.filteredItems(
-            using: savedView.filterSpec,
+            using: effectiveFilterSpec,
             sort: savedView.sortSpec
         )
     }
@@ -368,18 +384,7 @@ struct SavedViewTabContent: View {
     private var filterChipsRow: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
-                TextField(
-                    "Search this view",
-                    text: Binding(
-                        get: { savedView.filterSpec.textQuery },
-                        set: { newValue in
-                            var updated = savedView
-                            updated.filterSpec.textQuery = newValue
-                            onUpdateSavedView?(updated)
-                        }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
+                Spacer(minLength: 0)
 
                 Menu {
                     sortButton(.createdDescending, label: "Created (Newest)")

@@ -495,6 +495,37 @@ Enhance the search palette with:
 - Fuzzy matching for typo tolerance
 - Recent searches list
 
+### Search Scope Modifiers (Future)
+
+Currently the sidebar live search is scoped to whatever view is active — Home tab searches the full library, a folder view searches within that folder, a saved view tab searches within its filtered results. This is the right default. But power users may want to reach outside the current view without navigating away.
+
+**`@`-prefix modifiers** in the search field change the scope on the fly:
+
+| Modifier | Scope | Example |
+|---|---|---|
+| *(none)* | Current view (default) | `react hooks` — searches whatever is on screen |
+| `@all` | Entire library | `@all react hooks` — searches everything regardless of current view |
+| `@folder-name` | Named folder | `@Design Resources color palette` — searches within that folder |
+| `@bookmarks` | All bookmarks | `@bookmarks typescript` — bookmarks only, any folder |
+| `@notes` | All notes | `@notes meeting agenda` — notes only, any folder |
+
+**Behavior:**
+- Typing `@` shows an autocomplete dropdown of available scopes (folder names, type filters)
+- The modifier is parsed and stripped before the text query runs — the rest of the string is the search term
+- Modifier chip appears as a removable pill left of the search text (visual confirmation of active scope)
+- Clearing the modifier (backspace through it or click the pill's ×) returns to default current-view scope
+- Folder name matching is case-insensitive and supports partial matches (`@des` → suggests "Design Resources")
+
+**Why this fits:**
+- Keeps the single search field as the only entry point — no separate "search everywhere" UI
+- Discoverable but not required — users who never type `@` get the same scoped search they already have
+- Consistent with how other tools use prefix modifiers (Slack's `in:#channel`, Raycast's file filters)
+- Composable with future modifiers: `@bookmarks @Design Resources` could mean "bookmarks in Design Resources folder"
+
+**Not for immediate implementation** — this builds on top of the planned Live Search (above) and should come after that is solid.
+
+**Gap: Linked Sources** — The sidebar live search currently does not filter linked source views (`SourceDetailView`). Source files are not wired to `sidebarSearchText`. This should be addressed alongside scope modifiers or as a standalone follow-up — add a `searchText` param to `SourceDetailView` and filter its file listing by title/content match.
+
 ### macOS Services Integration
 
 Register Cider as a macOS Services provider so users can right-click selected content in any app and send it to Cider.

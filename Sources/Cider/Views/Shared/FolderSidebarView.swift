@@ -13,6 +13,7 @@ struct FolderSidebarView: View {
     var onRenameFolder: ((UUID, String) -> Void)?
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
+    var searchText: Binding<String> = .constant("")
     var onTriggerSearch: (() -> Void)?
     var showBackground: Bool = true
 
@@ -58,34 +59,38 @@ struct FolderSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Search trigger
-            if let onTriggerSearch {
-                Button(action: onTriggerSearch) {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "magnifyingglass")
+            // Live search field
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "magnifyingglass")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.tertiary)
+
+                TextField("Search", text: searchText)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.label)
+                    .foregroundColor(CiderColors.primary)
+
+                if !searchText.wrappedValue.isEmpty {
+                    Button {
+                        searchText.wrappedValue = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
                             .font(CiderFont.captionMedium)
                             .foregroundColor(CiderColors.tertiary)
-
-                        Text("Search")
-                            .font(CiderFont.label)
-                            .foregroundColor(CiderColors.tertiary)
-
-                        Spacer(minLength: 0)
-
-                        Text("\u{2318}K")
-                            .font(CiderFont.captionMedium)
-                            .foregroundColor(CiderColors.quaternary)
                     }
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.xs)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.separatorLight)
-                    )
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                } else {
+                    Text("\u{2318}K")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.quaternary)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.separatorLight)
+            )
 
             Label("Folders", systemImage: "folder")
                 .font(CiderFont.bodySemibold)

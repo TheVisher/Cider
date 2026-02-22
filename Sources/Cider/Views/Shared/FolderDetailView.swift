@@ -9,6 +9,7 @@ struct FolderDetailView: View {
     @Binding var cardSizeScale: Double
     @Binding var selectedItemIDs: Set<String>
     @Binding var subFoldersCollapsed: Bool
+    var searchText: String = ""
     var onSelectSubFolder: ((UUID) -> Void)?
     var onOpenNote: ((Note) -> Void)?
     var onEditDateCard: ((DateCard) -> Void)?
@@ -48,8 +49,15 @@ struct FolderDetailView: View {
             .map { LibraryItemV2.dateCard($0) }
         let contacts = contactStorage.contacts.filter { $0.folderID == folderID }
             .map { LibraryItemV2.contact($0) }
-        return (bookmarks + notes + dateCards + contacts)
+        var all = (bookmarks + notes + dateCards + contacts)
             .sorted { $0.createdDate > $1.createdDate }
+
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !query.isEmpty {
+            all = all.filter { LibraryViewModel.matchesTextQuery(query, in: $0) }
+        }
+
+        return all
     }
 
     private var cardSizing: LibraryCardSizing {

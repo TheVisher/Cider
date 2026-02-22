@@ -27,6 +27,7 @@ struct CiderPanelView: View {
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     @State private var suppressSidebarAutoExpandForDetails = false
     @State private var cardScaleSaveTask: Task<Void, Never>?
+    @State private var sidebarSearchText: String = ""
     @State private var editingNoteID: UUID?
     @State private var isEditingNoteTitle = false
     @State private var showRestoreSnapshotAlert = false
@@ -97,9 +98,11 @@ struct CiderPanelView: View {
             selectedFolderID = nil
             selectedSourceID = nil
             selectedItemIDs.removeAll()
+            sidebarSearchText = ""
         }
         .onChange(of: selectedFolderID) { _, _ in
             selectedItemIDs.removeAll()
+            sidebarSearchText = ""
         }
         .onChange(of: homeDisplayMode) { _, newValue in
             var config = CiderConfig.load()
@@ -230,7 +233,9 @@ struct CiderPanelView: View {
                 .hidden()
 
             Button("") {
-                if isEditorActive {
+                if !sidebarSearchText.isEmpty {
+                    sidebarSearchText = ""
+                } else if isEditorActive {
                     closeNoteEditor()
                 } else if !selectedItemIDs.isEmpty {
                     withAnimation(reduceMotion ? .none : .snappy) {
@@ -641,6 +646,7 @@ struct CiderPanelView: View {
             onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
             onRenameFolder: { bookmarksViewModel.renameFolder($0, to: $1) },
             onDeleteFolder: deleteFolder,
+            searchText: $sidebarSearchText,
             onTriggerSearch: { isSearchPaletteVisible = true },
             showBackground: false,
             sources: externalSourceStorage.sources,
@@ -887,6 +893,7 @@ struct CiderPanelView: View {
                 cardSizeScale: $homeCardSizeScale,
                 selectedItemIDs: $selectedItemIDs,
                 subFoldersCollapsed: $subFoldersCollapsed,
+                searchText: sidebarSearchText,
                 onSelectSubFolder: { subFolderID in
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)
@@ -913,6 +920,7 @@ struct CiderPanelView: View {
                     selectedItemIDs: $selectedItemIDs,
                     sortMode: $homeSort,
                     entityFilter: $homeEntityFilter,
+                    searchText: sidebarSearchText,
                     onOpenNote: { note in openNoteInline(note) },
                     onEditDateCard: { dateCard in
                         newEventEditorContext = DateCardEditorContext(
@@ -965,6 +973,7 @@ struct CiderPanelView: View {
                                 onMoveNoteToFolder: { note, folderID in
                                     _ = notesViewModel.assignNote(note, toFolder: folderID)
                                 },
+                                searchText: sidebarSearchText,
                                 onUpdateSavedView: { updated in
                                     _ = savedViewStorage.updateSavedView(updated)
                                     if case .savedView(let selectedID, _) = selectedTab,
