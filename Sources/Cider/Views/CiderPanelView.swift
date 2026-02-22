@@ -173,7 +173,7 @@ struct CiderPanelView: View {
             DateCardEditorSheet(
                 existingCard: context.existingCard,
                 defaultDate: context.defaultDate,
-                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs in
+                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule in
                     LibraryItemEditor.saveDateCard(
                         existingCard: context.existingCard,
                         title: title,
@@ -183,7 +183,8 @@ struct CiderPanelView: View {
                         allDay: allDay,
                         location: location,
                         amount: amount,
-                        labelIDs: labelIDs
+                        labelIDs: labelIDs,
+                        recurrenceRule: recurrenceRule
                     )
                 },
                 onDelete: { dateCard in
@@ -890,7 +891,13 @@ struct CiderPanelView: View {
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)
                 },
-                onOpenNote: { note in openNoteInline(note) }
+                onOpenNote: { note in openNoteInline(note) },
+                onEditDateCard: { dateCard in
+                    newEventEditorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+                },
+                onEditContact: { contact in
+                    newContactEditorContext = ContactEditorContext(existingContact: contact)
+                }
             )
         } else {
             ZStack {

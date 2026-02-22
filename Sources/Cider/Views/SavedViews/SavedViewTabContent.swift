@@ -79,7 +79,7 @@ struct SavedViewTabContent: View {
             DateCardEditorSheet(
                 existingCard: context.existingCard,
                 defaultDate: context.defaultDate,
-                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs in
+                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule in
                     LibraryItemEditor.saveDateCard(
                         existingCard: context.existingCard,
                         title: title,
@@ -89,7 +89,8 @@ struct SavedViewTabContent: View {
                         allDay: allDay,
                         location: location,
                         amount: amount,
-                        labelIDs: labelIDs
+                        labelIDs: labelIDs,
+                        recurrenceRule: recurrenceRule
                     )
                 },
                 onDelete: { dateCard in
@@ -669,6 +670,17 @@ struct SavedViewTabContent: View {
                 DateCardListRow(
                     dateCard: dateCard,
                     onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
+                    onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                    folders: folders,
+                    onMoveToFolder: { folderID in
+                        let oldFolderID = dateCard.folderID
+                        DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                        let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                        CiderUndoManager.shared.record(.movedToFolder(
+                            itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                            fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                        ))
+                    },
                     onDelete: {
                         _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
                         let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
@@ -682,6 +694,16 @@ struct SavedViewTabContent: View {
                     ContactListRow(
                         contact: contact,
                         onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
+                        folders: folders,
+                        onMoveToFolder: { folderID in
+                            let oldFolderID = contact.folderID
+                            ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                            let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                            CiderUndoManager.shared.record(.movedToFolder(
+                                itemType: .contact, itemID: contact.id, title: contact.displayName,
+                                fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                            ))
+                        },
                         onDelete: {
                             _ = ContactStorage.shared.deleteContact(contact.id)
                             let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
@@ -820,6 +842,17 @@ struct SavedViewTabContent: View {
             DateCardCardView(
                 dateCard: dateCard,
                 onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
+                onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                folders: folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = dateCard.folderID
+                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
                 onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
             )
         case .contact:
@@ -827,6 +860,16 @@ struct SavedViewTabContent: View {
                 ContactCardCardView(
                     contact: contact,
                     onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
+                    folders: folders,
+                    onMoveToFolder: { folderID in
+                        let oldFolderID = contact.folderID
+                        ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                        let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                        CiderUndoManager.shared.record(.movedToFolder(
+                            itemType: .contact, itemID: contact.id, title: contact.displayName,
+                            fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                        ))
+                    },
                     onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
                 )
             } else {

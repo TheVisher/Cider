@@ -3,6 +3,9 @@ import SwiftUI
 struct DateCardCardView: View {
     let dateCard: DateCard
     var onOpen: (() -> Void)? = nil
+    var onToggleComplete: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     @State private var isHovered = false
@@ -56,18 +59,21 @@ struct DateCardCardView: View {
                         .padding(.vertical, Spacing.xxs)
                         .padding(.horizontal, Spacing.sm)
 
-                    // Title + completed badge
+                    // Title + completion toggle
                     HStack(alignment: .top, spacing: Spacing.xs) {
                         Text(dateCard.title)
                             .font(CiderFont.subheadingSemibold)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        if dateCard.isCompleted {
-                            Image(systemName: "checkmark.circle.fill")
+                        Button {
+                            onToggleComplete?()
+                        } label: {
+                            Image(systemName: dateCard.isCompleted ? "checkmark.circle.fill" : "circle")
                                 .font(CiderFont.bodyMedium)
-                                .foregroundColor(CiderColors.controlAccent)
+                                .foregroundColor(dateCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                         }
+                        .buttonStyle(.plain)
                     }
                     .padding(.top, Spacing.xs)
                 }
@@ -104,6 +110,10 @@ struct DateCardCardView: View {
         .hoverState($isHovered, animation: .snappy)
         .dateCardContextMenu(
             onOpen: { onOpen?() },
+            onToggleComplete: { onToggleComplete?() },
+            isCompleted: dateCard.isCompleted,
+            folders: folders,
+            onMoveToFolder: { onMoveToFolder?($0) },
             onDelete: { onDelete?() }
         )
     }
@@ -132,6 +142,9 @@ struct DateCardCardView: View {
 struct DateCardListRow: View {
     let dateCard: DateCard
     var onOpen: (() -> Void)? = nil
+    var onToggleComplete: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     var body: some View {
@@ -179,11 +192,14 @@ struct DateCardListRow: View {
 
                 Spacer(minLength: Spacing.sm)
 
-                if dateCard.isCompleted {
-                    Image(systemName: "checkmark.circle.fill")
+                Button {
+                    onToggleComplete?()
+                } label: {
+                    Image(systemName: dateCard.isCompleted ? "checkmark.circle.fill" : "circle")
                         .font(CiderFont.bodyMedium)
-                        .foregroundColor(CiderColors.controlAccent)
+                        .foregroundColor(dateCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                 }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, Spacing.xs)
@@ -195,6 +211,10 @@ struct DateCardListRow: View {
         .buttonStyle(.plain)
         .dateCardContextMenu(
             onOpen: { onOpen?() },
+            onToggleComplete: { onToggleComplete?() },
+            isCompleted: dateCard.isCompleted,
+            folders: folders,
+            onMoveToFolder: { onMoveToFolder?($0) },
             onDelete: { onDelete?() }
         )
     }

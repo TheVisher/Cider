@@ -236,6 +236,17 @@ struct HomeDashboardView: View {
             DateCardListRow(
                 dateCard: dateCard,
                 onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = dateCard.folderID
+                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
                 onDelete: {
                     _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
                     let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
@@ -246,6 +257,16 @@ struct HomeDashboardView: View {
             ContactListRow(
                 contact: contact,
                 onOpen: { handleNormalAction { presentContactDetail(contact) } },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = contact.folderID
+                    ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .contact, itemID: contact.id, title: contact.displayName,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
                 onDelete: {
                     _ = ContactStorage.shared.deleteContact(contact.id)
                     let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
@@ -321,6 +342,17 @@ struct HomeDashboardView: View {
             DateCardCardView(
                 dateCard: dateCard,
                 onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = dateCard.folderID
+                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
                 onDelete: {
                     _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
                     let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
@@ -331,6 +363,16 @@ struct HomeDashboardView: View {
             ContactCardCardView(
                 contact: contact,
                 onOpen: { handleNormalAction { presentContactDetail(contact) } },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = contact.folderID
+                    ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .contact, itemID: contact.id, title: contact.displayName,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
                 onDelete: {
                     _ = ContactStorage.shared.deleteContact(contact.id)
                     let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())

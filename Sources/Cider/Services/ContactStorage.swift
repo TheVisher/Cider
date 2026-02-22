@@ -58,6 +58,15 @@ final class ContactStorage: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func assignContact(_ id: UUID, toFolder folderID: UUID?) -> Bool {
+        guard let idx = contacts.firstIndex(where: { $0.id == id }) else { return false }
+        contacts[idx].folderID = folderID
+        contacts[idx].updatedAt = Date()
+        persist()
+        return true
+    }
+
     func contact(for id: UUID) -> ContactCard? {
         contacts.first { $0.id == id }
     }

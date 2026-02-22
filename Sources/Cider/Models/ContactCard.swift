@@ -12,6 +12,7 @@ struct ContactCard: Identifiable, Codable, Hashable {
     var hasAvatar: Bool
     var labelIDs: [UUID]
     var linkedEntities: [LibraryEntityRef]
+    var folderID: UUID?
     var createdAt: Date
     var updatedAt: Date
 
@@ -27,6 +28,7 @@ struct ContactCard: Identifiable, Codable, Hashable {
         hasAvatar: Bool = false,
         labelIDs: [UUID] = [],
         linkedEntities: [LibraryEntityRef] = [],
+        folderID: UUID? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -41,6 +43,7 @@ struct ContactCard: Identifiable, Codable, Hashable {
         self.hasAvatar = hasAvatar
         self.labelIDs = labelIDs
         self.linkedEntities = linkedEntities
+        self.folderID = folderID
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -58,6 +61,7 @@ struct ContactCard: Identifiable, Codable, Hashable {
         hasAvatar = (try c.decodeIfPresent(Bool.self, forKey: .hasAvatar)) ?? false
         labelIDs = (try c.decodeIfPresent([UUID].self, forKey: .labelIDs)) ?? []
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
+        folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
     }

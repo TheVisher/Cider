@@ -88,10 +88,10 @@ enum LibraryItemV2: Identifiable, Hashable {
             bookmark.folderID
         case .note(let note):
             note.folderID
-        case .dateCard:
-            nil
-        case .contact:
-            nil
+        case .dateCard(let dateCard):
+            dateCard.folderID
+        case .contact(let contact):
+            contact.folderID
         case .externalFile:
             nil
         }

@@ -91,7 +91,11 @@ final class CiderUndoManager {
                 BookmarksStorage.shared.assignBookmark(itemID, toFolder: fromFolderID)
             case .note:
                 NotesStorage.shared.assignNote(itemID, toFolder: fromFolderID)
-            case .folder, .dateCard, .contact:
+            case .dateCard:
+                DateCardStorage.shared.assignDateCard(itemID, toFolder: fromFolderID)
+            case .contact:
+                ContactStorage.shared.assignContact(itemID, toFolder: fromFolderID)
+            case .folder:
                 break
             }
 
@@ -102,7 +106,11 @@ final class CiderUndoManager {
                     BookmarksStorage.shared.assignBookmark(item.itemID, toFolder: item.fromFolderID)
                 case .note:
                     NotesStorage.shared.assignNote(item.itemID, toFolder: item.fromFolderID)
-                case .folder, .dateCard, .contact:
+                case .dateCard:
+                    DateCardStorage.shared.assignDateCard(item.itemID, toFolder: item.fromFolderID)
+                case .contact:
+                    ContactStorage.shared.assignContact(item.itemID, toFolder: item.fromFolderID)
+                case .folder:
                     break
                 }
             }

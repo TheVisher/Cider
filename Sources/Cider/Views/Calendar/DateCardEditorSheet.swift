@@ -3,7 +3,7 @@ import SwiftUI
 struct DateCardEditorSheet: View {
     let existingCard: DateCard?
     let defaultDate: Date
-    let onSave: (String, String, Date, Date?, Bool, String, Double?, [UUID]) -> Void
+    let onSave: (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?) -> Void
     let onDelete: ((DateCard) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -18,12 +18,15 @@ struct DateCardEditorSheet: View {
     @State private var location: String
     @State private var amountText: String
     @State private var selectedLabelIDs: Set<UUID>
+    @State private var hasRecurrence: Bool
+    @State private var recurrenceFrequency: DateCardRecurrenceFrequency
+    @State private var recurrenceInterval: Int
     @State private var draftLabelName = ""
 
     init(
         existingCard: DateCard?,
         defaultDate: Date,
-        onSave: @escaping (String, String, Date, Date?, Bool, String, Double?, [UUID]) -> Void,
+        onSave: @escaping (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?) -> Void,
         onDelete: ((DateCard) -> Void)? = nil
     ) {
         self.existingCard = existingCard
@@ -43,6 +46,9 @@ struct DateCardEditorSheet: View {
         _location = State(initialValue: existingCard?.location ?? "")
         _amountText = State(initialValue: existingCard?.amount.map { Self.currencyFormatter.string(from: NSNumber(value: $0)) ?? "\($0)" } ?? "")
         _selectedLabelIDs = State(initialValue: Set(existingCard?.labelIDs ?? []))
+        _hasRecurrence = State(initialValue: existingCard?.recurrenceRule != nil)
+        _recurrenceFrequency = State(initialValue: existingCard?.recurrenceRule?.frequency ?? .weekly)
+        _recurrenceInterval = State(initialValue: existingCard?.recurrenceRule?.interval ?? 1)
     }
 
     var body: some View {
@@ -84,6 +90,27 @@ struct DateCardEditorSheet: View {
 
                 TextField("Amount (optional)", text: $amountText)
                     .textFieldStyle(.roundedBorder)
+
+                Toggle("Repeat", isOn: $hasRecurrence)
+                    .toggleStyle(.switch)
+
+                if hasRecurrence {
+                    HStack(spacing: Spacing.sm) {
+                        Text("Every")
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.secondary)
+                        TextField("", value: $recurrenceInterval, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 50)
+                        Picker("", selection: $recurrenceFrequency) {
+                            Text("Day(s)").tag(DateCardRecurrenceFrequency.daily)
+                            Text("Week(s)").tag(DateCardRecurrenceFrequency.weekly)
+                            Text("Month(s)").tag(DateCardRecurrenceFrequency.monthly)
+                            Text("Year(s)").tag(DateCardRecurrenceFrequency.yearly)
+                        }
+                        .labelsHidden()
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Labels")
@@ -136,6 +163,9 @@ struct DateCardEditorSheet: View {
                 .buttonStyle(.borderless)
 
                 Button("Save") {
+                    let rule: DateCardRecurrenceRule? = hasRecurrence
+                        ? DateCardRecurrenceRule(frequency: recurrenceFrequency, interval: max(recurrenceInterval, 1))
+                        : nil
                     onSave(
                         title.trimmingCharacters(in: .whitespacesAndNewlines),
                         details.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -144,7 +174,8 @@ struct DateCardEditorSheet: View {
                         allDay,
                         location.trimmingCharacters(in: .whitespacesAndNewlines),
                         parsedAmount,
-                        Array(selectedLabelIDs)
+                        Array(selectedLabelIDs),
+                        rule
                     )
                     dismiss()
                 }

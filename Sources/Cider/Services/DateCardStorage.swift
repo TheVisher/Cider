@@ -79,6 +79,15 @@ final class DateCardStorage: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func assignDateCard(_ id: UUID, toFolder folderID: UUID?) -> Bool {
+        guard let idx = dateCards.firstIndex(where: { $0.id == id }) else { return false }
+        dateCards[idx].folderID = folderID
+        dateCards[idx].updatedAt = Date()
+        persist()
+        return true
+    }
+
     func dateCard(for id: UUID) -> DateCard? {
         dateCards.first { $0.id == id }
     }

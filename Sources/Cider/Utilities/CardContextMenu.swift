@@ -150,27 +150,36 @@ extension View {
         })
     }
 
-    /// Context menu for date card (event) cards — Open, Delete.
+    /// Context menu for date card (event) cards — Open, Mark Complete, Move to Folder, Delete.
     func dateCardContextMenu(
         onOpen: @escaping () -> Void,
+        onToggleComplete: @escaping () -> Void,
+        isCompleted: Bool,
+        folders: [Folder],
+        onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void
     ) -> some View {
         modifier(CardContextMenuModifier {
             [.action(title: "Open", callback: onOpen),
-             .separator,
-             .destructive(title: "Delete", callback: onDelete)]
+             .action(title: isCompleted ? "Mark Incomplete" : "Mark Complete", callback: onToggleComplete)]
+            + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            + [.separator,
+               .destructive(title: "Delete", callback: onDelete)]
         })
     }
 
-    /// Context menu for contact cards — Open, Delete.
+    /// Context menu for contact cards — Open, Move to Folder, Delete.
     func contactContextMenu(
         onOpen: @escaping () -> Void,
+        folders: [Folder],
+        onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void
     ) -> some View {
         modifier(CardContextMenuModifier {
-            [.action(title: "Open", callback: onOpen),
-             .separator,
-             .destructive(title: "Delete", callback: onDelete)]
+            [.action(title: "Open", callback: onOpen)]
+            + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            + [.separator,
+               .destructive(title: "Delete", callback: onDelete)]
         })
     }
 

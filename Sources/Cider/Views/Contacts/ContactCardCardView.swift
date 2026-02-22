@@ -5,6 +5,8 @@ import SwiftUI
 struct ContactCardCardView: View {
     let contact: ContactCard
     var onOpen: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     @State private var isHovered = false
@@ -86,6 +88,8 @@ struct ContactCardCardView: View {
         .hoverState($isHovered, animation: .snappy)
         .contactContextMenu(
             onOpen: { onOpen?() },
+            folders: folders,
+            onMoveToFolder: { onMoveToFolder?($0) },
             onDelete: { onDelete?() }
         )
         .task(id: contact.updatedAt) {
@@ -163,6 +167,8 @@ struct ContactCardCardView: View {
 struct ContactListRow: View {
     let contact: ContactCard
     var onOpen: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     @State private var avatarImage: NSImage?
@@ -221,6 +227,8 @@ struct ContactListRow: View {
         .buttonStyle(.plain)
         .contactContextMenu(
             onOpen: { onOpen?() },
+            folders: folders,
+            onMoveToFolder: { onMoveToFolder?($0) },
             onDelete: { onDelete?() }
         )
         .task(id: contact.updatedAt) {

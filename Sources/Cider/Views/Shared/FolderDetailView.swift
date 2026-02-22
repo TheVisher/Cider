@@ -11,6 +11,11 @@ struct FolderDetailView: View {
     @Binding var subFoldersCollapsed: Bool
     var onSelectSubFolder: ((UUID) -> Void)?
     var onOpenNote: ((Note) -> Void)?
+    var onEditDateCard: ((DateCard) -> Void)?
+    var onEditContact: ((ContactCard) -> Void)?
+
+    @ObservedObject private var dateCardStorage = DateCardStorage.shared
+    @ObservedObject private var contactStorage = ContactStorage.shared
 
     @State private var selectionAnchorID: String?
     @State private var detailsDraft: BookmarkDetailsDraft?
@@ -34,12 +39,16 @@ struct FolderDetailView: View {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    private var folderItems: [LibraryItem] {
+    private var folderItems: [LibraryItemV2] {
         let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
+            .map { LibraryItemV2.bookmark($0) }
         let notes = notesViewModel.notes.filter { $0.folderID == folderID }
-        let bookmarkItems = bookmarks.map { LibraryItem.bookmark($0) }
-        let noteItems = notes.map { LibraryItem.note($0) }
-        return (bookmarkItems + noteItems)
+            .map { LibraryItemV2.note($0) }
+        let dateCards = dateCardStorage.dateCards.filter { $0.folderID == folderID }
+            .map { LibraryItemV2.dateCard($0) }
+        let contacts = contactStorage.contacts.filter { $0.folderID == folderID }
+            .map { LibraryItemV2.contact($0) }
+        return (bookmarks + notes + dateCards + contacts)
             .sorted { $0.createdDate > $1.createdDate }
     }
 
@@ -527,7 +536,7 @@ struct FolderDetailView: View {
     // MARK: - List Row
 
     @ViewBuilder
-    private func libraryListRow(_ item: LibraryItem) -> some View {
+    private func libraryListRow(_ item: LibraryItemV2) -> some View {
         switch item {
         case .bookmark(let bookmark):
             BookmarkListRow(
@@ -568,13 +577,56 @@ struct FolderDetailView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
+        case .dateCard(let dateCard):
+            DateCardListRow(
+                dateCard: dateCard,
+                onOpen: { onEditDateCard?(dateCard) },
+                onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = dateCard.folderID
+                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                }
+            )
+        case .contact(let contact):
+            ContactListRow(
+                contact: contact,
+                onOpen: { onEditContact?(contact) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = contact.folderID
+                    ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .contact, itemID: contact.id, title: contact.displayName,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    _ = ContactStorage.shared.deleteContact(contact.id)
+                    let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                }
+            )
+        case .externalFile:
+            EmptyView()
         }
     }
 
     // MARK: - Card (Grid / Masonry)
 
     @ViewBuilder
-    private func libraryCard(_ item: LibraryItem, mode: BookmarkCard.CardMode) -> some View {
+    private func libraryCard(_ item: LibraryItemV2, mode: BookmarkCard.CardMode) -> some View {
         switch item {
         case .bookmark(let bookmark):
             BookmarkCard(
@@ -617,6 +669,49 @@ struct FolderDetailView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
+        case .dateCard(let dateCard):
+            DateCardCardView(
+                dateCard: dateCard,
+                onOpen: { onEditDateCard?(dateCard) },
+                onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = dateCard.folderID
+                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                }
+            )
+        case .contact(let contact):
+            ContactCardCardView(
+                contact: contact,
+                onOpen: { onEditContact?(contact) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = contact.folderID
+                    ContactStorage.shared.assignContact(contact.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .contact, itemID: contact.id, title: contact.displayName,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    _ = ContactStorage.shared.deleteContact(contact.id)
+                    let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                }
+            )
+        case .externalFile:
+            EmptyView()
         }
     }
 
@@ -632,19 +727,16 @@ struct FolderDetailView: View {
 
     // MARK: - Selection Helpers
 
-    private func itemID(for item: LibraryItem) -> String {
-        switch item {
-        case .bookmark(let b): return "bookmark-\(b.id.uuidString)"
-        case .note(let n): return "note-\(n.id.uuidString)"
-        }
+    private func itemID(for item: LibraryItemV2) -> String {
+        item.id
     }
 
-    private func isItemSelected(_ item: LibraryItem) -> Bool {
-        selectedItemIDs.contains(itemID(for: item))
+    private func isItemSelected(_ item: LibraryItemV2) -> Bool {
+        selectedItemIDs.contains(item.id)
     }
 
-    private func handleSelect(item: LibraryItem) {
-        let id = itemID(for: item)
+    private func handleSelect(item: LibraryItemV2) {
+        let id = item.id
         if selectedItemIDs.contains(id) {
             selectedItemIDs.remove(id)
         } else {
@@ -653,12 +745,12 @@ struct FolderDetailView: View {
         selectionAnchorID = id
     }
 
-    private func handleShiftSelect(item: LibraryItem) {
-        let id = itemID(for: item)
+    private func handleShiftSelect(item: LibraryItemV2) {
+        let id = item.id
         let items = folderItems
         guard let anchorID = selectionAnchorID,
-              let anchorIndex = items.firstIndex(where: { itemID(for: $0) == anchorID }),
-              let clickedIndex = items.firstIndex(where: { itemID(for: $0) == id }) else {
+              let anchorIndex = items.firstIndex(where: { $0.id == anchorID }),
+              let clickedIndex = items.firstIndex(where: { $0.id == id }) else {
             selectedItemIDs.insert(id)
             selectionAnchorID = id
             return
@@ -666,7 +758,7 @@ struct FolderDetailView: View {
 
         let range = min(anchorIndex, clickedIndex) ... max(anchorIndex, clickedIndex)
         for i in range {
-            selectedItemIDs.insert(itemID(for: items[i]))
+            selectedItemIDs.insert(items[i].id)
         }
     }
 
@@ -923,23 +1015,26 @@ struct FolderDetailView: View {
 
     // MARK: - Multi-Drag Preview
 
-    private func multiDragPreview(for item: LibraryItem) -> AnyView? {
-        let id = itemID(for: item)
+    private func multiDragPreview(for item: LibraryItemV2) -> AnyView? {
+        let id = item.id
         guard selectedItemIDs.contains(id), selectedItemIDs.count > 1 else { return nil }
 
-        var previewItems: [MultiDragPreviewItem] = [multiDragPreviewItem(from: item)]
-        for libraryItem in folderItems where isItemSelected(libraryItem) && itemID(for: libraryItem) != id {
-            previewItems.append(multiDragPreviewItem(from: libraryItem))
+        var previewItems: [MultiDragPreviewItem] = [multiDragPreviewItem(from: item)].compactMap { $0 }
+        for libraryItem in folderItems where isItemSelected(libraryItem) && libraryItem.id != id {
+            if let preview = multiDragPreviewItem(from: libraryItem) {
+                previewItems.append(preview)
+            }
             if previewItems.count >= 3 { break }
         }
 
         return AnyView(MultiDragPreview(items: previewItems, totalCount: selectedItemIDs.count))
     }
 
-    private func multiDragPreviewItem(from item: LibraryItem) -> MultiDragPreviewItem {
+    private func multiDragPreviewItem(from item: LibraryItemV2) -> MultiDragPreviewItem? {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
+        case .dateCard, .contact, .externalFile: return nil
         }
     }
 }
