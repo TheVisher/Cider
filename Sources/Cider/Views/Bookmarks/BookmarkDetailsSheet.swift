@@ -9,6 +9,7 @@ struct BookmarkDetailsDraft: Equatable {
     var title: String
     var tagsText: String
     var notes: String
+    var folderID: UUID?
 
     init(bookmark: Bookmark) {
         id = bookmark.id
@@ -19,6 +20,7 @@ struct BookmarkDetailsDraft: Equatable {
         title = bookmark.title
         tagsText = bookmark.tags.joined(separator: ", ")
         notes = bookmark.notes
+        folderID = bookmark.folderID
     }
 }
 
@@ -26,6 +28,9 @@ struct BookmarkDetailsSheet: View {
     @Binding var draft: BookmarkDetailsDraft
     var bookmark: Bookmark?
     var errorMessage: String?
+    var folders: [Folder] = []
+    var onDelete: (() -> Void)? = nil
+    var onFolderChanged: ((UUID?) -> Void)? = nil
     let onOpenURL: () -> Void
     let onCopyURL: () -> Void
     let onSave: () -> Void
@@ -254,21 +259,38 @@ struct BookmarkDetailsSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
 
-            BookmarkDetailsPlaceholderSection(
-                title: "Folders",
-                subtitle: "Folder assignment coming soon",
-                icon: "folder"
-            )
-            BookmarkDetailsPlaceholderSection(
-                title: "Backlinks",
-                subtitle: "Linked bookmarks coming soon",
-                icon: "link.badge.plus"
-            )
-            BookmarkDetailsPlaceholderSection(
-                title: "Attachments",
-                subtitle: "Files and references coming soon",
-                icon: "paperclip"
-            )
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Folder")
+                    .font(CiderFont.bodyMedium(scale: textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                Menu {
+                    Button("No Folder") {
+                        draft.folderID = nil
+                        onFolderChanged?(nil)
+                    }
+                    Divider()
+                    ForEach(folders) { folder in
+                        Button(folder.name) {
+                            draft.folderID = folder.id
+                            onFolderChanged?(folder.id)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label(currentFolderName, systemImage: "folder")
+                            .font(CiderFont.body(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(CiderFont.caption(scale: textScale))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                    .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(CiderColors.surfaceInput))
+                }
+                .menuStyle(.borderlessButton)
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -289,6 +311,10 @@ struct BookmarkDetailsSheet: View {
             }
 
             HStack(spacing: Spacing.sm) {
+                if let onDelete {
+                    Button("Delete", action: onDelete)
+                        .buttonStyle(CiderDestructiveButtonStyle())
+                }
                 Spacer(minLength: 0)
 
                 Button("Cancel", action: onCancel)
@@ -315,6 +341,11 @@ struct BookmarkDetailsSheet: View {
             x: 0,
             y: BookmarksDesign.detailsFloatingLiftYOffset
         )
+    }
+
+    private var currentFolderName: String {
+        guard let fid = draft.folderID else { return "No Folder" }
+        return folders.first(where: { $0.id == fid })?.name ?? "No Folder"
     }
 
     private func resolvedSidebarWidth(for containerWidth: CGFloat) -> CGFloat {
@@ -459,31 +490,6 @@ struct BookmarkDetailsHeroPreview: View {
 
         guard !Task.isCancelled else { return }
         thumbnailImage = image
-    }
-}
-
-// MARK: - Placeholder Section
-
-struct BookmarkDetailsPlaceholderSection: View {
-    let title: String
-    let subtitle: String
-    let icon: String
-
-    @Environment(\.textScale) private var textScale
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            Label(title, systemImage: icon)
-                .font(CiderFont.captionSemibold(scale: textScale))
-                .foregroundColor(CiderColors.tertiary)
-
-            Text(subtitle)
-                .font(CiderFont.body(scale: textScale))
-                .foregroundColor(CiderColors.quaternary)
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, Spacing.xxs)
     }
 }
 

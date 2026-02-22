@@ -522,6 +522,9 @@ struct HomeDashboardView: View {
                 draft: draftBinding,
                 bookmark: selectedDetailsBookmark,
                 errorMessage: detailsErrorMessage,
+                folders: bookmarksViewModel.folders,
+                onDelete: { deleteDetailsBookmark() },
+                onFolderChanged: { assignDetailsBookmarkToFolder($0) },
                 onOpenURL: openDetailsURL,
                 onCopyURL: copyDetailsURL,
                 onSave: saveDetails,
@@ -578,6 +581,17 @@ struct HomeDashboardView: View {
         }
     }
 
+    private func deleteDetailsBookmark() {
+        guard let bookmark = selectedDetailsBookmark else { return }
+        closeDetails()
+        bookmarksViewModel.deleteBookmarks([bookmark])
+    }
+
+    private func assignDetailsBookmarkToFolder(_ folderID: UUID?) {
+        guard let bookmark = selectedDetailsBookmark else { return }
+        _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+    }
+
     private func copyDetailsURL() {
         guard let detailsDraft else { return }
         let pasteboard = NSPasteboard.general
@@ -619,6 +633,9 @@ struct HomeDashboardView: View {
                         draft: draftBinding,
                         bookmark: selectedDetailsBookmark,
                         errorMessage: detailsErrorMessage,
+                        folders: bookmarksViewModel.folders,
+                        onDelete: { deleteDetailsBookmark() },
+                        onFolderChanged: { assignDetailsBookmarkToFolder($0) },
                         onOpenURL: openDetailsURL,
                         onCopyURL: copyDetailsURL,
                         onSave: saveDetails,
