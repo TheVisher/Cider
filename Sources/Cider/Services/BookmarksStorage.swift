@@ -781,6 +781,12 @@ final class BookmarksStorage: ObservableObject {
         enrichmentTasks[bookmarkID] = task
     }
 
+    /// Force re-fetch metadata and thumbnail from the web for a bookmark.
+    func refetchMetadata(for bookmarkID: UUID) {
+        cancelEnrichment(for: bookmarkID)
+        startEnrichmentIfNeeded(for: bookmarkID, force: true)
+    }
+
     private func completeEnrichment(
         for bookmarkID: UUID,
         sourceURL: URL,
@@ -858,6 +864,7 @@ final class BookmarksStorage: ObservableObject {
         let isHighChurnSite = host.contains("reddit.com")
             || host == "x.com"
             || host == "twitter.com"
+            || host.contains("tiktok.com")
 
         if isHighChurnSite {
             if age < EnrichmentRetryThresholds.firstHour {
@@ -1253,6 +1260,26 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private static func fetchEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
+        let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
+
+        // If HTML gave us a thumbnail, we're done
+        if let htmlResult, htmlResult.thumbnailURL != nil {
+            return htmlResult
+        }
+
+        // Try oEmbed fallback for known providers
+        if let oembedResult = await BookmarkMetadataParser.fetchOEmbedPayload(for: pageURL) {
+            // Merge: prefer HTML title if we got one, supplement with oEmbed thumbnail
+            return BookmarkEnrichmentPayload(
+                title: htmlResult?.title ?? oembedResult.title,
+                thumbnailURL: oembedResult.thumbnailURL
+            )
+        }
+
+        return htmlResult
+    }
+
+    private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
         var request = URLRequest(url: pageURL)
         request.timeoutInterval = 10
         request.setValue(
@@ -1848,7 +1875,8 @@ private enum BookmarkMetadataParser {
         if host.contains("reddit.com")
             || host == "x.com"
             || host == "twitter.com"
-            || host.contains("digg.com") {
+            || host.contains("digg.com")
+            || host.contains("tiktok.com") {
             return nil
         }
 
@@ -2048,6 +2076,48 @@ private enum BookmarkMetadataParser {
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&amp;", with: "&")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - oEmbed fallback
+
+    static func oEmbedEndpointURL(for pageURL: URL) -> URL? {
+        let host = normalizedHost(for: pageURL)
+        let encoded = pageURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? pageURL.absoluteString
+
+        if host.contains("tiktok.com") {
+            return URL(string: "https://www.tiktok.com/oembed?url=\(encoded)")
+        }
+        if host.contains("instagram.com") {
+            return URL(string: "https://api.instagram.com/oembed?url=\(encoded)")
+        }
+        if host.contains("spotify.com") {
+            return URL(string: "https://open.spotify.com/oembed?url=\(encoded)")
+        }
+        return nil
+    }
+
+    static func fetchOEmbedPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
+        guard let endpoint = oEmbedEndpointURL(for: pageURL) else { return nil }
+
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 8
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<400).contains(http.statusCode) else { return nil }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+
+            let title = json["title"] as? String
+            let thumbnailRaw = json["thumbnail_url"] as? String
+            let thumbnailURL = thumbnailRaw.flatMap { URL(string: $0) }
+
+            guard title != nil || thumbnailURL != nil else { return nil }
+            return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL)
+        } catch {
+            return nil
+        }
     }
 }
 

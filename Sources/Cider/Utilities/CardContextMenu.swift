@@ -183,18 +183,20 @@ extension View {
         })
     }
 
-    /// Context menu for bookmark cards — Open in Browser, Show Details, Move to Folder, Delete.
+    /// Context menu for bookmark cards — Open in Browser, Show Details, Refetch Metadata, Move to Folder, Delete.
     func bookmarkContextMenu(
         bookmark: Bookmark,
         folders: [Folder],
         onOpen: @escaping () -> Void,
         onShowDetails: @escaping () -> Void,
+        onRefetchMetadata: @escaping () -> Void,
         onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void
     ) -> some View {
         modifier(CardContextMenuModifier {
             [.action(title: "Open in Browser", callback: onOpen),
-             .action(title: "Show Details", callback: onShowDetails)]
+             .action(title: "Show Details", callback: onShowDetails),
+             .action(title: "Refetch Metadata", callback: onRefetchMetadata)]
             + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             + [.separator,
                .destructive(title: "Delete", callback: onDelete)]

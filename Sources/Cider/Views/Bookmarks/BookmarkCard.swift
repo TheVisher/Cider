@@ -123,6 +123,7 @@ struct BookmarkCard: View {
             folders: folders,
             onOpen: onOpen,
             onShowDetails: onShowDetails,
+            onRefetchMetadata: { BookmarksStorage.shared.refetchMetadata(for: bookmark.id) },
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
             onDelete: onDelete
         )
