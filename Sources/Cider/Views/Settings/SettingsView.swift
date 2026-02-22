@@ -105,6 +105,12 @@ struct SettingsView: View {
         case .panelBehavior:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Panel") {
+                    SettingsToggleRow(
+                        title: "Remember panel position",
+                        subtitle: "Reopen the panel at its last position and size",
+                        isOn: $viewModel.rememberPanelPosition
+                    )
+
                     SettingsPickerRow(
                         title: "Detail modal style",
                         subtitle: "How bookmark details and note editors appear",
@@ -121,15 +127,9 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Notes Behavior") {
                     SettingsToggleRow(
-                        title: "Option+N to open notes",
-                        subtitle: "Quick-launch floating notes panel",
+                        title: "Option+N to create note",
+                        subtitle: "Open the panel and start a new note",
                         isOn: $viewModel.enableNotesHotkey
-                    )
-
-                    SettingsToggleRow(
-                        title: "Remember note window position",
-                        subtitle: "Reopen each note where you last closed it",
-                        isOn: $viewModel.rememberNotesPanelPositionPerNote
                     )
                 }
                 Spacer(minLength: 0)
@@ -168,8 +168,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Bookmarks") {
                     SettingsToggleRow(
-                        title: "Option+B to open bookmarks",
-                        subtitle: "Quick-launch floating bookmarks panel",
+                        title: "Option+B to capture bookmark",
+                        subtitle: "Capture the current browser tab as a bookmark",
                         isOn: $viewModel.enableBookmarksHotkey
                     )
 
@@ -192,12 +192,6 @@ struct SettingsView: View {
                     )
                     .disabled(!viewModel.autoCaptureCopiedURLs)
                     .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : CiderColors.disabledOpacity)
-
-                    SettingsToggleRow(
-                        title: "Remember bookmarks window position",
-                        subtitle: "Reopen bookmarks where you last left it",
-                        isOn: $viewModel.rememberBookmarksPanelPosition
-                    )
 
                     SettingsPickerRow(
                         title: "Default view mode",
@@ -342,6 +336,15 @@ struct SettingsView: View {
                         }
                         .controlSize(.small)
                     }
+
+                    Divider()
+                        .opacity(CiderColors.dividerSecondaryOpacity)
+
+                    SettingsToggleRow(
+                        title: "Spotlight indexing",
+                        subtitle: "Index Cider items for Spotlight, Raycast, and Alfred (requires .app bundle)",
+                        isOn: $viewModel.enableSpotlightIndexing
+                    )
                 }
                 Spacer(minLength: 0)
             }

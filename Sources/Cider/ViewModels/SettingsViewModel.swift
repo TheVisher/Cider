@@ -30,9 +30,6 @@ final class SettingsViewModel: ObservableObject {
     @Published var notesDirectory: String {
         didSet { saveConfig() }
     }
-    @Published var rememberNotesPanelPositionPerNote: Bool {
-        didSet { saveConfig() }
-    }
     @Published var notesEditorTextSize: NotesEditorTextSize {
         didSet { saveConfig() }
     }
@@ -53,7 +50,10 @@ final class SettingsViewModel: ObservableObject {
     @Published var ciderDataDirectory: String {
         didSet { saveConfig() }
     }
-    @Published var rememberBookmarksPanelPosition: Bool {
+    @Published var rememberPanelPosition: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enableSpotlightIndexing: Bool {
         didSet { saveConfig() }
     }
     @Published var bookmarksDefaultViewMode: BookmarkDisplayMode {
@@ -88,14 +88,14 @@ final class SettingsViewModel: ObservableObject {
         self.activationMode = config.activationMode
         self.enableNotesHotkey = config.enableNotesHotkey
         self.notesDirectory = config.notesDirectory
-        self.rememberNotesPanelPositionPerNote = config.rememberNotesPanelPositionPerNote
         self.notesEditorTextSize = config.notesEditorTextSize
         self.enableBookmarksHotkey = config.enableBookmarksHotkey
         self.enableBookmarksCaptureHotkey = config.enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = config.autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = config.confirmCopiedURLBeforeSave
         self.ciderDataDirectory = config.ciderDataDirectory
-        self.rememberBookmarksPanelPosition = config.rememberBookmarksPanelPosition
+        self.rememberPanelPosition = config.rememberPanelPosition
+        self.enableSpotlightIndexing = config.enableSpotlightIndexing
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
         self.detailModalMode = config.detailModalMode
@@ -118,14 +118,14 @@ final class SettingsViewModel: ObservableObject {
         config.activationMode = activationMode
         config.enableNotesHotkey = enableNotesHotkey
         config.notesDirectory = notesDirectory
-        config.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
         config.notesEditorTextSize = notesEditorTextSize
         config.enableBookmarksHotkey = enableBookmarksHotkey
         config.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         config.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         config.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
         config.ciderDataDirectory = ciderDataDirectory
-        config.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
+        config.rememberPanelPosition = rememberPanelPosition
+        config.enableSpotlightIndexing = enableSpotlightIndexing
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.bookmarksCardSize = bookmarksCardSize
         config.bookmarksCardSizeScale = bookmarksCardSize.sliderValue

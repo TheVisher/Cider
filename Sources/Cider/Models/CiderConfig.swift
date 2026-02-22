@@ -108,14 +108,13 @@ struct CiderConfig: Codable {
         case activationMode
         case notesDirectory
         case enableNotesHotkey
-        case rememberNotesPanelPositionPerNote
         case notesEditorTextSize
         case enableBookmarksHotkey
         case enableBookmarksCaptureHotkey
         case autoCaptureCopiedURLs
         case confirmCopiedURLBeforeSave
         case ciderDataDirectory = "bookmarksDirectory"
-        case rememberBookmarksPanelPosition
+        case rememberPanelPosition
         case bookmarksDefaultViewMode
         case bookmarksCardSize
         case bookmarksCardSizeScale
@@ -134,21 +133,21 @@ struct CiderConfig: Codable {
         case undoToastPosition
         case homeSort
         case homeEntityFilter
+        case enableSpotlightIndexing
     }
 
     var showMenuBarIcon: Bool
     var textSize: TextSize
     var activationMode: ActivationMode
     var notesDirectory: String  // Directory for notes .md files
-    var enableNotesHotkey: Bool  // Enable Option+N to open notes
-    var rememberNotesPanelPositionPerNote: Bool  // Reopen each note at its last panel position
+    var enableNotesHotkey: Bool  // Enable Option+N to create note
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
     var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
     var enableBookmarksCaptureHotkey: Bool  // Enable Option+Shift+B to capture active browser tab
     var autoCaptureCopiedURLs: Bool  // Automatically save copied URLs as bookmarks
     var confirmCopiedURLBeforeSave: Bool  // Require explicit save/discard for copied URLs
     var ciderDataDirectory: String  // Directory for Cider data (bookmarks, contacts, stacks, labels, date cards, saved views, projects)
-    var rememberBookmarksPanelPosition: Bool  // Reopen bookmarks panel where it was last shown
+    var rememberPanelPosition: Bool  // Reopen the panel at its last position and size
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
     var bookmarksCardSizeScale: Double?  // Continuous card size scale (0.0–3.0), overrides bookmarksCardSize
@@ -167,6 +166,7 @@ struct CiderConfig: Codable {
     var undoToastPosition: ToastPosition  // Position for undo action toast
     var homeSort: LibrarySortMode  // Sort mode for the Home library feed
     var homeEntityFilter: Set<LibraryEntityType>  // Which entity types to show in Home feed
+    var enableSpotlightIndexing: Bool  // Index Cider items in Core Spotlight for system-wide search
 
     static let storageKey = "CiderConfig"
 
@@ -177,14 +177,13 @@ struct CiderConfig: Codable {
             activationMode: .doubleTap,
             notesDirectory: "~/Documents/Cider/Notes",
             enableNotesHotkey: true,
-            rememberNotesPanelPositionPerNote: true,
             notesEditorTextSize: .normal,
             enableBookmarksHotkey: true,
             enableBookmarksCaptureHotkey: true,
             autoCaptureCopiedURLs: false,
             confirmCopiedURLBeforeSave: false,
             ciderDataDirectory: "~/Documents/Cider/Bookmarks",
-            rememberBookmarksPanelPosition: false,
+            rememberPanelPosition: true,
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
             notesDefaultViewMode: .list,
@@ -199,7 +198,8 @@ struct CiderConfig: Codable {
             captureToastPosition: .topCenterScreen,
             undoToastPosition: .bottomRightPanel,
             homeSort: .createdDescending,
-            homeEntityFilter: Set(LibraryEntityType.allCases)
+            homeEntityFilter: Set(LibraryEntityType.allCases),
+            enableSpotlightIndexing: true
         )
     }
 
@@ -235,11 +235,8 @@ struct CiderConfig: Codable {
 
             return config
         } catch {
-            NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
-            UserDefaults.standard.removeObject(forKey: storageKey)
-            let defaults = CiderConfig.default
-            defaults.save()
-            return defaults
+            NSLog("[Cider] Config decode error: \(error). Using defaults (saved config preserved).")
+            return .default
         }
     }
 
@@ -257,9 +254,6 @@ struct CiderConfig: Codable {
         activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
         notesDirectory = try container.decodeIfPresent(String.self, forKey: .notesDirectory) ?? "~/Documents/Cider/Notes"
         enableNotesHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableNotesHotkey) ?? true
-        rememberNotesPanelPositionPerNote = try container.decodeIfPresent(
-            Bool.self, forKey: .rememberNotesPanelPositionPerNote
-        ) ?? true
         notesEditorTextSize = try container.decodeIfPresent(
             NotesEditorTextSize.self,
             forKey: .notesEditorTextSize
@@ -281,10 +275,10 @@ struct CiderConfig: Codable {
             String.self,
             forKey: .ciderDataDirectory
         ) ?? "~/Documents/Cider/Bookmarks"
-        rememberBookmarksPanelPosition = try container.decodeIfPresent(
+        rememberPanelPosition = try container.decodeIfPresent(
             Bool.self,
-            forKey: .rememberBookmarksPanelPosition
-        ) ?? false
+            forKey: .rememberPanelPosition
+        ) ?? true
         bookmarksDefaultViewMode = try container.decodeIfPresent(
             BookmarkDisplayMode.self,
             forKey: .bookmarksDefaultViewMode
@@ -354,6 +348,10 @@ struct CiderConfig: Codable {
             Set<LibraryEntityType>.self,
             forKey: .homeEntityFilter
         ) ?? Set(LibraryEntityType.allCases)
+        enableSpotlightIndexing = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .enableSpotlightIndexing
+        ) ?? true
     }
 
     init(
@@ -362,14 +360,13 @@ struct CiderConfig: Codable {
         activationMode: ActivationMode = .doubleTap,
         notesDirectory: String = "~/Documents/Cider/Notes",
         enableNotesHotkey: Bool = true,
-        rememberNotesPanelPositionPerNote: Bool = true,
         notesEditorTextSize: NotesEditorTextSize = .normal,
         enableBookmarksHotkey: Bool = true,
         enableBookmarksCaptureHotkey: Bool = true,
         autoCaptureCopiedURLs: Bool = false,
         confirmCopiedURLBeforeSave: Bool = false,
         ciderDataDirectory: String = "~/Documents/Cider/Bookmarks",
-        rememberBookmarksPanelPosition: Bool = false,
+        rememberPanelPosition: Bool = true,
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
         bookmarksCardSize: BookmarkCardSize = .comfortable,
         bookmarksCardSizeScale: Double? = nil,
@@ -387,21 +384,21 @@ struct CiderConfig: Codable {
         captureToastPosition: ToastPosition = .topCenterScreen,
         undoToastPosition: ToastPosition = .bottomRightPanel,
         homeSort: LibrarySortMode = .createdDescending,
-        homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases)
+        homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases),
+        enableSpotlightIndexing: Bool = true
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
         self.activationMode = activationMode
         self.notesDirectory = notesDirectory
         self.enableNotesHotkey = enableNotesHotkey
-        self.rememberNotesPanelPositionPerNote = rememberNotesPanelPositionPerNote
         self.notesEditorTextSize = notesEditorTextSize
         self.enableBookmarksHotkey = enableBookmarksHotkey
         self.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
         self.ciderDataDirectory = ciderDataDirectory
-        self.rememberBookmarksPanelPosition = rememberBookmarksPanelPosition
+        self.rememberPanelPosition = rememberPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize
         self.bookmarksCardSizeScale = bookmarksCardSizeScale
@@ -420,5 +417,6 @@ struct CiderConfig: Codable {
         self.undoToastPosition = undoToastPosition
         self.homeSort = homeSort
         self.homeEntityFilter = homeEntityFilter
+        self.enableSpotlightIndexing = enableSpotlightIndexing
     }
 }

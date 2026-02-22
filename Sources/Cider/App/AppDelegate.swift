@@ -42,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var undoToastRemaining: TimeInterval = UndoToastDesign.autoHideDuration
     private var undoToastLastTick: Date?
 
+    // Spotlight
+    private var spotlightIndexer: SpotlightIndexer?
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -65,6 +68,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeUndoNotifications()
         observeSourcesNotifications()
 
+        // Start Spotlight indexing.
+        // Note: Core Spotlight requires a proper .app bundle to surface results in
+        // Spotlight/Raycast. During development (bare SPM executable), items are indexed
+        // but won't appear in system search. Works once packaged as .app for distribution.
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
+        }
+        spotlightIndexer = SpotlightIndexer.shared
+        spotlightIndexer?.start()
+
         Task { @MainActor in
             let config = CiderConfig.load()
             if config.trashRetentionDays > 0 {
@@ -84,6 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillResignActive(_ notification: Notification) {
         flushNotesDraftIfNeeded()
+    }
+
+    // MARK: - Spotlight Deep Links
+
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        SpotlightIndexer.handleUserActivity(userActivity)
     }
 
     // MARK: - File Open Handler
@@ -223,6 +242,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Toggle automatic bookmark capture from copied URLs
         BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
+
+        // Toggle Spotlight indexing
+        if config.enableSpotlightIndexing {
+            spotlightIndexer?.start()
+        } else {
+            spotlightIndexer?.stop()
+        }
     }
 
     private func observeWorkspaceApplicationActivation() {
@@ -858,7 +884,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         panel.setCollapsed(false, animated: false)
 
-        if let savedFrame = ciderPanelPositionStore.frame() {
+        let config = CiderConfig.load()
+        if config.rememberPanelPosition, let savedFrame = ciderPanelPositionStore.frame() {
             panel.show(frame: savedFrame)
         } else {
             panel.showAtMouse()
