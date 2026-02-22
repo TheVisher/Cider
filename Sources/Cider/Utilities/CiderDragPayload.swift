@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Bookmark Drag Payload
 
@@ -14,6 +15,16 @@ enum BookmarkDragPayload {
             return UUID(uuidString: idPortion)
         }
         return UUID(uuidString: trimmed)
+    }
+
+    static func registerPublicURL(on provider: NSItemProvider, urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.url.identifier, visibility: .all
+        ) { completion in
+            completion(url.dataRepresentation, nil)
+            return nil
+        }
     }
 }
 
@@ -30,6 +41,18 @@ enum NoteDragPayload {
             return UUID(uuidString: idPortion)
         }
         return UUID(uuidString: trimmed)
+    }
+
+    static func registerPublicFileURL(on provider: NSItemProvider, note: Note) {
+        guard !note.relativePath.isEmpty else { return }
+        let dir = NSString(string: StoragePaths.notesDirectoryPath).expandingTildeInPath
+        let fileURL = URL(fileURLWithPath: dir).appendingPathComponent(note.relativePath)
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
+        ) { completion in
+            completion(fileURL.dataRepresentation, nil)
+            return nil
+        }
     }
 }
 

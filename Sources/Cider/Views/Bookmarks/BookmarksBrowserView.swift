@@ -540,6 +540,7 @@ struct BookmarksBrowserView: View {
                     completion(payload, nil)
                     return nil
                 }
+                BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)
                 return provider
             }
         }

@@ -184,6 +184,7 @@ struct NotesBrowserView: View {
                     completion(payload, nil)
                     return nil
                 }
+                NoteDragPayload.registerPublicFileURL(on: provider, note: note)
                 return provider
             }
         }

@@ -1005,6 +1005,7 @@ struct FolderDetailView: View {
                     completion(payload, nil)
                     return nil
                 }
+                BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)
                 return provider
             }
         }
@@ -1033,6 +1034,7 @@ struct FolderDetailView: View {
                     completion(payload, nil)
                     return nil
                 }
+                NoteDragPayload.registerPublicFileURL(on: provider, note: note)
                 return provider
             }
         }
