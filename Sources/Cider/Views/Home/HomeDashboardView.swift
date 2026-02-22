@@ -236,13 +236,21 @@ struct HomeDashboardView: View {
             DateCardListRow(
                 dateCard: dateCard,
                 onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
-                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+                onDelete: {
+                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                }
             )
         case .contact(let contact):
             ContactListRow(
                 contact: contact,
                 onOpen: { handleNormalAction { presentContactDetail(contact) } },
-                onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+                onDelete: {
+                    _ = ContactStorage.shared.deleteContact(contact.id)
+                    let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                }
             )
         case .externalFile(let file):
             SourceCardView(
@@ -313,13 +321,21 @@ struct HomeDashboardView: View {
             DateCardCardView(
                 dateCard: dateCard,
                 onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
-                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+                onDelete: {
+                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                }
             )
         case .contact(let contact):
             ContactCardCardView(
                 contact: contact,
                 onOpen: { handleNormalAction { presentContactDetail(contact) } },
-                onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+                onDelete: {
+                    _ = ContactStorage.shared.deleteContact(contact.id)
+                    let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                }
             )
         case .externalFile(let file):
             SourceCardView(

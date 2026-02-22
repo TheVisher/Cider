@@ -62,6 +62,13 @@ final class ContactStorage: ObservableObject {
         contacts.first { $0.id == id }
     }
 
+    func restoreFromTrash(_ contact: ContactCard) {
+        guard !contacts.contains(where: { $0.id == contact.id }) else { return }
+        contacts.append(contact)
+        sortContacts()
+        persist()
+    }
+
     // MARK: - Avatar Storage
 
     func avatarDirectoryURL() -> URL {

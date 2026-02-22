@@ -188,6 +188,8 @@ struct CiderPanelView: View {
                 },
                 onDelete: { dateCard in
                     _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
                 }
             )
         }
@@ -212,6 +214,8 @@ struct CiderPanelView: View {
                 },
                 onDelete: { contact in
                     _ = ContactStorage.shared.deleteContact(contact.id)
+                    let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
                 }
             )
         }

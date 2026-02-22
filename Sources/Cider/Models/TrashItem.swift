@@ -4,6 +4,8 @@ enum TrashItemType: String, Codable {
     case bookmark
     case note
     case folder
+    case dateCard
+    case contact
 }
 
 /// Payload stored alongside a trashed bookmark, containing the full bookmark data
@@ -21,6 +23,20 @@ struct NoteTrashPayload: Codable {
     let noteFilename: String
     let folderID: UUID?
     let createdAt: Date
+}
+
+/// Payload stored alongside a trashed date card.
+struct DateCardTrashPayload: Codable {
+    let dateCard: DateCard
+}
+
+/// Payload stored alongside a trashed contact.
+struct ContactTrashPayload: Codable {
+    let contact: ContactCard
+    /// Avatar path relative to `.trash/` if avatar was moved there.
+    let trashAvatarRelativePath: String?
+    /// IDs of birthday date cards trashed as part of this contact deletion.
+    let cascadedDateCardTrashIDs: [UUID]
 }
 
 /// Represents a single item that has been moved to the trash.
@@ -41,6 +57,12 @@ struct TrashItem: Codable, Identifiable {
     // Folder-specific (folder trash stores contents as child items)
     var folderContents: [TrashItem]?
 
+    // Date card-specific
+    var dateCardPayload: DateCardTrashPayload?
+
+    // Contact-specific
+    var contactPayload: ContactTrashPayload?
+
     init(
         id: UUID = UUID(),
         itemID: UUID,
@@ -50,7 +72,9 @@ struct TrashItem: Codable, Identifiable {
         deletedAt: Date = Date(),
         bookmarkPayload: BookmarkTrashPayload? = nil,
         notePayload: NoteTrashPayload? = nil,
-        folderContents: [TrashItem]? = nil
+        folderContents: [TrashItem]? = nil,
+        dateCardPayload: DateCardTrashPayload? = nil,
+        contactPayload: ContactTrashPayload? = nil
     ) {
         self.id = id
         self.itemID = itemID
@@ -61,5 +85,7 @@ struct TrashItem: Codable, Identifiable {
         self.bookmarkPayload = bookmarkPayload
         self.notePayload = notePayload
         self.folderContents = folderContents
+        self.dateCardPayload = dateCardPayload
+        self.contactPayload = contactPayload
     }
 }

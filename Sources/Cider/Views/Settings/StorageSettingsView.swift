@@ -86,6 +86,8 @@ struct StorageSettingsView: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 let bookmarkItems = trashItems.filter { $0.itemType == .bookmark }
                 let noteItems = trashItems.filter { $0.itemType == .note }
+                let dateCardItems = trashItems.filter { $0.itemType == .dateCard }
+                let contactItems = trashItems.filter { $0.itemType == .contact }
 
                 if !bookmarkItems.isEmpty {
                     Text("Bookmarks")
@@ -111,6 +113,40 @@ struct StorageSettingsView: View {
                         .padding(.top, Spacing.xs)
 
                     ForEach(noteItems) { item in
+                        TrashItemRow(item: item, onRestore: {
+                            TrashStorage.shared.restore(item)
+                            loadTrashItems()
+                        }, onDelete: {
+                            TrashStorage.shared.permanentlyDelete(item)
+                            loadTrashItems()
+                        })
+                    }
+                }
+
+                if !dateCardItems.isEmpty {
+                    Text("Date Cards")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.secondary)
+                        .padding(.top, Spacing.xs)
+
+                    ForEach(dateCardItems) { item in
+                        TrashItemRow(item: item, onRestore: {
+                            TrashStorage.shared.restore(item)
+                            loadTrashItems()
+                        }, onDelete: {
+                            TrashStorage.shared.permanentlyDelete(item)
+                            loadTrashItems()
+                        })
+                    }
+                }
+
+                if !contactItems.isEmpty {
+                    Text("Contacts")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.secondary)
+                        .padding(.top, Spacing.xs)
+
+                    ForEach(contactItems) { item in
                         TrashItemRow(item: item, onRestore: {
                             TrashStorage.shared.restore(item)
                             loadTrashItems()
@@ -148,6 +184,16 @@ private struct TrashItemRow: View {
     let onRestore: () -> Void
     let onDelete: () -> Void
 
+    private var trashItemIcon: String {
+        switch item.itemType {
+        case .bookmark: return "bookmark"
+        case .note: return "note.text"
+        case .dateCard: return "calendar"
+        case .contact: return "person.crop.circle"
+        case .folder: return "folder"
+        }
+    }
+
     private var deletedAgoText: String {
         let interval = Date().timeIntervalSince(item.deletedAt)
         let days = Int(interval / 86400)
@@ -158,7 +204,7 @@ private struct TrashItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            Image(systemName: item.itemType == .bookmark ? "bookmark" : "note.text")
+            Image(systemName: trashItemIcon)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.secondary)
                 .frame(width: 16)

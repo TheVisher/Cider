@@ -183,6 +183,118 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
+    // MARK: - Date Card Trash
+
+    func trashDateCard(_ dateCard: DateCard, ciderDir: URL) -> TrashItem {
+        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        let payload = DateCardTrashPayload(dateCard: dateCard)
+        let trashItem = TrashItem(
+            itemID: dateCard.id,
+            itemType: .dateCard,
+            title: dateCard.title,
+            originalFolderID: nil,
+            dateCardPayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        return trashItem
+    }
+
+    func restoreDateCard(_ trashItem: TrashItem) {
+        guard let payload = trashItem.dateCardPayload else { return }
+
+        let ciderDir = StoragePaths.ciderDataDirectoryURL()
+        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+
+        DateCardStorage.shared.restoreFromTrash(payload.dateCard)
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+    }
+
+    // MARK: - Contact Trash
+
+    func trashContact(_ contact: ContactCard, ciderDir: URL) -> TrashItem {
+        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        // Move avatar file to trash if it exists
+        let contactAvatarsDirName = "contact-avatars"
+        var trashAvatarRelPath: String?
+        if contact.hasAvatar {
+            let avatarSrc = ciderDir.appendingPathComponent(".contact-avatars/\(contact.id.uuidString).jpg")
+            if fm.fileExists(atPath: avatarSrc.path) {
+                let trashAvatarsDir = trashDir.appendingPathComponent(contactAvatarsDirName)
+                try? fm.createDirectory(at: trashAvatarsDir, withIntermediateDirectories: true)
+                let avatarDest = trashAvatarsDir.appendingPathComponent("\(contact.id.uuidString).jpg")
+                try? fm.moveItem(at: avatarSrc, to: avatarDest)
+                trashAvatarRelPath = "\(contactAvatarsDirName)/\(contact.id.uuidString).jpg"
+            }
+        }
+
+        // Cascade-trash linked birthday date cards
+        var cascadedIDs: [UUID] = []
+        for ref in contact.linkedEntities where ref.type == .dateCard {
+            if let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) {
+                _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                let cascadedItem = trashDateCard(dateCard, ciderDir: ciderDir)
+                cascadedIDs.append(cascadedItem.id)
+            }
+        }
+
+        let payload = ContactTrashPayload(
+            contact: contact,
+            trashAvatarRelativePath: trashAvatarRelPath,
+            cascadedDateCardTrashIDs: cascadedIDs
+        )
+
+        let trashItem = TrashItem(
+            itemID: contact.id,
+            itemType: .contact,
+            title: contact.displayName,
+            originalFolderID: nil,
+            contactPayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        return trashItem
+    }
+
+    func restoreContact(_ trashItem: TrashItem) {
+        guard let payload = trashItem.contactPayload else { return }
+
+        let ciderDir = StoragePaths.ciderDataDirectoryURL()
+        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+        let fm = FileManager.default
+
+        // Restore avatar file
+        if let avatarRelPath = payload.trashAvatarRelativePath {
+            let srcURL = trashDir.appendingPathComponent(avatarRelPath)
+            let destURL = ciderDir.appendingPathComponent(".contact-avatars/\(payload.contact.id.uuidString).jpg")
+            if fm.fileExists(atPath: srcURL.path) {
+                try? fm.createDirectory(
+                    at: destURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try? fm.moveItem(at: srcURL, to: destURL)
+            }
+        }
+
+        // Restore the contact
+        ContactStorage.shared.restoreFromTrash(payload.contact)
+
+        // Restore cascaded birthday date cards
+        let manifest = loadManifest(trashDir: trashDir)
+        for cascadedID in payload.cascadedDateCardTrashIDs {
+            if let cascadedItem = manifest.first(where: { $0.id == cascadedID }) {
+                restoreDateCard(cascadedItem)
+            }
+        }
+
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+    }
+
     // MARK: - Generic Restore
 
     func restore(_ trashItem: TrashItem) {
@@ -195,6 +307,10 @@ final class TrashStorage {
             for content in trashItem.folderContents ?? [] {
                 restore(content)
             }
+        case .dateCard:
+            restoreDateCard(trashItem)
+        case .contact:
+            restoreContact(trashItem)
         }
     }
 
@@ -270,6 +386,28 @@ final class TrashStorage {
             for content in trashItem.folderContents ?? [] {
                 permanentlyDelete(content)
             }
+        case .dateCard:
+            let ciderDir = URL(
+                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
+            )
+            let trashDir = ciderDir.appendingPathComponent(trashDirName)
+            removeFromManifest(trashItem.id, trashDir: trashDir)
+        case .contact:
+            let ciderDir = URL(
+                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
+            )
+            let trashDir = ciderDir.appendingPathComponent(trashDirName)
+            deleteFilesForItem(trashItem, trashDir: trashDir)
+            // Permanently delete cascaded date cards
+            if let payload = trashItem.contactPayload {
+                let manifest = loadManifest(trashDir: trashDir)
+                for cascadedID in payload.cascadedDateCardTrashIDs {
+                    if let cascadedItem = manifest.first(where: { $0.id == cascadedID }) {
+                        permanentlyDelete(cascadedItem)
+                    }
+                }
+            }
+            removeFromManifest(trashItem.id, trashDir: trashDir)
         }
     }
 
@@ -314,6 +452,12 @@ final class TrashStorage {
         case .folder:
             for content in trashItem.folderContents ?? [] {
                 deleteFilesForItem(content, trashDir: trashDir)
+            }
+        case .dateCard:
+            break // No files to delete — data is in the manifest payload
+        case .contact:
+            if let payload = trashItem.contactPayload, let avatarRelPath = payload.trashAvatarRelativePath {
+                try? fm.removeItem(at: trashDir.appendingPathComponent(avatarRelPath))
             }
         }
     }

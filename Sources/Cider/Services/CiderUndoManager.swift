@@ -91,7 +91,7 @@ final class CiderUndoManager {
                 BookmarksStorage.shared.assignBookmark(itemID, toFolder: fromFolderID)
             case .note:
                 NotesStorage.shared.assignNote(itemID, toFolder: fromFolderID)
-            case .folder:
+            case .folder, .dateCard, .contact:
                 break
             }
 
@@ -102,7 +102,7 @@ final class CiderUndoManager {
                     BookmarksStorage.shared.assignBookmark(item.itemID, toFolder: item.fromFolderID)
                 case .note:
                     NotesStorage.shared.assignNote(item.itemID, toFolder: item.fromFolderID)
-                case .folder:
+                case .folder, .dateCard, .contact:
                     break
                 }
             }
@@ -121,6 +121,16 @@ final class CiderUndoManager {
             case .note:
                 if let note = NotesStorage.shared.notes.first(where: { $0.id == itemID }) {
                     NotesStorage.shared.rename(note: note, to: oldTitle)
+                }
+            case .dateCard:
+                if var dateCard = DateCardStorage.shared.dateCard(for: itemID) {
+                    dateCard.title = oldTitle
+                    _ = DateCardStorage.shared.updateDateCard(dateCard)
+                }
+            case .contact:
+                if var contact = ContactStorage.shared.contact(for: itemID) {
+                    contact.displayName = oldTitle
+                    _ = ContactStorage.shared.updateContact(contact)
                 }
             case .folder:
                 break

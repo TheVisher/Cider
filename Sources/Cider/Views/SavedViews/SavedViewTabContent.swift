@@ -94,6 +94,8 @@ struct SavedViewTabContent: View {
                 },
                 onDelete: { dateCard in
                     _ = dateCardStorage.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
                 }
             )
         }
@@ -118,6 +120,8 @@ struct SavedViewTabContent: View {
                 },
                 onDelete: { contact in
                     _ = contactStorage.deleteContact(contact.id)
+                    let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
                 }
             )
         }
@@ -665,7 +669,11 @@ struct SavedViewTabContent: View {
                 DateCardListRow(
                     dateCard: dateCard,
                     onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
-                    onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+                    onDelete: {
+                        _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                        let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    }
                 )
             )
         case .contact:
@@ -674,7 +682,11 @@ struct SavedViewTabContent: View {
                     ContactListRow(
                         contact: contact,
                         onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
-                        onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+                        onDelete: {
+                            _ = ContactStorage.shared.deleteContact(contact.id)
+                            let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                        }
                     )
                 )
             }
