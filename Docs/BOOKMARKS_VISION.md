@@ -271,6 +271,70 @@ These features lean into Cider's unique position as a floating panel open alongs
 
 ---
 
+## Rich Media Capture
+
+Extending image bookmarks beyond static images to support richer media types. Three tiers of increasing complexity:
+
+### GIF Support (Low Effort)
+
+GIF bookmarks are nearly supported already — most of the pipeline handles them:
+
+- Add `public.gif` to `BookmarksClipboardMonitor.imageTypes` array
+- GIF stored as original in `.originals/{id}.gif`, thumbnail is first-frame PNG extracted via `CGImageSourceCreateThumbnailAtIndex` (already works with GIF sources)
+- `normalizedImageFileExtension` already handles `.gif` → no storage path changes needed
+- Also add GIF support to `CiderServicesProvider.sendImageToCider` for macOS Services integration
+- Card display: static first-frame thumbnail (no animation in grid/masonry — animation would be distracting and memory-heavy)
+- Optional future: play GIF on hover in detail popover or reader view
+
+### Video Bookmarks (Medium Effort, Clipboard Limitation)
+
+Short video clips from Reddit, Instagram, TikTok, etc.:
+
+- **Clipboard limitation:** Browsers don't put video data on the clipboard — only URLs. So clipboard capture can't grab video content directly.
+- **Drag-drop of local files** is more feasible: accept `.mp4`/`.mov`/`.webm` drops onto bookmark cards (same pattern as image drops)
+- Store short clips in `.originals/` with video thumbnail extraction via `AVAssetImageGenerator` (first frame or mid-point frame)
+- **Card display:** Static thumbnail with play icon overlay — no inline video playback in grid/masonry
+- **Playback:** Click to play in DetailPopoverPanel using `AVPlayerView` or embedded `WKWebView`
+- **Storage implications:** Videos are orders of magnitude larger than images — needs size limits (e.g., 50MB max) or explicit opt-in
+- **URL-based video bookmarks:** For Reddit/Instagram/TikTok URLs, could use yt-dlp or similar to download the video on capture — but this adds external dependencies and raises storage concerns
+
+### Multi-Image Bookmarks / Carousels (Larger Effort)
+
+Instagram posts, product comparisons, design inspiration boards — content that's naturally multi-image:
+
+- **Model change:** `thumbnailRelativePaths: [String]?` and `originalImageRelativePaths: [String]?` (arrays alongside existing single-image fields for backward compat)
+- **Storage naming:** `{bookmarkID}_0.png`, `{bookmarkID}_1.png`, etc. in both `.thumbnails/` and `.originals/`
+- **Card UI:** Carousel with dot indicators or horizontal swipe gesture. Cover image (first by default, user-selectable) shown in grid/masonry.
+- **Drag-drop:** Accept multiple images in a single drop (currently stops after first image). Could also support dropping a folder of images.
+- **Use cases:** Instagram posts, product comparison screenshots, design inspiration boards, step-by-step tutorials, before/after pairs
+- **Migration:** Existing single-image bookmarks continue to work unchanged — array fields are optional and nil by default
+
+---
+
+## Future Ideas
+
+### Clipboard Viewer
+
+Since Cider relies heavily on the clipboard for capturing bookmarks, images, and text, a dedicated clipboard viewer gives users a safety net — a way to see what's there and act on it when auto-capture misses something.
+
+**V1 — Basic viewer:**
+
+- Shows current clipboard contents in a scrollable feed: URLs, images, GIFs, text snippets, rich text, file references
+- Single-column layout at default panel width; expands to multi-column when the panel is wider (same responsive pattern as masonry/grid)
+- Each clipboard item has action buttons: "Save as Bookmark", "Save as Note", etc. — one click to route content to the right place
+- Drag-and-drop from clipboard items to the library feed, folders in the sidebar, or specific tabs — same drag patterns as existing cards
+- Clipboard history: show the last N items (macOS `NSPasteboard` tracks change count but not history natively — would need our own ring buffer, capturing snapshots on each `changeCount` increment)
+- Accessible from the capture button area (popover or inline section) or as a dedicated tab
+
+**Future — Privacy & safety:**
+
+- App exclusion list: skip capturing clipboard changes from specific apps (password managers, banking apps, 1Password, etc.)
+- Sensitive content detection: auto-redact or skip items that look like passwords, API keys, credit card numbers
+- Configurable in Settings — off by default so the basic version ships without complexity
+- Could also auto-expire clipboard history items after a configurable duration
+
+---
+
 ## Open Questions
 - Should clipboard auto-capture default to review mode or instant-save mode?
 - Should there be per-site metadata adapters for high-value domains?

@@ -7,6 +7,31 @@ This document defines how Cider integrates with Obsidian and other knowledge bas
 
 ---
 
+## Current Obsidian Setup (Feb 2026)
+
+The user's Obsidian vault is live at **`~/Notes/`** (not inside Documents — intentionally placed at the home root alongside `~/Cider/` and `~/Pawkit/`).
+
+The vault uses symlinks to surface all docs in one place without moving any files. The actual files stay in their original locations; Obsidian sees them through aliases:
+
+```
+~/Notes/                          ← Obsidian vault root
+├── Cider/          → ~/Cider/Docs/                  (24 project docs)
+├── Cider Archive/  → ~/Cider/Docs/_archive/          (31 archived docs)
+├── Cider Research/ → ~/Cider/.research/              (70+ research files)
+├── Pawkit/         → ~/Pawkit/docs/                  (10 project docs)
+├── Documents/      → ~/Documents/                    (full macOS Documents folder)
+└── Personal/                                         (empty — for personal notes)
+```
+
+**Key points for Obsidian integration work:**
+- The vault path to use in Cider's vault discovery is `~/Notes/` (`/Users/minivish/Notes/`)
+- `~/Documents/` is symlinked in, so Pawkit Docs, Cider Notes, and other Documents subfolders are all visible inside the vault under `Documents/`
+- All Cider project docs are under `Cider/` — changes made via Cider will write directly to `~/Cider/Docs/`
+- The `.obsidian/` config directory is at `~/Notes/.obsidian/`
+- Obsidian's "Show all file types" setting is enabled
+
+---
+
 ## Architecture Overview
 
 ```

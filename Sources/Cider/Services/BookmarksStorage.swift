@@ -599,6 +599,13 @@ final class BookmarksStorage: ObservableObject {
             loadedBookmarks.append(bookmark)
         }
 
+        // Append metadata-only bookmarks that have no URL (e.g. image bookmarks).
+        // These aren't represented in the HTML file so they'd be lost without this.
+        let loadedIDs = Set(loadedBookmarks.map(\.id))
+        for meta in metadataBookmarks where meta.urlString.isEmpty && !loadedIDs.contains(meta.id) {
+            loadedBookmarks.append(meta)
+        }
+
         let sanitizedLoaded = sanitizedBookmarks(
             from: loadedBookmarks,
             validFolderIDs: Set(metadataFolders.map(\.id))
@@ -689,6 +696,12 @@ final class BookmarksStorage: ObservableObject {
             }
 
             loadedBookmarks.append(bookmark)
+        }
+
+        // Append metadata-only bookmarks that have no URL (e.g. image bookmarks).
+        let loadedIDs = Set(loadedBookmarks.map(\.id))
+        for meta in metadataBookmarks where meta.urlString.isEmpty && !loadedIDs.contains(meta.id) {
+            loadedBookmarks.append(meta)
         }
 
         let sanitizedLoaded = sanitizedBookmarks(

@@ -25,6 +25,9 @@ final class BookmarksClipboardMonitor {
         let clamped = max(0, seconds)
         guard clamped > 0 else { return }
 
+        pendingImageRetry?.cancel()
+        pendingImageRetry = nil
+
         let newDeadline = Date().addingTimeInterval(clamped)
         if let existing = suspendUntil {
             suspendUntil = max(existing, newDeadline)
@@ -58,6 +61,9 @@ final class BookmarksClipboardMonitor {
         }
         if let suspendUntil, Date() >= suspendUntil {
             self.suspendUntil = nil
+            // Skip any clipboard changes that occurred during suspension
+            // (e.g. browser capture restoring the pasteboard after reading the URL)
+            lastChangeCount = NSPasteboard.general.changeCount
         }
 
         let pasteboard = NSPasteboard.general
@@ -118,6 +124,7 @@ final class BookmarksClipboardMonitor {
     }
 
     private func retryImageCheck(expectedChangeCount: Int) {
+        guard suspendUntil == nil else { return }
         let pasteboard = NSPasteboard.general
         // Only retry if the clipboard hasn't changed again since we scheduled
         guard pasteboard.changeCount == expectedChangeCount else { return }
@@ -133,9 +140,6 @@ final class BookmarksClipboardMonitor {
     ]
 
     private func hasImageData(pasteboard: NSPasteboard) -> Bool {
-        // Actually read data (like URL detection does with pasteboard.string).
-        // This triggers lazy data provision from the source app, which is more
-        // reliable than just checking declared types via availableType(from:).
         for type in Self.imageTypes {
             if pasteboard.data(forType: type) != nil {
                 return true
