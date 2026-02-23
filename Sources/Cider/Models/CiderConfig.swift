@@ -135,6 +135,7 @@ struct CiderConfig: Codable {
         case homeSort
         case homeEntityFilter
         case enableSpotlightIndexing
+        case enableSoundEffects
     }
 
     var showMenuBarIcon: Bool
@@ -169,6 +170,7 @@ struct CiderConfig: Codable {
     var homeSort: LibrarySortMode  // Sort mode for the Home library feed
     var homeEntityFilter: Set<LibraryEntityType>  // Which entity types to show in Home feed
     var enableSpotlightIndexing: Bool  // Index Cider items in Core Spotlight for system-wide search
+    var enableSoundEffects: Bool  // Play sounds for saves, captures, and deletes
 
     static let storageKey = "CiderConfig"
 
@@ -202,7 +204,8 @@ struct CiderConfig: Codable {
             undoToastPosition: .bottomRightPanel,
             homeSort: .createdDescending,
             homeEntityFilter: Set(LibraryEntityType.allCases),
-            enableSpotlightIndexing: true
+            enableSpotlightIndexing: true,
+            enableSoundEffects: false
         )
     }
 
@@ -359,6 +362,10 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .enableSpotlightIndexing
         ) ?? true
+        enableSoundEffects = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .enableSoundEffects
+        ) ?? false
     }
 
     init(
@@ -393,7 +400,8 @@ struct CiderConfig: Codable {
         undoToastPosition: ToastPosition = .bottomRightPanel,
         homeSort: LibrarySortMode = .createdDescending,
         homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases),
-        enableSpotlightIndexing: Bool = true
+        enableSpotlightIndexing: Bool = true,
+        enableSoundEffects: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -427,5 +435,6 @@ struct CiderConfig: Codable {
         self.homeSort = homeSort
         self.homeEntityFilter = homeEntityFilter
         self.enableSpotlightIndexing = enableSpotlightIndexing
+        self.enableSoundEffects = enableSoundEffects
     }
 }

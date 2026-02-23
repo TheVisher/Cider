@@ -251,6 +251,19 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .appearanceSounds:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Sounds") {
+                    SettingsToggleRow(
+                        title: "Sound effects",
+                        subtitle: "Play sounds for saves, captures, and deletes",
+                        isOn: $viewModel.enableSoundEffects
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
         case .advancedAccessibility:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Accessibility") {
@@ -491,7 +504,7 @@ private enum SettingsCategory: String, CaseIterable {
         case .bookmarks:
             [.bookmarksBehavior]
         case .appearance:
-            [.appearanceText, .appearanceMenuBar]
+            [.appearanceText, .appearanceMenuBar, .appearanceSounds]
         case .data:
             [.dataDirectories, .dataTrash, .dataNotifications]
         case .advanced:
@@ -514,6 +527,7 @@ private enum SettingsSubcategory: Hashable {
     case bookmarksBehavior
     case appearanceText
     case appearanceMenuBar
+    case appearanceSounds
     case dataDirectories
     case dataTrash
     case dataNotifications
@@ -542,6 +556,8 @@ private enum SettingsSubcategory: Hashable {
             "Text"
         case .appearanceMenuBar:
             "Menu Bar"
+        case .appearanceSounds:
+            "Sounds"
         case .dataDirectories:
             "Directories"
         case .dataTrash:

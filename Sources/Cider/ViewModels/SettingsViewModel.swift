@@ -80,6 +80,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var undoToastPosition: ToastPosition {
         didSet { saveConfig() }
     }
+    @Published var enableSoundEffects: Bool {
+        didSet { saveConfig() }
+    }
 
     private var config: CiderConfig
 
@@ -107,6 +110,7 @@ final class SettingsViewModel: ObservableObject {
         self.trashRetentionDays = config.trashRetentionDays
         self.captureToastPosition = config.captureToastPosition
         self.undoToastPosition = config.undoToastPosition
+        self.enableSoundEffects = config.enableSoundEffects
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -139,6 +143,7 @@ final class SettingsViewModel: ObservableObject {
         config.trashRetentionDays = trashRetentionDays
         config.captureToastPosition = captureToastPosition
         config.undoToastPosition = undoToastPosition
+        config.enableSoundEffects = enableSoundEffects
         config.save()
 
         // Post notification so AppDelegate can respond

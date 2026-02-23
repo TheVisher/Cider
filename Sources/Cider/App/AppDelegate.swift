@@ -448,6 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showUndoToast(message: String, showViewTrash: Bool) {
+        CiderSoundEffect.trash.play()
         stopUndoToastTimer()
         undoToastIsHovering = false
         undoToastRemaining = UndoToastDesign.autoHideDuration
@@ -588,6 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showBookmarkCaptureToast(message: String, isSuccess: Bool) {
+        if isSuccess { CiderSoundEffect.save.play() }
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
         bookmarkClipboardReviewToastModel.progress = 1
@@ -610,6 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showImageClipboardReviewToast() {
+        CiderSoundEffect.clipboardReview.play()
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
         bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
@@ -653,6 +656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showBookmarkClipboardReviewToast(urlString: String) {
+        CiderSoundEffect.clipboardReview.play()
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
         bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration

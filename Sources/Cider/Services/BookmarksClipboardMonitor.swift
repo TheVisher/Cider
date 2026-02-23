@@ -9,6 +9,7 @@ final class BookmarksClipboardMonitor {
     private var lastChangeCount: Int
     private var isEnabled = false
     private var suspendUntil: Date?
+    private var pendingImageRetry: DispatchWorkItem?
 
     private init() {
         lastChangeCount = NSPasteboard.general.changeCount
@@ -47,6 +48,8 @@ final class BookmarksClipboardMonitor {
     private func stop() {
         timer?.invalidate()
         timer = nil
+        pendingImageRetry?.cancel()
+        pendingImageRetry = nil
     }
 
     @objc private func pollClipboard() {
@@ -61,6 +64,8 @@ final class BookmarksClipboardMonitor {
         let changeCount = pasteboard.changeCount
         guard changeCount != lastChangeCount else { return }
         lastChangeCount = changeCount
+        pendingImageRetry?.cancel()
+        pendingImageRetry = nil
 
         let config = CiderConfig.load()
 
@@ -73,6 +78,18 @@ final class BookmarksClipboardMonitor {
                 object: nil
             )
             return
+        }
+
+        // If image capture is enabled but no image was found, the source app
+        // may still be writing image data to the pasteboard asynchronously.
+        // Schedule a retry to catch lazily-provided image data.
+        if config.autoCaptureCopiedImages {
+            let retryCount = changeCount
+            let work = DispatchWorkItem { [weak self] in
+                self?.retryImageCheck(expectedChangeCount: retryCount)
+            }
+            pendingImageRetry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
         }
 
         // Check for URL string (if URL capture is enabled)
@@ -100,12 +117,31 @@ final class BookmarksClipboardMonitor {
         }
     }
 
+    private func retryImageCheck(expectedChangeCount: Int) {
+        let pasteboard = NSPasteboard.general
+        // Only retry if the clipboard hasn't changed again since we scheduled
+        guard pasteboard.changeCount == expectedChangeCount else { return }
+        guard hasImageData(pasteboard: pasteboard) else { return }
+        NotificationCenter.default.post(
+            name: .showImageClipboardReviewToast,
+            object: nil
+        )
+    }
+
     private static let imageTypes: [NSPasteboard.PasteboardType] = [
         .png, .tiff, NSPasteboard.PasteboardType("public.jpeg")
     ]
 
     private func hasImageData(pasteboard: NSPasteboard) -> Bool {
-        pasteboard.availableType(from: Self.imageTypes) != nil
+        // Actually read data (like URL detection does with pasteboard.string).
+        // This triggers lazy data provision from the source app, which is more
+        // reliable than just checking declared types via availableType(from:).
+        for type in Self.imageTypes {
+            if pasteboard.data(forType: type) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     /// Reads image data from the general pasteboard. Called by the toast save action.
