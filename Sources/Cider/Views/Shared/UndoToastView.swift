@@ -15,7 +15,7 @@ struct UndoToastView: View {
 
     var body: some View {
         ZStack {
-            AcrylicPanelBackground(cornerRadius: UndoToastDesign.cornerRadius, shadowStyle: .compact)
+            AcrylicPanelBackground(cornerRadius: UndoToastDesign.cornerRadius)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.sm) {

@@ -102,10 +102,6 @@ enum CiderDesign {
     static let runningIndicatorSize: CGFloat = 6
     static let runningIndicatorOffset: CGFloat = 6
 
-    // Shadow padding - extra space in window for shadow to render
-    static let shadowPaddingHorizontal: CGFloat = 70
-    static let shadowPaddingTop: CGFloat = 20
-    static let shadowPaddingBottom: CGFloat = 70
 }
 
 enum NotesDesign {
@@ -114,7 +110,7 @@ enum NotesDesign {
     static let minWidth: CGFloat = 300
     static let minHeight: CGFloat = 300
     static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 40
+    static let shadowPadding: CGFloat = 0
     static let titleBarHeight: CGFloat = 40
     static let toolbarHeight: CGFloat = 36
     static let findBarHeight: CGFloat = 36
@@ -262,7 +258,7 @@ enum BookmarksToastDesign {
     static let height: CGFloat = 56
     static let reviewHeight: CGFloat = 96
     static let cornerRadius: CGFloat = Radius.md
-    static let shadowPadding: CGFloat = 24
+    static let shadowPadding: CGFloat = 0
     static let topInset: CGFloat = Spacing.xxxl
     static let autoHideDuration: TimeInterval = 1.8
     static let reviewAutoHideDuration: TimeInterval = 5.0
@@ -304,7 +300,7 @@ enum UndoToastDesign {
     static let width: CGFloat = 360
     static let height: CGFloat = 56
     static let cornerRadius: CGFloat = Radius.md
-    static let shadowPadding: CGFloat = 24
+    static let shadowPadding: CGFloat = 0
     static let autoHideDuration: TimeInterval = 5.0
     static let panelEdgeInset: CGFloat = Spacing.md
 
@@ -334,7 +330,7 @@ enum CiderPanelDesign {
     static let minWidth: CGFloat = 540
     static let minHeight: CGFloat = 440
     static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 40
+    static let shadowPadding: CGFloat = 0
     static let topPadding: CGFloat = 28
     static let bottomPadding: CGFloat = 15
     static let collapsedBottomPadding: CGFloat = topPadding
@@ -535,11 +531,6 @@ enum CiderColors {
     static let dividerSecondaryOpacity: CGFloat = 0.22
 
     // MARK: - Shadow Shape Opacity (custom blurred shadow technique)
-
-    /// Full/expanded panel shadow shape opacity
-    static let shadowShapeFullOpacity: CGFloat = 0.7
-    /// Compact/collapsed panel shadow shape opacity
-    static let shadowShapeCompactOpacity: CGFloat = 0.52
 
     // MARK: - View State Opacity
 

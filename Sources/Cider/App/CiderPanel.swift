@@ -37,7 +37,7 @@ final class CiderPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false
+        hasShadow = true
 
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false

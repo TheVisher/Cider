@@ -24,7 +24,7 @@ final class BookmarkCaptureToastPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false
+        hasShadow = true
 
         isMovable = false
         isReleasedWhenClosed = false
@@ -45,7 +45,7 @@ struct BookmarkCaptureToastView: View {
 
     var body: some View {
         ZStack {
-            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
+            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius)
 
             HStack(spacing: Spacing.sm) {
                 Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
@@ -76,7 +76,7 @@ struct BookmarkClipboardReviewToastView: View {
 
     var body: some View {
         ZStack {
-            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
+            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.sm) {
@@ -156,7 +156,7 @@ struct ImageClipboardReviewToastView: View {
 
     var body: some View {
         ZStack {
-            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
+            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.sm) {

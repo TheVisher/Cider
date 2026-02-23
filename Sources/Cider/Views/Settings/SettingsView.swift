@@ -580,7 +580,7 @@ enum SettingsDesign {
     static let width: CGFloat = 750
     static let height: CGFloat = 580
     static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 45
+    static let shadowPadding: CGFloat = 0
     static let headerHeight: CGFloat = 48
     static let primarySidebarWidth: CGFloat = 190
     static let displayPickerMaxWidth: CGFloat = 250
@@ -870,24 +870,16 @@ struct SettingsBackgroundView: View {
     @ViewBuilder
     private var acrylicBackground: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.black)
-                .blur(radius: 18)
-                .offset(y: 18)
-                .opacity(CiderColors.shadowShapeFullOpacity)
-
-            ZStack {
-                VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                CiderColors.acrylicTint
-                CiderColors.surfaceHighlight
-            }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
-                    .padding(CiderBorder.innerStrokeInset)
-            )
+            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+            CiderColors.acrylicTint
+            CiderColors.surfaceHighlight
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
+                .padding(CiderBorder.innerStrokeInset)
+        )
     }
 
     @ViewBuilder

@@ -63,8 +63,7 @@ struct CiderPanelShell<
     var body: some View {
         ZStack {
             AcrylicPanelBackground(
-                cornerRadius: CiderPanelDesign.cornerRadius,
-                shadowStyle: isCollapsed ? .compact : .full
+                cornerRadius: CiderPanelDesign.cornerRadius
             )
 
             HStack(spacing: 0) {

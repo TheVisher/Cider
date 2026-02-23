@@ -16,7 +16,7 @@ final class SettingsWindow: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false // We draw our own shadow
+        hasShadow = true
         isMovableByWindowBackground = true
 
         // Standard window behavior
