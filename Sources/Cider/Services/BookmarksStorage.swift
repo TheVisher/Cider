@@ -153,6 +153,21 @@ final class BookmarksStorage: ObservableObject {
         return bookmark
     }
 
+    /// Creates a bookmark for a saved image (no URL required).
+    func addImageBookmark(title: String) -> Bookmark {
+        let bookmark = Bookmark(title: title, urlString: "")
+        bookmarks.insert(bookmark, at: 0)
+        persist()
+        return bookmark
+    }
+
+    /// Sets the URL on an existing bookmark (used for image bookmarks that get source context).
+    func updateURL(for bookmarkID: UUID, urlString: String) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        bookmarks[index].urlString = urlString
+        persist()
+    }
+
     @discardableResult
     func remove(_ bookmark: Bookmark) -> TrashItem {
         cancelEnrichment(for: bookmark.id)
@@ -526,7 +541,12 @@ final class BookmarksStorage: ObservableObject {
             from: metadataSnapshot.bookmarks,
             validFolderIDs: Set(metadataFolders.map(\.id))
         )
-        let metadataByURL = Dictionary(uniqueKeysWithValues: metadataBookmarks.map { ($0.urlString.lowercased(), $0) })
+        let metadataByURL = Dictionary(
+            metadataBookmarks
+                .filter { !$0.urlString.isEmpty }
+                .map { ($0.urlString.lowercased(), $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
 
         guard let htmlData = try? Data(contentsOf: htmlFileURL),
               let html = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .utf16) else {
@@ -613,7 +633,12 @@ final class BookmarksStorage: ObservableObject {
             from: metadataSnapshot.bookmarks,
             validFolderIDs: Set(metadataFolders.map(\.id))
         )
-        let metadataByURL = Dictionary(uniqueKeysWithValues: metadataBookmarks.map { ($0.urlString.lowercased(), $0) })
+        let metadataByURL = Dictionary(
+            metadataBookmarks
+                .filter { !$0.urlString.isEmpty }
+                .map { ($0.urlString.lowercased(), $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
 
         guard let htmlData,
               let html = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .utf16) else {

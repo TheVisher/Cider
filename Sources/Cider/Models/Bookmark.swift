@@ -258,6 +258,12 @@ struct Bookmark: Identifiable, Hashable, Codable {
         URL(string: urlString)
     }
 
+    /// Whether this bookmark has a meaningful URL (not just an image-only entry).
+    var hasURL: Bool {
+        guard let url, let host = url.host, !host.isEmpty else { return false }
+        return url.scheme == "http" || url.scheme == "https" || !host.isEmpty
+    }
+
     var hostDisplay: String {
         guard let host = url?.host, !host.isEmpty else {
             return "Unknown Source"

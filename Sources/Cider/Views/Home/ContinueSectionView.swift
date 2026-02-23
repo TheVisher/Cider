@@ -149,10 +149,17 @@ extension LibraryItemV2 {
     var subtitleView: some View {
         switch self {
         case .bookmark(let b):
-            Text(b.hostDisplay)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
-                .lineLimit(1)
+            if b.hasURL {
+                Text(b.hostDisplay)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            } else {
+                Text(b.updatedAt.formatted(.relative(presentation: .named)))
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            }
         case .dateCard(let dc):
             Text(dc.allDay ? dc.startAt.formatted(.dateTime.month(.abbreviated).day()) :
                  dc.startAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))

@@ -23,6 +23,7 @@ extension Notification.Name {
     static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
     static let showBookmarkCaptureToast = Notification.Name("cider.showBookmarkCaptureToast")
     static let showBookmarkClipboardReviewToast = Notification.Name("cider.showBookmarkClipboardReviewToast")
+    static let showImageClipboardReviewToast = Notification.Name("cider.showImageClipboardReviewToast")
     static let toggleCiderPanel = Notification.Name("cider.toggleCiderPanel")
     static let dismissCiderPanel = Notification.Name("cider.dismissCiderPanel")
     static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")

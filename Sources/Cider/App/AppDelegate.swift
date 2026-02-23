@@ -42,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var undoToastRemaining: TimeInterval = UndoToastDesign.autoHideDuration
     private var undoToastLastTick: Date?
 
+    // Services
+    private var servicesProvider: CiderServicesProvider?
+
     // Spotlight
     private var spotlightIndexer: SpotlightIndexer?
 
@@ -74,9 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // but won't appear in system search. Works once packaged as .app for distribution.
         if Bundle.main.bundleURL.pathExtension == "app" {
             LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
+            NSUpdateDynamicServices()
         }
         spotlightIndexer = SpotlightIndexer.shared
         spotlightIndexer?.start()
+
+        // Register macOS Services provider ("Send to Cider" in Services menu)
+        let provider = CiderServicesProvider()
+        NSApp.servicesProvider = provider
+        servicesProvider = provider
 
         Task { @MainActor in
             let config = CiderConfig.load()
@@ -240,8 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ProjectStorage.shared.reload()
         ExternalSourceStorage.shared.reload()
 
-        // Toggle automatic bookmark capture from copied URLs
-        BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
+        // Toggle automatic bookmark capture from copied URLs/images
+        BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs || config.autoCaptureCopiedImages)
 
         // Toggle Spotlight indexing
         if config.enableSpotlightIndexing {
@@ -361,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bookmarksViewModel = BookmarksViewModel()
 
         let config = CiderConfig.load()
-        BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs)
+        BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs || config.autoCaptureCopiedImages)
     }
 
     private func startBookmarksHotkeyDetection() {
@@ -390,6 +399,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] notification in
                 guard let urlString = notification.userInfo?["urlString"] as? String else { return }
                 self?.showBookmarkClipboardReviewToast(urlString: urlString)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .showImageClipboardReviewToast)
+            .sink { [weak self] _ in
+                self?.showImageClipboardReviewToast()
             }
             .store(in: &cancellables)
     }
@@ -594,6 +609,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + BookmarksToastDesign.autoHideDuration, execute: hideWork)
     }
 
+    private func showImageClipboardReviewToast() {
+        stopBookmarkClipboardReviewTimer()
+        bookmarkClipboardReviewIsHovering = false
+        bookmarkClipboardReviewRemaining = BookmarksToastDesign.reviewAutoHideDuration
+        bookmarkClipboardReviewToastModel.progress = 1
+        bookmarkCaptureToastHideWorkItem?.cancel()
+        bookmarkCaptureToastHideWorkItem = nil
+
+        let panel = resolveBookmarkCaptureToastPanel()
+        let toastView = ImageClipboardReviewToastView(
+            model: bookmarkClipboardReviewToastModel,
+            onHoverChanged: { [weak self] hovering in
+                self?.handleBookmarkClipboardReviewHoverChange(hovering)
+            },
+            onSave: { [weak self] in
+                guard let self else { return }
+                guard let imageData = BookmarksClipboardMonitor.readImageFromClipboard() else {
+                    self.showBookmarkCaptureToast(message: "Image no longer on clipboard", isSuccess: false)
+                    return
+                }
+                // Suspend monitor so the same clipboard image isn't re-detected
+                BookmarksClipboardMonitor.shared.suspendFor(seconds: 3)
+                // Try to get context from the frontmost browser (page title + URL)
+                let browserCapture = ActiveBrowserCaptureService.captureFromFrontmostBrowser()
+                let title = browserCapture?.title ?? "Saved Image"
+                let bookmark = BookmarksStorage.shared.addImageBookmark(title: title)
+                if let urlString = browserCapture?.urlString {
+                    BookmarksStorage.shared.updateURL(for: bookmark.id, urlString: urlString)
+                }
+                BookmarksStorage.shared.assignThumbnail(for: bookmark.id, imageData: imageData)
+                self.showBookmarkCaptureToast(message: "Saved copied image", isSuccess: true)
+            },
+            onDiscard: { [weak self] in
+                BookmarksClipboardMonitor.shared.suspendFor(seconds: 3)
+                self?.dismissBookmarkCaptureToast()
+            }
+        )
+        let hostingView = BookmarkCaptureToastHostingView(rootView: toastView)
+        panel.contentView = hostingView
+        showBookmarkToastPanel(panel, contentHeight: BookmarksToastDesign.reviewHeight)
+        startBookmarkClipboardReviewTimer(resetToFull: true)
+    }
+
     private func showBookmarkClipboardReviewToast(urlString: String) {
         stopBookmarkClipboardReviewTimer()
         bookmarkClipboardReviewIsHovering = false
@@ -696,6 +754,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if bookmarkClipboardReviewRemaining <= 0 {
             bookmarkClipboardReviewToastModel.progress = 0
+            BookmarksClipboardMonitor.shared.suspendFor(seconds: 3)
             dismissBookmarkCaptureToast()
             return
         }

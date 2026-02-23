@@ -148,6 +148,81 @@ struct BookmarkClipboardReviewToastView: View {
     }
 }
 
+struct ImageClipboardReviewToastView: View {
+    @ObservedObject var model: BookmarkClipboardReviewToastModel
+    let onHoverChanged: (Bool) -> Void
+    let onSave: () -> Void
+    let onDiscard: () -> Void
+
+    var body: some View {
+        ZStack {
+            AcrylicPanelBackground(cornerRadius: BookmarksToastDesign.cornerRadius, shadowStyle: .compact)
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.controlAccent)
+
+                    Text("Save copied image?")
+                        .font(CiderFont.labelSemibold)
+                        .foregroundColor(CiderColors.primary)
+
+                    Spacer(minLength: Spacing.sm)
+                }
+
+                HStack(spacing: Spacing.sm) {
+                    Button(action: onDiscard) {
+                        Text("Discard")
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(CiderColors.secondary)
+                            .padding(.horizontal, Spacing.sm)
+                            .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onSave) {
+                        Text("Save")
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.controlAccent)
+                            .padding(.horizontal, Spacing.sm)
+                            .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .fill(CiderColors.selectedFill)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: Spacing.sm)
+                }
+
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                            .fill(CiderColors.borderSelected)
+
+                        RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                            .fill(CiderColors.accentSolid)
+                            .frame(width: proxy.size.width * max(0, min(1, model.progress)))
+                    }
+                }
+                .frame(height: BookmarksToastDesign.reviewProgressHeight)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+        }
+        .frame(width: BookmarksToastDesign.width, height: BookmarksToastDesign.reviewHeight)
+        .padding(BookmarksToastDesign.shadowPadding)
+        .contentShape(Rectangle())
+        .onHover(perform: onHoverChanged)
+    }
+}
+
 final class BookmarkCaptureToastHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true

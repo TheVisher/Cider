@@ -56,14 +56,16 @@ struct BookmarkListRow: View {
 
                 Button { handleClick(normalAction: onOpen) } label: {
                     HStack(spacing: Spacing.xs) {
-                        Text(bookmark.hostDisplay)
-                            .font(CiderFont.body(scale: textScale))
-                            .foregroundColor(CiderColors.secondary)
-                            .lineLimit(1)
+                        if bookmark.hasURL {
+                            Text(bookmark.hostDisplay)
+                                .font(CiderFont.body(scale: textScale))
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
 
-                        Text("\u{2022}")
-                            .font(CiderFont.captionSemibold(scale: textScale))
-                            .foregroundColor(CiderColors.tertiary)
+                            Text("\u{2022}")
+                                .font(CiderFont.captionSemibold(scale: textScale))
+                                .foregroundColor(CiderColors.tertiary)
+                        }
 
                         Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
                             .font(CiderFont.body(scale: textScale))

@@ -193,6 +193,12 @@ struct SettingsView: View {
                     .disabled(!viewModel.autoCaptureCopiedURLs)
                     .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : CiderColors.disabledOpacity)
 
+                    SettingsToggleRow(
+                        title: "Detect copied images",
+                        subtitle: "When you copy an image, offer to save it as a bookmark",
+                        isOn: $viewModel.autoCaptureCopiedImages
+                    )
+
                     SettingsPickerRow(
                         title: "Default view mode",
                         subtitle: "Choose how bookmarks are shown by default",

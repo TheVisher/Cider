@@ -4,6 +4,7 @@ struct BookmarkDetailsDraft: Equatable {
     let id: UUID
     let urlString: String
     let hostDisplay: String
+    let hasURL: Bool
     let createdAt: Date
     let updatedAt: Date
     var title: String
@@ -15,6 +16,7 @@ struct BookmarkDetailsDraft: Equatable {
         id = bookmark.id
         urlString = bookmark.urlString
         hostDisplay = bookmark.hostDisplay
+        hasURL = bookmark.hasURL
         createdAt = bookmark.createdAt
         updatedAt = bookmark.updatedAt
         title = bookmark.title
@@ -139,12 +141,14 @@ struct BookmarkDetailsSheet: View {
                     .lineLimit(3)
 
                 HStack(spacing: Spacing.xs) {
-                    Text(draft.hostDisplay)
-                        .font(CiderFont.labelMedium(scale: textScale))
-                        .foregroundColor(CiderColors.secondary)
-                    Text("\u{2022}")
-                        .font(CiderFont.captionSemibold(scale: textScale))
-                        .foregroundColor(CiderColors.tertiary)
+                    if draft.hasURL {
+                        Text(draft.hostDisplay)
+                            .font(CiderFont.labelMedium(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                        Text("\u{2022}")
+                            .font(CiderFont.captionSemibold(scale: textScale))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
                     Text(draft.updatedAt.formatted(.relative(presentation: .named)))
                         .font(CiderFont.label(scale: textScale))
                         .foregroundColor(CiderColors.tertiary)

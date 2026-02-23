@@ -82,10 +82,12 @@ struct BookmarkCard: View {
 
                 Button { handleClick(normalAction: onOpen) } label: {
                     HStack(spacing: Spacing.xs) {
-                        Text(bookmark.hostDisplay)
-                            .font(CiderFont.body(scale: textScale))
-                            .foregroundColor(CiderColors.secondary)
-                            .lineLimit(1)
+                        if bookmark.hasURL {
+                            Text(bookmark.hostDisplay)
+                                .font(CiderFont.body(scale: textScale))
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
+                        }
 
                         Spacer(minLength: Spacing.xs)
 

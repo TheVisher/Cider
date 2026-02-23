@@ -47,6 +47,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var confirmCopiedURLBeforeSave: Bool {
         didSet { saveConfig() }
     }
+    @Published var autoCaptureCopiedImages: Bool {
+        didSet { saveConfig() }
+    }
     @Published var ciderDataDirectory: String {
         didSet { saveConfig() }
     }
@@ -93,6 +96,7 @@ final class SettingsViewModel: ObservableObject {
         self.enableBookmarksCaptureHotkey = config.enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = config.autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = config.confirmCopiedURLBeforeSave
+        self.autoCaptureCopiedImages = config.autoCaptureCopiedImages
         self.ciderDataDirectory = config.ciderDataDirectory
         self.rememberPanelPosition = config.rememberPanelPosition
         self.enableSpotlightIndexing = config.enableSpotlightIndexing
@@ -123,6 +127,7 @@ final class SettingsViewModel: ObservableObject {
         config.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         config.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         config.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
+        config.autoCaptureCopiedImages = autoCaptureCopiedImages
         config.ciderDataDirectory = ciderDataDirectory
         config.rememberPanelPosition = rememberPanelPosition
         config.enableSpotlightIndexing = enableSpotlightIndexing

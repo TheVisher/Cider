@@ -23,5 +23,40 @@
             </array>
         </dict>
     </array>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMessage</key>
+            <string>sendTextToCider</string>
+            <key>NSPortName</key>
+            <string>Cider</string>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Send to Cider</string>
+            </dict>
+            <key>NSSendTypes</key>
+            <array>
+                <string>public.utf8-plain-text</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSMessage</key>
+            <string>sendImageToCider</string>
+            <key>NSPortName</key>
+            <string>Cider</string>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Send to Cider</string>
+            </dict>
+            <key>NSSendTypes</key>
+            <array>
+                <string>public.png</string>
+                <string>public.jpeg</string>
+                <string>public.tiff</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

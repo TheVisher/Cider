@@ -87,10 +87,12 @@ struct FolderContentView: View {
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)
 
-                    Text(bookmark.hostDisplay)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
+                    if bookmark.hasURL {
+                        Text(bookmark.hostDisplay)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: Spacing.sm)

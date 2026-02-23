@@ -207,9 +207,9 @@ struct SearchPaletteView: View {
                     onDismiss()
                 } label: {
                     recentRowContent(
-                        icon: "bookmark",
+                        icon: bookmark.hasURL ? "bookmark" : "photo",
                         title: bookmark.title,
-                        subtitle: bookmark.hostDisplay,
+                        subtitle: bookmark.hasURL ? bookmark.hostDisplay : "",
                         date: bookmark.updatedAt
                     )
                 }
