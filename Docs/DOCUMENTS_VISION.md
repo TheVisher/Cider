@@ -89,6 +89,34 @@ Introduce a dedicated Documents surface for non-URL assets (PDFs, images, files)
 - Large files are referenced, not copied. Cider's data directory stays small.
 - File operations (move, rename, delete) go through Finder / filesystem — Cider is a viewer and organizer, not a file manager
 
+## Window-Based File Capture
+
+**Concept:** Grab the file behind any open window without hunting through Finder.
+
+macOS has always had **proxy icons** — the small file icon in the title bar of document-based apps (Preview, TextEdit, Xcode, Word, etc.). You can drag it directly to any drop target to move or copy the underlying file. Since Monterey, proxy icons are hidden by default and only appear on hover over the filename in the title bar.
+
+**How Cider could use this:**
+
+1. **Accept proxy icon drops** — Cider's panel is already a drop target for files. Proxy icon drags produce the same `NSItemProvider` payload as a Finder drag, so this works today with no extra work. Users just need to know about it.
+
+2. **Frontmost window detection** — When the Cider panel opens (double-tap Option), use the Accessibility API (`AXUIElementCopyAttributeValue` with `kAXDocumentAttribute`) to check the frontmost app's focused window for an open document path. If found, surface a one-tap "Capture [filename]" suggestion at the top of the panel — no drag required.
+
+3. **Shake to grab (future concept)** — Detect rapid back-and-forth window movement via the Accessibility API or `NSEvent` global monitor. If a window is shaken, surface a HUD or Cider capture prompt offering to grab the file. This is a novel interaction not built into macOS — no existing utility does it. Implementation: track `NSWindow` (or `AXUIElement`) position delta over time, trigger when movement crosses a shake threshold (similar to how macOS detects cursor shake to enlarge the pointer).
+
+**Why this matters:**
+Sending a document — to Slack, email, a teammate — currently means: switch to Finder, navigate to the file, drag it out. If the file is already open in Preview or Word, that navigation is wasted. Window-based capture skips it entirely. The file is already on screen; Cider just needs a way to grab it.
+
+**macOS API surface:**
+- `AXUIElementCopyAttributeValue` with `kAXDocumentAttribute` → returns `file:///path/to/file` for most document apps
+- `NSWorkspace.shared.frontmostApplication` → get the active app to target the right AX element
+- Requires Accessibility permission (already needed for the double-tap Option hotkey detection)
+- Proxy icon drags: standard `NSItemProvider` with `public.file-url` type — Cider already handles these
+
+**Make proxy icons always visible** (useful tip to surface in onboarding/settings):
+```bash
+defaults write -g NSToolbarTitleViewRolloverDelay -float 0
+```
+
 ## Open Questions
 - Should Documents support OCR/transcription in scope, or stay file-management only at first?
 - Should downloads captured from browsers auto-route to Documents?

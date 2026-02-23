@@ -26,6 +26,7 @@ These are active standards. Agents are directed to read specific ones from CLAUD
 | **ACRYLIC_STYLE.md** | NSVisualEffectView patterns, custom shadow technique, borders, NSPanel config | Panel/surface work |
 | **CONVENTIONS.md** | Swift style, file organization, SwiftUI patterns, state management, threading | Any Swift code |
 | **FLOATING_PANEL.md** | NSPanel architecture, positioning, resize handling, CiderPanel implementation | Panel architecture work |
+| **DETAIL_PANEL_SPEC.md** | Detail view layout spec — slide-out/fullPanel/page geometry, alignment targets, shared components | Building or modifying any detail view surface |
 | **SHARED_COMPONENTS.md** | Inventory of reusable cross-tab components — check here before building something new | Adding any new UI component |
 | **TECH_STACK.md** | Swift 6.2, Combine, approachable concurrency, UserDefaults + Codable patterns | Concurrency or storage work |
 | **USER_PREFERENCES.md** | CiderConfig structure, adding new settings, backward-compatible decoding | Adding any new setting |

@@ -65,7 +65,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var bookmarksCardSize: BookmarkCardSize {
         didSet { saveConfig() }
     }
-    @Published var detailModalMode: DetailModalMode {
+    @Published var detailViewMode: DetailViewMode {
         didSet { saveConfig() }
     }
     @Published var enableLinkedSources: Bool {
@@ -105,7 +105,7 @@ final class SettingsViewModel: ObservableObject {
         self.enableSpotlightIndexing = config.enableSpotlightIndexing
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
-        self.detailModalMode = config.detailModalMode
+        self.detailViewMode = config.detailViewMode
         self.enableLinkedSources = config.enableLinkedSources
         self.trashRetentionDays = config.trashRetentionDays
         self.captureToastPosition = config.captureToastPosition
@@ -138,7 +138,7 @@ final class SettingsViewModel: ObservableObject {
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.bookmarksCardSize = bookmarksCardSize
         config.bookmarksCardSizeScale = bookmarksCardSize.sliderValue
-        config.detailModalMode = detailModalMode
+        config.detailViewMode = detailViewMode
         config.enableLinkedSources = enableLinkedSources
         config.trashRetentionDays = trashRetentionDays
         config.captureToastPosition = captureToastPosition

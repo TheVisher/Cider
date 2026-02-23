@@ -28,10 +28,7 @@ extension Notification.Name {
     static let dismissCiderPanel = Notification.Name("cider.dismissCiderPanel")
     static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")
     static let maximizeCiderPanel = Notification.Name("cider.maximizeCiderPanel")
-    static let showDetailPopover = Notification.Name("cider.showDetailPopover")
-    static let dismissDetailPopover = Notification.Name("cider.dismissDetailPopover")
-    static let expandCiderPanelForDetailModal = Notification.Name("cider.expandCiderPanelForDetailModal")
-    static let restoreCiderPanelAfterDetailModal = Notification.Name("cider.restoreCiderPanelAfterDetailModal")
+    static let openBookmarkDetails = Notification.Name("cider.openBookmarkDetails")
     static let showBookmarkAddForm = Notification.Name("cider.showBookmarkAddForm")
     static let triggerNewNoteInTab = Notification.Name("cider.triggerNewNoteInTab")
     static let showFolderCreationField = Notification.Name("cider.showFolderCreationField")
@@ -201,8 +198,12 @@ enum BookmarksDesign {
     static let detailsSidebarMinWidth: CGFloat = 300
     static let detailsSidebarMaxWidth: CGFloat = 440
     static let detailsSidebarWidthRatio: CGFloat = 0.34
-    static let detailsHeroMinHeight: CGFloat = 280
+    static let detailsSidebarFixedWidth: CGFloat = 300
+    static let detailsHeroMinHeight: CGFloat = 200
     static let detailsHeroMaxHeight: CGFloat = 520
+    static let detailsSlideOutMinWidth: CGFloat = 600
+    static let detailsSlideOutFloatInset: CGFloat = Spacing.md
+    static let detailsSlideOutMinVisibleContent: CGFloat = 100
     static let cardFallbackLetterSize: CGFloat = 26
     static let listFallbackLetterSize: CGFloat = 16
     static let detailsHeroFallbackLetterSize: CGFloat = 54

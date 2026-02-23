@@ -16,6 +16,7 @@ struct CiderPanelShell<
 >: View {
     let isCollapsed: Bool
     let suppressSidebarAutoExpand: Bool
+    let blurRightColumn: Bool
     let onClose: () -> Void
     let onCollapse: () -> Void
     let onMaximize: () -> Void
@@ -36,6 +37,7 @@ struct CiderPanelShell<
     init(
         isCollapsed: Bool,
         suppressSidebarAutoExpand: Bool = false,
+        blurRightColumn: Bool = false,
         onClose: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
         onMaximize: @escaping () -> Void,
@@ -47,6 +49,7 @@ struct CiderPanelShell<
     ) {
         self.isCollapsed = isCollapsed
         self.suppressSidebarAutoExpand = suppressSidebarAutoExpand
+        self.blurRightColumn = blurRightColumn
         self.onClose = onClose
         self.onCollapse = onCollapse
         self.onMaximize = onMaximize
@@ -85,6 +88,9 @@ struct CiderPanelShell<
                             .clipped()
                     }
                 }
+                .blur(radius: blurRightColumn ? BookmarksDesign.detailsContentBlurRadius : 0)
+                .allowsHitTesting(!blurRightColumn)
+                .animation(reduceMotion ? .none : .snappy, value: blurRightColumn)
                 .padding(.top, Spacing.sm - 1)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -112,15 +118,14 @@ struct CiderPanelShell<
                         }
                 }
             )
-            // Clip sidebar slide animation to panel boundary (not shadow edge)
+            .overlay { panelOverlay }
+            // Clip sidebar slide animation + overlay to panel boundary (not shadow edge)
             .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
 
             // Compact overlay sidebar
             if !isCollapsed && isCompactMode && isSidebarVisible {
                 compactOverlaySidebar
             }
-
-            panelOverlay
         }
         .overlay(alignment: .bottomTrailing) {
             if !isCollapsed {
@@ -290,6 +295,7 @@ extension CiderPanelShell where PanelOverlay == EmptyView {
     init(
         isCollapsed: Bool,
         suppressSidebarAutoExpand: Bool = false,
+        blurRightColumn: Bool = false,
         onClose: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
         onMaximize: @escaping () -> Void,
@@ -300,6 +306,7 @@ extension CiderPanelShell where PanelOverlay == EmptyView {
     ) {
         self.isCollapsed = isCollapsed
         self.suppressSidebarAutoExpand = suppressSidebarAutoExpand
+        self.blurRightColumn = blurRightColumn
         self.onClose = onClose
         self.onCollapse = onCollapse
         self.onMaximize = onMaximize

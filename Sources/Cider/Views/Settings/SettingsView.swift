@@ -112,10 +112,10 @@ struct SettingsView: View {
                     )
 
                     SettingsPickerRow(
-                        title: "Detail modal style",
-                        subtitle: "How bookmark details and note editors appear",
-                        selection: $viewModel.detailModalMode,
-                        options: DetailModalMode.allCases,
+                        title: "Detail view mode",
+                        subtitle: "How bookmark details appear",
+                        selection: $viewModel.detailViewMode,
+                        options: DetailViewMode.allCases,
                         label: { $0.displayName }
                     )
                 }

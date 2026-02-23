@@ -12,6 +12,7 @@ struct FolderDetailView: View {
     var searchText: String = ""
     var onSelectSubFolder: ((UUID) -> Void)?
     var onOpenNote: ((Note) -> Void)?
+    var onShowBookmarkDetails: ((Bookmark) -> Void)?
     var onEditDateCard: ((DateCard) -> Void)?
     var onEditContact: ((ContactCard) -> Void)?
 
@@ -19,9 +20,6 @@ struct FolderDetailView: View {
     @ObservedObject private var contactStorage = ContactStorage.shared
 
     @State private var selectionAnchorID: String?
-    @State private var detailsDraft: BookmarkDetailsDraft?
-    @State private var detailsPresentationMode: DetailModalMode?
-    @State private var detailsErrorMessage: String?
     @State private var coverImage: NSImage?
     @State private var coverOffsetY: Double = 0.5
     @State private var isHoveringCover = false
@@ -66,15 +64,6 @@ struct FolderDetailView: View {
 
     private var foldersByID: [UUID: Folder] {
         bookmarksViewModel.foldersByID
-    }
-
-    private var selectedDetailsBookmark: Bookmark? {
-        guard let detailsDraft else { return nil }
-        return bookmarksViewModel.bookmarks.first(where: { $0.id == detailsDraft.id })
-    }
-
-    private var isExpandMode: Bool {
-        (detailsPresentationMode ?? CiderConfig.load().detailModalMode) == .expand
     }
 
     /// Ancestors of the current folder (excluding itself), from root → parent.
@@ -123,22 +112,6 @@ struct FolderDetailView: View {
                 .padding(.bottom, Spacing.md)
             }
 
-            if isExpandMode, detailsDraft != nil {
-                detailsOverlay
-            }
-        }
-        .blur(radius: (isExpandMode && detailsDraft != nil) ? BookmarksDesign.detailsContentBlurRadius : 0)
-        .animation(reduceMotion ? .none : .snappy, value: detailsDraft != nil)
-        .onChange(of: bookmarksViewModel.bookmarks.map(\.id)) { _, bookmarkIDs in
-            guard let detailsDraft else { return }
-            if !bookmarkIDs.contains(detailsDraft.id) {
-                closeDetails()
-            }
-        }
-        .onDisappear {
-            if detailsDraft != nil {
-                closeDetails()
-            }
         }
         .task(id: "\(folderID)-\(folder?.coverImagePath ?? "")-\(folder?.updatedAt.timeIntervalSinceReferenceDate ?? 0)") {
             await loadCoverImage()
@@ -554,7 +527,7 @@ struct FolderDetailView: View {
                 folders: bookmarksViewModel.folders,
                 dragProvider: bookmarkDragProvider(for: bookmark),
                 dragPreviewOverride: multiDragPreview(for: item),
-                onShowDetails: { handleNormalAction { presentDetails(for: bookmark) } },
+                onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
                 onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
@@ -645,7 +618,7 @@ struct FolderDetailView: View {
                 folders: bookmarksViewModel.folders,
                 dragProvider: bookmarkDragProvider(for: bookmark),
                 dragPreviewOverride: multiDragPreview(for: item),
-                onShowDetails: { handleNormalAction { presentDetails(for: bookmark) } },
+                onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
                 onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
@@ -789,195 +762,6 @@ struct FolderDetailView: View {
 
     private func openNoteInPanel(_ note: Note) {
         onOpenNote?(note)
-    }
-
-    // MARK: - Bookmark Details
-
-    private func presentDetails(for bookmark: Bookmark) {
-        let draft = BookmarkDetailsDraft(bookmark: bookmark)
-        detailsDraft = draft
-        detailsErrorMessage = nil
-
-        let presentationMode = CiderConfig.load().detailModalMode
-        detailsPresentationMode = presentationMode
-
-        if presentationMode == .popover {
-            showDetailsPopover(draft: draft)
-        } else {
-            requestPanelExpansionForDetails()
-        }
-    }
-
-    private func closeDetails() {
-        let presentationMode = detailsPresentationMode ?? CiderConfig.load().detailModalMode
-        if presentationMode == .popover {
-            NotificationCenter.default.post(name: .dismissDetailPopover, object: nil)
-        } else {
-            requestPanelRestoreAfterDetails()
-        }
-        detailsPresentationMode = nil
-        detailsDraft = nil
-        detailsErrorMessage = nil
-    }
-
-    private func showDetailsPopover(draft: BookmarkDetailsDraft) {
-        let draftBinding = Binding<BookmarkDetailsDraft>(
-            get: { self.detailsDraft ?? draft },
-            set: { next in
-                self.detailsDraft = next
-                self.detailsErrorMessage = nil
-            }
-        )
-
-        let popoverContent = AnyView(
-            BookmarkDetailsSheet(
-                draft: draftBinding,
-                bookmark: selectedDetailsBookmark,
-                errorMessage: detailsErrorMessage,
-                folders: bookmarksViewModel.folders,
-                onDelete: { deleteDetailsBookmark() },
-                onFolderChanged: { assignDetailsBookmarkToFolder($0) },
-                onOpenURL: openDetailsURL,
-                onCopyURL: copyDetailsURL,
-                onSave: saveDetails,
-                onCancel: { closeDetails() }
-            )
-            .padding(Spacing.xl)
-        )
-
-        NotificationCenter.default.post(
-            name: .showDetailPopover,
-            object: nil,
-            userInfo: [
-                "view": popoverContent,
-                "preferredWidth": BookmarksDesign.detailsRequiredPanelWidth,
-            ]
-        )
-    }
-
-    private func requestPanelExpansionForDetails() {
-        NotificationCenter.default.post(
-            name: .expandCiderPanelForDetailModal,
-            object: nil,
-            userInfo: ["minimumWidth": BookmarksDesign.detailsRequiredPanelWidth]
-        )
-    }
-
-    private func requestPanelRestoreAfterDetails() {
-        NotificationCenter.default.post(name: .restoreCiderPanelAfterDetailModal, object: nil)
-    }
-
-    private func saveDetails() {
-        guard let detailsDraft else { return }
-        guard let selectedBookmark = selectedDetailsBookmark else {
-            detailsErrorMessage = "This bookmark is no longer available."
-            return
-        }
-
-        let parsedTags = detailsDraft.tagsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        let didSave = bookmarksViewModel.updateDetails(
-            for: selectedBookmark,
-            title: detailsDraft.title,
-            notes: detailsDraft.notes,
-            tags: parsedTags
-        )
-
-        if didSave {
-            closeDetails()
-        } else {
-            detailsErrorMessage = "Could not save bookmark details."
-        }
-    }
-
-    private func deleteDetailsBookmark() {
-        guard let bookmark = selectedDetailsBookmark else { return }
-        closeDetails()
-        bookmarksViewModel.deleteBookmarks([bookmark])
-    }
-
-    private func assignDetailsBookmarkToFolder(_ folderID: UUID?) {
-        guard let bookmark = selectedDetailsBookmark else { return }
-        _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
-    }
-
-    private func copyDetailsURL() {
-        guard let detailsDraft else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(detailsDraft.urlString, forType: .string)
-    }
-
-    private func openDetailsURL() {
-        guard let detailsDraft,
-              let url = URL(string: detailsDraft.urlString) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    // MARK: - Details Overlay
-
-    @ViewBuilder
-    private var detailsOverlay: some View {
-        if let draft = detailsDraft {
-            let draftBinding = Binding(
-                get: { self.detailsDraft ?? draft },
-                set: { next in
-                    self.detailsDraft = next
-                    detailsErrorMessage = nil
-                }
-            )
-
-            GeometryReader { proxy in
-                let sheetWidth = resolvedDetailsSheetWidth(for: proxy.size.width)
-                let sheetHeight = resolvedDetailsSheetHeight(for: proxy.size.height)
-
-                ZStack {
-                    CiderColors.backdropSubtle
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            closeDetails()
-                        }
-
-                    BookmarkDetailsSheet(
-                        draft: draftBinding,
-                        bookmark: selectedDetailsBookmark,
-                        errorMessage: detailsErrorMessage,
-                        folders: bookmarksViewModel.folders,
-                        onDelete: { deleteDetailsBookmark() },
-                        onFolderChanged: { assignDetailsBookmarkToFolder($0) },
-                        onOpenURL: openDetailsURL,
-                        onCopyURL: copyDetailsURL,
-                        onSave: saveDetails,
-                        onCancel: { closeDetails() }
-                    )
-                    .frame(width: sheetWidth)
-                    .frame(maxHeight: sheetHeight)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.xxl)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .transition(.opacity)
-        }
-    }
-
-    private func resolvedDetailsSheetWidth(for containerWidth: CGFloat) -> CGFloat {
-        let horizontalInset = Spacing.xxxl * 2
-        let availableWidth = max(containerWidth - horizontalInset, 1)
-        let minimumWidth = min(BookmarksDesign.detailsSheetMinWidth, availableWidth)
-        let preferredWidth = max(minimumWidth, availableWidth * BookmarksDesign.detailsSheetPreferredWidthRatio)
-        return min(preferredWidth, BookmarksDesign.detailsSheetMaxWidth)
-    }
-
-    private func resolvedDetailsSheetHeight(for containerHeight: CGFloat) -> CGFloat {
-        let verticalInset = Spacing.xxxl * 2
-        let availableHeight = max(containerHeight - verticalInset, 1)
-        let minimumHeight = min(BookmarksDesign.detailsSheetMinHeight, availableHeight)
-        let preferredHeight = max(minimumHeight, availableHeight * BookmarksDesign.detailsSheetPreferredHeightRatio)
-        return min(preferredHeight, BookmarksDesign.detailsSheetMaxHeight)
     }
 
     // MARK: - Drag Providers

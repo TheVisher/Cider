@@ -25,7 +25,13 @@ struct CiderPanelView: View {
     @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
     @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
-    @State private var suppressSidebarAutoExpandForDetails = false
+    // Detail view state (centralized)
+    @State private var detailBookmarkID: UUID?
+    @State private var detailViewMode: DetailViewMode = CiderConfig.load().detailViewMode
+    @State private var detailSlideOutWidth: CGFloat = CiderConfig.load().detailSlideOutWidth ?? 400
+    @State private var detailsDraft: BookmarkDetailsDraft?
+    @State private var detailsErrorMessage: String?
+    @State private var detailWidthSaveTask: Task<Void, Never>?
     @State private var cardScaleSaveTask: Task<Void, Never>?
     @State private var sidebarSearchText: String = ""
     @State private var debouncedSearchText: String = ""
@@ -36,6 +42,7 @@ struct CiderPanelView: View {
     @State private var pendingSnapshotChoice: NotesRecoverySnapshotChoice?
     @State private var newEventEditorContext: DateCardEditorContext?
     @State private var newContactEditorContext: ContactEditorContext?
+    @State private var contentAreaWidth: CGFloat = 800
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + savedViewTabs + sourceTabs + dynamicTabs
@@ -60,7 +67,8 @@ struct CiderPanelView: View {
     var body: some View {
         CiderPanelShell(
             isCollapsed: isCollapsed,
-            suppressSidebarAutoExpand: suppressSidebarAutoExpandForDetails,
+            suppressSidebarAutoExpand: isDetailOpen,
+            blurRightColumn: isDetailSlideOut,
             onClose: { NotificationCenter.default.post(name: .dismissCiderPanel, object: nil) },
             onCollapse: { NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil) },
             onMaximize: { NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil) }
@@ -81,9 +89,7 @@ struct CiderPanelView: View {
                         if NSEvent.modifierFlags.contains(.command) {
                             bookmarksViewModel.open(bookmark)
                         } else {
-                            selectedFolderID = nil
-                            selectedTab = .home
-                            bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                            openBookmarkDetails(bookmark)
                         }
                     },
                     onOpenNote: { note in
@@ -93,8 +99,20 @@ struct CiderPanelView: View {
                     onDismiss: { isSearchPaletteVisible = false }
                 )
             }
+            if isDetailFullPanel {
+                detailFullPanelOverlay
+            }
+            if isDetailSlideOut, let _ = detailsDraft {
+                detailSlideOutContainer
+                    .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
+        .animation(reduceMotion ? .none : .snappy, value: isDetailFullPanel)
+        .animation(reduceMotion ? .none : .snappy, value: isDetailSlideOut)
         .environment(\.textScale, textScale)
         .onChange(of: sidebarSearchText) { _, newValue in
             searchDebounceTask?.cancel()
@@ -115,12 +133,20 @@ struct CiderPanelView: View {
             searchDebounceTask?.cancel()
             sidebarSearchText = ""
             debouncedSearchText = ""
+            closeBookmarkDetails()
         }
         .onChange(of: selectedFolderID) { _, _ in
             selectedItemIDs.removeAll()
             searchDebounceTask?.cancel()
             sidebarSearchText = ""
             debouncedSearchText = ""
+            closeBookmarkDetails()
+        }
+        .onChange(of: bookmarksViewModel.bookmarks.map(\.id)) { _, bookmarkIDs in
+            guard let detailBookmarkID else { return }
+            if !bookmarkIDs.contains(detailBookmarkID) {
+                closeBookmarkDetails()
+            }
         }
         .onChange(of: homeDisplayMode) { _, newValue in
             var config = CiderConfig.load()
@@ -157,14 +183,8 @@ struct CiderPanelView: View {
             config.homeEntityFilter = newValue
             config.save()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .expandCiderPanelForDetailModal)) { _ in
-            suppressSidebarAutoExpandForDetails = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .restoreCiderPanelAfterDetailModal)) { _ in
-            suppressSidebarAutoExpandForDetails = false
-        }
         .onReceive(NotificationCenter.default.publisher(for: .dismissCiderPanel)) { _ in
-            suppressSidebarAutoExpandForDetails = false
+            closeBookmarkDetails()
             if isEditorActive {
                 closeNoteEditor()
             }
@@ -189,6 +209,11 @@ struct CiderPanelView: View {
             if isEditorActive {
                 closeNoteEditor()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openBookmarkDetails)) { notification in
+            guard let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID,
+                  let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
+            openBookmarkDetails(bookmark)
         }
         .sheet(item: $newEventEditorContext) { context in
             DateCardEditorSheet(
@@ -255,6 +280,8 @@ struct CiderPanelView: View {
                     searchDebounceTask?.cancel()
                     sidebarSearchText = ""
                     debouncedSearchText = ""
+                } else if isDetailOpen {
+                    closeBookmarkDetails()
                 } else if isEditorActive {
                     closeNoteEditor()
                 } else if !selectedItemIDs.isEmpty {
@@ -272,7 +299,9 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var titleBarContent: some View {
-        if isEditorActive {
+        if isDetailPageMode {
+            detailPageTitleBar
+        } else if isEditorActive {
             noteEditorTitleBar
         } else if !selectedItemIDs.isEmpty {
             selectionTitleBar
@@ -881,14 +910,27 @@ struct CiderPanelView: View {
     private var contentArea: some View {
         ZStack {
             tabContentBody
-                .opacity(isEditorActive ? 0 : 1)
-                .allowsHitTesting(!isEditorActive)
+                .opacity(isEditorActive || isDetailPageMode ? 0 : 1)
+                .allowsHitTesting(!isEditorActive && !isDetailPageMode)
+
+            if isDetailPageMode {
+                detailPageView
+            }
 
             if isEditorActive {
                 InlineNoteEditorView(viewModel: notesViewModel)
             }
         }
+        .animation(reduceMotion ? .none : .snappy, value: isDetailOpen)
+        .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { contentAreaWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, w in contentAreaWidth = w }
+            }
+        )
     }
 
     private var isHomeActive: Bool {
@@ -919,6 +961,7 @@ struct CiderPanelView: View {
                     expandPathToFolder(subFolderID)
                 },
                 onOpenNote: { note in openNoteInline(note) },
+                onShowBookmarkDetails: { openBookmarkDetails($0) },
                 onEditDateCard: { dateCard in
                     newEventEditorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
                 },
@@ -942,6 +985,7 @@ struct CiderPanelView: View {
                     entityFilter: $homeEntityFilter,
                     searchText: debouncedSearchText,
                     onOpenNote: { note in openNoteInline(note) },
+                    onShowBookmarkDetails: { openBookmarkDetails($0) },
                     onEditDateCard: { dateCard in
                         newEventEditorContext = DateCardEditorContext(
                             existingCard: dateCard,
@@ -970,9 +1014,7 @@ struct CiderPanelView: View {
                                     if NSEvent.modifierFlags.contains(.command) {
                                         bookmarksViewModel.open(bookmark)
                                     } else {
-                                        selectedFolderID = nil
-                                        selectedTab = .home
-                                        bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                                        openBookmarkDetails(bookmark)
                                     }
                                 },
                                 onOpenNote: { note in
@@ -1020,9 +1062,7 @@ struct CiderPanelView: View {
                                 if NSEvent.modifierFlags.contains(.command) {
                                     bookmarksViewModel.open(bookmark)
                                 } else {
-                                    selectedFolderID = nil
-                                    selectedTab = .home
-                                    bookmarksViewModel.pendingDetailBookmarkID = bookmark.id
+                                    openBookmarkDetails(bookmark)
                                 }
                             },
                             onOpenNote: { note in
@@ -1085,6 +1125,300 @@ struct CiderPanelView: View {
         editingNoteID = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
+    }
+
+    // MARK: - Bookmark Details (Centralized)
+
+    private var isDetailOpen: Bool {
+        detailBookmarkID != nil && detailsDraft != nil
+    }
+
+    private var isDetailSlideOut: Bool {
+        isDetailOpen && detailViewMode == .slideOut
+    }
+
+    private var maxSlideOutWidth: CGFloat {
+        let inset = BookmarksDesign.detailsSlideOutFloatInset
+        return max(
+            BookmarksDesign.detailsSlideOutMinWidth,
+            contentAreaWidth - inset * 2
+        )
+    }
+
+    private var isDetailFullPanel: Bool {
+        isDetailOpen && detailViewMode == .fullPanel
+    }
+
+    private var isDetailPageMode: Bool {
+        isDetailOpen && detailViewMode == .page
+    }
+
+    private var selectedDetailsBookmark: Bookmark? {
+        guard let detailBookmarkID else { return nil }
+        return bookmarksViewModel.bookmarks.first(where: { $0.id == detailBookmarkID })
+    }
+
+    private func openBookmarkDetails(_ bookmark: Bookmark) {
+        if isSearchPaletteVisible {
+            isSearchPaletteVisible = false
+        }
+        if isEditorActive {
+            closeNoteEditor()
+        }
+        detailBookmarkID = bookmark.id
+        detailsDraft = BookmarkDetailsDraft(bookmark: bookmark)
+        detailsErrorMessage = nil
+    }
+
+    private func closeBookmarkDetails() {
+        guard isDetailOpen else { return }
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+    }
+
+    private func saveBookmarkDetails() {
+        guard let detailsDraft else { return }
+        guard let selectedBookmark = selectedDetailsBookmark else {
+            detailsErrorMessage = "This bookmark is no longer available."
+            return
+        }
+
+        let parsedTags = detailsDraft.tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let didSave = bookmarksViewModel.updateDetails(
+            for: selectedBookmark,
+            title: detailsDraft.title,
+            notes: detailsDraft.notes,
+            tags: parsedTags
+        )
+
+        if didSave {
+            closeBookmarkDetails()
+        } else {
+            detailsErrorMessage = "Could not save bookmark details."
+        }
+    }
+
+    private func deleteDetailBookmark() {
+        guard let bookmark = selectedDetailsBookmark else { return }
+        closeBookmarkDetails()
+        bookmarksViewModel.deleteBookmarks([bookmark])
+    }
+
+    private func assignDetailBookmarkToFolder(_ folderID: UUID?) {
+        guard let bookmark = selectedDetailsBookmark else { return }
+        _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+    }
+
+    private func copyDetailURL() {
+        guard let detailsDraft else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(detailsDraft.urlString, forType: .string)
+    }
+
+    private func openDetailURL() {
+        guard let detailsDraft,
+              let url = URL(string: detailsDraft.urlString) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func changeDetailViewMode(_ mode: DetailViewMode) {
+        withAnimation(reduceMotion ? .none : .snappy) {
+            detailViewMode = mode
+        }
+        var config = CiderConfig.load()
+        config.detailViewMode = mode
+        config.save()
+    }
+
+    // MARK: - Detail Views
+
+    private func makeDetailDraftBinding(fallback: BookmarkDetailsDraft) -> Binding<BookmarkDetailsDraft> {
+        Binding(
+            get: { self.detailsDraft ?? fallback },
+            set: { next in
+                self.detailsDraft = next
+                self.detailsErrorMessage = nil
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var detailSlideOutContainer: some View {
+        if let draft = detailsDraft {
+        DetailSlideOutView(
+            draft: makeDetailDraftBinding(fallback: draft),
+            bookmark: selectedDetailsBookmark,
+            errorMessage: detailsErrorMessage,
+            folders: bookmarksViewModel.folders,
+            width: min(detailSlideOutWidth, maxSlideOutWidth),
+            maxWidth: maxSlideOutWidth,
+            detailViewMode: detailViewMode,
+            onResize: { newWidth in
+                let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                detailSlideOutWidth = clamped
+                detailWidthSaveTask?.cancel()
+                detailWidthSaveTask = Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    var config = CiderConfig.load()
+                    config.detailSlideOutWidth = clamped
+                    config.save()
+                }
+            },
+            onDelete: deleteDetailBookmark,
+            onFolderChanged: assignDetailBookmarkToFolder,
+            onOpenURL: openDetailURL,
+            onCopyURL: copyDetailURL,
+            onSave: saveBookmarkDetails,
+            onCancel: closeBookmarkDetails,
+            onModeChange: changeDetailViewMode
+        )
+        }
+    }
+
+    @ViewBuilder
+    private var detailFullPanelOverlay: some View {
+        if let draft = detailsDraft {
+            ZStack {
+                CiderColors.backdrop
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        closeBookmarkDetails()
+                    }
+
+                GeometryReader { proxy in
+                    let sheetWidth = resolvedDetailsSheetWidth(for: proxy.size.width)
+                    let sheetHeight = resolvedDetailsSheetHeight(for: proxy.size.height)
+
+                    VStack(spacing: Spacing.sm) {
+                        HStack(spacing: Spacing.sm) {
+                            Spacer(minLength: 0)
+                            ForEach(DetailViewMode.allCases, id: \.self) { mode in
+                                Button {
+                                    changeDetailViewMode(mode)
+                                } label: {
+                                    Image(systemName: detailModeIcon(mode))
+                                        .font(CiderFont.label)
+                                        .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
+                                        .frame(width: 24, height: 24)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(mode.displayName)
+                            }
+                        }
+                        .padding(.horizontal, Spacing.lg)
+
+                        BookmarkDetailsSheet(
+                            draft: makeDetailDraftBinding(fallback: draft),
+                            bookmark: selectedDetailsBookmark,
+                            errorMessage: detailsErrorMessage,
+                            folders: bookmarksViewModel.folders,
+                            onDelete: deleteDetailBookmark,
+                            onFolderChanged: assignDetailBookmarkToFolder,
+                            onOpenURL: openDetailURL,
+                            onCopyURL: copyDetailURL,
+                            onSave: saveBookmarkDetails,
+                            onCancel: closeBookmarkDetails
+                        )
+                        .frame(width: sheetWidth)
+                        .frame(maxHeight: sheetHeight)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var detailPageView: some View {
+        if let draft = detailsDraft {
+            ScrollView {
+                BookmarkDetailsSheet(
+                    draft: makeDetailDraftBinding(fallback: draft),
+                    bookmark: selectedDetailsBookmark,
+                    errorMessage: detailsErrorMessage,
+                    folders: bookmarksViewModel.folders,
+                    onDelete: deleteDetailBookmark,
+                    onFolderChanged: assignDetailBookmarkToFolder,
+                    onOpenURL: openDetailURL,
+                    onCopyURL: copyDetailURL,
+                    onSave: saveBookmarkDetails,
+                    onCancel: closeBookmarkDetails
+                )
+            }
+            .scrollIndicators(.hidden)
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        }
+    }
+
+    @ViewBuilder
+    private var detailPageTitleBar: some View {
+        Button {
+            closeBookmarkDetails()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Back")
+
+        Text(detailsDraft?.title ?? "Details")
+            .font(CiderFont.subheadingSemibold)
+            .foregroundColor(CiderColors.primary)
+            .lineLimit(1)
+
+        Spacer(minLength: Spacing.sm)
+
+        ForEach(DetailViewMode.allCases, id: \.self) { mode in
+            Button {
+                changeDetailViewMode(mode)
+            } label: {
+                Image(systemName: detailModeIcon(mode))
+                    .font(CiderFont.label)
+                    .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(mode.displayName)
+        }
+    }
+
+    private func detailModeIcon(_ mode: DetailViewMode) -> String {
+        switch mode {
+        case .slideOut: return "sidebar.trailing"
+        case .fullPanel: return "rectangle"
+        case .page: return "rectangle.fill"
+        }
+    }
+
+    private func resolvedDetailsSheetWidth(for containerWidth: CGFloat) -> CGFloat {
+        let horizontalInset = Spacing.xxxl * 2
+        let availableWidth = max(containerWidth - horizontalInset, 1)
+        let minimumWidth = min(BookmarksDesign.detailsSheetMinWidth, availableWidth)
+        let preferredWidth = max(minimumWidth, availableWidth * BookmarksDesign.detailsSheetPreferredWidthRatio)
+        return min(preferredWidth, BookmarksDesign.detailsSheetMaxWidth)
+    }
+
+    private func resolvedDetailsSheetHeight(for containerHeight: CGFloat) -> CGFloat {
+        let verticalInset = Spacing.xxxl * 2
+        let availableHeight = max(containerHeight - verticalInset, 1)
+        let minimumHeight = min(BookmarksDesign.detailsSheetMinHeight, availableHeight)
+        let preferredHeight = max(minimumHeight, availableHeight * BookmarksDesign.detailsSheetPreferredHeightRatio)
+        return min(preferredHeight, BookmarksDesign.detailsSheetMaxHeight)
     }
 
     // MARK: - Search Tab Management

@@ -219,7 +219,7 @@ final class SpotlightIndexer {
             if let bookmark = BookmarksStorage.shared.bookmarks.first(where: { $0.id == itemID }) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     NotificationCenter.default.post(
-                        name: .showDetailPopover,
+                        name: .openBookmarkDetails,
                         object: nil,
                         userInfo: ["bookmarkID": bookmark.id]
                     )

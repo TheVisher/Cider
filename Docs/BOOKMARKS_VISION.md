@@ -45,7 +45,7 @@ Bookmarks participate in the cross-entity label and stack system alongside date 
 - Metadata title quality is improved on major sites.
 - Thumbnail fallback coverage improves without regressions in speed.
 
-## Phase 2: Bookmark Details Surface ✅
+## Phase 2: Bookmark Details Surface ✅ (V1)
 1. ✅ Add bookmark details panel (on thumbnail click / info action).
 2. ✅ Show/edit metadata:
 - ✅ canonical URL
@@ -63,6 +63,89 @@ Bookmarks participate in the cross-entity label and stack system alongside date 
 - ✅ Details panel opens reliably from cards in all layouts (BookmarksTabContent, HomeDashboardView, FolderDetailView).
 - ✅ Edits persist and reflect immediately in card/list views.
 - ✅ Keyboard navigation and accessibility behavior match existing panel standards.
+
+## Detail View V2 — Resurf-Inspired Redesign
+
+Complete redesign of the detail surface, inspired by Resurf's modal system. The current V1 is a basic two-column sheet (hero preview + metadata sidebar). V2 transforms it into a flexible, content-aware detail experience with multiple view modes and richer metadata.
+
+### Three View Modes
+
+The detail view supports three sizes, switchable via toolbar buttons + a drag handle for manual resizing:
+
+**1. Slide-out panel (default)**
+- Slides in from the right edge of the content area (replaces the current detached popover)
+- Content behind it stays visible (not blurred) — the panel overlays part of the card grid
+- Toggleable: clicking a card opens it, clicking the same card or pressing Escape closes it
+- Metadata sidebar is toggleable — when hidden, just the content preview fills the panel
+- Metadata toggle state persists (if you prefer metadata always visible, it stays that way)
+- Drag handle on the left edge to manually widen/narrow
+
+**2. Full panel**
+- Takes over the entire content area (sidebar stays, tab bar stays)
+- Great for images you want to see larger, or for reading bookmark content
+- Toolbar button to switch between slide-out and full panel
+
+**3. Page view**
+- Self-contained view — takes over everything including the tab bar area
+- Essentially a dedicated screen for that item
+- Back button or Escape to return
+- Best for notes in reader mode, long articles, or when you want to focus entirely on one item
+
+### Metadata Panel Layout
+
+The metadata panel lives on the right side of the detail view. All sections are collapsible (disclosure triangles, state persisted per section). Order top to bottom:
+
+**Title** — Large editable text at the top of the metadata panel (not buried under "Metadata" heading like V1)
+
+**Folders** — Current folder assignment with picker (same as V1 but moved up in priority)
+
+**Tags** — Tag chips with inline "Add tag..." field. Tap a tag to filter by it. (Currently comma-separated text — upgrade to chip UI)
+
+**Notes** — Expandable text area for free-form notes about the bookmark. "Add note" button when empty.
+
+**Source** — URL display with open/copy actions. For image bookmarks, shows "Saved from clipboard" or the source app.
+
+**Colors** — Dominant color palette extracted from the thumbnail/image. Shows 5-7 color swatches as filled circles or rounded rectangles. "Extract Colors" button if not yet computed. Color values copyable (hex, RGB). Technical approach: `CGImage` → `CIFilter` (CIAreaAverage for regions) or k-means clustering on downsampled pixel data. Store extracted colors on the Bookmark model as `[String]?` (hex values). See "Dominant Color Extraction" below.
+
+**Properties** (bottom) — Read-only metadata grid:
+- Created: date
+- Updated: date
+- Type: Bookmark / Image / (future: Video, GIF)
+- Size: file size for images, or "Web page" for URL bookmarks
+
+### Content-Specific Tabs (URL Bookmarks)
+
+URL bookmarks get content tabs above the preview area:
+
+**Preview tab** — Shows the thumbnail image (current behavior)
+
+**Reader tab** — Clean, distraction-free article text extracted via Readability. Renders in the detail view using the same approach as the Reader Mode feature (see "Reader Mode" section below). This is where Reader Mode lives in the UI — it's a tab within the detail view, not a separate surface.
+
+**Web tab** (future, lowest priority) — Embedded WKWebView showing the live page. Scrollable within the detail panel. Useful for quick checks without opening a browser. Heavy resource-wise — load on demand, not preloaded.
+
+### Dominant Color Extraction
+
+Extract a palette of 5-7 dominant colors from bookmark thumbnails and images:
+
+**Technical approach:**
+- Load the thumbnail (not original — already downsampled, fast to process)
+- Option A: `CIFilter` with `CIAreaAverage` on grid regions — simple, fast, but picks averages not dominant colors
+- Option B: k-means clustering on downsampled pixel buffer (resize to ~50x50, run k-means with k=6) — better results, slightly more compute
+- Option C: Apple's `VNGenerateImageFeaturePrintRequest` (Vision framework) — not directly a color extractor but could inform palette
+- Recommended: k-means on a tiny downsampled image. Fast enough to run on capture or on-demand.
+
+**Storage:** `dominantColors: [String]?` on the Bookmark model — array of hex strings (e.g., `["#FC3434", "#1A1A2E", "#E94560"]`). Extracted lazily (on first detail view open) or eagerly (on capture, in background).
+
+**Display:** Row of filled circles or rounded-rect swatches. Tap to copy hex value. Could also be used for:
+- Tinting the card border/background subtly in grid view
+- Filtering bookmarks by color ("show me all blue-dominant images")
+- Color-based sorting or grouping
+
+### Shared Pattern
+
+This detail view pattern is shared across all content types — not just bookmarks. Notes, date cards, contacts, and future types (documents, whiteboard items) should all use the same three-mode detail surface with content-specific tabs and a consistent metadata panel. The metadata sections vary by type (notes don't have URL/Colors, date cards have date/time/location, etc.) but the shell is identical.
+
+Update `SHARED_COMPONENTS.md` when implementing to document the shared detail view container.
 
 ## Phase 3: Library Management
 1. **Multi-select** ✓ — Shift-click range, Cmd-click toggle, Cmd+A select all. Bulk move/delete implemented. Multi-drag with fanned preview implemented. Bulk tag future. See `WORKSPACES_VISION.md`.

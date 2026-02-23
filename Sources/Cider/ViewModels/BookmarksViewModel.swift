@@ -10,7 +10,6 @@ final class BookmarksViewModel: ObservableObject {
     @Published var cardSizeScale: Double
     @Published var isVisible = false
     @Published var isCollapsed = false
-    @Published var pendingDetailBookmarkID: UUID?
 
     /// Pre-computed folder lookup — rebuilt when folders change.
     private(set) var foldersByID: [UUID: Folder] = [:]

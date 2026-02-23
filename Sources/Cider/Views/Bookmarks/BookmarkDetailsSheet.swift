@@ -47,7 +47,7 @@ struct BookmarkDetailsSheet: View {
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: BookmarksDesign.detailsSheetMinHeight, maxHeight: BookmarksDesign.detailsSheetMaxHeight)
+        .frame(minHeight: BookmarksDesign.detailsSheetMinHeight)
         .background(
             ZStack {
                 VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
@@ -93,29 +93,34 @@ struct BookmarkDetailsSheet: View {
 
     @ViewBuilder
     private var canvas: some View {
-        GeometryReader { proxy in
-            let sidebarWidth = resolvedSidebarWidth(for: proxy.size.width)
-            ZStack {
-                RoundedRectangle(
-                    cornerRadius: BookmarksDesign.detailsCanvasCornerRadius,
-                    style: .continuous
-                )
-                .fill(CiderColors.surfaceHighlight)
+        HStack(alignment: .top, spacing: 0) {
+            leftContent
+                .padding(Spacing.lg)
+                .frame(maxWidth: .infinity)
 
-                leftContent
-                    .padding(.leading, Spacing.lg)
-                    .padding(.top, Spacing.lg)
-                    .padding(.bottom, Spacing.lg)
-                    .padding(.trailing, sidebarWidth + Spacing.xl)
-
-                HStack {
-                    Spacer(minLength: 0)
-                    sidebar(width: sidebarWidth)
-                        .padding(.vertical, BookmarksDesign.detailsCanvasInset)
-                        .padding(.trailing, BookmarksDesign.detailsCanvasInset)
-                }
-            }
+            BookmarkMetadataSidebar(
+                draft: $draft,
+                bookmark: bookmark,
+                errorMessage: errorMessage,
+                folders: folders,
+                width: BookmarksDesign.detailsSidebarFixedWidth,
+                onDelete: onDelete,
+                onFolderChanged: onFolderChanged,
+                onOpenURL: onOpenURL,
+                onCopyURL: onCopyURL,
+                onSave: onSave,
+                onCancel: onCancel
+            )
+            .padding(.vertical, BookmarksDesign.detailsCanvasInset)
+            .padding(.trailing, BookmarksDesign.detailsCanvasInset)
         }
+        .background(
+            RoundedRectangle(
+                cornerRadius: BookmarksDesign.detailsCanvasCornerRadius,
+                style: .continuous
+            )
+            .fill(CiderColors.surfaceHighlight)
+        )
     }
 
     @ViewBuilder
@@ -123,10 +128,7 @@ struct BookmarkDetailsSheet: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
                 .frame(maxWidth: .infinity)
-                .frame(
-                    minHeight: BookmarksDesign.detailsHeroMinHeight,
-                    maxHeight: BookmarksDesign.detailsHeroMaxHeight
-                )
+                .frame(minHeight: BookmarksDesign.detailsHeroMinHeight)
                 .shadow(
                     color: CiderColors.shadowMedium,
                     radius: BookmarksDesign.detailsFloatingLiftBlur,
@@ -154,13 +156,30 @@ struct BookmarkDetailsSheet: View {
                         .foregroundColor(CiderColors.tertiary)
                 }
             }
-
-            Spacer(minLength: 0)
         }
     }
 
-    @ViewBuilder
-    private func sidebar(width: CGFloat) -> some View {
+}
+
+// MARK: - Metadata Sidebar (shared by BookmarkDetailsSheet and DetailSlideOutView)
+
+struct BookmarkMetadataSidebar: View {
+    @Binding var draft: BookmarkDetailsDraft
+    var bookmark: Bookmark?
+    var errorMessage: String?
+    var folders: [Folder]
+    var width: CGFloat
+    var showBackground: Bool = true
+    var onDelete: (() -> Void)?
+    var onFolderChanged: ((UUID?) -> Void)?
+    var onOpenURL: () -> Void
+    var onCopyURL: () -> Void
+    var onSave: () -> Void
+    var onCancel: () -> Void
+
+    @Environment(\.textScale) private var textScale
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Metadata")
                 .font(CiderFont.bodySemibold(scale: textScale))
@@ -303,8 +322,6 @@ struct BookmarkDetailsSheet: View {
                     .lineLimit(2)
             }
 
-            Spacer(minLength: 0)
-
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Updated \(draft.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(CiderFont.caption(scale: textScale))
@@ -330,34 +347,29 @@ struct BookmarkDetailsSheet: View {
         }
         .padding(Spacing.md)
         .frame(width: width)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .fill(CiderColors.surfaceInput)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
-        )
+        .background {
+            if showBackground {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            }
+        }
+        .overlay {
+            if showBackground {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+            }
+        }
         .shadow(
-            color: CiderColors.shadowMedium,
-            radius: BookmarksDesign.detailsFloatingLiftBlur,
+            color: showBackground ? CiderColors.shadowMedium : .clear,
+            radius: showBackground ? BookmarksDesign.detailsFloatingLiftBlur : 0,
             x: 0,
-            y: BookmarksDesign.detailsFloatingLiftYOffset
+            y: showBackground ? BookmarksDesign.detailsFloatingLiftYOffset : 0
         )
     }
 
     private var currentFolderName: String {
         guard let fid = draft.folderID else { return "No Folder" }
         return folders.first(where: { $0.id == fid })?.name ?? "No Folder"
-    }
-
-    private func resolvedSidebarWidth(for containerWidth: CGFloat) -> CGFloat {
-        let maxCandidate = containerWidth * BookmarksDesign.detailsSidebarWidthRatio
-        return min(
-            max(maxCandidate, BookmarksDesign.detailsSidebarMinWidth),
-            BookmarksDesign.detailsSidebarMaxWidth
-        )
     }
 
     private var hasOpenableImageSource: Bool {

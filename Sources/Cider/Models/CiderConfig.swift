@@ -1,17 +1,5 @@
 import Foundation
 
-enum DetailModalMode: String, Codable, CaseIterable {
-    case expand
-    case popover
-
-    var displayName: String {
-        switch self {
-        case .expand: return "Expand panel"
-        case .popover: return "Popover window"
-        }
-    }
-}
-
 enum ActivationMode: String, Codable, CaseIterable {
     case doubleTap
     case singleTap
@@ -101,6 +89,11 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
 
 
 struct CiderConfig: Codable {
+    // Legacy keys for migration from old config format
+    private enum LegacyCodingKeys: String, CodingKey {
+        case detailModalMode
+    }
+
     // CodingKeys: keeps JSON key "bookmarksDirectory" for backward compat with existing UserDefaults data
     private enum CodingKeys: String, CodingKey {
         case showMenuBarIcon
@@ -121,7 +114,8 @@ struct CiderConfig: Codable {
         case bookmarksCardSizeScale
         case notesDefaultViewMode
         case notesCardSizeScale
-        case detailModalMode
+        case detailViewMode
+        case detailSlideOutWidth
         case showContinueSection
         case continueSectionCollapsed
         case subFoldersCollapsed
@@ -156,7 +150,8 @@ struct CiderConfig: Codable {
     var bookmarksCardSizeScale: Double?  // Continuous card size scale (0.0–3.0), overrides bookmarksCardSize
     var notesDefaultViewMode: NoteDisplayMode  // Default notes layout mode
     var notesCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for notes
-    var detailModalMode: DetailModalMode  // How detail modals appear: expand panel or popover window
+    var detailViewMode: DetailViewMode  // Three-mode detail view: slide-out, full panel, or page
+    var detailSlideOutWidth: CGFloat?  // Drag-resizable width of slide-out detail view (nil = 400)
     var showContinueSection: Bool  // Show the Continue section on the Home tab
     var continueSectionCollapsed: Bool  // Whether the Continue section is collapsed
     var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
@@ -192,7 +187,7 @@ struct CiderConfig: Codable {
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
             notesDefaultViewMode: .list,
-            detailModalMode: .expand,
+            detailViewMode: .slideOut,
             showContinueSection: true,
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
@@ -309,10 +304,16 @@ struct CiderConfig: Codable {
             Double.self,
             forKey: .notesCardSizeScale
         )
-        detailModalMode = try container.decodeIfPresent(
-            DetailModalMode.self,
-            forKey: .detailModalMode
-        ) ?? .expand
+        // Migrate from legacy detailModalMode if detailViewMode not yet set
+        if let decoded = try container.decodeIfPresent(DetailViewMode.self, forKey: .detailViewMode) {
+            detailViewMode = decoded
+        } else {
+            // Read legacy key: "expand" → .fullPanel, anything else → .slideOut
+            let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            let legacyMode = try legacyContainer.decodeIfPresent(String.self, forKey: .detailModalMode)
+            detailViewMode = legacyMode == "expand" ? .fullPanel : .slideOut
+        }
+        detailSlideOutWidth = try container.decodeIfPresent(CGFloat.self, forKey: .detailSlideOutWidth)
         showContinueSection = try container.decodeIfPresent(
             Bool.self,
             forKey: .showContinueSection
@@ -387,7 +388,8 @@ struct CiderConfig: Codable {
         bookmarksCardSizeScale: Double? = nil,
         notesDefaultViewMode: NoteDisplayMode = .list,
         notesCardSizeScale: Double? = nil,
-        detailModalMode: DetailModalMode = .expand,
+        detailViewMode: DetailViewMode = .slideOut,
+        detailSlideOutWidth: CGFloat? = nil,
         showContinueSection: Bool = true,
         continueSectionCollapsed: Bool = false,
         subFoldersCollapsed: Bool = false,
@@ -421,7 +423,8 @@ struct CiderConfig: Codable {
         self.bookmarksCardSizeScale = bookmarksCardSizeScale
         self.notesDefaultViewMode = notesDefaultViewMode
         self.notesCardSizeScale = notesCardSizeScale
-        self.detailModalMode = detailModalMode
+        self.detailViewMode = detailViewMode
+        self.detailSlideOutWidth = detailSlideOutWidth
         self.showContinueSection = showContinueSection
         self.continueSectionCollapsed = continueSectionCollapsed
         self.subFoldersCollapsed = subFoldersCollapsed
