@@ -130,6 +130,11 @@ struct CiderConfig: Codable {
         case homeEntityFilter
         case enableSpotlightIndexing
         case enableSoundEffects
+        case enableAutoTagging
+        case enableEmbeddings
+        case enablePageSummaries
+        case enableOCRIndexing
+        case enableColorExtraction
     }
 
     var showMenuBarIcon: Bool
@@ -166,6 +171,11 @@ struct CiderConfig: Codable {
     var homeEntityFilter: Set<LibraryEntityType>  // Which entity types to show in Home feed
     var enableSpotlightIndexing: Bool  // Index Cider items in Core Spotlight for system-wide search
     var enableSoundEffects: Bool  // Play sounds for saves, captures, and deletes
+    var enableAutoTagging: Bool  // Auto-suggest tags using NaturalLanguage NER + keyword extraction
+    var enableEmbeddings: Bool  // Compute NLEmbedding vectors to power "find similar"
+    var enablePageSummaries: Bool  // Generate 2-sentence summaries via Foundation Models (Apple Intelligence)
+    var enableOCRIndexing: Bool  // OCR thumbnail images via Vision so their text is searchable
+    var enableColorExtraction: Bool  // Extract dominant colors from thumbnails for display
 
     static let storageKey = "CiderConfig"
 
@@ -200,7 +210,12 @@ struct CiderConfig: Codable {
             homeSort: .createdDescending,
             homeEntityFilter: Set(LibraryEntityType.allCases),
             enableSpotlightIndexing: true,
-            enableSoundEffects: false
+            enableSoundEffects: false,
+            enableAutoTagging: true,
+            enableEmbeddings: true,
+            enablePageSummaries: true,
+            enableOCRIndexing: false,
+            enableColorExtraction: true
         )
     }
 
@@ -367,6 +382,11 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .enableSoundEffects
         ) ?? false
+        enableAutoTagging = try container.decodeIfPresent(Bool.self, forKey: .enableAutoTagging) ?? true
+        enableEmbeddings = try container.decodeIfPresent(Bool.self, forKey: .enableEmbeddings) ?? true
+        enablePageSummaries = try container.decodeIfPresent(Bool.self, forKey: .enablePageSummaries) ?? true
+        enableOCRIndexing = try container.decodeIfPresent(Bool.self, forKey: .enableOCRIndexing) ?? false
+        enableColorExtraction = try container.decodeIfPresent(Bool.self, forKey: .enableColorExtraction) ?? true
     }
 
     init(
@@ -403,7 +423,12 @@ struct CiderConfig: Codable {
         homeSort: LibrarySortMode = .createdDescending,
         homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases),
         enableSpotlightIndexing: Bool = true,
-        enableSoundEffects: Bool = false
+        enableSoundEffects: Bool = false,
+        enableAutoTagging: Bool = true,
+        enableEmbeddings: Bool = true,
+        enablePageSummaries: Bool = true,
+        enableOCRIndexing: Bool = false,
+        enableColorExtraction: Bool = true
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -439,5 +464,10 @@ struct CiderConfig: Codable {
         self.homeEntityFilter = homeEntityFilter
         self.enableSpotlightIndexing = enableSpotlightIndexing
         self.enableSoundEffects = enableSoundEffects
+        self.enableAutoTagging = enableAutoTagging
+        self.enableEmbeddings = enableEmbeddings
+        self.enablePageSummaries = enablePageSummaries
+        self.enableOCRIndexing = enableOCRIndexing
+        self.enableColorExtraction = enableColorExtraction
     }
 }

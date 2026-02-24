@@ -885,6 +885,9 @@ final class BookmarksStorage: ObservableObject {
         } else {
             objectWillChange.send()
         }
+
+        // Schedule AI enrichment after metadata + thumbnail are ready
+        BookmarkAIEnrichment.shared.schedule(for: bookmarks[index])
     }
 
     private func shouldEnrich(_ bookmark: Bookmark, for url: URL) -> Bool {
@@ -1079,6 +1082,8 @@ final class BookmarksStorage: ObservableObject {
 
         bookmarks[index] = bookmark
         persist()
+        // Re-run OCR + color extraction when thumbnail changes
+        BookmarkAIEnrichment.shared.schedule(for: bookmarks[index])
         return true
     }
 
@@ -1593,6 +1598,34 @@ final class BookmarksStorage: ObservableObject {
         }
 
         return result
+    }
+
+    // MARK: - AI Results
+
+    /// Write AI-generated fields back to a bookmark without re-triggering AI enrichment.
+    func applyAIResults(
+        for bookmarkID: UUID,
+        tags: [String],
+        ocrText: String?,
+        dominantColors: [String]?
+    ) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        var bookmark = bookmarks[index]
+        var changed = false
+        if bookmark.tags != tags { bookmark.tags = tags; changed = true }
+        if bookmark.ocrText != ocrText { bookmark.ocrText = ocrText; changed = true }
+        if bookmark.dominantColors != dominantColors { bookmark.dominantColors = dominantColors; changed = true }
+        guard changed else { return }
+        bookmarks[index] = bookmark
+        persist()
+    }
+
+    /// Write an AI-generated summary back to a bookmark.
+    func applyAISummary(_ summary: String, for bookmarkID: UUID) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        guard bookmarks[index].aiSummary != summary else { return }
+        bookmarks[index].aiSummary = summary
+        persist()
     }
 }
 

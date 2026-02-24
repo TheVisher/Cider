@@ -161,7 +161,9 @@ final class LibraryViewModel: ObservableObject {
         let fields: [String]
         switch item {
         case .bookmark(let bookmark):
-            fields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
+            var bFields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
+            if let ocr = bookmark.ocrText { bFields.append(ocr) }
+            fields = bFields
         case .note(let note):
             let content = NotesStorage.shared.loadContent(for: note)
             fields = [note.title, content]

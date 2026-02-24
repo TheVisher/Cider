@@ -395,6 +395,10 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .intelligenceFeatures:
+            IntelligenceSettingsView()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
         case .aboutOverview:
             AboutSettingsView()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -466,12 +470,13 @@ private enum SettingsCategory: String, CaseIterable {
     case bookmarks = "Bookmarks"
     case appearance = "Appearance"
     case data = "Data"
+    case intelligence = "Intelligence"
     case advanced = "Advanced"
     case about = "About"
     case account = "Account"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .notes, .bookmarks, .appearance, .data, .advanced, .about]
+        [.general, .notes, .bookmarks, .appearance, .intelligence, .data, .advanced, .about]
     }
 
     var icon: String {
@@ -484,6 +489,8 @@ private enum SettingsCategory: String, CaseIterable {
             "square.grid.2x2"
         case .appearance:
             "paintbrush"
+        case .intelligence:
+            "sparkles"
         case .data:
             "externaldrive"
         case .advanced:
@@ -505,6 +512,8 @@ private enum SettingsCategory: String, CaseIterable {
             [.bookmarksBehavior]
         case .appearance:
             [.appearanceText, .appearanceMenuBar, .appearanceSounds]
+        case .intelligence:
+            [.intelligenceFeatures]
         case .data:
             [.dataDirectories, .dataTrash, .dataNotifications]
         case .advanced:
@@ -531,6 +540,7 @@ private enum SettingsSubcategory: Hashable {
     case dataDirectories
     case dataTrash
     case dataNotifications
+    case intelligenceFeatures
     case advancedAccessibility
     case advancedReset
     case aboutOverview
@@ -564,6 +574,8 @@ private enum SettingsSubcategory: Hashable {
             "Trash"
         case .dataNotifications:
             "Notifications"
+        case .intelligenceFeatures:
+            "Features"
         case .advancedAccessibility:
             "Accessibility"
         case .advancedReset:

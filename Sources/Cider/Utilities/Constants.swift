@@ -551,3 +551,19 @@ enum CiderColors {
     /// Disabled element opacity
     static let disabledOpacity: CGFloat = 0.55
 }
+
+
+// MARK: - Color helpers
+
+extension Color {
+    /// Initialize from a CSS hex string like `"#RRGGBB"` or `"#RGB"`.
+    init?(hex: String) {
+        var s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
+        guard s.count == 6, let value = UInt64(s, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+}

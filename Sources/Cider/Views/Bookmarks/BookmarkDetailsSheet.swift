@@ -56,6 +56,7 @@ struct BookmarkMetadataSidebar: View {
     @State private var isTagsExpanded = true
     @State private var isNotesExpanded = true
     @State private var isPropertiesExpanded = true
+    @State private var isAIExpanded = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,6 +88,12 @@ struct BookmarkMetadataSidebar: View {
                     sectionDivider
                     notesSection
                         .padding(.vertical, Spacing.md)
+
+                    if hasAIData {
+                        sectionDivider
+                        aiSection
+                            .padding(.vertical, Spacing.md)
+                    }
                 }
                 .padding(Spacing.md)
             }
@@ -370,6 +377,50 @@ struct BookmarkMetadataSidebar: View {
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceInput)
                     )
+                }
+            }
+        }
+    }
+
+    // MARK: - AI Section
+
+    private var hasAIData: Bool {
+        guard let bookmark else { return false }
+        return bookmark.aiSummary != nil
+            || !(bookmark.dominantColors ?? []).isEmpty
+    }
+
+    @ViewBuilder
+    private var aiSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Intelligence", isExpanded: $isAIExpanded)
+
+            if isAIExpanded, let bookmark {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    if let summary = bookmark.aiSummary, !summary.isEmpty {
+                        Text(summary)
+                            .font(CiderFont.body(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let colors = bookmark.dominantColors, !colors.isEmpty {
+                        HStack(spacing: Spacing.xs) {
+                            ForEach(colors, id: \.self) { hex in
+                                if let color = Color(hex: hex) {
+                                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                        .fill(color)
+                                        .frame(width: 20, height: 20)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                                .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
+                                        )
+                                        .help(hex)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

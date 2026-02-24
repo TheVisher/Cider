@@ -91,6 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if config.trashRetentionDays > 0 {
                 TrashStorage.shared.purgeExpired(olderThan: config.trashRetentionDays)
             }
+            // Load persisted embeddings so similarity search works immediately.
+            EmbeddingStore.shared.load()
         }
     }
 
