@@ -95,7 +95,7 @@ struct DetailSlideOutView: View {
                             // Reader layer
                             if readerViewActivated, let url = bookmark?.url {
                                 ZStack {
-                                    BookmarkReaderView(url: url, isLoading: $readerIsLoading)
+                                    BookmarkReaderView(url: url, isLoading: $readerIsLoading, bookmarkID: bookmark?.id)
 
                                     if readerIsLoading {
                                         ProgressView()

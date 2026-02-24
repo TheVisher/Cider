@@ -384,9 +384,11 @@ struct BookmarkMetadataSidebar: View {
 
     // MARK: - AI Section
 
+    // Show the AI section for any URL bookmark — summary and related items arrive async.
     private var hasAIData: Bool {
         guard let bookmark else { return false }
-        return bookmark.aiSummary != nil
+        return draft.hasURL
+            || bookmark.aiSummary != nil
             || !(bookmark.dominantColors ?? []).isEmpty
     }
 
@@ -421,6 +423,8 @@ struct BookmarkMetadataSidebar: View {
                             }
                         }
                     }
+
+                    RelatedItemsView(bookmarkID: bookmark.id)
                 }
             }
         }

@@ -4,6 +4,8 @@ import WebKit
 struct BookmarkReaderView: NSViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
+    /// When set, article text is forwarded to SummaryService after extraction.
+    var bookmarkID: UUID?
 
     func makeCoordinator() -> Coordinator { Coordinator(isLoading: $isLoading) }
 
@@ -11,14 +13,18 @@ struct BookmarkReaderView: NSViewRepresentable {
         let wv = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         wv.navigationDelegate = context.coordinator
         wv.setValue(false, forKey: "drawsBackground")
+        context.coordinator.bookmarkID = bookmarkID
         context.coordinator.load(url: url, in: wv)
         return wv
     }
 
-    func updateNSView(_ wv: WKWebView, context: Context) { }
+    func updateNSView(_ wv: WKWebView, context: Context) {
+        context.coordinator.bookmarkID = bookmarkID
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding var isLoading: Bool
+        var bookmarkID: UUID?
 
         private enum Phase { case loadingRaw, extracting, displaying, error }
         private var phase: Phase = .loadingRaw
@@ -156,6 +162,19 @@ struct BookmarkReaderView: NSViewRepresentable {
             """
             phase = .displaying
             wv.loadHTMLString(html, baseURL: articleURL)
+
+            // Trigger summary generation if Apple Intelligence is available
+            // and this bookmark doesn't already have a summary.
+            if let bid = bookmarkID,
+               BookmarksStorage.shared.bookmarks.first(where: { $0.id == bid })?.aiSummary == nil {
+                let plainText = "\(title). \(content)"
+                    .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+                Task { @MainActor in
+                    if let summary = await SummaryService.shared.summarize(articleText: plainText) {
+                        BookmarksStorage.shared.applyAISummary(summary, for: bid)
+                    }
+                }
+            }
         }
 
         private func showError(in wv: WKWebView) {
