@@ -46,43 +46,39 @@ struct DetailSlideOutView: View {
 
                 // Content area — hero/title + metadata sidebar
                 HStack(alignment: .top, spacing: 0) {
-                    // Left column — scrollable hero + title
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: Spacing.md) {
-                            BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: BookmarksDesign.detailsHeroMinHeight)
-                                .shadow(
-                                    color: CiderColors.shadowMedium,
-                                    radius: BookmarksDesign.detailsFloatingLiftBlur,
-                                    x: 0,
-                                    y: BookmarksDesign.detailsFloatingLiftYOffset
-                                )
+                    // Left column — hero fills height, title pinned at bottom
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .shadow(
+                                color: CiderColors.shadowMedium,
+                                radius: BookmarksDesign.detailsFloatingLiftBlur,
+                                x: 0,
+                                y: BookmarksDesign.detailsFloatingLiftYOffset
+                            )
 
-                            VStack(alignment: .leading, spacing: Spacing.xs) {
-                                Text(draft.title)
-                                    .font(CiderFont.heroTitle(scale: textScale))
-                                    .foregroundColor(CiderColors.primary)
-                                    .lineLimit(3)
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text(draft.title)
+                                .font(CiderFont.heroTitle(scale: textScale))
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(3)
 
-                                HStack(spacing: Spacing.xs) {
-                                    if draft.hasURL {
-                                        Text(draft.hostDisplay)
-                                            .font(CiderFont.labelMedium(scale: textScale))
-                                            .foregroundColor(CiderColors.secondary)
-                                        Text("\u{2022}")
-                                            .font(CiderFont.captionSemibold(scale: textScale))
-                                            .foregroundColor(CiderColors.tertiary)
-                                    }
-                                    Text(draft.updatedAt.formatted(.relative(presentation: .named)))
-                                        .font(CiderFont.label(scale: textScale))
+                            HStack(spacing: Spacing.xs) {
+                                if draft.hasURL {
+                                    Text(draft.hostDisplay)
+                                        .font(CiderFont.labelMedium(scale: textScale))
+                                        .foregroundColor(CiderColors.secondary)
+                                    Text("\u{2022}")
+                                        .font(CiderFont.captionSemibold(scale: textScale))
                                         .foregroundColor(CiderColors.tertiary)
                                 }
+                                Text(draft.updatedAt.formatted(.relative(presentation: .named)))
+                                    .font(CiderFont.label(scale: textScale))
+                                    .foregroundColor(CiderColors.tertiary)
                             }
                         }
-                        .padding(Spacing.lg)
                     }
-                    .scrollIndicators(.hidden)
+                    .padding(Spacing.lg)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     // Right column — metadata sidebar (toggleable)
