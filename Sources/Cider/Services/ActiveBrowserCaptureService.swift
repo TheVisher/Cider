@@ -126,7 +126,17 @@ enum ActiveBrowserCaptureService {
     private static func target(from application: NSRunningApplication?) -> BrowserTarget? {
         guard let application,
               let bundleID = application.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !bundleID.isEmpty else {
+              !bundleID.isEmpty,
+              !application.isTerminated else {
+            return nil
+        }
+
+        // Skip ghost processes whose .app bundle no longer exists on disk.
+        // These arise from apps that were uninstalled but remain registered as
+        // Dock Extras or Login Items. Running AppleScript against them triggers
+        // a "Where is <App>?" system picker dialog.
+        if let bundleURL = application.bundleURL,
+           !FileManager.default.fileExists(atPath: bundleURL.path) {
             return nil
         }
 
