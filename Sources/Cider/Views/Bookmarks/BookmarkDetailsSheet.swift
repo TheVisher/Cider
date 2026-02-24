@@ -207,12 +207,13 @@ struct BookmarkMetadataSidebar: View {
                 }
                 .padding(Spacing.md)
             }
+            .frame(maxHeight: .infinity)
 
             // ── Pinned footer ───────────────────────────────────────────
             footerSection
         }
         .frame(width: width)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxHeight: .infinity)
         .background {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
