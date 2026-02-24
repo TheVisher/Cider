@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ciderShadowPanel: CiderShadowPanel?
     private var panelFrameObservation: NSKeyValueObservation?
     private let ciderPanelPositionStore = CiderPanelPositionStore.shared
-    private var widthBeforeSlideOut: CGFloat?
+    private var frameBeforeSlideOut: NSRect?
 
     // Undo toast
     private var undoToastPanel: BookmarkCaptureToastPanel?
@@ -1019,17 +1019,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel = ciderPanel, panel.isVisible else { return }
         guard panel.frame.width < minimumWidth else { return }
 
-        // Save current width so we can restore it when the slide-out closes
-        widthBeforeSlideOut = panel.frame.width
+        // Save full frame so restore can return to exact position and size
+        frameBeforeSlideOut = panel.frame
 
         let currentFrame = panel.frame
         let delta = minimumWidth - currentFrame.width
-        // Expand to the right; if that would exceed screen bounds, expand leftward instead
         let center = NSPoint(x: currentFrame.midX, y: currentFrame.midY)
         let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
             ?? NSScreen.main ?? NSScreen.screens.first
         let visibleFrame = screen?.visibleFrame ?? currentFrame
 
+        // Anchor the right edge when near screen edge; otherwise expand to the right
         var newOriginX = currentFrame.minX
         if currentFrame.maxX + delta > visibleFrame.maxX {
             newOriginX = max(visibleFrame.minX, currentFrame.maxX - minimumWidth)
@@ -1049,20 +1049,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restoreCiderPanelAfterSlideOut() {
-        guard let panel = ciderPanel, let savedWidth = widthBeforeSlideOut else { return }
-        widthBeforeSlideOut = nil
+        guard let panel = ciderPanel, let savedFrame = frameBeforeSlideOut else { return }
+        frameBeforeSlideOut = nil
 
-        let currentFrame = panel.frame
-        let newFrame = NSRect(
-            x: currentFrame.minX,
-            y: currentFrame.minY,
-            width: savedWidth,
-            height: currentFrame.height
-        )
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
-            panel.animator().setFrame(newFrame, display: true)
+            panel.animator().setFrame(savedFrame, display: true)
         }
         persistCurrentCiderPanelFrameIfNeeded()
     }
