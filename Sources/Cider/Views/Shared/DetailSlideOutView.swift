@@ -82,25 +82,23 @@ struct DetailSlideOutView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     // Right column — metadata sidebar (toggleable)
+                    // No outer ScrollView — the sidebar manages its own scrolling
+                    // and needs a bounded height to pin the footer to the bottom.
                     if isMetadataVisible {
-                        ScrollView {
-                            BookmarkMetadataSidebar(
-                                draft: $draft,
-                                bookmark: bookmark,
-                                errorMessage: errorMessage,
-                                folders: folders,
-                                width: BookmarksDesign.detailsSidebarFixedWidth,
-                                showBackground: false,
-                                onDelete: onDelete,
-                                onFolderChanged: onFolderChanged,
-                                onOpenURL: onOpenURL,
-                                onCopyURL: onCopyURL,
-                                onSave: onSave,
-                                onCancel: onCancel
-                            )
-                        }
-                        .scrollIndicators(.hidden)
-                        .frame(maxHeight: .infinity)
+                        BookmarkMetadataSidebar(
+                            draft: $draft,
+                            bookmark: bookmark,
+                            errorMessage: errorMessage,
+                            folders: folders,
+                            width: BookmarksDesign.detailsSidebarFixedWidth,
+                            showBackground: false,
+                            onDelete: onDelete,
+                            onFolderChanged: onFolderChanged,
+                            onOpenURL: onOpenURL,
+                            onCopyURL: onCopyURL,
+                            onSave: onSave,
+                            onCancel: onCancel
+                        )
                         .background(CiderColors.surfaceInput)
                         .overlay(alignment: .leading) {
                             CiderColors.separator
