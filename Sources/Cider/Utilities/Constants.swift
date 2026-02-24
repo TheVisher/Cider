@@ -40,6 +40,17 @@ extension Notification.Name {
     static let captureBookmark = Notification.Name("cider.captureBookmark")
     static let trashContentsChanged = Notification.Name("cider.trashContentsChanged")
     static let openExternalSourceAndSelectFile = Notification.Name("cider.openExternalSourceAndSelectFile")
+    static let snapCiderPanel = Notification.Name("cider.snapCiderPanel")
+}
+
+// MARK: - Snap Target
+
+enum SnapTarget: String, CaseIterable {
+    case almostMaximized
+    case leftHalf
+    case rightHalf
+    case leftEdge
+    case rightEdge
 }
 
 enum CiderBorder {
@@ -327,12 +338,12 @@ enum SearchPaletteDesign {
 enum CiderPanelDesign {
     static let defaultWidth: CGFloat = 780
     static let defaultHeight: CGFloat = 640
-    static let minWidth: CGFloat = 540
+    static let minWidth: CGFloat = 400
     static let minHeight: CGFloat = 440
     static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 16
-    static let topPadding: CGFloat = 28
-    static let bottomPadding: CGFloat = 15
+    static let shadowPadding: CGFloat = 0
+    static let topPadding: CGFloat = 0
+    static let bottomPadding: CGFloat = 0
     static let collapsedBottomPadding: CGFloat = topPadding
     static let titleBarHeight: CGFloat = 40
     static let tabBarHeight: CGFloat = 34

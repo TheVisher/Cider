@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Main Cider panel
     private var ciderPanel: CiderPanel?
+    private var ciderShadowPanel: CiderShadowPanel?
+    private var panelFrameObservation: NSKeyValueObservation?
     private let ciderPanelPositionStore = CiderPanelPositionStore.shared
 
     // Undo toast
@@ -833,6 +835,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = CiderPanel()
         self.ciderPanel = panel
 
+        let shadowPanel = CiderShadowPanel()
+        self.ciderShadowPanel = shadowPanel
+
+        // Keep shadow panel frame in sync with main panel at every step —
+        // including during user dragging, programmatic setFrame, and animations.
+        panelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
+            guard let frame = change.newValue else { return }
+            self?.ciderShadowPanel?.updateFrame(for: frame)
+        }
+
         updateCiderPanelView()
     }
 
@@ -881,6 +893,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: .snapCiderPanel)
+            .sink { [weak self] notification in
+                guard let raw = notification.userInfo?["target"] as? String,
+                      let target = SnapTarget(rawValue: raw) else { return }
+                self?.snapCiderPanel(to: target)
+            }
+            .store(in: &cancellables)
+
         // Note editor hotkey — show panel if hidden, CiderPanelView handles the rest
         NotificationCenter.default.publisher(for: .toggleNoteEditor)
             .sink { [weak self] _ in
@@ -923,10 +943,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             panel.showAtMouse()
         }
+
+        // Show shadow behind the main panel.
+        ciderShadowPanel?.updateFrame(for: panel.frame)
+        ciderShadowPanel?.orderFront(nil)
+        panel.orderFront(nil)
     }
 
     private func hideCiderPanel() {
         persistCurrentCiderPanelFrameIfNeeded()
+        ciderShadowPanel?.orderOut(nil)
         ciderPanel?.orderOut(nil)
     }
 
@@ -971,6 +997,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setCollapsed(false, animated: false)
         panel.setFrame(maximizedFrame, display: true)
         panel.isMaximized = true
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    private func snapCiderPanel(to target: SnapTarget) {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+
+        let panelCenter = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(panelCenter) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let screen else { return }
+
+        let vf = screen.visibleFrame
+        let gap: CGFloat = 15
+        let minW = CiderPanelDesign.panelMinWidth
+
+        let targetFrame: NSRect
+        switch target {
+        case .almostMaximized:
+            targetFrame = NSRect(
+                x: vf.minX + gap,
+                y: vf.minY + gap,
+                width: vf.width - gap * 2,
+                height: vf.height - gap * 2
+            )
+        case .leftHalf:
+            targetFrame = NSRect(
+                x: vf.minX + gap,
+                y: vf.minY + gap,
+                width: vf.width / 2 - gap * 2,
+                height: vf.height - gap * 2
+            )
+        case .rightHalf:
+            targetFrame = NSRect(
+                x: vf.midX + gap,
+                y: vf.minY + gap,
+                width: vf.width / 2 - gap * 2,
+                height: vf.height - gap * 2
+            )
+        case .leftEdge:
+            targetFrame = NSRect(
+                x: vf.minX + gap,
+                y: vf.minY + gap,
+                width: minW,
+                height: vf.height - gap * 2
+            )
+        case .rightEdge:
+            targetFrame = NSRect(
+                x: vf.maxX - gap - minW,
+                y: vf.minY + gap,
+                width: minW,
+                height: vf.height - gap * 2
+            )
+        }
+
+        panel.isMaximized = false
+        panel.frameBeforeMaximize = nil
+        panel.setCollapsed(false, animated: false)
+        panel.setFrame(targetFrame, display: true)
         persistCurrentCiderPanelFrameIfNeeded()
     }
 

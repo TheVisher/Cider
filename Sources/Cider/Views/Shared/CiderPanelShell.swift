@@ -32,6 +32,12 @@ struct CiderPanelShell<
     @State private var showTitleBarToggle = false
     @State private var toggleAppearTask: Task<Void, Never>?
 
+    // Snap menu popover (green traffic light hover)
+    @State private var showSnapMenu = false
+    @State private var isHoveringGreenButton = false
+    @State private var isHoveringSnapMenu = false
+    @State private var snapMenuDismissTask: Task<Void, Never>?
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
@@ -65,7 +71,6 @@ struct CiderPanelShell<
             AcrylicPanelBackground(
                 cornerRadius: CiderPanelDesign.cornerRadius
             )
-            .shadow(color: Color.black.opacity(0.5), radius: 8, x: 0, y: 6)
 
             HStack(spacing: 0) {
                 // Left: full-height sidebar column
@@ -227,9 +232,27 @@ struct CiderPanelShell<
             PanelTrafficLightButton(
                 color: .systemGreen,
                 symbol: "arrow.up.left.and.arrow.down.right",
-                help: "Maximize panel",
+                help: "Snap or maximize",
                 action: onMaximize
             )
+            .onHover { hovering in
+                isHoveringGreenButton = hovering
+                updateSnapMenuVisibility()
+            }
+            .popover(isPresented: $showSnapMenu, arrowEdge: .bottom) {
+                SnapMenuView { target in
+                    showSnapMenu = false
+                    NotificationCenter.default.post(
+                        name: .snapCiderPanel,
+                        object: nil,
+                        userInfo: ["target": target.rawValue]
+                    )
+                }
+                .onHover { hovering in
+                    isHoveringSnapMenu = hovering
+                    updateSnapMenuVisibility()
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -277,6 +300,21 @@ struct CiderPanelShell<
         }
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
         .animation(reduceMotion ? .none : .snappy, value: isSidebarVisible)
+    }
+
+    // MARK: - Snap Menu
+
+    private func updateSnapMenuVisibility() {
+        snapMenuDismissTask?.cancel()
+        if isHoveringGreenButton || isHoveringSnapMenu {
+            showSnapMenu = true
+        } else {
+            snapMenuDismissTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                showSnapMenu = false
+            }
+        }
     }
 
     // MARK: - Sidebar Toggle

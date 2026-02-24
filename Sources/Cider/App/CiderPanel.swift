@@ -46,15 +46,32 @@ final class CiderPanel: NSPanel {
             width: CiderPanelDesign.panelMinWidth,
             height: CiderPanelDesign.panelMinHeight
         )
+
+        // Ensure the content view is layer-backed so the window server can
+        // compute the shadow shape from the composited rounded content.
+        contentView?.wantsLayer = true
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    // Allow the panel to be dragged freely across all monitors.
-    // The default implementation constrains to the current screen's visibleFrame.
+    // Allow the panel to be dragged freely across all monitors (don't constrain
+    // position to visibleFrame like the default implementation does), but still
+    // enforce minimum width so the panel can't be shrunk to nothing.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
-        frameRect
+        var rect = frameRect
+        rect.size.width = max(CiderPanelDesign.panelMinWidth, rect.size.width)
+        rect.size.height = max(CiderPanelDesign.panelMinHeight, rect.size.height)
+        return rect
+    }
+
+    // Enforce minimum width for ALL setFrame calls (including those from the custom
+    // edge-resize view, which calls setFrame directly and bypasses constrainFrameRect).
+    // Height is intentionally not clamped here — collapse sets a much smaller height.
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        var r = frameRect
+        r.size.width = max(CiderPanelDesign.panelMinWidth, r.size.width)
+        super.setFrame(r, display: flag)
     }
 
     // MARK: - Window Dragging via Title Bar
