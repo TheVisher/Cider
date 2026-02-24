@@ -1174,6 +1174,13 @@ struct CiderPanelView: View {
         detailBookmarkID = bookmark.id
         detailsDraft = BookmarkDetailsDraft(bookmark: bookmark)
         detailsErrorMessage = nil
+        if detailViewMode == .slideOut {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
     }
 
     private func closeBookmarkDetails() {
@@ -1181,6 +1188,7 @@ struct CiderPanelView: View {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
     private func saveBookmarkDetails() {

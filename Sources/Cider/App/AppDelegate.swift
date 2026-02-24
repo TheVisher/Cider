@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ciderShadowPanel: CiderShadowPanel?
     private var panelFrameObservation: NSKeyValueObservation?
     private let ciderPanelPositionStore = CiderPanelPositionStore.shared
+    private var widthBeforeSlideOut: CGFloat?
 
     // Undo toast
     private var undoToastPanel: BookmarkCaptureToastPanel?
@@ -911,6 +912,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: .expandCiderPanelForSlideOut)
+            .sink { [weak self] notification in
+                let minWidth = notification.userInfo?["minimumWidth"] as? CGFloat
+                    ?? BookmarksDesign.detailsSlideOutExpandedPanelMinWidth
+                self?.expandCiderPanelForSlideOut(minimumWidth: minWidth)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .restoreCiderPanelAfterSlideOut)
+            .sink { [weak self] _ in
+                self?.restoreCiderPanelAfterSlideOut()
+            }
+            .store(in: &cancellables)
+
         // Bookmark capture hotkey
         NotificationCenter.default.publisher(for: .captureBookmark)
             .sink { [weak self] _ in
@@ -997,6 +1012,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setCollapsed(false, animated: false)
         panel.setFrame(maximizedFrame, display: true)
         panel.isMaximized = true
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    private func expandCiderPanelForSlideOut(minimumWidth: CGFloat) {
+        guard let panel = ciderPanel, panel.isVisible else { return }
+        guard panel.frame.width < minimumWidth else { return }
+
+        // Save current width so we can restore it when the slide-out closes
+        widthBeforeSlideOut = panel.frame.width
+
+        let currentFrame = panel.frame
+        let delta = minimumWidth - currentFrame.width
+        // Expand to the right; if that would exceed screen bounds, expand leftward instead
+        let center = NSPoint(x: currentFrame.midX, y: currentFrame.midY)
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
+            ?? NSScreen.main ?? NSScreen.screens.first
+        let visibleFrame = screen?.visibleFrame ?? currentFrame
+
+        var newOriginX = currentFrame.minX
+        if currentFrame.maxX + delta > visibleFrame.maxX {
+            newOriginX = max(visibleFrame.minX, currentFrame.maxX - minimumWidth)
+        }
+
+        let newFrame = NSRect(
+            x: newOriginX,
+            y: currentFrame.minY,
+            width: minimumWidth,
+            height: currentFrame.height
+        )
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
+            panel.animator().setFrame(newFrame, display: true)
+        }
+    }
+
+    private func restoreCiderPanelAfterSlideOut() {
+        guard let panel = ciderPanel, let savedWidth = widthBeforeSlideOut else { return }
+        widthBeforeSlideOut = nil
+
+        let currentFrame = panel.frame
+        let newFrame = NSRect(
+            x: currentFrame.minX,
+            y: currentFrame.minY,
+            width: savedWidth,
+            height: currentFrame.height
+        )
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
+            panel.animator().setFrame(newFrame, display: true)
+        }
         persistCurrentCiderPanelFrameIfNeeded()
     }
 

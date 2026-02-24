@@ -41,6 +41,8 @@ extension Notification.Name {
     static let trashContentsChanged = Notification.Name("cider.trashContentsChanged")
     static let openExternalSourceAndSelectFile = Notification.Name("cider.openExternalSourceAndSelectFile")
     static let snapCiderPanel = Notification.Name("cider.snapCiderPanel")
+    static let expandCiderPanelForSlideOut = Notification.Name("cider.expandCiderPanelForSlideOut")
+    static let restoreCiderPanelAfterSlideOut = Notification.Name("cider.restoreCiderPanelAfterSlideOut")
 }
 
 // MARK: - Snap Target
@@ -211,6 +213,7 @@ enum BookmarksDesign {
     static let detailsSlideOutMinWidth: CGFloat = 600
     static let detailsSlideOutFloatInset: CGFloat = Spacing.md
     static let detailsSlideOutMinVisibleContent: CGFloat = 100
+    static let detailsSlideOutExpandedPanelMinWidth: CGFloat = 900
     static let cardFallbackLetterSize: CGFloat = 26
     static let listFallbackLetterSize: CGFloat = 16
     static let detailsHeroFallbackLetterSize: CGFloat = 54
