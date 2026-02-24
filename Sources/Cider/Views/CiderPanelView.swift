@@ -32,6 +32,8 @@ struct CiderPanelView: View {
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsErrorMessage: String?
     @State private var detailWidthSaveTask: Task<Void, Never>?
+    @State private var selectedDateCard: DateCard?
+    @State private var selectedContact: ContactCard?
     @State private var cardScaleSaveTask: Task<Void, Never>?
     @State private var sidebarSearchText: String = ""
     @State private var debouncedSearchText: String = ""
@@ -67,8 +69,8 @@ struct CiderPanelView: View {
     var body: some View {
         CiderPanelShell(
             isCollapsed: isCollapsed,
-            suppressSidebarAutoExpand: isDetailOpen,
-            blurRightColumn: isDetailSlideOut,
+            suppressSidebarAutoExpand: isAnyDetailOpen,
+            blurRightColumn: isDetailSlideOut || isGenericDetailSlideOut,
             onClose: { NotificationCenter.default.post(name: .dismissCiderPanel, object: nil) },
             onCollapse: { NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil) },
             onMaximize: { NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil) }
@@ -115,10 +117,27 @@ struct CiderPanelView: View {
                     .padding(BookmarksDesign.detailsSlideOutFloatInset)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            if isGenericDetailFullPanel {
+                genericDetailFullPanelOverlay
+            }
+            if isGenericDetailSlideOut {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeGenericDetail() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                genericDetailSlideOutContainer
+                    .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .animation(reduceMotion ? .none : .snappy, value: isDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isDetailSlideOut)
+        .animation(reduceMotion ? .none : .snappy, value: isGenericDetailFullPanel)
+        .animation(reduceMotion ? .none : .snappy, value: isGenericDetailSlideOut)
         .environment(\.textScale, textScale)
         .onChange(of: sidebarSearchText) { _, newValue in
             searchDebounceTask?.cancel()
@@ -139,14 +158,14 @@ struct CiderPanelView: View {
             searchDebounceTask?.cancel()
             sidebarSearchText = ""
             debouncedSearchText = ""
-            closeBookmarkDetails()
+            closeAllDetails()
         }
         .onChange(of: selectedFolderID) { _, _ in
             selectedItemIDs.removeAll()
             searchDebounceTask?.cancel()
             sidebarSearchText = ""
             debouncedSearchText = ""
-            closeBookmarkDetails()
+            closeAllDetails()
         }
         .onChange(of: bookmarksViewModel.bookmarks.map(\.id)) { _, bookmarkIDs in
             guard let detailBookmarkID else { return }
@@ -190,7 +209,7 @@ struct CiderPanelView: View {
             config.save()
         }
         .onReceive(NotificationCenter.default.publisher(for: .dismissCiderPanel)) { _ in
-            closeBookmarkDetails()
+            closeAllDetails()
             if isEditorActive {
                 closeNoteEditor()
             }
@@ -288,6 +307,8 @@ struct CiderPanelView: View {
                     debouncedSearchText = ""
                 } else if isDetailOpen {
                     closeBookmarkDetails()
+                } else if isGenericDetailOpen {
+                    closeGenericDetail()
                 } else if isEditorActive {
                     closeNoteEditor()
                 } else if !selectedItemIDs.isEmpty {
@@ -927,7 +948,7 @@ struct CiderPanelView: View {
                 InlineNoteEditorView(viewModel: notesViewModel)
             }
         }
-        .animation(reduceMotion ? .none : .snappy, value: isDetailOpen)
+        .animation(reduceMotion ? .none : .snappy, value: isAnyDetailOpen)
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -973,7 +994,9 @@ struct CiderPanelView: View {
                 },
                 onEditContact: { contact in
                     newContactEditorContext = ContactEditorContext(existingContact: contact)
-                }
+                },
+                onOpenDateCard: { openDateCardDetail($0) },
+                onOpenContact: { openContactDetail($0) }
             )
         } else {
             ZStack {
@@ -1000,7 +1023,9 @@ struct CiderPanelView: View {
                     },
                     onEditContact: { contact in
                         newContactEditorContext = ContactEditorContext(existingContact: contact)
-                    }
+                    },
+                    onOpenDateCard: { openDateCardDetail($0) },
+                    onOpenContact: { openContactDetail($0) }
                 )
                 .opacity(isHomeActive ? 1 : 0)
                 .allowsHitTesting(isHomeActive)
@@ -1041,6 +1066,8 @@ struct CiderPanelView: View {
                                 onMoveNoteToFolder: { note, folderID in
                                     _ = notesViewModel.assignNote(note, toFolder: folderID)
                                 },
+                                onOpenDateCard: { openDateCardDetail($0) },
+                                onOpenContact: { openContactDetail($0) },
                                 searchText: debouncedSearchText,
                                 onUpdateSavedView: { updated in
                                     _ = savedViewStorage.updateSavedView(updated)
@@ -1159,6 +1186,22 @@ struct CiderPanelView: View {
         isDetailOpen && detailViewMode == .page
     }
 
+    private var isGenericDetailOpen: Bool {
+        selectedDateCard != nil || selectedContact != nil
+    }
+
+    private var isAnyDetailOpen: Bool {
+        isDetailOpen || isGenericDetailOpen
+    }
+
+    private var isGenericDetailSlideOut: Bool {
+        isGenericDetailOpen && detailViewMode == .slideOut
+    }
+
+    private var isGenericDetailFullPanel: Bool {
+        isGenericDetailOpen && detailViewMode == .fullPanel
+    }
+
     private var selectedDetailsBookmark: Bookmark? {
         guard let detailBookmarkID else { return nil }
         return bookmarksViewModel.bookmarks.first(where: { $0.id == detailBookmarkID })
@@ -1189,6 +1232,62 @@ struct CiderPanelView: View {
         detailsDraft = nil
         detailsErrorMessage = nil
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
+    }
+
+    private func openDateCardDetail(_ dateCard: DateCard) {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isEditorActive { closeNoteEditor() }
+        let wasExpanded = isAnyDetailOpen
+        // Clear all detail state silently (no restore notification — we're about to show a new detail)
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        selectedContact = nil
+        selectedDateCard = dateCard
+        if !wasExpanded, detailViewMode == .slideOut {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
+    }
+
+    private func openContactDetail(_ contact: ContactCard) {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isEditorActive { closeNoteEditor() }
+        let wasExpanded = isAnyDetailOpen
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        selectedDateCard = nil
+        selectedContact = contact
+        if !wasExpanded, detailViewMode == .slideOut {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
+    }
+
+    private func closeGenericDetail() {
+        guard isGenericDetailOpen else { return }
+        selectedDateCard = nil
+        selectedContact = nil
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
+    }
+
+    private func closeAllDetails() {
+        let anyOpen = isAnyDetailOpen
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        selectedDateCard = nil
+        selectedContact = nil
+        if anyOpen {
+            NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
+        }
     }
 
     private func saveBookmarkDetails() {
@@ -1317,6 +1416,104 @@ struct CiderPanelView: View {
                 onModeChange: changeDetailViewMode,
                 showDragHandle: false
             )
+            .padding(BookmarksDesign.detailsSlideOutFloatInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+            .transition(.opacity)
+        }
+    }
+
+    // MARK: - Generic Item Detail Views (Date Cards, Contacts)
+
+    @ViewBuilder
+    private var genericDetailSlideOutContainer: some View {
+        if let dateCard = selectedDateCard {
+            GenericItemDetailPanel(
+                title: dateCard.title,
+                detailViewMode: detailViewMode,
+                width: min(detailSlideOutWidth, maxSlideOutWidth),
+                maxWidth: maxSlideOutWidth,
+                onResize: { newWidth in
+                    let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                    detailSlideOutWidth = clamped
+                },
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                DateCardDetailView(
+                    dateCard: dateCard,
+                    onEdit: {
+                        closeGenericDetail()
+                        newEventEditorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
+        } else if let contact = selectedContact {
+            GenericItemDetailPanel(
+                title: contact.displayName,
+                detailViewMode: detailViewMode,
+                width: min(detailSlideOutWidth, maxSlideOutWidth),
+                maxWidth: maxSlideOutWidth,
+                onResize: { newWidth in
+                    let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                    detailSlideOutWidth = clamped
+                },
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                ContactDetailView(
+                    contact: contact,
+                    onEdit: {
+                        closeGenericDetail()
+                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var genericDetailFullPanelOverlay: some View {
+        if let dateCard = selectedDateCard {
+            GenericItemDetailPanel(
+                title: dateCard.title,
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                DateCardDetailView(
+                    dateCard: dateCard,
+                    onEdit: {
+                        closeGenericDetail()
+                        newEventEditorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
+            .padding(BookmarksDesign.detailsSlideOutFloatInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+            .transition(.opacity)
+        } else if let contact = selectedContact {
+            GenericItemDetailPanel(
+                title: contact.displayName,
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                ContactDetailView(
+                    contact: contact,
+                    onEdit: {
+                        closeGenericDetail()
+                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
             .padding(BookmarksDesign.detailsSlideOutFloatInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))

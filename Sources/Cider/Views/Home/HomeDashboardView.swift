@@ -17,10 +17,10 @@ struct HomeDashboardView: View {
     var onShowBookmarkDetails: (Bookmark) -> Void = { _ in }
     var onEditDateCard: (DateCard) -> Void = { _ in }
     var onEditContact: (ContactCard) -> Void = { _ in }
+    var onOpenDateCard: (DateCard) -> Void = { _ in }
+    var onOpenContact: (ContactCard) -> Void = { _ in }
 
     @State private var config = CiderConfig.load()
-    @State private var selectedDateCard: DateCard?
-    @State private var selectedContact: ContactCard?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -66,16 +66,23 @@ struct HomeDashboardView: View {
         bookmarksViewModel.foldersByID
     }
 
-    private var shouldBlurContent: Bool {
-        selectedDateCard != nil || selectedContact != nil
-    }
-
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                if libraryItems.isEmpty {
-                    // No scrollable content — show recents normally above empty state
-                    if config.showContinueSection && !isSearching && !continueItems.isEmpty && !continueSectionCollapsed {
+        VStack(spacing: 0) {
+            if libraryItems.isEmpty {
+                // No scrollable content — show recents normally above empty state
+                if config.showContinueSection && !isSearching && !continueItems.isEmpty && !continueSectionCollapsed {
+                    ContinueSectionView(
+                        items: continueItems,
+                        onOpen: { handleContinueOpen($0) },
+                        dragProviderForItem: continueDragProvider
+                    )
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.md)
+                }
+                emptyState
+            } else {
+                if config.showContinueSection && !isSearching && !continueItems.isEmpty {
+                    CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
                         ContinueSectionView(
                             items: continueItems,
                             onOpen: { handleContinueOpen($0) },
@@ -84,44 +91,17 @@ struct HomeDashboardView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.md)
                     }
-                    emptyState
-                } else {
-                    if config.showContinueSection && !isSearching && !continueItems.isEmpty {
-                        CollapsiblePinnedSection(isCollapsed: $continueSectionCollapsed) {
-                            ContinueSectionView(
-                                items: continueItems,
-                                onOpen: { handleContinueOpen($0) },
-                                dragProviderForItem: continueDragProvider
-                            )
-                            .padding(.horizontal, Spacing.md)
-                            .padding(.top, Spacing.md)
-                        }
-                    }
-
-                    ScrollView {
-                        libraryFeed
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .scrollIndicators(.hidden)
-                    .padding(Spacing.xxs)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.md)
-                    .padding(.bottom, Spacing.md)
                 }
-            }
-            .blur(radius: shouldBlurContent ? BookmarksDesign.detailsContentBlurRadius : 0)
-            .animation(reduceMotion ? .none : .snappy, value: shouldBlurContent)
 
-            if selectedDateCard != nil {
-                dateCardDetailOverlay
-                    .transition(.opacity)
-                    .animation(reduceMotion ? .none : .snappy, value: selectedDateCard != nil)
-            }
-
-            if selectedContact != nil {
-                contactDetailOverlay
-                    .transition(.opacity)
-                    .animation(reduceMotion ? .none : .snappy, value: selectedContact != nil)
+                ScrollView {
+                    libraryFeed
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollIndicators(.hidden)
+                .padding(Spacing.xxs)
+                .padding(.horizontal, Spacing.md)
+                .padding(.top, Spacing.md)
+                .padding(.bottom, Spacing.md)
             }
         }
     }
@@ -454,81 +434,11 @@ struct HomeDashboardView: View {
     // MARK: - Date Card & Contact Detail
 
     private func presentDateCardDetail(_ dateCard: DateCard) {
-        selectedDateCard = dateCard
+        onOpenDateCard(dateCard)
     }
 
     private func presentContactDetail(_ contact: ContactCard) {
-        selectedContact = contact
-    }
-
-    @ViewBuilder
-    private var dateCardDetailOverlay: some View {
-        if let dateCard = selectedDateCard {
-            GeometryReader { proxy in
-                let sheetWidth = min(400, max(280, proxy.size.width - Spacing.xxxl * 2))
-                ZStack {
-                    CiderColors.backdropSubtle
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectedDateCard = nil }
-
-                    LibraryDetailModalContainer(
-                        onClose: { selectedDateCard = nil },
-                        onEdit: {
-                            selectedDateCard = nil
-                            onEditDateCard(dateCard)
-                        }
-                    ) {
-                        DateCardDetailView(
-                            dateCard: dateCard,
-                            onEdit: {
-                                selectedDateCard = nil
-                                onEditDateCard(dateCard)
-                            },
-                            onDismiss: { selectedDateCard = nil }
-                        )
-                    }
-                    .frame(width: sheetWidth)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.xxl)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var contactDetailOverlay: some View {
-        if let contact = selectedContact {
-            GeometryReader { proxy in
-                let sheetWidth = min(420, max(280, proxy.size.width - Spacing.xxxl * 2))
-                ZStack {
-                    CiderColors.backdropSubtle
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectedContact = nil }
-
-                    LibraryDetailModalContainer(
-                        onClose: { selectedContact = nil },
-                        onEdit: {
-                            selectedContact = nil
-                            onEditContact(contact)
-                        }
-                    ) {
-                        ContactDetailView(
-                            contact: contact,
-                            onEdit: {
-                                selectedContact = nil
-                                onEditContact(contact)
-                            },
-                            onDismiss: { selectedContact = nil }
-                        )
-                    }
-                    .frame(width: sheetWidth)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.xxl)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
+        onOpenContact(contact)
     }
 
     // MARK: - Drag Providers

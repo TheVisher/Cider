@@ -11,6 +11,8 @@ struct SavedViewTabContent: View {
     var onRenameNote: ((Note, String) -> Void)? = nil
     var onMoveBookmarkToFolder: ((Bookmark, UUID?) -> Void)? = nil
     var onMoveNoteToFolder: ((Note, UUID?) -> Void)? = nil
+    var onOpenDateCard: ((DateCard) -> Void)? = nil
+    var onOpenContact: ((ContactCard) -> Void)? = nil
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
     @ObservedObject private var labelStorage = CardLabelStorage.shared
@@ -674,7 +676,10 @@ struct SavedViewTabContent: View {
             return AnyView(
                 DateCardListRow(
                     dateCard: dateCard,
-                    onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
+                    onOpen: {
+                        if let cb = onOpenDateCard { cb(dateCard) }
+                        else { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) }
+                    },
                     onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                     folders: folders,
                     onMoveToFolder: { folderID in
@@ -698,7 +703,10 @@ struct SavedViewTabContent: View {
                 return AnyView(
                     ContactListRow(
                         contact: contact,
-                        onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
+                        onOpen: {
+                            if let cb = onOpenContact { cb(contact) }
+                            else { contactEditorContext = ContactEditorContext(existingContact: contact) }
+                        },
                         folders: folders,
                         onMoveToFolder: { folderID in
                             let oldFolderID = contact.folderID
@@ -846,7 +854,10 @@ struct SavedViewTabContent: View {
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
-                onOpen: { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) },
+                onOpen: {
+                    if let cb = onOpenDateCard { cb(dateCard) }
+                    else { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) }
+                },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: folders,
                 onMoveToFolder: { folderID in
@@ -864,7 +875,10 @@ struct SavedViewTabContent: View {
             if case .contact(let contact) = item {
                 ContactCardCardView(
                     contact: contact,
-                    onOpen: { contactEditorContext = ContactEditorContext(existingContact: contact) },
+                    onOpen: {
+                        if let cb = onOpenContact { cb(contact) }
+                        else { contactEditorContext = ContactEditorContext(existingContact: contact) }
+                    },
                     folders: folders,
                     onMoveToFolder: { folderID in
                         let oldFolderID = contact.folderID

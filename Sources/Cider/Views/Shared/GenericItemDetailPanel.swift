@@ -1,0 +1,113 @@
+import SwiftUI
+
+/// A reusable panel chrome for non-bookmark item types (date cards, contacts, etc.).
+/// Provides the same toolbar, drag handle, acrylic background, and view-mode switcher
+/// as DetailSlideOutView, but with a single scrollable content column instead of a
+/// hero + metadata sidebar split.
+struct GenericItemDetailPanel<Content: View>: View {
+    var title: String
+    var detailViewMode: DetailViewMode
+    var width: CGFloat = 0
+    var maxWidth: CGFloat = 0
+    var showDragHandle: Bool = true
+    var onResize: (CGFloat) -> Void = { _ in }
+    var onClose: () -> Void
+    var onModeChange: (DetailViewMode) -> Void
+    @ViewBuilder var content: () -> Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.textScale) private var textScale
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if showDragHandle {
+                SlideOutDragHandle(width: width, maxWidth: maxWidth, onResize: onResize)
+                    .frame(width: SlideOutDesign.dragHandleWidth)
+            }
+
+            VStack(spacing: 0) {
+                toolbar
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.xxs)
+                    .padding(.bottom, Spacing.xs + 1)
+
+                Divider()
+                    .background(CiderColors.separator)
+                    .padding(.leading, Spacing.md + Spacing.xxs)
+                    .padding(.trailing, Spacing.md + Spacing.xxs)
+
+                ScrollView {
+                    content()
+                        .padding(Spacing.md)
+                }
+                .scrollIndicators(.hidden)
+                .frame(maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .background(
+            ZStack {
+                VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
+                CiderColors.acrylicOverlayTint
+                CiderColors.surfaceSubtle
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
+                .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ViewBuilder
+    private var toolbar: some View {
+        HStack(spacing: Spacing.sm) {
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+
+            Spacer(minLength: 0)
+
+            Text(title)
+                .font(CiderFont.labelMedium(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            ForEach(DetailViewMode.allCases, id: \.self) { mode in
+                Button {
+                    onModeChange(mode)
+                } label: {
+                    Image(systemName: modeIcon(mode))
+                        .font(CiderFont.label)
+                        .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(mode.displayName)
+            }
+        }
+    }
+
+    private func modeIcon(_ mode: DetailViewMode) -> String {
+        switch mode {
+        case .slideOut: return "sidebar.trailing"
+        case .fullPanel: return "rectangle"
+        case .page: return "rectangle.fill"
+        }
+    }
+}

@@ -15,6 +15,8 @@ struct FolderDetailView: View {
     var onShowBookmarkDetails: ((Bookmark) -> Void)?
     var onEditDateCard: ((DateCard) -> Void)?
     var onEditContact: ((ContactCard) -> Void)?
+    var onOpenDateCard: ((DateCard) -> Void)?
+    var onOpenContact: ((ContactCard) -> Void)?
 
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
@@ -561,7 +563,7 @@ struct FolderDetailView: View {
         case .dateCard(let dateCard):
             DateCardListRow(
                 dateCard: dateCard,
-                onOpen: { onEditDateCard?(dateCard) },
+                onOpen: { (onOpenDateCard ?? onEditDateCard)?(dateCard) },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
@@ -582,7 +584,7 @@ struct FolderDetailView: View {
         case .contact(let contact):
             ContactListRow(
                 contact: contact,
-                onOpen: { onEditContact?(contact) },
+                onOpen: { (onOpenContact ?? onEditContact)?(contact) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = contact.folderID
@@ -653,7 +655,7 @@ struct FolderDetailView: View {
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
-                onOpen: { onEditDateCard?(dateCard) },
+                onOpen: { (onOpenDateCard ?? onEditDateCard)?(dateCard) },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
@@ -674,7 +676,7 @@ struct FolderDetailView: View {
         case .contact(let contact):
             ContactCardCardView(
                 contact: contact,
-                onOpen: { onEditContact?(contact) },
+                onOpen: { (onOpenContact ?? onEditContact)?(contact) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = contact.folderID
