@@ -1302,54 +1302,23 @@ struct CiderPanelView: View {
     @ViewBuilder
     private var detailFullPanelOverlay: some View {
         if let draft = detailsDraft {
-            ZStack {
-                CiderColors.backdrop
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        closeBookmarkDetails()
-                    }
-
-                GeometryReader { proxy in
-                    let sheetWidth = resolvedDetailsSheetWidth(for: proxy.size.width)
-                    let sheetHeight = resolvedDetailsSheetHeight(for: proxy.size.height)
-
-                    VStack(spacing: Spacing.sm) {
-                        HStack(spacing: Spacing.sm) {
-                            Spacer(minLength: 0)
-                            ForEach(DetailViewMode.allCases, id: \.self) { mode in
-                                Button {
-                                    changeDetailViewMode(mode)
-                                } label: {
-                                    Image(systemName: detailModeIcon(mode))
-                                        .font(CiderFont.label)
-                                        .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
-                                        .frame(width: 24, height: 24)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help(mode.displayName)
-                            }
-                        }
-                        .padding(.horizontal, Spacing.lg)
-
-                        BookmarkDetailsSheet(
-                            draft: makeDetailDraftBinding(fallback: draft),
-                            bookmark: selectedDetailsBookmark,
-                            errorMessage: detailsErrorMessage,
-                            folders: bookmarksViewModel.folders,
-                            onDelete: deleteDetailBookmark,
-                            onFolderChanged: assignDetailBookmarkToFolder,
-                            onOpenURL: openDetailURL,
-                            onCopyURL: copyDetailURL,
-                            onSave: saveBookmarkDetails,
-                            onCancel: closeBookmarkDetails
-                        )
-                        .frame(width: sheetWidth)
-                        .frame(maxHeight: sheetHeight)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+            DetailSlideOutView(
+                draft: makeDetailDraftBinding(fallback: draft),
+                bookmark: selectedDetailsBookmark,
+                errorMessage: detailsErrorMessage,
+                folders: bookmarksViewModel.folders,
+                detailViewMode: detailViewMode,
+                onDelete: deleteDetailBookmark,
+                onFolderChanged: assignDetailBookmarkToFolder,
+                onOpenURL: openDetailURL,
+                onCopyURL: copyDetailURL,
+                onSave: saveBookmarkDetails,
+                onCancel: closeBookmarkDetails,
+                onModeChange: changeDetailViewMode,
+                showDragHandle: false
+            )
+            .padding(BookmarksDesign.detailsSlideOutFloatInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
             .transition(.opacity)
         }
@@ -1422,21 +1391,6 @@ struct CiderPanelView: View {
         }
     }
 
-    private func resolvedDetailsSheetWidth(for containerWidth: CGFloat) -> CGFloat {
-        let horizontalInset = Spacing.xxxl * 2
-        let availableWidth = max(containerWidth - horizontalInset, 1)
-        let minimumWidth = min(BookmarksDesign.detailsSheetMinWidth, availableWidth)
-        let preferredWidth = max(minimumWidth, availableWidth * BookmarksDesign.detailsSheetPreferredWidthRatio)
-        return min(preferredWidth, BookmarksDesign.detailsSheetMaxWidth)
-    }
-
-    private func resolvedDetailsSheetHeight(for containerHeight: CGFloat) -> CGFloat {
-        let verticalInset = Spacing.xxxl * 2
-        let availableHeight = max(containerHeight - verticalInset, 1)
-        let minimumHeight = min(BookmarksDesign.detailsSheetMinHeight, availableHeight)
-        let preferredHeight = max(minimumHeight, availableHeight * BookmarksDesign.detailsSheetPreferredHeightRatio)
-        return min(preferredHeight, BookmarksDesign.detailsSheetMaxHeight)
-    }
 
     // MARK: - Search Tab Management
 

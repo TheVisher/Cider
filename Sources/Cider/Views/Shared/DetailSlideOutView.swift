@@ -6,10 +6,10 @@ struct DetailSlideOutView: View {
     var bookmark: Bookmark?
     var errorMessage: String?
     var folders: [Folder]
-    var width: CGFloat
-    var maxWidth: CGFloat
+    var width: CGFloat = 0
+    var maxWidth: CGFloat = 0
     var detailViewMode: DetailViewMode
-    var onResize: (CGFloat) -> Void
+    var onResize: (CGFloat) -> Void = { _ in }
     var onDelete: () -> Void
     var onFolderChanged: (UUID?) -> Void
     var onOpenURL: () -> Void
@@ -17,6 +17,7 @@ struct DetailSlideOutView: View {
     var onSave: () -> Void
     var onCancel: () -> Void
     var onModeChange: (DetailViewMode) -> Void
+    var showDragHandle: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
@@ -28,9 +29,11 @@ struct DetailSlideOutView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Drag handle
-            SlideOutDragHandle(width: width, maxWidth: maxWidth, onResize: onResize)
-                .frame(width: SlideOutDesign.dragHandleWidth)
+            // Drag handle (slide-out mode only)
+            if showDragHandle {
+                SlideOutDragHandle(width: width, maxWidth: maxWidth, onResize: onResize)
+                    .frame(width: SlideOutDesign.dragHandleWidth)
+            }
 
             // Content column — toolbar + divider + hero/title + metadata
             VStack(spacing: 0) {
