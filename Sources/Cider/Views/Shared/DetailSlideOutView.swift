@@ -21,6 +21,10 @@ struct DetailSlideOutView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
     @State private var isMetadataVisible: Bool = true
+    // Sidebar's own move transition is suppressed on first appearance to prevent
+    // it from compounding with the parent panel's slide-in transition. Enabled
+    // after first render so the info-button toggle animates correctly.
+    @State private var sidebarTransitionEnabled: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -104,7 +108,9 @@ struct DetailSlideOutView: View {
                             CiderColors.separator
                                 .frame(width: Spacing.hairline)
                         }
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(sidebarTransitionEnabled
+                            ? .move(edge: .trailing).combined(with: .opacity)
+                            : .identity)
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -112,6 +118,11 @@ struct DetailSlideOutView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .onAppear {
+            // Enable the sidebar's own transition only after the first render,
+            // so it doesn't compound with the parent panel's slide-in animation.
+            DispatchQueue.main.async { sidebarTransitionEnabled = true }
+        }
         .background(
             ZStack {
                 VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)

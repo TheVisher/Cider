@@ -180,6 +180,7 @@ struct BookmarkMetadataSidebar: View {
     @Environment(\.textScale) private var textScale
     @State private var isEditingNotes = false
     @State private var saveDebounceTask: Task<Void, Never>?
+    @State private var fileSize: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -235,6 +236,20 @@ struct BookmarkMetadataSidebar: View {
         .onChange(of: draft.id) { _, _ in
             isEditingNotes = false
             saveDebounceTask?.cancel()
+            fileSize = nil
+        }
+        .task(id: bookmark?.id) {
+            fileSize = nil
+            guard let url = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL else { return }
+            let size = await Task.detached(priority: .utility) {
+                (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
+            }.value
+            guard !Task.isCancelled else { return }
+            var t = Transaction(animation: .none)
+            t.disablesAnimations = true
+            withTransaction(t) {
+                fileSize = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
+            }
         }
     }
 
@@ -449,10 +464,17 @@ struct BookmarkMetadataSidebar: View {
             propertyRow("Created", value: draft.createdAt.formatted(date: .abbreviated, time: .shortened))
             propertyRow("Updated", value: draft.updatedAt.formatted(date: .abbreviated, time: .shortened))
             propertyRow("Type", value: itemType)
-            if let size = fileSizeString {
-                propertyRow("Size", value: size)
+            if shouldShowSize {
+                propertyRow("Size", value: fileSize ?? "—")
             }
         }
+    }
+
+    // Show a Size row for image and file bookmarks (not for web URLs — thumbnail
+    // size is irrelevant there). Computed without disk I/O so it's ready on first
+    // render, preventing layout shift when the async size value arrives.
+    private var shouldShowSize: Bool {
+        !draft.hasURL || draft.urlString.lowercased().hasPrefix("file:")
     }
 
     private func propertyRow(_ label: String, value: String) -> some View {
@@ -512,15 +534,6 @@ struct BookmarkMetadataSidebar: View {
         }
     }
 
-    // Computed synchronously — FileManager.attributesOfItem is a fast metadata
-    // (stat) call, not a file read. Computing it inline ensures it's available on
-    // the first render so it slides in with the rest of the panel.
-    private var fileSizeString: String? {
-        let url = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL
-        guard let url else { return nil }
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
-        return size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
-    }
 }
 
 // MARK: - Hero Preview
