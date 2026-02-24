@@ -178,175 +178,41 @@ struct BookmarkMetadataSidebar: View {
     var onCancel: () -> Void
 
     @Environment(\.textScale) private var textScale
+    @State private var isEditingNotes = false
+    @State private var saveDebounceTask: Task<Void, Never>?
+    @State private var fileSize: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text("Metadata")
-                .font(CiderFont.bodySemibold(scale: textScale))
-                .foregroundColor(CiderColors.tertiary)
+        VStack(spacing: 0) {
+            // ── Scrollable content ──────────────────────────────────────
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    titleSection
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("URL")
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(draft.urlString)
-                        .font(CiderFont.label(scale: textScale))
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(1)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(minHeight: BookmarksDesign.detailsSheetURLMinHeight)
-                .padding(.horizontal, Spacing.sm)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
-            }
-
-            HStack(spacing: Spacing.sm) {
-                Button(action: onOpenURL) {
-                    Label("Open", systemImage: "link")
-                        .font(CiderFont.bodyMedium(scale: textScale))
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                        .padding(.horizontal, Spacing.sm)
-                }
-                .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
-
-                Button(action: onCopyURL) {
-                    Label("Copy URL", systemImage: "doc.on.doc")
-                        .font(CiderFont.bodyMedium(scale: textScale))
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                        .padding(.horizontal, Spacing.sm)
-                }
-                .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
-
-                Button(action: openOriginalImage) {
-                    Label("Open Image", systemImage: "photo")
-                        .font(CiderFont.bodyMedium(scale: textScale))
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                        .padding(.horizontal, Spacing.sm)
-                }
-                .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceInput)
-                )
-                .disabled(!hasOpenableImageSource)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Title")
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                TextField("Bookmark title", text: $draft.title)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Tags")
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                TextField("Comma-separated tags", text: $draft.tagsText)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Notes")
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                TextEditor(text: $draft.notes)
-                    .font(CiderFont.label(scale: textScale))
-                    .frame(
-                        minHeight: BookmarksDesign.detailsSheetNotesMinHeight,
-                        idealHeight: BookmarksDesign.detailsSheetNotesHeight,
-                        maxHeight: BookmarksDesign.detailsSheetNotesHeight
-                    )
-                    .padding(Spacing.xxs)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Folder")
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                Menu {
-                    Button("No Folder") {
-                        draft.folderID = nil
-                        onFolderChanged?(nil)
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(CiderFont.bodyMedium(scale: textScale))
+                            .foregroundColor(CiderColors.destructive)
                     }
-                    Divider()
-                    ForEach(folders) { folder in
-                        Button(folder.name) {
-                            draft.folderID = folder.id
-                            onFolderChanged?(folder.id)
-                        }
+
+                    if draft.hasURL {
+                        sourceSection
                     }
-                } label: {
-                    HStack {
-                        Label(currentFolderName, systemImage: "folder")
-                            .font(CiderFont.body(scale: textScale))
-                            .foregroundColor(CiderColors.secondary)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(CiderFont.caption(scale: textScale))
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                    .padding(.horizontal, Spacing.sm)
-                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                    .background(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(CiderColors.surfaceInput))
+
+                    folderSection
+
+                    tagsSection
+
+                    notesSection
                 }
-                .menuStyle(.borderlessButton)
+                .padding(Spacing.md)
             }
 
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(CiderFont.bodyMedium(scale: textScale))
-                    .foregroundColor(CiderColors.destructive)
-                    .lineLimit(2)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text("Updated \(draft.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(CiderFont.caption(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                Text("Created \(draft.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(CiderFont.caption(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-            }
-
-            HStack(spacing: Spacing.sm) {
-                if let onDelete {
-                    Button("Delete", action: onDelete)
-                        .buttonStyle(CiderDestructiveButtonStyle())
-                }
-                Spacer(minLength: 0)
-
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(CiderSecondaryButtonStyle())
-
-                Button("Save", action: onSave)
-                    .buttonStyle(CiderAccentButtonStyle())
-            }
+            // ── Pinned footer ───────────────────────────────────────────
+            footerSection
         }
-        .padding(Spacing.md)
         .frame(width: width)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
@@ -365,6 +231,253 @@ struct BookmarkMetadataSidebar: View {
             x: 0,
             y: showBackground ? BookmarksDesign.detailsFloatingLiftYOffset : 0
         )
+        .onChange(of: draft) { _, _ in scheduleSave() }
+        .onChange(of: draft.id) { _, _ in
+            isEditingNotes = false
+            saveDebounceTask?.cancel()
+            fileSize = nil
+        }
+        .task(id: bookmark?.id) {
+            await computeFileSize()
+        }
+    }
+
+    // MARK: - Title
+
+    @ViewBuilder
+    private var titleSection: some View {
+        TextField("Title", text: $draft.title, axis: .vertical)
+            .font(CiderFont.bodySemibold(scale: textScale))
+            .foregroundColor(CiderColors.primary)
+            .lineLimit(1...5)
+            .textFieldStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .padding(Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+    }
+
+    // MARK: - Source
+
+    @ViewBuilder
+    private var sourceSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Source")
+                .font(CiderFont.bodyMedium(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(draft.urlString)
+                    .font(CiderFont.label(scale: textScale))
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: BookmarksDesign.detailsSheetURLMinHeight)
+            .padding(.horizontal, Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+
+            HStack(spacing: Spacing.xs) {
+                Button(action: onOpenURL) {
+                    Label("Open", systemImage: "link")
+                        .font(CiderFont.bodyMedium(scale: textScale))
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                        .padding(.horizontal, Spacing.sm)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+
+                Button(action: onCopyURL) {
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .font(CiderFont.bodyMedium(scale: textScale))
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                        .padding(.horizontal, Spacing.sm)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+
+                if hasOpenableImageSource {
+                    Button(action: openOriginalImage) {
+                        Image(systemName: "photo")
+                            .font(CiderFont.bodyMedium(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                            .frame(
+                                width: BookmarksDesign.buttonTapTarget,
+                                height: BookmarksDesign.buttonTapTarget
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                    .help("Open original image")
+                }
+            }
+        }
+    }
+
+    // MARK: - Folder
+
+    @ViewBuilder
+    private var folderSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Folder")
+                .font(CiderFont.bodyMedium(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+            Menu {
+                Button("No Folder") {
+                    draft.folderID = nil
+                    onFolderChanged?(nil)
+                }
+                if !folders.isEmpty { Divider() }
+                ForEach(folders) { folder in
+                    Button(folder.name) {
+                        draft.folderID = folder.id
+                        onFolderChanged?(folder.id)
+                    }
+                }
+            } label: {
+                HStack {
+                    Label(currentFolderName, systemImage: "folder")
+                        .font(CiderFont.body(scale: textScale))
+                        .foregroundColor(CiderColors.secondary)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(CiderFont.caption(scale: textScale))
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .padding(.horizontal, Spacing.sm)
+                .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+            }
+            .menuStyle(.borderlessButton)
+        }
+    }
+
+    // MARK: - Tags
+
+    @ViewBuilder
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Tags")
+                .font(CiderFont.bodyMedium(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+            TextField("Add tags, comma separated", text: $draft.tagsText)
+                .font(CiderFont.body(scale: textScale))
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    // MARK: - Notes
+
+    @ViewBuilder
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Notes")
+                .font(CiderFont.bodyMedium(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+
+            if !draft.notes.isEmpty || isEditingNotes {
+                TextEditor(text: $draft.notes)
+                    .font(CiderFont.label(scale: textScale))
+                    .frame(
+                        minHeight: BookmarksDesign.detailsSheetNotesMinHeight,
+                        idealHeight: BookmarksDesign.detailsSheetNotesHeight,
+                        maxHeight: BookmarksDesign.detailsSheetNotesHeight
+                    )
+                    .padding(Spacing.xxs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            } else {
+                Button {
+                    isEditingNotes = true
+                } label: {
+                    Label("Add note", systemImage: "plus")
+                        .font(CiderFont.body(scale: textScale))
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                .padding(.horizontal, Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+            }
+        }
+    }
+
+    // MARK: - Footer (pinned to bottom)
+
+    @ViewBuilder
+    private var footerSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            propertiesGrid
+
+            if let onDelete {
+                Divider()
+
+                Button("Delete", action: onDelete)
+                    .buttonStyle(CiderDestructiveButtonStyle())
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(Spacing.md)
+    }
+
+    @ViewBuilder
+    private var propertiesGrid: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            propertyRow("Created", value: draft.createdAt.formatted(date: .abbreviated, time: .shortened))
+            propertyRow("Updated", value: draft.updatedAt.formatted(date: .abbreviated, time: .shortened))
+            propertyRow("Type", value: itemType)
+            if let fileSize {
+                propertyRow("Size", value: fileSize)
+            }
+        }
+    }
+
+    private func propertyRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            Text(label)
+                .font(CiderFont.caption(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 52, alignment: .leading)
+            Text(value)
+                .font(CiderFont.caption(scale: textScale))
+                .foregroundColor(CiderColors.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private var itemType: String {
+        if !draft.hasURL { return "Image" }
+        if draft.urlString.lowercased().hasPrefix("file:") { return "File" }
+        return "Bookmark"
     }
 
     private var currentFolderName: String {
@@ -388,11 +501,31 @@ struct BookmarkMetadataSidebar: View {
             NSWorkspace.shared.open(originalFileURL)
             return
         }
-
         if let remote = bookmark?.thumbnailRemoteURLString,
            let remoteURL = URL(string: remote) {
             NSWorkspace.shared.open(remoteURL)
         }
+    }
+
+    private func scheduleSave() {
+        saveDebounceTask?.cancel()
+        saveDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            onSave()
+        }
+    }
+
+    private func computeFileSize() async {
+        let url = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL
+        guard let url else {
+            fileSize = nil
+            return
+        }
+        let size = await Task.detached {
+            (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
+        }.value
+        fileSize = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
     }
 }
 
