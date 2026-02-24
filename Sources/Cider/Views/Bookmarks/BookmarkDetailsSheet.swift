@@ -180,7 +180,6 @@ struct BookmarkMetadataSidebar: View {
     @Environment(\.textScale) private var textScale
     @State private var isEditingNotes = false
     @State private var saveDebounceTask: Task<Void, Never>?
-    @State private var fileSize: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -236,10 +235,6 @@ struct BookmarkMetadataSidebar: View {
         .onChange(of: draft.id) { _, _ in
             isEditingNotes = false
             saveDebounceTask?.cancel()
-            fileSize = nil
-        }
-        .task(id: bookmark?.id) {
-            await computeFileSize()
         }
     }
 
@@ -454,8 +449,8 @@ struct BookmarkMetadataSidebar: View {
             propertyRow("Created", value: draft.createdAt.formatted(date: .abbreviated, time: .shortened))
             propertyRow("Updated", value: draft.updatedAt.formatted(date: .abbreviated, time: .shortened))
             propertyRow("Type", value: itemType)
-            if let fileSize {
-                propertyRow("Size", value: fileSize)
+            if let size = fileSizeString {
+                propertyRow("Size", value: size)
             }
         }
     }
@@ -517,16 +512,14 @@ struct BookmarkMetadataSidebar: View {
         }
     }
 
-    private func computeFileSize() async {
+    // Computed synchronously — FileManager.attributesOfItem is a fast metadata
+    // (stat) call, not a file read. Computing it inline ensures it's available on
+    // the first render so it slides in with the rest of the panel.
+    private var fileSizeString: String? {
         let url = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL
-        guard let url else {
-            fileSize = nil
-            return
-        }
-        let size = await Task.detached {
-            (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
-        }.value
-        fileSize = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
+        guard let url else { return nil }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
+        return size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
     }
 }
 
