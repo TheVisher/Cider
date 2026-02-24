@@ -580,7 +580,7 @@ enum SettingsDesign {
     static let width: CGFloat = 750
     static let height: CGFloat = 580
     static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 0
+    static let shadowPadding: CGFloat = 16
     static let headerHeight: CGFloat = 48
     static let primarySidebarWidth: CGFloat = 190
     static let displayPickerMaxWidth: CGFloat = 250
@@ -880,6 +880,7 @@ struct SettingsBackgroundView: View {
                 .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                 .padding(CiderBorder.innerStrokeInset)
         )
+        .shadow(color: Color.black.opacity(0.5), radius: 8, x: 0, y: 6)
     }
 
     @ViewBuilder

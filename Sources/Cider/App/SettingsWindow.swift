@@ -16,7 +16,7 @@ final class SettingsWindow: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         isMovableByWindowBackground = true
 
         // Standard window behavior

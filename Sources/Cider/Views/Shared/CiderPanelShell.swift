@@ -65,6 +65,7 @@ struct CiderPanelShell<
             AcrylicPanelBackground(
                 cornerRadius: CiderPanelDesign.cornerRadius
             )
+            .shadow(color: Color.black.opacity(0.5), radius: 8, x: 0, y: 6)
 
             HStack(spacing: 0) {
                 // Left: full-height sidebar column

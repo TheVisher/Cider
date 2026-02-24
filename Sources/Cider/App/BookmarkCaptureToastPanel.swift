@@ -24,7 +24,7 @@ final class BookmarkCaptureToastPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
 
         isMovable = false
         isReleasedWhenClosed = false

@@ -330,7 +330,7 @@ enum CiderPanelDesign {
     static let minWidth: CGFloat = 540
     static let minHeight: CGFloat = 440
     static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 0
+    static let shadowPadding: CGFloat = 16
     static let topPadding: CGFloat = 28
     static let bottomPadding: CGFloat = 15
     static let collapsedBottomPadding: CGFloat = topPadding
