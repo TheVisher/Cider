@@ -103,6 +103,12 @@ struct CiderPanelView: View {
                 detailFullPanelOverlay
             }
             if isDetailSlideOut, let _ = detailsDraft {
+                // Transparent dismiss area — covers the blurred content to the left
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeBookmarkDetails() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
                 detailSlideOutContainer
                     .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
