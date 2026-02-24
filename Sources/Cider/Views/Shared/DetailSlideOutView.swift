@@ -200,13 +200,13 @@ struct DetailSlideOutView: View {
 
 // MARK: - Design Constants
 
-private enum SlideOutDesign {
+enum SlideOutDesign {
     static let dragHandleWidth: CGFloat = 6
 }
 
 // MARK: - Drag Handle (AppKit event-loop pattern)
 
-private struct SlideOutDragHandle: NSViewRepresentable {
+struct SlideOutDragHandle: NSViewRepresentable {
     var width: CGFloat
     var maxWidth: CGFloat
     var onResize: (CGFloat) -> Void
@@ -226,7 +226,7 @@ private struct SlideOutDragHandle: NSViewRepresentable {
     }
 }
 
-private final class SlideOutDragHandleNSView: NSView {
+final class SlideOutDragHandleNSView: NSView {
     var currentWidth: CGFloat = 400
     var maxWidth: CGFloat = 800
     var onResize: ((CGFloat) -> Void)?

@@ -10,6 +10,7 @@ struct GenericItemDetailPanel<Content: View>: View {
     var width: CGFloat = 0
     var maxWidth: CGFloat = 0
     var showDragHandle: Bool = true
+    var scrollsContent: Bool = true
     var onResize: (CGFloat) -> Void = { _ in }
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
@@ -36,12 +37,17 @@ struct GenericItemDetailPanel<Content: View>: View {
                     .padding(.leading, Spacing.md + Spacing.xxs)
                     .padding(.trailing, Spacing.md + Spacing.xxs)
 
-                ScrollView {
+                if scrollsContent {
+                    ScrollView {
+                        content()
+                            .padding(Spacing.md)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxHeight: .infinity)
+                } else {
                     content()
-                        .padding(Spacing.md)
+                        .frame(maxHeight: .infinity)
                 }
-                .scrollIndicators(.hidden)
-                .frame(maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

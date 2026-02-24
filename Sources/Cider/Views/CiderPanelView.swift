@@ -38,10 +38,8 @@ struct CiderPanelView: View {
     @State private var sidebarSearchText: String = ""
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
-    @State private var editingNoteID: UUID?
+    @State private var selectedNote: Note?
     @State private var isEditingNoteTitle = false
-    @State private var showRestoreSnapshotAlert = false
-    @State private var pendingSnapshotChoice: NotesRecoverySnapshotChoice?
     @State private var newEventEditorContext: DateCardEditorContext?
     @State private var newContactEditorContext: ContactEditorContext?
     @State private var contentAreaWidth: CGFloat = 800
@@ -70,7 +68,7 @@ struct CiderPanelView: View {
         CiderPanelShell(
             isCollapsed: isCollapsed,
             suppressSidebarAutoExpand: isAnyDetailOpen,
-            blurRightColumn: isDetailSlideOut || isGenericDetailSlideOut,
+            blurRightColumn: isDetailSlideOut || isGenericDetailSlideOut || isNoteDetailSlideOut,
             onClose: { NotificationCenter.default.post(name: .dismissCiderPanel, object: nil) },
             onCollapse: { NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil) },
             onMaximize: { NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil) }
@@ -95,7 +93,7 @@ struct CiderPanelView: View {
                         }
                     },
                     onOpenNote: { note in
-                        openNoteInline(note)
+                        openNoteDetail(note)
                     },
                     onSpawnSearchTab: spawnSearchTab,
                     onDismiss: { isSearchPaletteVisible = false }
@@ -132,12 +130,29 @@ struct CiderPanelView: View {
                     .padding(BookmarksDesign.detailsSlideOutFloatInset)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            if isNoteDetailFullPanel {
+                noteDetailFullPanelOverlay
+            }
+            if isNoteDetailSlideOut {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeNoteDetail() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                noteDetailSlideOutContainer
+                    .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .animation(reduceMotion ? .none : .snappy, value: isDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isDetailSlideOut)
         .animation(reduceMotion ? .none : .snappy, value: isGenericDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isGenericDetailSlideOut)
+        .animation(reduceMotion ? .none : .snappy, value: isNoteDetailFullPanel)
+        .animation(reduceMotion ? .none : .snappy, value: isNoteDetailSlideOut)
         .environment(\.textScale, textScale)
         .onChange(of: sidebarSearchText) { _, newValue in
             searchDebounceTask?.cancel()
@@ -210,29 +225,26 @@ struct CiderPanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .dismissCiderPanel)) { _ in
             closeAllDetails()
-            if isEditorActive {
-                closeNoteEditor()
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
             textScale = CiderConfig.load().textSize.scale
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
-            if isEditorActive {
-                closeNoteEditor()
+            if isNoteDetailOpen {
+                closeNoteDetail()
             } else if let note = notification.object as? Note {
-                openNoteInline(note)
+                openNoteDetail(note)
             } else {
                 let note = NotesStorage.shared.createNew()
-                openNoteInline(note)
+                openNoteDetail(note)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .captureBookmark)) { _ in
             _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
         }
         .onReceive(NotificationCenter.default.publisher(for: .editorRequestClose)) { _ in
-            if isEditorActive {
-                closeNoteEditor()
+            if isNoteDetailOpen {
+                closeNoteDetail()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openBookmarkDetails)) { notification in
@@ -309,8 +321,8 @@ struct CiderPanelView: View {
                     closeBookmarkDetails()
                 } else if isGenericDetailOpen {
                     closeGenericDetail()
-                } else if isEditorActive {
-                    closeNoteEditor()
+                } else if isNoteDetailOpen {
+                    closeNoteDetail()
                 } else if !selectedItemIDs.isEmpty {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         selectedItemIDs.removeAll()
@@ -328,8 +340,6 @@ struct CiderPanelView: View {
     private var titleBarContent: some View {
         if isDetailPageMode {
             detailPageTitleBar
-        } else if isEditorActive {
-            noteEditorTitleBar
         } else if !selectedItemIDs.isEmpty {
             selectionTitleBar
         } else {
@@ -454,250 +464,6 @@ struct CiderPanelView: View {
         }
         .buttonStyle(.plain)
         .help("Delete selected items")
-    }
-
-    // MARK: - Note Editor Title Bar
-
-    @ViewBuilder
-    private var noteEditorTitleBar: some View {
-        // Back button
-        Button {
-            closeNoteEditor()
-        } label: {
-            Image(systemName: "chevron.left")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.secondary)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Back")
-
-        // Editable title
-        if isEditingNoteTitle {
-            TextField("Note title", text: $notesViewModel.editingTitle, onCommit: {
-                notesViewModel.renameCurrentNote(to: notesViewModel.editingTitle)
-                isEditingNoteTitle = false
-            })
-            .textFieldStyle(.plain)
-            .font(CiderFont.subheadingSemibold)
-            .foregroundColor(CiderColors.primary)
-        } else {
-            let displayTitle = notesViewModel.activeExternalFile?.title ?? notesViewModel.selectedNote?.title ?? "Note"
-            Text(displayTitle)
-                .font(CiderFont.subheadingSemibold)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
-                .onTapGesture(count: 2) {
-                    if notesViewModel.selectedNote != nil {
-                        isEditingNoteTitle = true
-                    }
-                }
-        }
-
-        Spacer(minLength: Spacing.sm)
-
-        // Note switcher dropdown
-        Menu {
-            Button {
-                let note = NotesStorage.shared.createNew()
-                openNoteInline(note)
-            } label: {
-                Label("New Note", systemImage: "plus")
-            }
-
-            if !notesViewModel.notes.isEmpty {
-                Divider()
-                ForEach(notesViewModel.notes) { note in
-                    Button {
-                        openNoteInline(note)
-                    } label: {
-                        if note.id == notesViewModel.selectedNote?.id {
-                            Label(note.title, systemImage: "checkmark")
-                        } else {
-                            Text(note.title)
-                        }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "doc.text")
-                .font(CiderFont.label)
-                .foregroundColor(CiderColors.secondary)
-        }
-        .menuStyle(.borderlessButton)
-        .frame(width: 24)
-        .help("Switch note")
-
-        // Formatting menu
-        noteFormattingMenu
-    }
-
-    @ViewBuilder
-    private var noteFormattingMenu: some View {
-        Menu {
-            Button {
-                notesViewModel.toggleFormattingToolbarPinned()
-            } label: {
-                Label(
-                    notesViewModel.isFormattingToolbarPinned ? "Unpin Toolbar" : "Pin Toolbar",
-                    systemImage: notesViewModel.isFormattingToolbarPinned ? "pin.slash" : "pin"
-                )
-            }
-
-            Divider()
-
-            Section("History") {
-                Button {
-                    notesViewModel.showFindBar()
-                } label: {
-                    Label("Find in Note", systemImage: "magnifyingglass")
-                }
-
-                Divider()
-
-                Button {
-                    notesViewModel.editorUndo()
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                }
-                Button {
-                    notesViewModel.editorRedo()
-                } label: {
-                    Label("Redo", systemImage: "arrow.uturn.forward")
-                }
-            }
-
-            Section("Recovery") {
-                if notesViewModel.recoverySnapshotChoices.isEmpty {
-                    Button("No snapshots yet") {}
-                        .disabled(true)
-                } else {
-                    Menu {
-                        ForEach(notesViewModel.recoverySnapshotChoices) { choice in
-                            Button {
-                                pendingSnapshotChoice = choice
-                                showRestoreSnapshotAlert = true
-                            } label: {
-                                Text(
-                                    "\(choice.title) (\(choice.snapshotDate.formatted(.relative(presentation: .named))))"
-                                )
-                            }
-                        }
-                    } label: {
-                        Label("Quick Restore", systemImage: "clock.arrow.circlepath")
-                    }
-
-                    Menu {
-                        ForEach(Array(notesViewModel.allRecoverySnapshotChoices.prefix(12))) { choice in
-                            Button {
-                                pendingSnapshotChoice = choice
-                                showRestoreSnapshotAlert = true
-                            } label: {
-                                Text(choice.title)
-                            }
-                        }
-
-                        if notesViewModel.allRecoverySnapshotChoices.count > 12 {
-                            Divider()
-                            Text("Showing 12 newest snapshots")
-                        }
-                    } label: {
-                        Label("All Snapshots", systemImage: "clock")
-                    }
-                }
-            }
-
-            Section("Alignment") {
-                Button { notesViewModel.editorAlignLeft() } label: {
-                    Label("Align Left", systemImage: "text.alignleft")
-                }
-                Button { notesViewModel.editorAlignCenter() } label: {
-                    Label("Align Center", systemImage: "text.aligncenter")
-                }
-                Button { notesViewModel.editorAlignRight() } label: {
-                    Label("Align Right", systemImage: "text.alignright")
-                }
-            }
-
-            Section("Text Style") {
-                Button { notesViewModel.editorToggleBold() } label: { Label("Bold", systemImage: "bold") }
-                Button { notesViewModel.editorToggleItalic() } label: { Label("Italic", systemImage: "italic") }
-                Button { notesViewModel.editorToggleUnderline() } label: { Label("Underline", systemImage: "underline") }
-                Button { notesViewModel.editorPromptForLink() } label: { Label("Add Link", systemImage: "link.badge.plus") }
-                Button { notesViewModel.editorRemoveLink() } label: { Label("Remove Link", systemImage: "link") }
-            }
-
-            Section("Selection Text Size") {
-                Button("Small") { notesViewModel.editorSetTextSizeSmall() }
-                Button("Normal") { notesViewModel.editorSetTextSizeNormal() }
-                Button("Large") { notesViewModel.editorSetTextSizeLarge() }
-                Button("Extra Large") { notesViewModel.editorSetTextSizeExtraLarge() }
-                Button("Reset Size") { notesViewModel.editorResetTextSize() }
-            }
-
-            Section("Note Text Size") {
-                ForEach(NotesEditorTextSize.allCases, id: \.self) { size in
-                    Button {
-                        notesViewModel.setNotesEditorTextSize(size)
-                    } label: {
-                        if notesViewModel.notesEditorTextSize == size {
-                            Label(size.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(size.displayName)
-                        }
-                    }
-                }
-            }
-
-            Section("Lists") {
-                Button { notesViewModel.editorToggleBulletList() } label: { Label("Bullet List", systemImage: "list.bullet") }
-                Button { notesViewModel.editorToggleOrderedList() } label: { Label("Numbered List", systemImage: "list.number") }
-                Button { notesViewModel.editorToggleTaskList() } label: { Label("Task List", systemImage: "checklist") }
-            }
-
-            Section("Table") {
-                Button("Insert Table") { notesViewModel.editorInsertTable() }
-                Button("Add Row Above") { notesViewModel.editorAddRowBefore() }
-                Button("Add Row Below") { notesViewModel.editorAddRowAfter() }
-                Button("Delete Row") { notesViewModel.editorDeleteRow() }
-                Button("Add Column Left") { notesViewModel.editorAddColumnBefore() }
-                Button("Add Column Right") { notesViewModel.editorAddColumnAfter() }
-                Button("Delete Column") { notesViewModel.editorDeleteColumn() }
-                Button("Merge Cells") { notesViewModel.editorMergeCells() }
-                Button("Split Cell") { notesViewModel.editorSplitCell() }
-                Button("Toggle Header Row") { notesViewModel.editorToggleHeaderRow() }
-                Button("Toggle Header Column") { notesViewModel.editorToggleHeaderColumn() }
-                Button("Delete Table") { notesViewModel.editorDeleteTable() }
-            }
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(CiderFont.labelMedium)
-                .foregroundColor(CiderColors.secondary)
-        }
-        .menuStyle(.borderlessButton)
-        .frame(width: 24)
-        .disabled(notesViewModel.selectedNote == nil)
-        .help("Formatting")
-        .alert("Restore snapshot?", isPresented: $showRestoreSnapshotAlert) {
-            Button("Restore", role: .destructive) {
-                if let choice = pendingSnapshotChoice {
-                    notesViewModel.restoreSnapshot(choice)
-                }
-                pendingSnapshotChoice = nil
-            }
-            Button("Cancel", role: .cancel) {
-                pendingSnapshotChoice = nil
-            }
-        } message: {
-            if let choice = pendingSnapshotChoice {
-                Text(
-                    "This replaces the current note with the \(choice.title.lowercased()) snapshot from \(choice.snapshotDate.formatted(date: .abbreviated, time: .shortened))."
-                )
-            } else {
-                Text("This replaces the current note with the latest saved snapshot.")
-            }
-        }
     }
 
     // MARK: - Section Toggles
@@ -931,21 +697,21 @@ struct CiderPanelView: View {
     // MARK: - Content Area
 
     private var isEditorActive: Bool {
-        editingNoteID != nil || notesViewModel.activeExternalFile != nil
+        selectedNote != nil || notesViewModel.activeExternalFile != nil
     }
+
+    private var isNoteDetailOpen: Bool { isEditorActive }
+    private var isNoteDetailSlideOut: Bool { isNoteDetailOpen && detailViewMode == .slideOut }
+    private var isNoteDetailFullPanel: Bool { isNoteDetailOpen && detailViewMode == .fullPanel }
 
     private var contentArea: some View {
         ZStack {
             tabContentBody
-                .opacity(isEditorActive || isDetailPageMode ? 0 : 1)
-                .allowsHitTesting(!isEditorActive && !isDetailPageMode)
+                .opacity(isDetailPageMode ? 0 : 1)
+                .allowsHitTesting(!isDetailPageMode)
 
             if isDetailPageMode {
                 detailPageView
-            }
-
-            if isEditorActive {
-                InlineNoteEditorView(viewModel: notesViewModel)
             }
         }
         .animation(reduceMotion ? .none : .snappy, value: isAnyDetailOpen)
@@ -961,7 +727,7 @@ struct CiderPanelView: View {
     }
 
     private var isHomeActive: Bool {
-        selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil && !isEditorActive
+        selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil
     }
 
     @ViewBuilder
@@ -987,7 +753,7 @@ struct CiderPanelView: View {
                     selectedFolderID = subFolderID
                     expandPathToFolder(subFolderID)
                 },
-                onOpenNote: { note in openNoteInline(note) },
+                onOpenNote: { note in openNoteDetail(note) },
                 onShowBookmarkDetails: { openBookmarkDetails($0) },
                 onEditDateCard: { dateCard in
                     newEventEditorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
@@ -1013,7 +779,7 @@ struct CiderPanelView: View {
                     sortMode: $homeSort,
                     entityFilter: $homeEntityFilter,
                     searchText: debouncedSearchText,
-                    onOpenNote: { note in openNoteInline(note) },
+                    onOpenNote: { note in openNoteDetail(note) },
                     onShowBookmarkDetails: { openBookmarkDetails($0) },
                     onEditDateCard: { dateCard in
                         newEventEditorContext = DateCardEditorContext(
@@ -1049,7 +815,7 @@ struct CiderPanelView: View {
                                     }
                                 },
                                 onOpenNote: { note in
-                                    openNoteInline(note)
+                                    openNoteDetail(note)
                                 },
                                 onDeleteBookmark: { bookmark in
                                     bookmarksViewModel.deleteBookmarks([bookmark])
@@ -1099,7 +865,7 @@ struct CiderPanelView: View {
                                 }
                             },
                             onOpenNote: { note in
-                                openNoteInline(note)
+                                openNoteDetail(note)
                             }
                         )
                     case .externalSource(let id, _):
@@ -1138,26 +904,38 @@ struct CiderPanelView: View {
             NotesStorage.shared.save(note: note)
         }
 
-        openNoteInline(note)
+        openNoteDetail(note)
     }
 
-    // MARK: - Inline Note Editor
+    // MARK: - Note Detail
 
-    private func openNoteInline(_ note: Note) {
+    private func openNoteDetail(_ note: Note) {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        let wasExpanded = isAnyDetailOpen
+        // Clear other detail state silently
+        detailBookmarkID = nil; detailsDraft = nil; detailsErrorMessage = nil
+        selectedDateCard = nil; selectedContact = nil
+        // Open note
         notesViewModel.selectNote(note)
-        editingNoteID = note.id
+        selectedNote = note
         isEditingNoteTitle = false
-
-        DispatchQueue.main.async {
-            notesViewModel.focusEditorIfFindBarHidden()
+        DispatchQueue.main.async { notesViewModel.focusEditorIfFindBarHidden() }
+        if !wasExpanded, detailViewMode == .slideOut {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
         }
     }
 
-    private func closeNoteEditor() {
+    private func closeNoteDetail() {
+        guard isNoteDetailOpen else { return }
         notesViewModel.flushSave()
-        editingNoteID = nil
+        selectedNote = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
     // MARK: - Bookmark Details (Centralized)
@@ -1191,7 +969,7 @@ struct CiderPanelView: View {
     }
 
     private var isAnyDetailOpen: Bool {
-        isDetailOpen || isGenericDetailOpen
+        isDetailOpen || isGenericDetailOpen || isNoteDetailOpen
     }
 
     private var isGenericDetailSlideOut: Bool {
@@ -1211,9 +989,7 @@ struct CiderPanelView: View {
         if isSearchPaletteVisible {
             isSearchPaletteVisible = false
         }
-        if isEditorActive {
-            closeNoteEditor()
-        }
+        if isNoteDetailOpen { closeNoteDetail() }
         detailBookmarkID = bookmark.id
         detailsDraft = BookmarkDetailsDraft(bookmark: bookmark)
         detailsErrorMessage = nil
@@ -1236,7 +1012,7 @@ struct CiderPanelView: View {
 
     private func openDateCardDetail(_ dateCard: DateCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
-        if isEditorActive { closeNoteEditor() }
+        if isNoteDetailOpen { closeNoteDetail() }
         let wasExpanded = isAnyDetailOpen
         // Clear all detail state silently (no restore notification — we're about to show a new detail)
         detailBookmarkID = nil
@@ -1255,7 +1031,7 @@ struct CiderPanelView: View {
 
     private func openContactDetail(_ contact: ContactCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
-        if isEditorActive { closeNoteEditor() }
+        if isNoteDetailOpen { closeNoteDetail() }
         let wasExpanded = isAnyDetailOpen
         detailBookmarkID = nil
         detailsDraft = nil
@@ -1280,11 +1056,15 @@ struct CiderPanelView: View {
 
     private func closeAllDetails() {
         let anyOpen = isAnyDetailOpen
+        if isNoteDetailOpen { notesViewModel.flushSave() }
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
         selectedDateCard = nil
         selectedContact = nil
+        selectedNote = nil
+        notesViewModel.activeExternalFile = nil
+        isEditingNoteTitle = false
         if anyOpen {
             NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
         }
@@ -1588,6 +1368,46 @@ struct CiderPanelView: View {
         }
     }
 
+    // MARK: - Note Detail Views
+
+    @ViewBuilder
+    private var noteDetailSlideOutContainer: some View {
+        let title = notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
+        GenericItemDetailPanel(
+            title: title,
+            detailViewMode: detailViewMode,
+            width: min(detailSlideOutWidth, maxSlideOutWidth),
+            maxWidth: maxSlideOutWidth,
+            scrollsContent: false,
+            onResize: { newWidth in
+                let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                detailSlideOutWidth = clamped
+            },
+            onClose: closeNoteDetail,
+            onModeChange: changeDetailViewMode
+        ) {
+            InlineNoteEditorView(viewModel: notesViewModel)
+        }
+    }
+
+    @ViewBuilder
+    private var noteDetailFullPanelOverlay: some View {
+        let title = notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
+        GenericItemDetailPanel(
+            title: title,
+            detailViewMode: detailViewMode,
+            showDragHandle: false,
+            scrollsContent: false,
+            onClose: closeNoteDetail,
+            onModeChange: changeDetailViewMode
+        ) {
+            InlineNoteEditorView(viewModel: notesViewModel)
+        }
+        .padding(BookmarksDesign.detailsSlideOutFloatInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+        .transition(.opacity)
+    }
 
     // MARK: - Search Tab Management
 
