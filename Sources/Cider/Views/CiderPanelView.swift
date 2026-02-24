@@ -1189,16 +1189,19 @@ struct CiderPanelView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
+        let sourceURL: String? = detailsDraft.sourceURL != detailsDraft.originalURLString
+            ? detailsDraft.sourceURL
+            : nil
+
         let didSave = bookmarksViewModel.updateDetails(
             for: selectedBookmark,
             title: detailsDraft.title,
             notes: detailsDraft.notes,
-            tags: parsedTags
+            tags: parsedTags,
+            urlString: sourceURL
         )
 
-        if didSave {
-            closeBookmarkDetails()
-        } else {
+        if !didSave {
             detailsErrorMessage = "Could not save bookmark details."
         }
     }
@@ -1218,12 +1221,12 @@ struct CiderPanelView: View {
         guard let detailsDraft else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(detailsDraft.urlString, forType: .string)
+        pasteboard.setString(detailsDraft.sourceURL, forType: .string)
     }
 
     private func openDetailURL() {
         guard let detailsDraft,
-              let url = URL(string: detailsDraft.urlString) else { return }
+              let url = URL(string: detailsDraft.sourceURL) else { return }
         NSWorkspace.shared.open(url)
     }
 

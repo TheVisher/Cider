@@ -219,7 +219,8 @@ final class BookmarksStorage: ObservableObject {
         for bookmarkID: UUID,
         title: String,
         notes: String,
-        tags: [String]
+        tags: [String],
+        urlString: String? = nil
     ) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else {
             return false
@@ -252,6 +253,13 @@ final class BookmarksStorage: ObservableObject {
         if bookmark.tags != normalizedTags {
             bookmark.tags = normalizedTags
             changed = true
+        }
+        if let urlString {
+            let normalizedSource = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+            if bookmark.urlString != normalizedSource {
+                bookmark.urlString = normalizedSource
+                changed = true
+            }
         }
 
         if changed {
