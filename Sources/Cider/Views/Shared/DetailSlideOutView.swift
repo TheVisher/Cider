@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import WebKit
+
+private enum HeroMode { case thumbnail, web, reader }
 
 struct DetailSlideOutView: View {
     @Binding var draft: BookmarkDetailsDraft
@@ -26,6 +29,11 @@ struct DetailSlideOutView: View {
     // it from compounding with the parent panel's slide-in transition. Enabled
     // after first render so the info-button toggle animates correctly.
     @State private var sidebarTransitionEnabled: Bool = false
+    @State private var heroMode: HeroMode = .thumbnail
+    @State private var webViewActivated: Bool = false
+    @State private var webViewIsLoading: Bool = false
+    @State private var readerViewActivated: Bool = false
+    @State private var readerIsLoading: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -51,14 +59,61 @@ struct DetailSlideOutView: View {
                 HStack(alignment: .top, spacing: 0) {
                     // Left column — hero fills height, title pinned at bottom
                     VStack(alignment: .leading, spacing: Spacing.md) {
-                        BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .shadow(
-                                color: CiderColors.shadowMedium,
-                                radius: BookmarksDesign.detailsFloatingLiftBlur,
-                                x: 0,
-                                y: BookmarksDesign.detailsFloatingLiftYOffset
-                            )
+                        ZStack {
+                            // Thumbnail layer
+                            BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
+                                .shadow(
+                                    color: CiderColors.shadowMedium,
+                                    radius: BookmarksDesign.detailsFloatingLiftBlur,
+                                    x: 0,
+                                    y: BookmarksDesign.detailsFloatingLiftYOffset
+                                )
+                                .opacity(heroMode == .thumbnail ? 1 : 0)
+                                .allowsHitTesting(heroMode == .thumbnail)
+
+                            // Web layer
+                            if webViewActivated, let url = bookmark?.url {
+                                ZStack {
+                                    BookmarkWebView(url: url, isLoading: $webViewIsLoading)
+
+                                    if webViewIsLoading {
+                                        ProgressView()
+                                            .controlSize(.large)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .background(CiderColors.surfaceSubtle.opacity(0.6))
+                                    }
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                        .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                                )
+                                .opacity(heroMode == .web ? 1 : 0)
+                                .allowsHitTesting(heroMode == .web)
+                            }
+
+                            // Reader layer
+                            if readerViewActivated, let url = bookmark?.url {
+                                ZStack {
+                                    BookmarkReaderView(url: url, isLoading: $readerIsLoading)
+
+                                    if readerIsLoading {
+                                        ProgressView()
+                                            .controlSize(.large)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .background(CiderColors.surfaceSubtle.opacity(0.6))
+                                    }
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                        .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                                )
+                                .opacity(heroMode == .reader ? 1 : 0)
+                                .allowsHitTesting(heroMode == .reader)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text(draft.title)
@@ -117,6 +172,13 @@ struct DetailSlideOutView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .onChange(of: bookmark?.id) { _, _ in
+            heroMode = .thumbnail
+            webViewActivated = false
+            webViewIsLoading = false
+            readerViewActivated = false
+            readerIsLoading = false
+        }
         .onAppear {
             // Enable the sidebar's own transition only after the first render,
             // so it doesn't compound with the parent panel's slide-in animation.
@@ -156,6 +218,59 @@ struct DetailSlideOutView: View {
             .help("Close")
 
             Spacer(minLength: 0)
+
+            // Hero mode buttons (URL bookmarks only)
+            if draft.hasURL {
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) { heroMode = .thumbnail }
+                } label: {
+                    Image(systemName: "photo")
+                        .font(CiderFont.label)
+                        .foregroundColor(heroMode == .thumbnail ? CiderColors.controlAccent : CiderColors.tertiary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Preview")
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        if heroMode == .reader {
+                            heroMode = .thumbnail
+                        } else {
+                            if !readerViewActivated { readerViewActivated = true }
+                            heroMode = .reader
+                        }
+                    }
+                } label: {
+                    Image(systemName: "doc.richtext")
+                        .font(CiderFont.label)
+                        .foregroundColor(heroMode == .reader ? CiderColors.controlAccent : CiderColors.tertiary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Reader view")
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        if heroMode == .web {
+                            heroMode = .thumbnail
+                        } else {
+                            if !webViewActivated { webViewActivated = true }
+                            heroMode = .web
+                        }
+                    }
+                } label: {
+                    Image(systemName: "globe")
+                        .font(CiderFont.label)
+                        .foregroundColor(heroMode == .web ? CiderColors.controlAccent : CiderColors.tertiary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("View live page")
+            }
 
             // Metadata sidebar toggle
             Button {

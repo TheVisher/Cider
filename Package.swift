@@ -13,7 +13,8 @@ let package = Package(
             name: "Cider",
             path: "Sources/Cider",
             resources: [
-                .copy("Resources/TipTapEditor")
+                .copy("Resources/TipTapEditor"),
+                .copy("Resources/ReaderMode"),
             ],
             linkerSettings: [
                 .unsafeFlags([

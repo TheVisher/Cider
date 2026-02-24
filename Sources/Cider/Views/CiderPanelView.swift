@@ -338,7 +338,7 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var titleBarContent: some View {
-        if isDetailPageMode {
+        if isAnyDetailPageMode {
             detailPageTitleBar
         } else if !selectedItemIDs.isEmpty {
             selectionTitleBar
@@ -703,14 +703,15 @@ struct CiderPanelView: View {
     private var isNoteDetailOpen: Bool { isEditorActive }
     private var isNoteDetailSlideOut: Bool { isNoteDetailOpen && detailViewMode == .slideOut }
     private var isNoteDetailFullPanel: Bool { isNoteDetailOpen && detailViewMode == .fullPanel }
+    private var isNoteDetailPageMode: Bool { isNoteDetailOpen && detailViewMode == .page }
 
     private var contentArea: some View {
         ZStack {
             tabContentBody
-                .opacity(isDetailPageMode ? 0 : 1)
-                .allowsHitTesting(!isDetailPageMode)
+                .opacity(isAnyDetailPageMode ? 0 : 1)
+                .allowsHitTesting(!isAnyDetailPageMode)
 
-            if isDetailPageMode {
+            if isAnyDetailPageMode {
                 detailPageView
             }
         }
@@ -978,6 +979,14 @@ struct CiderPanelView: View {
 
     private var isGenericDetailFullPanel: Bool {
         isGenericDetailOpen && detailViewMode == .fullPanel
+    }
+
+    private var isGenericDetailPageMode: Bool {
+        isGenericDetailOpen && detailViewMode == .page
+    }
+
+    private var isAnyDetailPageMode: Bool {
+        isDetailPageMode || isGenericDetailPageMode || isNoteDetailPageMode
     }
 
     private var selectedDetailsBookmark: Bookmark? {
@@ -1304,30 +1313,18 @@ struct CiderPanelView: View {
     @ViewBuilder
     private var detailPageView: some View {
         if let draft = detailsDraft {
-            ScrollView {
-                BookmarkDetailsSheet(
-                    draft: makeDetailDraftBinding(fallback: draft),
-                    bookmark: selectedDetailsBookmark,
-                    errorMessage: detailsErrorMessage,
-                    folders: bookmarksViewModel.folders,
-                    onDelete: deleteDetailBookmark,
-                    onFolderChanged: assignDetailBookmarkToFolder,
-                    onOpenURL: openDetailURL,
-                    onCopyURL: copyDetailURL,
-                    onSave: saveBookmarkDetails,
-                    onCancel: closeBookmarkDetails
-                )
-            }
-            .scrollIndicators(.hidden)
-            .padding(.horizontal, Spacing.md)
-            .padding(.bottom, Spacing.md)
+            bookmarkDetailPageView(draft: draft)
+        } else if selectedDateCard != nil || selectedContact != nil {
+            genericDetailPageView
+        } else if isNoteDetailPageMode {
+            noteDetailPageView
         }
     }
 
     @ViewBuilder
     private var detailPageTitleBar: some View {
         Button {
-            closeBookmarkDetails()
+            closeCurrentDetailForPageMode()
         } label: {
             Image(systemName: "chevron.left")
                 .font(CiderFont.bodySemibold)
@@ -1338,7 +1335,7 @@ struct CiderPanelView: View {
         .buttonStyle(.plain)
         .help("Back")
 
-        Text(detailsDraft?.title ?? "Details")
+        Text(currentDetailPageTitle)
             .font(CiderFont.subheadingSemibold)
             .foregroundColor(CiderColors.primary)
             .lineLimit(1)
@@ -1366,6 +1363,106 @@ struct CiderPanelView: View {
         case .fullPanel: return "rectangle"
         case .page: return "rectangle.fill"
         }
+    }
+
+    private var currentDetailPageTitle: String {
+        if let draft = detailsDraft { return draft.title }
+        if let dateCard = selectedDateCard { return dateCard.title }
+        if let contact = selectedContact { return contact.displayName }
+        if isNoteDetailPageMode {
+            return notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
+        }
+        return "Details"
+    }
+
+    private func closeCurrentDetailForPageMode() {
+        if isDetailPageMode {
+            closeBookmarkDetails()
+        } else if isGenericDetailPageMode {
+            closeGenericDetail()
+        } else if isNoteDetailPageMode {
+            closeNoteDetail()
+        }
+    }
+
+    @ViewBuilder
+    private func bookmarkDetailPageView(draft: BookmarkDetailsDraft) -> some View {
+        DetailSlideOutView(
+            draft: makeDetailDraftBinding(fallback: draft),
+            bookmark: selectedDetailsBookmark,
+            errorMessage: detailsErrorMessage,
+            folders: bookmarksViewModel.folders,
+            detailViewMode: detailViewMode,
+            onDelete: deleteDetailBookmark,
+            onFolderChanged: assignDetailBookmarkToFolder,
+            onOpenURL: openDetailURL,
+            onCopyURL: copyDetailURL,
+            onSave: saveBookmarkDetails,
+            onCancel: closeBookmarkDetails,
+            onModeChange: changeDetailViewMode,
+            showDragHandle: false
+        )
+        .padding(.horizontal, Spacing.md)
+        .padding(.bottom, Spacing.md)
+    }
+
+    @ViewBuilder
+    private var genericDetailPageView: some View {
+        if let dateCard = selectedDateCard {
+            GenericItemDetailPanel(
+                title: dateCard.title,
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                DateCardDetailView(
+                    dateCard: dateCard,
+                    onEdit: {
+                        closeGenericDetail()
+                        newEventEditorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        } else if let contact = selectedContact {
+            GenericItemDetailPanel(
+                title: contact.displayName,
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                ContactDetailView(
+                    contact: contact,
+                    onEdit: {
+                        closeGenericDetail()
+                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private var noteDetailPageView: some View {
+        let title = notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
+        return GenericItemDetailPanel(
+            title: title,
+            detailViewMode: detailViewMode,
+            showDragHandle: false,
+            scrollsContent: false,
+            onClose: closeNoteDetail,
+            onModeChange: changeDetailViewMode
+        ) {
+            InlineNoteEditorView(viewModel: notesViewModel)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.bottom, Spacing.md)
     }
 
     // MARK: - Note Detail Views
