@@ -126,7 +126,19 @@ enum ActiveBrowserCaptureService {
     private static func target(from application: NSRunningApplication?) -> BrowserTarget? {
         guard let application,
               let bundleID = application.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !bundleID.isEmpty else {
+              !bundleID.isEmpty,
+              !application.isTerminated,
+              // Only regular-policy apps can be brought to the foreground and
+              // scripted. Helpers, XPC services, Dock Extras, and plugin containers
+              // all use .accessory or .prohibited — skip them all.
+              application.activationPolicy == .regular else {
+            return nil
+        }
+
+        // Skip ghost processes whose .app bundle no longer exists on disk.
+        // Using guard (not if-let) so a nil bundleURL also rejects the app.
+        guard let bundleURL = application.bundleURL,
+              FileManager.default.fileExists(atPath: bundleURL.path) else {
             return nil
         }
 

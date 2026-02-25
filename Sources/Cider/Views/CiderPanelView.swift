@@ -252,6 +252,9 @@ struct CiderPanelView: View {
                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
             openBookmarkDetails(bookmark)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { _ in
+            showNewItemPicker = true
+        }
         .sheet(item: $newEventEditorContext) { context in
             DateCardEditorSheet(
                 existingCard: context.existingCard,
@@ -367,6 +370,16 @@ struct CiderPanelView: View {
                 _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
             }
             .help("Capture active browser tab")
+
+        Image(systemName: "camera.viewfinder")
+            .font(CiderFont.bodySemibold)
+            .foregroundColor(CiderColors.secondary)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                NotificationCenter.default.post(name: .requestScreenCapture, object: nil)
+            }
+            .help("Capture screen region (⌥⌘2)")
 
         if selectedTab == .home && selectedFolderID == nil {
             Image(systemName: "plus.square.on.square")

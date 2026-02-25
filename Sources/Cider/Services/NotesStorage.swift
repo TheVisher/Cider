@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 
@@ -32,10 +33,23 @@ final class NotesStorage: ObservableObject {
     private var contentCache: [UUID: (modifiedAt: Date, content: String)] = [:]
 
     /// Per-note metadata persisted in the index file.
-private struct NoteIndexEntry: Codable, Equatable, Sendable {
+    private struct NoteIndexEntry: Codable, Equatable, Sendable {
         var filename: String
         var folderID: UUID?
         var createdAt: Date?
+        /// Source URL captured from (if any), persisted for future metadata panel.
+        var sourceURL: String?
+        /// Filename under `{notesDir}/.attachments/` for an associated screenshot.
+        var sourceImageFilename: String?
+
+        init(filename: String, folderID: UUID? = nil, createdAt: Date? = nil,
+             sourceURL: String? = nil, sourceImageFilename: String? = nil) {
+            self.filename = filename
+            self.folderID = folderID
+            self.createdAt = createdAt
+            self.sourceURL = sourceURL
+            self.sourceImageFilename = sourceImageFilename
+        }
     }
 
     /// UUID-to-metadata mapping persisted on disk
@@ -319,6 +333,81 @@ private struct NoteIndexEntry: Codable, Equatable, Sendable {
         saveIndex()
 
         let note = Note(id: uuid, title: title, content: "", createdAt: now, modifiedAt: now, relativePath: filename)
+        notes.insert(note, at: 0)
+        return note
+    }
+
+    /// Create a note from a screen capture, saving the screenshot to Attachments.
+    /// - Parameters:
+    ///   - title: Initial note title (derived from OCR text or a default).
+    ///   - ocrText: OCR-extracted text to use as the note body.
+    ///   - screenshot: The captured screenshot image (saved as PNG to Attachments).
+    ///   - sourceURL: Source URL if the capture was associated with a browser page.
+    /// - Returns: The newly created `Note`.
+    @discardableResult
+    func createFromCapture(
+        title: String,
+        ocrText: String,
+        screenshot: NSImage?,
+        sourceURL: String? = nil
+    ) -> Note {
+        let sanitizedTitle = title.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let safeTitle = sanitizedTitle.isEmpty ? "Screen Capture" : sanitizedTitle
+        let uniqued = uniqueTitle(safeTitle)
+        let filename = "\(uniqued).md"
+        let fileURL = directoryURL.appendingPathComponent(filename)
+        let uuid = UUID()
+        let now = Date()
+
+        // Save screenshot to Attachments if provided
+        var screenshotFilename: String?
+        if let image = screenshot,
+           let pngData = image.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: pngData),
+           let png = bitmap.representation(using: .png, properties: [:]) {
+            let attachmentsDir = attachmentsDirectoryURL()
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: attachmentsDir.path) {
+                try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
+            }
+            let fname = "\(uuid.uuidString.prefix(8))-capture.png"
+            let imgURL = attachmentsDir.appendingPathComponent(fname)
+            if (try? png.write(to: imgURL, options: .atomic)) != nil {
+                screenshotFilename = fname
+            }
+        }
+
+        // Build markdown content: screenshot embed + OCR text
+        var lines: [String] = []
+        if let fname = screenshotFilename {
+            lines.append("<img src=\".attachments/\(fname)\" alt=\"Screen Capture\" />")
+            lines.append("")
+        }
+        if !ocrText.isEmpty {
+            lines.append(ocrText)
+        }
+        let content = lines.joined(separator: "\n")
+
+        try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        index[uuid] = NoteIndexEntry(
+            filename: filename,
+            folderID: nil,
+            createdAt: now,
+            sourceURL: sourceURL,
+            sourceImageFilename: screenshotFilename
+        )
+        saveIndex()
+
+        let note = Note(
+            id: uuid,
+            title: uniqued,
+            content: content,
+            createdAt: now,
+            modifiedAt: now,
+            relativePath: filename
+        )
         notes.insert(note, at: 0)
         return note
     }

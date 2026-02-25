@@ -49,7 +49,8 @@ enum SearchService {
 
     static func searchBookmarks(_ tokens: [String], in bookmarks: [Bookmark]) -> [SearchResult] {
         bookmarks.compactMap { bookmark in
-            let fields = [bookmark.title, bookmark.urlString, bookmark.hostDisplay, bookmark.notes] + bookmark.tags
+            var fields = [bookmark.title, bookmark.urlString, bookmark.hostDisplay, bookmark.notes] + bookmark.tags
+            if let ocr = bookmark.ocrText { fields.append(ocr) }
             guard matchesAllTokens(tokens, in: fields) else { return nil }
 
             let titleMatch = fieldsMatch(tokens, in: [bookmark.title, bookmark.urlString, bookmark.hostDisplay] + bookmark.tags)

@@ -209,6 +209,11 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var metadataUpdatedAt: Date?
     var isEnriching: Bool = false
 
+    // AI-generated fields (all optional — backwards compatible)
+    var aiSummary: String?           // Foundation Models 2-sentence summary
+    var ocrText: String?             // Vision OCR text from thumbnail (for search)
+    var dominantColors: [String]?    // Hex color strings extracted from thumbnail
+
     private enum CodingKeys: String, CodingKey {
         case id
         case title
@@ -222,6 +227,9 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case thumbnailRelativePath
         case originalImageRelativePath
         case metadataUpdatedAt
+        case aiSummary
+        case ocrText
+        case dominantColors
     }
 
     init(
@@ -237,7 +245,10 @@ struct Bookmark: Identifiable, Hashable, Codable {
         thumbnailRelativePath: String? = nil,
         originalImageRelativePath: String? = nil,
         metadataUpdatedAt: Date? = nil,
-        isEnriching: Bool = false
+        isEnriching: Bool = false,
+        aiSummary: String? = nil,
+        ocrText: String? = nil,
+        dominantColors: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -252,6 +263,9 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.originalImageRelativePath = originalImageRelativePath
         self.metadataUpdatedAt = metadataUpdatedAt
         self.isEnriching = isEnriching
+        self.aiSummary = aiSummary
+        self.ocrText = ocrText
+        self.dominantColors = dominantColors
     }
 
     var url: URL? {

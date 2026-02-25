@@ -1,0 +1,3 @@
+import Cider
+
+launchCider()

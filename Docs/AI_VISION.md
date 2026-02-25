@@ -348,13 +348,15 @@ This bridges natural language input to concrete app actions — the model unders
 **Phase 1: Non-AI foundations**
 
 - Tier 0 page summaries (metadata + headings + first paragraph)
-- Core Spotlight indexing for bookmarks and notes
-- NaturalLanguage keyword extraction for auto-tagging
-- NaturalLanguage embedding computation on save (prep for "find similar")
+- ✅ Core Spotlight indexing for bookmarks and notes (`SpotlightIndexer`)
+- ✅ NaturalLanguage keyword extraction for auto-tagging (`AutoTagService`)
+- ✅ NaturalLanguage embedding computation on save (`EmbeddingStore`, persisted to disk)
+- ✅ Vision OCR indexing for image search (`OCRService`)
+- ✅ Dominant color extraction on capture (`ColorExtractionService`)
 
 **Phase 2: Foundation Models integration**
 
-- Page summarization via on-device LLM with author-metadata cross-check
+- ✅ Page summarization via Foundation Models — `SummaryService` triggered from `BookmarkReaderView` after Readability extraction. Guards on Apple Intelligence availability and existing `aiSummary`.
 - Smart bookmark title generation
 - Note title suggestions
 - Transcript summarization
@@ -370,7 +372,7 @@ This bridges natural language input to concrete app actions — the model unders
 
 **Phase 4: Deeper intelligence**
 
-- NaturalLanguage embeddings powering "find similar" UI
+- ✅ "Find similar" UI — `RelatedItemsView` in bookmark detail panel (up to 3 related items via `SimilarItemsService` + cosine similarity on `EmbeddingStore`)
 - Vision OCR for screenshot-based capture and image search indexing
 - Smart folder suggestions based on content patterns
 - Auto-organize nudges ("You saved 12 React articles this week — create a folder?")

@@ -74,7 +74,7 @@ struct DetailSlideOutView: View {
                             // Web layer
                             if webViewActivated, let url = bookmark?.url {
                                 ZStack {
-                                    BookmarkWebView(url: url, isLoading: $webViewIsLoading)
+                                    BookmarkWebView(url: url, isLoading: $webViewIsLoading, isActive: heroMode == .web)
 
                                     if webViewIsLoading {
                                         ProgressView()
@@ -95,7 +95,7 @@ struct DetailSlideOutView: View {
                             // Reader layer
                             if readerViewActivated, let url = bookmark?.url {
                                 ZStack {
-                                    BookmarkReaderView(url: url, isLoading: $readerIsLoading)
+                                    BookmarkReaderView(url: url, isLoading: $readerIsLoading, bookmarkID: bookmark?.id)
 
                                     if readerIsLoading {
                                         ProgressView()

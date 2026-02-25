@@ -4,6 +4,8 @@ import WebKit
 struct BookmarkWebView: NSViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
+    /// When false, all media in the web view is paused (e.g. heroMode switched away from .web).
+    var isActive: Bool = true
 
     func makeCoordinator() -> Coordinator { Coordinator(isLoading: $isLoading) }
 
@@ -16,7 +18,20 @@ struct BookmarkWebView: NSViewRepresentable {
         return wv
     }
 
-    func updateNSView(_ wv: WKWebView, context: Context) { }
+    func updateNSView(_ wv: WKWebView, context: Context) {
+        if !isActive {
+            wv.evaluateJavaScript(
+                "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause();}catch(e){}})"
+            )
+        }
+    }
+
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // Fired when the view is removed from the hierarchy (panel close, bookmark change).
+        nsView.evaluateJavaScript(
+            "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause();}catch(e){}})"
+        )
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding var isLoading: Bool

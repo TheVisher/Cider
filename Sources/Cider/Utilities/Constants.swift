@@ -43,6 +43,9 @@ extension Notification.Name {
     static let snapCiderPanel = Notification.Name("cider.snapCiderPanel")
     static let expandCiderPanelForSlideOut = Notification.Name("cider.expandCiderPanelForSlideOut")
     static let restoreCiderPanelAfterSlideOut = Notification.Name("cider.restoreCiderPanelAfterSlideOut")
+    static let requestScreenCapture = Notification.Name("cider.requestScreenCapture")
+    static let screenCaptureComplete = Notification.Name("cider.screenCaptureComplete")
+    static let openNewItemPopover = Notification.Name("cider.openNewItemPopover")
 }
 
 // MARK: - Snap Target
@@ -327,6 +330,19 @@ enum UndoToastDesign {
     }
 }
 
+enum ScreenCaptureToastDesign {
+    static let width: CGFloat = 360
+    static let height: CGFloat = 112
+    static let cornerRadius: CGFloat = Radius.md
+    static let shadowPadding: CGFloat = 0
+    static let autoHideDuration: TimeInterval = 8.0
+    static let progressTickInterval: TimeInterval = 1.0 / 30.0
+    static let panelEdgeInset: CGFloat = Spacing.md
+
+    static var panelWidth: CGFloat { width + shadowPadding * 2 }
+    static var panelHeight: CGFloat { height + shadowPadding * 2 }
+}
+
 enum SearchPaletteDesign {
     static let paletteWidth: CGFloat = 560
     static let paletteMaxHeight: CGFloat = 480
@@ -550,4 +566,20 @@ enum CiderColors {
 
     /// Disabled element opacity
     static let disabledOpacity: CGFloat = 0.55
+}
+
+
+// MARK: - Color helpers
+
+extension Color {
+    /// Initialize from a CSS hex string like `"#RRGGBB"` or `"#RGB"`.
+    init?(hex: String) {
+        var s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
+        guard s.count == 6, let value = UInt64(s, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
 }

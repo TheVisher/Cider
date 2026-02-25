@@ -537,7 +537,7 @@ struct BookmarksBrowserView: View {
                     forTypeIdentifier: BookmarkDragPayload.typeIdentifier,
                     visibility: .all
                 ) { completion in
-                    completion(payload, nil)
+                    Task { @MainActor in completion(payload, nil) }
                     return nil
                 }
                 BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)

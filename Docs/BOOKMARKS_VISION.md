@@ -18,6 +18,11 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Clipboard review toast flow (save/discard), plus capture success/error toasts.
 - Window behavior parity improvements (resizing, tiling shortcuts, snap padding consistency).
 - Context menus on cards/rows with Open in Browser, Show Details, Move to Folder, Delete (shared CardContextMenu component).
+- **Reader Mode** — Three-mode hero area in the detail panel: thumbnail preview, Readability.js reader view, and live WKWebView. Toolbar buttons (`photo`, `doc.richtext`, `globe`) switch between modes. State resets on bookmark change; each mode is lazy-activated and kept alive on first use.
+- **Dominant Color Extraction** — k-means palette extracted from bookmark thumbnails via `ColorExtractionService`. Stored as `dominantColors: [String]?` (hex). Displayed as color swatches in the detail panel's Intelligence section.
+- **AI Enrichment Pipeline (Phase 1)** — On capture: NaturalLanguage keyword extraction for auto-tagging (`AutoTagService`), NLEmbedding vector computation (`EmbeddingStore`), Vision OCR text extraction (`OCRService`), color palette extraction (`ColorExtractionService`). All on-device, all background.
+- **Intelligence section in detail panel** — Shows `aiSummary` text, dominant color swatches, and related items (`RelatedItemsView`, up to 3 by vector similarity). Visible for all URL bookmarks.
+- **Foundation Models summary integration** — `SummaryService` (Foundation Models on macOS 26+) generates summaries from Reader Mode article text. Triggered on first reader open if no existing `aiSummary`. Stored on the Bookmark model.
 
 ## Label and Stack Integration
 
@@ -115,24 +120,21 @@ The metadata panel lives on the right side of the detail view. All sections are 
 
 ### Content-Specific Tabs (URL Bookmarks)
 
-URL bookmarks get content tabs above the preview area:
+URL bookmarks get hero mode buttons in the detail panel toolbar (implemented as icon toggles, not traditional tabs):
 
-**Preview tab** — Shows the thumbnail image (current behavior)
+**Preview** (`photo` icon) ✅ — Shows the thumbnail image. Default mode.
 
-**Reader tab** — Clean, distraction-free article text extracted via Readability. Renders in the detail view using the same approach as the Reader Mode feature (see "Reader Mode" section below). This is where Reader Mode lives in the UI — it's a tab within the detail view, not a separate surface.
+**Reader** (`doc.richtext` icon) ✅ — Clean Readability.js article view, styled to match Cider's dark aesthetic. Triggers Foundation Models summary on first open. Links open in system browser.
 
-**Web tab** (future, lowest priority) — Embedded WKWebView showing the live page. Scrollable within the detail panel. Useful for quick checks without opening a browser. Heavy resource-wise — load on demand, not preloaded.
+**Web** (`globe` icon) ✅ — Embedded WKWebView showing the live page. Loaded on demand; stays alive once activated so toggling back is instant.
 
 ### Dominant Color Extraction
 
-Extract a palette of 5-7 dominant colors from bookmark thumbnails and images:
+✅ Implemented: dominant color palette extracted on capture from bookmark thumbnails.
 
 **Technical approach:**
 - Load the thumbnail (not original — already downsampled, fast to process)
-- Option A: `CIFilter` with `CIAreaAverage` on grid regions — simple, fast, but picks averages not dominant colors
-- Option B: k-means clustering on downsampled pixel buffer (resize to ~50x50, run k-means with k=6) — better results, slightly more compute
-- Option C: Apple's `VNGenerateImageFeaturePrintRequest` (Vision framework) — not directly a color extractor but could inform palette
-- Recommended: k-means on a tiny downsampled image. Fast enough to run on capture or on-demand.
+- ✅ k-means clustering on downsampled pixel buffer (resize to ~50x50, run k-means with k=6) — implemented in `ColorExtractionService`
 
 **Storage:** `dominantColors: [String]?` on the Bookmark model — array of hex strings (e.g., `["#FC3434", "#1A1A2E", "#E94560"]`). Extracted lazily (on first detail view open) or eagerly (on capture, in background).
 
@@ -202,38 +204,73 @@ These features lean into Cider's unique position as a floating panel open alongs
 
 ### Live YouTube Transcript Sync
 
-**Concept:** When a YouTube video is playing in Chrome, Cider shows a live-scrolling transcript in the panel. Words/sentences highlight in real-time as the video plays. No embedded video player — the video stays in Chrome, the transcript lives in Cider.
+**Concept:** When a YouTube video is playing — either in Chrome or in Cider's built-in web view — Cider shows a live-scrolling transcript. Words/sentences highlight in real-time as the video plays.
 
-**Why not an embedded player?**
-- macOS already has Picture-in-Picture for mini players
-- Video eats panel real estate in a floating panel
-- Cider's identity is "companion to your browser," not "replacement for your browser"
-- The transcript-only approach is something no one else does
+**Two modes:**
 
-**Core experience:**
-- Open a YouTube video in Chrome → Cider detects it and offers to show the transcript
+*Chrome companion mode (future):*
+- Detect YouTube tab in Chrome via the existing browser extension pattern
+- Extension reads `video.currentTime` and sends playback state to Cider via local IPC
+- Cider fetches captions and renders them in the panel alongside the browser
+
+*In-app mode (closer, more feasible):*
+- User opens a YouTube bookmark in the Web view tab of the detail panel
+- Cider injects a `WKScriptMessageHandler` into the WKWebView
+- JS polls `video.currentTime` every ~500ms and posts it back to Swift
+- Cider fetches the caption track from YouTube's timedtext endpoint, extracts the URL from `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[*].baseUrl`
+- Current line is highlighted in a transcript panel below or alongside the video
+- Click any line → inject JS to seek: `document.querySelector('video').currentTime = timestamp`
+- Transcript stored as a bookmark artifact on save
+
+**Core experience (both modes):**
 - Transcript scrolls automatically, highlighting the current sentence/word
 - Click any line in the transcript → seeks the video to that timestamp
 - Search within the transcript while the video plays
 - Copy/highlight passages directly into Cider notes
-- Transcript persists as a bookmark artifact — even after closing the video tab, you have the full text
-
-**Technical approach:**
-- Lightweight Chrome extension (or piggyback on existing MCP/extension pattern) reads `document.querySelector('video').currentTime` and video metadata
-- Extension sends playback state to Cider via WebSocket or local IPC
-- Cider fetches transcript data via YouTube's caption/subtitle API (or scrapes the timedtext endpoint)
-- Timestamps in transcript data map to highlight positions
-- Bidirectional: Cider click → extension seeks video; video plays → Cider scrolls
-
-**Optional future: detach mode**
-- If someone wants to close the Chrome tab but keep watching, offer to pull the video into a small embedded WKWebView player within Cider
-- This is the escape hatch, not the primary experience
+- Transcript persists as a bookmark artifact — even after closing the video, you have the full text
 
 **Open questions:**
-- Should transcript auto-appear when a YouTube tab is detected, or require a manual "Show Transcript" action?
+- Should transcript auto-appear for YouTube bookmarks in web view, or require a manual "Show Transcript" button?
 - Should transcripts be saved automatically with the bookmark, or only on explicit save?
 - Support for other video platforms (Vimeo, Twitch VODs) — same pattern, different caption APIs?
 - Could we generate transcripts via local Whisper for videos without captions?
+
+---
+
+### Picture-in-Picture Video Player
+
+**Concept:** When the bookmark detail panel is closed while a YouTube video is playing in the web view, instead of killing the audio, pop out the video into a small floating mini-player — like browsers' PiP mode. Put it back in the panel when you return to that bookmark.
+
+**Core experience:**
+- Video playing in web view → user closes the detail panel → Cider detects active video playback
+- Small floating panel appears with the video still playing (no reload, no audio gap)
+- User can dismiss the mini-player to stop the video entirely
+- User opens the same YouTube bookmark → web view resumes from the mini-player seamlessly
+- Timestamp is preserved throughout — the video state is never interrupted
+
+**Why this fits:**
+- Cider is already a floating panel app — a second floating mini-player is a natural extension
+- Users already have the video in Cider's web view; PiP is a logical "continue watching while you do something else" action
+- Much better UX than the current behavior (audio orphaned with no controls)
+
+**Technical approach:**
+- `BookmarkWebViewManager` singleton — owns `WKWebView` instances keyed by URL (same pattern as `NotesViewModel` owning the TipTap `WKWebView`)
+- On panel close: detect `!video.paused` via JS injection. If playing, reparent the `WKWebView` (`NSView` subclass) into a new floating `NSPanel` instead of discarding it
+- `NSView.addSubview()` reparents cleanly — the video process continues uninterrupted
+- On panel reopen for the same bookmark: reparent the WKWebView back into the detail panel hero area
+- Mini-player panel: borderless, floating level, resizable, shows only the video — no Cider chrome
+- Dismiss button: calls `video.pause()` JS and closes the panel
+
+**Timestamp persistence (prerequisite):**
+- Before any navigation or close, inject JS to capture `video.currentTime`
+- Store as `lastWatchedTimestamp: TimeInterval?` on the `Bookmark` model
+- On reopen: use the YouTube `&t=Ns` URL parameter (more reliable than JS-seeking a React-managed player)
+- Show a small "Resume from X:XX" indicator in the web view toolbar when a saved timestamp exists
+- Minimum viable first version: timestamp persistence alone (no reparented mini-player) — close kills audio, but reopening resumes from where you left off
+
+**Open questions:**
+- Should PiP be automatic (always pop out when closing with video playing) or optional (ask once, configurable)?
+- Should the mini-player appear adjacent to the main Cider panel, or freely positioned?
 
 ---
 
@@ -299,14 +336,15 @@ These features lean into Cider's unique position as a floating panel open alongs
 
 ### Reader Mode
 
-**Concept:** Open saved links in a clean, distraction-free reading view inside Cider's panel — no ads, no navigation chrome, no cookie banners. Read articles, blog posts, and documentation without leaving Cider or opening a browser tab.
+✅ **Implemented:** Clean distraction-free reading view inside the detail panel's hero area. Accessed via the `doc.richtext` toolbar button.
 
 **Core experience:**
-- Click "Read" on a bookmark card (or a dedicated button in the detail popover)
+- Click `doc.richtext` in the detail panel toolbar
 - Cider fetches the page content and runs it through a Readability parser (strip ads, nav, sidebars → extract article body)
-- Clean article renders in a reader view inside the panel — title, author, date, body text, images
-- Typography and spacing match Cider's design system (CiderFont, CiderColors)
-- Reader view can be scrolled, text selected, passages highlighted or copied to a note
+- Clean article renders in the hero area — title, byline, body text, images
+- Typography and spacing match Cider's design system
+- Reader view can be scrolled; links open in system browser
+- After article extraction, Foundation Models summary is triggered and saved to the bookmark (if no existing summary)
 
 **Why this fits Cider:**
 - Cider is already a reading companion — it saves links. Reader mode makes it a reading *tool*, not just a link repository.
@@ -315,13 +353,11 @@ These features lean into Cider's unique position as a floating panel open alongs
 - Future integration with the Books tab — reader mode is the core reading experience for both web articles and longer-form content
 
 **Technical approach:**
-- Readability.js (Mozilla's open-source parser) runs in a lightweight WKWebView — same pattern as the TipTap editor
-- Alternatively, use the existing enrichment pipeline to fetch HTML and parse article content server-side (no extra WebView)
-- Reader view renders in the DetailPopoverPanel or inline in the content area (push/pop like the notes editor)
-- CSS theme matches the panel aesthetic (dark mode, acrylic-compatible)
+- ✅ `BookmarkReaderView.swift`: Swift fetches raw HTML via URLSession → `loadHTMLString` into WKWebView → Readability.js evaluated after `didFinish` → parsed JSON → styled HTML loaded in second pass
+- Phase state machine (`loadingRaw` → `extracting` → `displaying` / `error`) prevents re-entrant extraction
+- CSS in `Resources/ReaderMode/reader.css` — dark mode, `color-scheme: dark`, matches panel aesthetic
 
-**Open questions:**
-- Should reader mode be a separate view or replace the detail popover?
+**Open questions / future:**
 - Should reader content be cached locally for offline access?
 - Support for multi-page articles (auto-pagination)?
 

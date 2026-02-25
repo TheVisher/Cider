@@ -5,24 +5,18 @@ let package = Package(
     name: "Cider",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "Cider", targets: ["Cider"])
+        .library(name: "Cider", targets: ["Cider"])
     ],
     dependencies: [],
     targets: [
-        .executableTarget(
+        .target(
             name: "Cider",
             path: "Sources/Cider",
-            resources: [
-                .copy("Resources/TipTapEditor"),
-                .copy("Resources/ReaderMode"),
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-Xlinker", "-sectcreate",
-                    "-Xlinker", "__TEXT",
-                    "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/Cider/Resources/Info.plist"
-                ])
+            exclude: [
+                // Resources are bundled by the Xcode project (Cider.xcodeproj).
+                // swift build is used for compilation verification only.
+                "Resources/TipTapEditor",
+                "Resources/ReaderMode",
             ]
         ),
         .testTarget(

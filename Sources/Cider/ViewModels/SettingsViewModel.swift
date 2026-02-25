@@ -84,6 +84,23 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Intelligence
+    @Published var enableAutoTagging: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enableEmbeddings: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enablePageSummaries: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enableOCRIndexing: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enableColorExtraction: Bool {
+        didSet { saveConfig() }
+    }
+
     private var config: CiderConfig
 
     init() {
@@ -111,6 +128,11 @@ final class SettingsViewModel: ObservableObject {
         self.captureToastPosition = config.captureToastPosition
         self.undoToastPosition = config.undoToastPosition
         self.enableSoundEffects = config.enableSoundEffects
+        self.enableAutoTagging = config.enableAutoTagging
+        self.enableEmbeddings = config.enableEmbeddings
+        self.enablePageSummaries = config.enablePageSummaries
+        self.enableOCRIndexing = config.enableOCRIndexing
+        self.enableColorExtraction = config.enableColorExtraction
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -144,6 +166,11 @@ final class SettingsViewModel: ObservableObject {
         config.captureToastPosition = captureToastPosition
         config.undoToastPosition = undoToastPosition
         config.enableSoundEffects = enableSoundEffects
+        config.enableAutoTagging = enableAutoTagging
+        config.enableEmbeddings = enableEmbeddings
+        config.enablePageSummaries = enablePageSummaries
+        config.enableOCRIndexing = enableOCRIndexing
+        config.enableColorExtraction = enableColorExtraction
         config.save()
 
         // Post notification so AppDelegate can respond
