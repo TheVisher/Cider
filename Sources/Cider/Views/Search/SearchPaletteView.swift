@@ -99,7 +99,13 @@ struct SearchPaletteView: View {
                     .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
-            .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 12)
+            .background {
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .fill(Color.black)
+                    .blur(radius: 24)
+                    .offset(y: 12)
+                    .opacity(0.7)
+            }
             .padding(.top, proxy.size.height * 0.22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

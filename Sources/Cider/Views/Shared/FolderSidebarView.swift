@@ -16,6 +16,7 @@ struct FolderSidebarView: View {
     var searchText: Binding<String> = .constant("")
     var onTriggerSearch: (() -> Void)?
     var showBackground: Bool = true
+    var enableLinkedSources: Bool = false
 
     // Sources (optional — all default to no-ops so existing call sites compile unchanged)
     var sources: [ExternalSource] = []
@@ -131,7 +132,7 @@ struct FolderSidebarView: View {
                 }
             }
 
-            if CiderConfig.load().enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
+            if enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
                 sourcesSection
             }
 
@@ -235,41 +236,29 @@ struct FolderSidebarView: View {
         .onTapGesture {
             onSelectSource?(source.id)
         }
-        .contextMenu {
+        .modifier(CardContextMenuModifier { [onToggleSourceLibrary, onToggleSourceTab, onRemoveSource] in
+            var items: [CardMenuItem] = []
             if let onToggleSourceLibrary {
-                Button {
+                items.append(.action(title: source.showInLibrary ? "Remove from Library" : "Show in Library") {
                     onToggleSourceLibrary(source.id)
-                } label: {
-                    Label(
-                        source.showInLibrary ? "Remove from Library" : "Show in Library",
-                        systemImage: source.showInLibrary ? "minus.square" : "plus.square"
-                    )
-                }
+                })
             }
             if let onToggleSourceTab {
-                Button {
+                items.append(.action(title: source.isTabPinned ? "Unpin Tab" : "Pin as Tab") {
                     onToggleSourceTab(source.id)
-                } label: {
-                    Label(
-                        source.isTabPinned ? "Unpin Tab" : "Pin as Tab",
-                        systemImage: source.isTabPinned ? "pin.slash" : "pin"
-                    )
-                }
+                })
             }
-            Divider()
-            Button {
+            items.append(.separator)
+            items.append(.action(title: "Open in Finder") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: source.path))
-            } label: {
-                Label("Open in Finder", systemImage: "folder")
-            }
+            })
             if let onRemoveSource {
-                Button(role: .destructive) {
+                items.append(.destructive(title: "Remove Source") {
                     onRemoveSource(source.id)
-                } label: {
-                    Label("Remove Source", systemImage: "trash")
-                }
+                })
             }
-        }
+            return items
+        })
     }
 
     private func commitFolderRename() {
@@ -762,23 +751,20 @@ struct RootFolderHeaderRow: View {
         .onChange(of: isDropTargeted) { _, targeted in
             onDropTargetChanged(targeted)
         }
-        .contextMenu {
+        .modifier(CardContextMenuModifier { [onRename, onAddSubFolder, onDelete] in
+            var items: [CardMenuItem] = []
             if let onRename {
-                Button(action: onRename) {
-                    Label("Rename", systemImage: "pencil")
-                }
+                items.append(.action(title: "Rename", callback: onRename))
             }
             if let onAddSubFolder {
-                Button(action: onAddSubFolder) {
-                    Label("Add Sub Folder", systemImage: "folder.badge.plus")
-                }
+                items.append(.action(title: "Add Sub Folder", callback: onAddSubFolder))
             }
             if let onDelete {
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete Folder", systemImage: "trash")
-                }
+                items.append(.separator)
+                items.append(.destructive(title: "Delete Folder", callback: onDelete))
             }
-        }
+            return items
+        })
     }
 
     private var shouldShowChevron: Bool {
@@ -930,23 +916,20 @@ struct SubFolderRow: View {
         .onChange(of: isDropTargeted) { _, targeted in
             onDropTargetChanged(targeted)
         }
-        .contextMenu {
+        .modifier(CardContextMenuModifier { [onRename, onAddSubFolder, onDelete] in
+            var items: [CardMenuItem] = []
             if let onRename {
-                Button(action: onRename) {
-                    Label("Rename", systemImage: "pencil")
-                }
+                items.append(.action(title: "Rename", callback: onRename))
             }
             if let onAddSubFolder {
-                Button(action: onAddSubFolder) {
-                    Label("Add Sub Folder", systemImage: "folder.badge.plus")
-                }
+                items.append(.action(title: "Add Sub Folder", callback: onAddSubFolder))
             }
             if let onDelete {
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete Folder", systemImage: "trash")
-                }
+                items.append(.separator)
+                items.append(.destructive(title: "Delete Folder", callback: onDelete))
             }
-        }
+            return items
+        })
     }
 
     private var iconColor: Color {

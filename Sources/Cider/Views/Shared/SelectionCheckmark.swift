@@ -8,7 +8,7 @@ struct SelectionCheckmark: View {
             .overlay(
                 Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(CiderColors.textOnColor)
             )
     }
 }

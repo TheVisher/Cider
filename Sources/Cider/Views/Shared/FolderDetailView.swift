@@ -240,7 +240,7 @@ struct FolderDetailView: View {
                         if isHoveringCover && maxOffset > 0 {
                             Text("Drag to reposition")
                                 .font(CiderFont.caption)
-                                .foregroundColor(.white)
+                                .foregroundColor(CiderColors.textOnColor)
                                 .padding(.horizontal, Spacing.sm)
                                 .padding(.vertical, Spacing.xxs)
                                 .background(Capsule().fill(Color.black.opacity(0.5)))

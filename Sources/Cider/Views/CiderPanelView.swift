@@ -43,20 +43,22 @@ struct CiderPanelView: View {
     @State private var newEventEditorContext: DateCardEditorContext?
     @State private var newContactEditorContext: ContactEditorContext?
     @State private var contentAreaWidth: CGFloat = 800
+    @State private var enableLinkedSources: Bool = CiderConfig.load().enableLinkedSources
+    @State private var enableSavedViewTabs: Bool = CiderConfig.load().enableSavedViewTabs
 
     private var allTabs: [CiderTab] {
         CiderTab.fixedTabs + savedViewTabs + sourceTabs + dynamicTabs
     }
 
     private var sourceTabs: [CiderTab] {
-        guard CiderConfig.load().enableLinkedSources else { return [] }
+        guard enableLinkedSources else { return [] }
         return externalSourceStorage.pinnedSources().map {
             .externalSource(id: $0.id, name: $0.displayName)
         }
     }
 
     private var savedViewTabs: [CiderTab] {
-        guard CiderConfig.load().enableSavedViewTabs else { return [] }
+        guard enableSavedViewTabs else { return [] }
         return savedViewStorage.pinnedSavedViews().map { savedView in
             .savedView(id: savedView.id, name: savedView.name)
         }
@@ -227,7 +229,10 @@ struct CiderPanelView: View {
             closeAllDetails()
         }
         .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
-            textScale = CiderConfig.load().textSize.scale
+            let config = CiderConfig.load()
+            textScale = config.textSize.scale
+            enableLinkedSources = config.enableLinkedSources
+            enableSavedViewTabs = config.enableSavedViewTabs
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
             if isNoteDetailOpen {
@@ -504,6 +509,7 @@ struct CiderPanelView: View {
             searchText: $sidebarSearchText,
             onTriggerSearch: { isSearchPaletteVisible = true },
             showBackground: false,
+            enableLinkedSources: enableLinkedSources,
             sources: externalSourceStorage.sources,
             selectedSourceID: $selectedSourceID,
             onAddSource: addLinkedSource,
@@ -619,6 +625,7 @@ struct CiderPanelView: View {
         let contactContextSetter = _newContactEditorContext
         return NewItemPopover(
             folders: bvm.folders,
+            enableSavedViewTabs: enableSavedViewTabs,
             onCreateBookmark: { urlString, title in
                 _ = bvm.addBookmark(urlString: urlString, title: title)
             },
@@ -652,6 +659,12 @@ struct CiderPanelView: View {
                 bvm.createFolder(name: name, parentID: parentID)
             },
             onCreateTab: { [self] name, entityTypes in
+                if !enableSavedViewTabs {
+                    var config = CiderConfig.load()
+                    config.enableSavedViewTabs = true
+                    config.save()
+                    enableSavedViewTabs = true
+                }
                 let filter = SavedViewFilterSpec(entityTypes: entityTypes)
                 let savedView = savedViewStorage.createSavedView(name: name, filterSpec: filter)
                 selectedFolderID = nil

@@ -161,7 +161,7 @@ struct BookmarkMetadataSidebar: View {
                     .foregroundColor(CiderColors.tertiary)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
                     .foregroundColor(CiderColors.tertiary)
                     .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : -90))
             }
@@ -358,7 +358,7 @@ struct BookmarkMetadataSidebar: View {
                                 removeTag(tag)
                             } label: {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .semibold))
+                                    .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
                                     .foregroundColor(CiderColors.tertiary)
                             }
                             .buttonStyle(.plain)
@@ -531,7 +531,7 @@ struct BookmarkMetadataSidebar: View {
                                 Group {
                                     if copiedHex == hex {
                                         Image(systemName: "checkmark")
-                                            .font(.system(size: 8, weight: .semibold))
+                                            .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
                                             .foregroundColor(CiderColors.success)
                                     } else {
                                         Text(hex.uppercased())
@@ -591,7 +591,7 @@ struct BookmarkMetadataSidebar: View {
                     .foregroundColor(CiderColors.tertiary)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
                     .foregroundColor(CiderColors.tertiary)
                     .rotationEffect(.degrees(isPropertiesExpanded ? 0 : -90))
             }

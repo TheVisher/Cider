@@ -166,6 +166,7 @@ struct BookmarkReaderView: NSViewRepresentable {
             // Trigger summary generation if Apple Intelligence is available
             // and this bookmark doesn't already have a summary.
             if let bid = bookmarkID,
+               CiderConfig.load().enablePageSummaries,
                BookmarksStorage.shared.bookmarks.first(where: { $0.id == bid })?.aiSummary == nil {
                 let plainText = "\(title). \(content)"
                     .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)

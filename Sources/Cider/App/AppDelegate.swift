@@ -1063,6 +1063,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             width: minimumWidth,
             height: currentFrame.height
         )
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            panel.setFrame(newFrame, display: true)
+            return
+        }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
@@ -1074,6 +1078,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel = ciderPanel, let savedFrame = frameBeforeSlideOut else { return }
         frameBeforeSlideOut = nil
 
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            panel.setFrame(savedFrame, display: true)
+            persistCurrentCiderPanelFrameIfNeeded()
+            return
+        }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)

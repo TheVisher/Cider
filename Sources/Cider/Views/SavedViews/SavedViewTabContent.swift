@@ -786,22 +786,18 @@ struct SavedViewTabContent: View {
             case .list:
                 ForEach(filteredItems) { item in
                     itemRow(item)
-                        .contextMenu {
-                            addToStackMenu(for: item)
-                            linkMenu(for: item)
-                            linkedItemsMenu(for: item)
-                        }
+                        .modifier(CardContextMenuModifier {
+                            contextMenuItems(for: item)
+                        })
                 }
             case .grid:
                 let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
                 LazyVGrid(columns: columns, spacing: Spacing.md) {
                     ForEach(filteredItems) { item in
                         itemCard(item)
-                            .contextMenu {
-                                addToStackMenu(for: item)
-                                linkMenu(for: item)
-                                linkedItemsMenu(for: item)
-                            }
+                            .modifier(CardContextMenuModifier {
+                                contextMenuItems(for: item)
+                            })
                     }
                 }
             case .masonry:
@@ -811,11 +807,9 @@ struct SavedViewTabContent: View {
                 ) {
                     ForEach(filteredItems) { item in
                         itemCard(item)
-                            .contextMenu {
-                                addToStackMenu(for: item)
-                                linkMenu(for: item)
-                                linkedItemsMenu(for: item)
-                            }
+                            .modifier(CardContextMenuModifier {
+                                contextMenuItems(for: item)
+                            })
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -869,7 +863,11 @@ struct SavedViewTabContent: View {
                         fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
                     ))
                 },
-                onDelete: { _ = DateCardStorage.shared.deleteDateCard(dateCard.id) }
+                onDelete: {
+                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                }
             )
         case .contact:
             if case .contact(let contact) = item {
@@ -889,7 +887,11 @@ struct SavedViewTabContent: View {
                             fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
                         ))
                     },
-                    onDelete: { _ = ContactStorage.shared.deleteContact(contact.id) }
+                    onDelete: {
+                        _ = ContactStorage.shared.deleteContact(contact.id)
+                        let trashItem = TrashStorage.shared.trashContact(contact, ciderDir: StoragePaths.ciderDataDirectoryURL())
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
                 )
             } else {
                 GenericLibraryItemCard(item: item)
@@ -910,80 +912,91 @@ struct SavedViewTabContent: View {
         }
     }
 
-    @ViewBuilder
-    private func addToStackMenu(for item: LibraryItemV2) -> some View {
+    private func contextMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
+        var items: [CardMenuItem] = []
+        items.append(contentsOf: addToStackMenuItems(for: item))
+        items.append(contentsOf: linkMenuItems(for: item))
+        items.append(contentsOf: linkedItemsMenuItems(for: item))
+        return items
+    }
+
+    private func addToStackMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
         if stackStorage.stacks.isEmpty {
-            Button("Create Stack and Add") {
+            return [.action(title: "Create Stack and Add") {
                 let created = stackStorage.createStack(template: .blank, nameOverride: "New Stack")
                 addManualItem(item, to: created)
-            }
+            }]
         } else {
-            Menu("Add to Stack") {
-                ForEach(stackStorage.stacks) { stack in
-                    let alreadyIncluded = stack.manualItemRefs.contains(entityRef(for: item))
-                    Button(alreadyIncluded ? "\(stack.name) (Added)" : stack.name) {
+            let children: [CardMenuItem] = stackStorage.stacks.map { stack in
+                let alreadyIncluded = stack.manualItemRefs.contains(entityRef(for: item))
+                if alreadyIncluded {
+                    return .action(title: "\(stack.name) (Added)") {}
+                } else {
+                    return .action(title: stack.name) {
                         addManualItem(item, to: stack)
                     }
-                    .disabled(alreadyIncluded)
                 }
             }
+            return [.submenu(title: "Add to Stack", children: children)]
         }
     }
 
-    @ViewBuilder
-    private func linkMenu(for item: LibraryItemV2) -> some View {
+    private func linkMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
         switch item {
         case .dateCard(let dateCard):
-            Menu("Link Contact") {
-                if contactStorage.contacts.isEmpty {
-                    Text("No contacts available")
+            if contactStorage.contacts.isEmpty {
+                return [.submenu(title: "Link Contact", children: [
+                    .action(title: "No contacts available") {}
+                ])]
+            }
+            let children: [CardMenuItem] = contactStorage.contacts.map { contact in
+                let alreadyLinked = dateCard.linkedEntities.contains(
+                    LibraryEntityRef(type: .contact, entityID: contact.id)
+                )
+                if alreadyLinked {
+                    return .action(title: "\(contact.displayName) (Linked)") {}
                 } else {
-                    ForEach(contactStorage.contacts) { contact in
-                        let alreadyLinked = dateCard.linkedEntities.contains(
-                            LibraryEntityRef(type: .contact, entityID: contact.id)
-                        )
-                        Button(alreadyLinked ? "\(contact.displayName) (Linked)" : contact.displayName) {
-                            link(dateCardID: dateCard.id, contactID: contact.id)
-                        }
-                        .disabled(alreadyLinked)
+                    return .action(title: contact.displayName) {
+                        link(dateCardID: dateCard.id, contactID: contact.id)
                     }
                 }
             }
+            return [.submenu(title: "Link Contact", children: children)]
         case .contact(let contact):
-            Menu("Link Date Card") {
-                if dateCardStorage.dateCards.isEmpty {
-                    Text("No date cards available")
+            if dateCardStorage.dateCards.isEmpty {
+                return [.submenu(title: "Link Date Card", children: [
+                    .action(title: "No date cards available") {}
+                ])]
+            }
+            let children: [CardMenuItem] = dateCardStorage.dateCards.map { dateCard in
+                let alreadyLinked = contact.linkedEntities.contains(
+                    LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
+                )
+                if alreadyLinked {
+                    return .action(title: "\(dateCard.title) (Linked)") {}
                 } else {
-                    ForEach(dateCardStorage.dateCards) { dateCard in
-                        let alreadyLinked = contact.linkedEntities.contains(
-                            LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
-                        )
-                        Button(alreadyLinked ? "\(dateCard.title) (Linked)" : dateCard.title) {
-                            link(dateCardID: dateCard.id, contactID: contact.id)
-                        }
-                        .disabled(alreadyLinked)
+                    return .action(title: dateCard.title) {
+                        link(dateCardID: dateCard.id, contactID: contact.id)
                     }
                 }
             }
+            return [.submenu(title: "Link Date Card", children: children)]
         case .bookmark, .note, .externalFile:
-            EmptyView()
+            return []
         }
     }
 
-    @ViewBuilder
-    private func linkedItemsMenu(for item: LibraryItemV2) -> some View {
+    private func linkedItemsMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
         let refs = linkedEntityRefs(for: item)
-        if !refs.isEmpty {
-            Menu("Linked Items") {
-                ForEach(refs, id: \.id) { ref in
-                    if let title = titleForLinkedRef(ref) {
-                        Button(title) {
-                            openLinkedRef(ref)
-                        }
-                    }
-                }
+        guard !refs.isEmpty else { return [] }
+        let children: [CardMenuItem] = refs.compactMap { ref in
+            guard let title = titleForLinkedRef(ref) else { return nil }
+            return .action(title: title) {
+                openLinkedRef(ref)
             }
         }
+        guard !children.isEmpty else { return [] }
+        return [.submenu(title: "Linked Items", children: children)]
     }
 
     private func linkedEntityRefs(for item: LibraryItemV2) -> [LibraryEntityRef] {

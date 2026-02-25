@@ -8,6 +8,8 @@ struct DateCardDetailView: View {
     @State private var isMetadataExpanded = true
     @State private var isCompleted: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
 
@@ -105,7 +107,7 @@ struct DateCardDetailView: View {
 
             if hasMetadata {
                 Button {
-                    withAnimation(.snappy) { isMetadataExpanded.toggle() }
+                    withAnimation(reduceMotion ? .none : .snappy) { isMetadataExpanded.toggle() }
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Text("Details")

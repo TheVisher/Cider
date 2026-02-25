@@ -92,9 +92,10 @@ Move is now `try fm.moveItem` inside a `do/catch`; on failure, function returns 
 
 ### CH-C07 — Complex logic lacks unit tests (Medium)
 
-Critical storage and parsing logic (`NetscapeBookmarksCodec`, `NotesMarkdownPathCodec`) lacks unit tests. This increases the risk of regressions during future refactors or enhancements.
+`NotesMarkdownPathCodec` now has full test coverage (4 tests in `NotesMarkdownPathCodecTests.swift`). `NetscapeBookmarksCodec` still has no tests — it is `fileprivate` inside `BookmarksStorage.swift` and handles HTML import parsing with special-casing for empty hrefs and metadata merging.
 
-- File refs: `Sources/Cider/Services/BookmarksStorage.swift`, `Sources/Cider/Services/NotesMarkdownPathCodec.swift`
+- [ ] `NetscapeBookmarksCodec` test coverage
+- File refs: `Sources/Cider/Services/BookmarksStorage.swift`
 
 ### CH-C08 — Search results for Date Cards/Contacts are non-functional (High)
 
@@ -104,21 +105,17 @@ Search surfaces list Date Cards and Contacts, but selecting those results does n
 - File refs: `Sources/Cider/Views/Search/SearchPaletteView.swift`, `Sources/Cider/Views/Search/SearchTabContent.swift`
 - First reported: 2026-02-24
 
-### CH-C09 — `enablePageSummaries` setting is not enforced in Reader summary trigger (High)
+### ~~CH-C09 — `enablePageSummaries` setting is not enforced in Reader summary trigger~~ ✅ Fixed 2026-02-24
 
-`BookmarkReaderView` triggers summary generation whenever `aiSummary` is nil, but does not check `CiderConfig.enablePageSummaries`. This causes summaries to run even when the setting is disabled.
+Added `CiderConfig.load().enablePageSummaries` guard to the summary generation condition in `BookmarkReaderView.showReader()`. Summaries now only trigger when the setting is enabled.
 
-- [ ]
-- File refs: `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`, `Sources/Cider/Models/CiderConfig.swift`
-- First reported: 2026-02-24
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`
 
-### CH-C10 — +New Tab can create saved views while saved-view tabs are feature-flag hidden (High)
+### ~~CH-C10 — +New Tab can create saved views while saved-view tabs are feature-flag hidden~~ ✅ Fixed 2026-02-24
 
-`onCreateTab` creates and selects a saved view tab without enabling `enableSavedViewTabs`. If the flag is off, users can create a tab that is not visible in the tab bar.
+`NewItemPopover` now takes `enableSavedViewTabs` parameter and conditionally shows the Tab card. `onCreateTab` closure in `CiderPanelView` now auto-enables the flag (matching `createSavedViewFromCurrentHomeState` pattern) before selecting the new tab.
 
-- [ ]
-- File refs: `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Models/CiderConfig.swift`
-- First reported: 2026-02-24
+- File refs: `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Views/Shared/NewItemPopover.swift`
 
 ### CH-C11 — `NotesStorage.updateDirectory` async transition breaks synchronous expectations (Medium)
 
@@ -136,9 +133,27 @@ Directory updates now load notes asynchronously. Existing code/tests that assume
 - File refs: `Sources/Cider/Models/LibraryItemV2.swift`, `Sources/Cider/ViewModels/LibraryViewModel.swift`
 - First reported: 2026-02-24
 
+### ~~CH-C13 — SavedViewTabContent.itemCard() deletes without TrashStorage or undo~~ ✅ Fixed 2026-02-24
+
+`itemCard()` called `DateCardStorage.deleteDateCard` / `ContactStorage.deleteContact` directly, bypassing `TrashStorage` and `CiderUndoManager`. Grid/masonry deletes were permanent with no undo. Fixed to match `itemRow()` pattern: route through `TrashStorage.shared.trashDateCard` / `trashContact` and record undo action.
+
+- File refs: `Sources/Cider/Views/SavedViews/SavedViewTabContent.swift`
+
+### ~~CH-C14 — Force unwrap crash in HighlightedText on Unicode text~~ ✅ Fixed 2026-02-24
+
+`AttributedString.Index(_:within:)!` force unwraps could crash when `lowercased()` changes string length (e.g., "ß" → "ss"). Replaced with `guard let` safe unwrap that skips the match on conversion failure.
+
+- File refs: `Sources/Cider/Utilities/HighlightedText.swift`
+
 ---
 
 ## Performance
+
+### ~~CH-P06 — CiderConfig.load() decoded on every render in computed properties~~ ✅ Fixed 2026-02-24
+
+`sourceTabs` and `savedViewTabs` computed properties in `CiderPanelView` called `CiderConfig.load()` (UserDefaults decode) on every body evaluation. `FolderSidebarView.body` did the same for `enableLinkedSources`. Fixed: added `@State` properties refreshed via `.onReceive(.ciderConfigChanged)`; `FolderSidebarView` takes `enableLinkedSources` as a parameter.
+
+- File refs: `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Views/Shared/FolderSidebarView.swift`
 
 ### ~~CH-P01 — Main-thread disk I/O in search~~ ✅ Fixed 2026-02-21
 
@@ -178,9 +193,9 @@ Hover-enter branch now only stops the timer and sets `undoToastIsHovering = true
 
 Replaced `CAMediaTimingFunction(name: .easeInEaseOut)` with `CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)` (fast-out deceleration curve, perceptually matching a critically-damped spring) in all three panel files. Reduce-motion guard was already present.
 
-### ~~CH-D04 — Search palette uses `.shadow()` instead of shape-based shadow~~ ✅ Fixed 2026-02-21
+### ~~CH-D04 — Search palette uses `.shadow()` instead of shape-based shadow~~ ✅ Fixed 2026-02-21, regressed, re-fixed 2026-02-24
 
-Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(24).offset(y:12).opacity(shadowShapeFullOpacity) }` — same pattern as `AcrylicPanelBackground`.
+Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(24).offset(y:12).opacity(...) }` — same pattern as `AcrylicPanelBackground`. Regression detected 2026-02-24 (`.shadow()` modifier had returned); re-applied the blurred-shape fix.
 
 ### ~~CH-D05 — Some UI elements ignore global text-size preference~~ ✅ Fixed 2026-02-21
 
@@ -193,6 +208,36 @@ Current docs disagree on shipped status for linked sources and active tabs (e.g.
 - [ ]
 - File refs: `Docs/DOCS_INDEX.md`, `Docs/QUICK_REFERENCE.md`, `Docs/LINKED_SOURCES_VISION.md`
 - First reported: 2026-02-24
+
+### ~~CH-D07 — Missing reduce motion guard in AppDelegate panel expand/restore~~ ✅ Fixed 2026-02-24
+
+`expandCiderPanelForSlideOut` and `restoreCiderPanelAfterSlideOut` used `NSAnimationContext.runAnimationGroup` without checking `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion`. Added guard to both — when reduce motion is enabled, frame changes apply immediately.
+
+- File refs: `Sources/Cider/App/AppDelegate.swift`
+
+### ~~CH-D08 — Missing reduce motion guard in DateCardDetailView and ContactDetailView~~ ✅ Fixed 2026-02-24
+
+Both views used `withAnimation(.snappy)` without `reduceMotion` check. Added `@Environment(\.accessibilityReduceMotion)` and guarded the animation.
+
+- File refs: `Sources/Cider/Views/DateCards/DateCardDetailView.swift`, `Sources/Cider/Views/Contacts/ContactDetailView.swift`
+
+### ~~CH-D09 — `.contextMenu` in lazy containers: SavedViewTabContent, SourceCardView, FolderSidebarView~~ ✅ Fixed 2026-02-24
+
+7 instances of SwiftUI `.contextMenu` inside `LazyVStack`/`LazyVGrid` replaced with `CardContextMenuModifier` (builds fresh `NSMenu` on each right-click). SavedViewTabContent had data-driven submenus (stacks, contacts) that would cache stale data; now rebuilt at invocation time.
+
+- File refs: `Sources/Cider/Views/SavedViews/SavedViewTabContent.swift`, `Sources/Cider/Views/Sources/SourceCardView.swift`, `Sources/Cider/Views/Shared/FolderSidebarView.swift`
+
+### ~~CH-D10 — Hardcoded font sizes in BookmarkDetailsSheet~~ ✅ Fixed 2026-02-24
+
+Four instances of `.font(.system(size: 8/9))` on small icon elements did not scale with `CiderFont.scale`. Multiplied by `CiderFont.scale` to respect user text-size preference.
+
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarkDetailsSheet.swift`
+
+### ~~CH-D11 — Hardcoded `.foregroundColor(.white)` instead of CiderColors.textOnColor~~ ✅ Fixed 2026-02-24
+
+Three instances of `.foregroundColor(.white)` on text/icons over colored backgrounds replaced with `CiderColors.textOnColor` (`Color.white.opacity(0.9)`).
+
+- File refs: `Sources/Cider/Views/Shared/SelectionCheckmark.swift`, `Sources/Cider/Views/Shared/NewItemPopover.swift`, `Sources/Cider/Views/Shared/FolderDetailView.swift`
 
 ---
 
@@ -208,10 +253,10 @@ Current docs disagree on shipped status for linked sources and active tabs (e.g.
 
 ### CH-L03 — Legacy tab/browser views appear unreferenced after panel consolidation (Low)
 
-`BookmarksBrowserView`, `NotesTabContent`, and `NotesBrowserView` appear to be leftover from the pre-consolidation tab architecture and are not part of the current `CiderPanelView` flow. Validate and remove or rewire to avoid maintenance drag.
+`BookmarksBrowserView`, `NotesTabContent`, `NotesBrowserView`, `FolderContentView`, and `RootFolderOverviewView` are all confirmed dead code — zero instantiation call sites in the current `CiderPanelView` flow. `FolderDetailView` replaced the folder views; Home/SavedView tabs replaced the browser views.
 
 - [ ]
-- File refs: `Sources/Cider/Views/Bookmarks/BookmarksBrowserView.swift`, `Sources/Cider/Views/Notes/NotesTabContent.swift`, `Sources/Cider/Views/Notes/NotesBrowserView.swift`
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarksBrowserView.swift`, `Sources/Cider/Views/Notes/NotesTabContent.swift`, `Sources/Cider/Views/Notes/NotesBrowserView.swift`, `Sources/Cider/Views/Shared/FolderContentView.swift`, `Sources/Cider/Views/Shared/RootFolderOverviewView.swift`
 - First reported: 2026-02-24
 
 ---

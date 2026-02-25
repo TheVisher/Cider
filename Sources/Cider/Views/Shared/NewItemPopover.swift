@@ -4,6 +4,7 @@ import SwiftUI
 
 struct NewItemPopover: View {
     let folders: [Folder]
+    var enableSavedViewTabs: Bool = true
     var onCreateBookmark: (String, String?) -> Void
     var onCreateNote: (String, String) -> Void
     var onCreateEvent: (String, Date, Bool) -> Void
@@ -98,7 +99,9 @@ struct NewItemPopover: View {
                 typeCard(.event)
                 typeCard(.contact)
                 typeCard(.folder)
-                typeCard(.tab)
+                if enableSavedViewTabs {
+                    typeCard(.tab)
+                }
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
@@ -214,7 +217,7 @@ private struct AddButton: View {
         Button(action: action) {
             Text(label)
                 .font(CiderFont.bodyMedium)
-                .foregroundColor(.white)
+                .foregroundColor(CiderColors.textOnColor)
                 .frame(maxWidth: .infinity)
                 .frame(height: 32)
                 .background(

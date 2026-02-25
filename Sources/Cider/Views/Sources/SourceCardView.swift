@@ -56,21 +56,17 @@ struct SourceCardView: View {
         .onTapGesture {
             onOpen()
         }
-        .contextMenu {
-            Button {
-                NSWorkspace.shared.open(file.path)
-            } label: {
-                Label("Open in Default App", systemImage: "arrow.up.right.square")
-            }
-
-            Divider()
-
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Move to Trash", systemImage: "trash")
-            }
-        }
+        .modifier(CardContextMenuModifier {
+            [
+                .action(title: "Open in Default App") {
+                    NSWorkspace.shared.open(file.path)
+                },
+                .separator,
+                .destructive(title: "Move to Trash") {
+                    onDelete()
+                }
+            ]
+        })
         .task(id: file.modifiedAt) {
             await loadContentPreview()
         }

@@ -27,8 +27,12 @@ struct HighlightedText: View {
         var searchStart = textLower.startIndex
 
         while let range = textLower.range(of: query, range: searchStart..<textLower.endIndex) {
-            let attrRange = AttributedString.Index(range.lowerBound, within: attributed)!
-                ..< AttributedString.Index(range.upperBound, within: attributed)!
+            guard let lower = AttributedString.Index(range.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(range.upperBound, within: attributed) else {
+                searchStart = range.upperBound
+                continue
+            }
+            let attrRange = lower ..< upper
             attributed[attrRange].font = CiderFont.bodySemibold
             attributed[attrRange].foregroundColor = highlightColor
             searchStart = range.upperBound
