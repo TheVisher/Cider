@@ -5,17 +5,24 @@ let package = Package(
     name: "Cider",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "Cider", targets: ["Cider"])
+        .library(name: "Cider", targets: ["Cider"])
     ],
     dependencies: [],
     targets: [
-        .executableTarget(
+        .target(
             name: "Cider",
             path: "Sources/Cider",
             resources: [
                 .copy("Resources/TipTapEditor"),
                 .copy("Resources/ReaderMode"),
-            ],
+            ]
+        ),
+        // Thin CLI entry point — only used for `swift run`.
+        // The Xcode project (Cider.xcodeproj) owns the .app build.
+        .executableTarget(
+            name: "CiderLauncher",
+            dependencies: ["Cider"],
+            path: "Sources/CiderApp",
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
