@@ -25,7 +25,7 @@ final class BookmarkAIEnrichment {
         activeTasks[bookmark.id] = Task { [weak self] in
             await self?.run(for: bookmark, config: config)
             await MainActor.run { [weak self] in
-                self?.activeTasks.removeValue(forKey: bookmark.id)
+                _ = self?.activeTasks.removeValue(forKey: bookmark.id)
             }
         }
     }
@@ -43,7 +43,6 @@ final class BookmarkAIEnrichment {
         // ── 1. Auto-tagging (NaturalLanguage, any Mac) ──────────────────────
         var suggestedTags: [String] = []
         if config.enableAutoTagging {
-            let text = "\(bookmark.title) \(bookmark.hostDisplay) \(bookmark.notes)"
             suggestedTags = await Task.detached(priority: .utility) {
                 NLPipeline.suggestTags(
                     title: bookmark.title,
@@ -99,6 +98,20 @@ final class BookmarkAIEnrichment {
         // explicitly requested — we don't fetch the page ourselves.
         // (See SummaryService + BookmarkReaderView integration)
 
+        // ── 5a. Smart title from OCR (image bookmarks with generic titles) ──────
+        var suggestedTitle: String?
+        if let text = ocrText, !text.isEmpty, isGenericImageTitle(bookmark.title) {
+            // Prefer Apple Intelligence if available, fall back to first OCR line
+            if let aiTitle = await SummaryService.shared.suggestTitle(
+                currentTitle: bookmark.title,
+                articleText: text
+            ) {
+                suggestedTitle = aiTitle
+            } else {
+                suggestedTitle = extractTitleFromOCR(text)
+            }
+        }
+
         // ── Apply results back to storage ───────────────────────────────────
         let newTags = mergedTags(
             existing: bookmark.tags,
@@ -107,13 +120,15 @@ final class BookmarkAIEnrichment {
         let changed = newTags != bookmark.tags
                    || ocrText != bookmark.ocrText
                    || dominantColors != bookmark.dominantColors
+                   || suggestedTitle != nil
 
         if changed {
             BookmarksStorage.shared.applyAIResults(
                 for: bookmark.id,
                 tags: newTags,
                 ocrText: ocrText,
-                dominantColors: dominantColors
+                dominantColors: dominantColors,
+                title: suggestedTitle
             )
         }
     }
@@ -126,5 +141,28 @@ final class BookmarkAIEnrichment {
         let existingSet = Set(existing.map { $0.lowercased() })
         let newSuggested = suggested.filter { !existingSet.contains($0.lowercased()) }
         return existing + newSuggested
+    }
+
+    /// Returns true if the title looks like a generic placeholder that can be replaced.
+    private func isGenericImageTitle(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return true }
+        if t.lowercased() == "saved image" { return true }
+        // Single word shorter than 5 chars (e.g. "IMG", "pic")
+        if !t.contains(" ") && t.count < 5 { return true }
+        // Purely numeric (e.g. "20241215_123456")
+        if t.allSatisfy({ $0.isNumber || $0 == "_" || $0 == "-" }) { return true }
+        return false
+    }
+
+    /// Extract a meaningful title from the first non-trivial line of OCR text.
+    private func extractTitleFromOCR(_ text: String) -> String? {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count >= 4 && !$0.allSatisfy { $0.isNumber || $0.isPunctuation || $0 == " " } }
+        guard let firstLine = lines.first else { return nil }
+        let truncated = String(firstLine.prefix(60))
+        return truncated.capitalized
     }
 }

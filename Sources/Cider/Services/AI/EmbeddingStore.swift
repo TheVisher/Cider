@@ -62,6 +62,48 @@ final class EmbeddingStore {
         scheduleSave()
     }
 
+    /// Backfill embeddings for bookmarks that have no stored vector.
+    /// Called once at startup after `load()` completes. Runs in background with
+    /// 100 ms yields between batches of 20 to avoid blocking the main thread.
+    func backfillMissing(bookmarks: [Bookmark]) {
+        Task.detached(priority: .background) { [weak self] in
+            // Wait for load() to finish populating the cache before filtering.
+            try? await Task.sleep(for: .milliseconds(500))
+
+            let missing: [Bookmark] = await MainActor.run { [weak self] in
+                guard let self else { return [] }
+                return bookmarks.filter { self.cache[$0.id] == nil }
+            }
+            guard !missing.isEmpty else { return }
+
+            let batchSize = 20
+            var idx = 0
+            while idx < missing.count {
+                guard !Task.isCancelled else { return }
+                let batch = Array(missing[idx..<min(idx + batchSize, missing.count)])
+                idx += batchSize
+
+                for bookmark in batch {
+                    let text = [bookmark.title, bookmark.hostDisplay, bookmark.notes]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                    guard let vector = NLPipeline.embedding(for: text) else { continue }
+                    let item = ItemEmbedding(id: bookmark.id, vector: vector, modifiedAt: bookmark.updatedAt)
+                    await MainActor.run { [weak self] in
+                        guard let self, self.cache[bookmark.id] == nil else { return }
+                        self.cache[bookmark.id] = item
+                        self.isDirty = true
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+
+            await MainActor.run { [weak self] in
+                self?.scheduleSave()
+            }
+        }
+    }
+
     // MARK: - Persistence
 
     func load() {
@@ -83,7 +125,7 @@ final class EmbeddingStore {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
-            await self?.flushSave()
+            self?.flushSave()
         }
     }
 

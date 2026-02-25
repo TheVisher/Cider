@@ -135,6 +135,8 @@ struct CiderConfig: Codable {
         case enablePageSummaries
         case enableOCRIndexing
         case enableColorExtraction
+        case screenCaptureToastTimeout
+        case screenCaptureDefaultAction
     }
 
     var showMenuBarIcon: Bool
@@ -176,6 +178,8 @@ struct CiderConfig: Codable {
     var enablePageSummaries: Bool  // Generate 2-sentence summaries via Foundation Models (Apple Intelligence)
     var enableOCRIndexing: Bool  // OCR thumbnail images via Vision so their text is searchable
     var enableColorExtraction: Bool  // Extract dominant colors from thumbnails for display
+    var screenCaptureToastTimeout: Int  // Seconds before routing toast auto-dismisses (0 = skip toast)
+    var screenCaptureDefaultAction: String  // Default action: "note", "dateCard", "contact"
 
     static let storageKey = "CiderConfig"
 
@@ -215,7 +219,9 @@ struct CiderConfig: Codable {
             enableEmbeddings: true,
             enablePageSummaries: true,
             enableOCRIndexing: false,
-            enableColorExtraction: true
+            enableColorExtraction: true,
+            screenCaptureToastTimeout: 8,
+            screenCaptureDefaultAction: "note"
         )
     }
 
@@ -387,6 +393,12 @@ struct CiderConfig: Codable {
         enablePageSummaries = try container.decodeIfPresent(Bool.self, forKey: .enablePageSummaries) ?? true
         enableOCRIndexing = try container.decodeIfPresent(Bool.self, forKey: .enableOCRIndexing) ?? false
         enableColorExtraction = try container.decodeIfPresent(Bool.self, forKey: .enableColorExtraction) ?? true
+        screenCaptureToastTimeout = try container.decodeIfPresent(
+            Int.self, forKey: .screenCaptureToastTimeout
+        ) ?? 8
+        screenCaptureDefaultAction = try container.decodeIfPresent(
+            String.self, forKey: .screenCaptureDefaultAction
+        ) ?? "note"
     }
 
     init(
@@ -428,7 +440,9 @@ struct CiderConfig: Codable {
         enableEmbeddings: Bool = true,
         enablePageSummaries: Bool = true,
         enableOCRIndexing: Bool = false,
-        enableColorExtraction: Bool = true
+        enableColorExtraction: Bool = true,
+        screenCaptureToastTimeout: Int = 8,
+        screenCaptureDefaultAction: String = "note"
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -469,5 +483,7 @@ struct CiderConfig: Codable {
         self.enablePageSummaries = enablePageSummaries
         self.enableOCRIndexing = enableOCRIndexing
         self.enableColorExtraction = enableColorExtraction
+        self.screenCaptureToastTimeout = screenCaptureToastTimeout
+        self.screenCaptureDefaultAction = screenCaptureDefaultAction
     }
 }

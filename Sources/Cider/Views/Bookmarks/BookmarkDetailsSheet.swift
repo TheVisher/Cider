@@ -50,6 +50,8 @@ struct BookmarkMetadataSidebar: View {
     @State private var isEditingNotes = false
     @State private var saveDebounceTask: Task<Void, Never>?
     @State private var fileSize: String?
+    @State private var newTagText: String = ""
+    @State private var copiedHex: String?
 
     @State private var isSourceExpanded = true
     @State private var isFolderExpanded = true
@@ -127,6 +129,8 @@ struct BookmarkMetadataSidebar: View {
             isEditingNotes = false
             saveDebounceTask?.cancel()
             fileSize = nil
+            newTagText = ""
+            copiedHex = nil
         }
         .task(id: bookmark?.id) {
             fileSize = nil
@@ -310,15 +314,93 @@ struct BookmarkMetadataSidebar: View {
 
     // MARK: - Tags
 
+    private var parsedTags: [String] {
+        draft.tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func removeTag(_ tag: String) {
+        let updated = parsedTags.filter { $0.lowercased() != tag.lowercased() }
+        draft.tagsText = updated.joined(separator: ", ")
+    }
+
+    private func commitNewTag() {
+        var text = newTagText
+        if text.hasSuffix(",") { text = String(text.dropLast()) }
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { newTagText = ""; return }
+        var tags = parsedTags
+        guard !tags.contains(where: { $0.lowercased() == trimmed.lowercased() }) else {
+            newTagText = ""
+            return
+        }
+        tags.append(trimmed)
+        draft.tagsText = tags.joined(separator: ", ")
+        newTagText = ""
+    }
+
     @ViewBuilder
     private var tagsSection: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeader("Tags", isExpanded: $isTagsExpanded)
 
             if isTagsExpanded {
-                TextField("Add tags, comma separated", text: $draft.tagsText)
-                    .font(CiderFont.body(scale: textScale))
-                    .textFieldStyle(.roundedBorder)
+                TagFlowLayout(spacing: Spacing.xs) {
+                    ForEach(parsedTags, id: \.self) { tag in
+                        HStack(spacing: 3) {
+                            Text(tag)
+                                .font(CiderFont.label(scale: textScale))
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(1)
+                            Button {
+                                removeTag(tag)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                .fill(CiderColors.surfaceInput)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                        )
+                    }
+
+                    TextField(parsedTags.isEmpty ? "Add tags…" : "Add tag…", text: $newTagText)
+                        .font(CiderFont.label(scale: textScale))
+                        .foregroundColor(CiderColors.primary)
+                        .textFieldStyle(.plain)
+                        .frame(minWidth: 64)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.xxs)
+                        .onSubmit { commitNewTag() }
+                        .onChange(of: newTagText) { _, new in
+                            if new.contains(",") {
+                                let parts = new.split(separator: ",", maxSplits: 1)
+                                let tagPart = parts.first.map(String.init)?
+                                    .trimmingCharacters(in: .whitespaces) ?? ""
+                                if !tagPart.isEmpty {
+                                    var tags = parsedTags
+                                    if !tags.contains(where: { $0.lowercased() == tagPart.lowercased() }) {
+                                        tags.append(tagPart)
+                                        draft.tagsText = tags.joined(separator: ", ")
+                                    }
+                                }
+                                newTagText = parts.count > 1
+                                    ? String(parts[1]).trimmingCharacters(in: .whitespaces)
+                                    : ""
+                            }
+                        }
+                }
             }
         }
     }
@@ -408,23 +490,62 @@ struct BookmarkMetadataSidebar: View {
                     }
 
                     if let colors = bookmark.dominantColors, !colors.isEmpty {
-                        HStack(spacing: Spacing.xs) {
-                            ForEach(colors, id: \.self) { hex in
-                                if let color = Color(hex: hex) {
-                                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                                        .fill(color)
-                                        .frame(width: 20, height: 20)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                                                .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
-                                        )
-                                        .help(hex)
-                                }
-                            }
-                        }
+                        colorsSubsection(colors: colors)
                     }
 
                     RelatedItemsView(bookmarkID: bookmark.id)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func colorsSubsection(colors: [String]) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text("Colors")
+                .font(CiderFont.caption(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+
+            HStack(spacing: Spacing.sm) {
+                ForEach(colors, id: \.self) { hex in
+                    if let color = Color(hex: hex) {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(hex.uppercased(), forType: .string)
+                            copiedHex = hex
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(1.2))
+                                guard !Task.isCancelled else { return }
+                                copiedHex = nil
+                            }
+                        } label: {
+                            VStack(spacing: Spacing.xxs) {
+                                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                    .fill(color)
+                                    .frame(width: 44, height: 22)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                            .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
+                                    )
+
+                                Group {
+                                    if copiedHex == hex {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 8, weight: .semibold))
+                                            .foregroundColor(CiderColors.success)
+                                    } else {
+                                        Text(hex.uppercased())
+                                            .font(CiderFont.caption(scale: textScale))
+                                            .foregroundColor(CiderColors.tertiary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .frame(height: 12)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy \(hex.uppercased())")
+                    }
                 }
             }
         }
@@ -555,6 +676,57 @@ struct BookmarkMetadataSidebar: View {
         }
     }
 
+}
+
+// MARK: - TagFlowLayout
+
+/// A wrapping row layout for tag chips. Wraps items to the next row when the current row is full.
+private struct TagFlowLayout: Layout {
+    var spacing: CGFloat = Spacing.xs
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = max(1, proposal.width ?? 200)
+        let rows = computeRows(in: width, subviews: subviews)
+        let height = rows.reduce(0.0) { acc, row in
+            acc + (row.map(\.1.height).max() ?? 0) + spacing
+        }
+        return CGSize(width: width, height: max(0, height - spacing))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(in: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            let rowH = row.map(\.1.height).max() ?? 0
+            for (subview, size) in row {
+                subview.place(
+                    at: CGPoint(x: x, y: y + (rowH - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += rowH + spacing
+        }
+    }
+
+    private func computeRows(in width: CGFloat, subviews: Subviews) -> [[(LayoutSubview, CGSize)]] {
+        var rows: [[(LayoutSubview, CGSize)]] = []
+        var current: [(LayoutSubview, CGSize)] = []
+        var used: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if !current.isEmpty && used + size.width > width {
+                rows.append(current)
+                current = []
+                used = 0
+            }
+            current.append((subview, size))
+            used += size.width + spacing
+        }
+        if !current.isEmpty { rows.append(current) }
+        return rows
+    }
 }
 
 // MARK: - Hero Preview

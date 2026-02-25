@@ -36,6 +36,18 @@ Changed `allowingReadAccessTo: URL(fileURLWithPath: "/")` to `URL(fileURLWithPat
 
 Navigation policy in `TipTapEditorCoordinator` changed to deny-by-default. Only `file://` (editor HTML + local images) and `about:` (initial blank) are allowed through. All other schemes are blocked regardless of `navigationType` — the previous code only blocked `.linkActivated`, leaving JS-triggered navigations open. User-clicked external links still open in the system browser before being cancelled.
 
+### CH-S03 — SSRF / Local network scanning via Bookmark Enrichment (Low)
+
+`BookmarksStorage.fetchHTMLEnrichmentPayload` fetches arbitrary URLs. This could allow local port scanning (e.g., `http://localhost:8080`) if a user manually adds such a bookmark. While requiring user action, it is a potential vector for mapping local network services.
+
+- File refs: `Sources/Cider/Services/BookmarksStorage.swift`
+
+### CH-S04 — Symlink traversal in ExternalSourceScanner (Low)
+
+`ExternalSourceScanner` does not explicitly check for or block symbolic links. This could lead to accidental traversal into sensitive system directories or infinite loops if a source contains a symlink pointing to a system folder or itself.
+
+- File refs: `Sources/Cider/Services/ExternalSourceScanner.swift`
+
 ---
 
 ## Correctness / Data
@@ -66,7 +78,63 @@ Move is now `try fm.moveItem` inside a `do/catch`; on failure, function returns 
 
 - First reported: 2026-02-20
 
-- [ ] Fixed (partial — TODO marker added; full fix deferred until bulk actions support all entity types)
+### CH-C05 — Orphan attachment cleanup race condition (Low)
+
+`removeOrphanAttachmentsInBackground` deletes unreferenced files after a 5-minute grace period. A slow-typing user or delayed auto-save could theoretically result in an image being deleted before the reference is saved to disk. Consider increasing the grace period or checking `creationDate` in addition to `modificationDate`.
+
+- File refs: `Sources/Cider/Services/NotesStorage.swift`
+
+### CH-C06 — Short UUID collision risk in attachments (Low)
+
+`saveImage` uses `UUID().prefix(8)` for filenames. While collisions are unlikely in a local scope, using the full UUID would eliminate the risk entirely in the attachments folder.
+
+- File refs: `Sources/Cider/Services/NotesStorage.swift`
+
+### CH-C07 — Complex logic lacks unit tests (Medium)
+
+Critical storage and parsing logic (`NetscapeBookmarksCodec`, `NotesMarkdownPathCodec`) lacks unit tests. This increases the risk of regressions during future refactors or enhancements.
+
+- File refs: `Sources/Cider/Services/BookmarksStorage.swift`, `Sources/Cider/Services/NotesMarkdownPathCodec.swift`
+
+### CH-C08 — Search results for Date Cards/Contacts are non-functional (High)
+
+Search surfaces list Date Cards and Contacts, but selecting those results does not open detail/edit flows. In Search Palette, selection just dismisses; in Search Tab, selection is a no-op.
+
+- [ ]
+- File refs: `Sources/Cider/Views/Search/SearchPaletteView.swift`, `Sources/Cider/Views/Search/SearchTabContent.swift`
+- First reported: 2026-02-24
+
+### CH-C09 — `enablePageSummaries` setting is not enforced in Reader summary trigger (High)
+
+`BookmarkReaderView` triggers summary generation whenever `aiSummary` is nil, but does not check `CiderConfig.enablePageSummaries`. This causes summaries to run even when the setting is disabled.
+
+- [ ]
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`, `Sources/Cider/Models/CiderConfig.swift`
+- First reported: 2026-02-24
+
+### CH-C10 — +New Tab can create saved views while saved-view tabs are feature-flag hidden (High)
+
+`onCreateTab` creates and selects a saved view tab without enabling `enableSavedViewTabs`. If the flag is off, users can create a tab that is not visible in the tab bar.
+
+- [ ]
+- File refs: `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Models/CiderConfig.swift`
+- First reported: 2026-02-24
+
+### CH-C11 — `NotesStorage.updateDirectory` async transition breaks synchronous expectations (Medium)
+
+Directory updates now load notes asynchronously. Existing code/tests that assume immediate availability after `updateDirectory(to:)` can observe empty notes transiently, causing regression test failure.
+
+- [ ]
+- File refs: `Sources/Cider/Services/NotesStorage.swift`, `Tests/CiderTests/NotesStorageRegressionTests.swift`
+- First reported: 2026-02-24
+
+### CH-C12 — Bookmark labels are not represented in unified library filtering (Medium)
+
+`LibraryItemV2.labelIDs` returns empty sets for bookmarks and notes, so label-based filtering and stack matching do not apply to those entities despite docs describing cross-entity label behavior.
+
+- [ ]
+- File refs: `Sources/Cider/Models/LibraryItemV2.swift`, `Sources/Cider/ViewModels/LibraryViewModel.swift`
+- First reported: 2026-02-24
 
 ---
 
@@ -118,6 +186,14 @@ Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(2
 
 Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from `static let` to `static var` using `scaled(36)`. Fixed traffic light symbol fonts in `CiderPanelShell.swift` to multiply by `CiderFont.scale`. `appIcon` left as fixed 64pt (purely decorative on About screen). (Note: NotesPanelView and BookmarksPanelView references removed — standalone panels deleted in Feb 2026 consolidation.)
 
+### CH-D06 — Docs index/status drift from implemented product model (Low)
+
+Current docs disagree on shipped status for linked sources and active tabs (e.g., `DOCS_INDEX` says linked sources not started while `LINKED_SOURCES_VISION` says implemented; quick reference still lists Bookmarks/Notes tabs as live). This increases onboarding and planning errors.
+
+- [ ]
+- File refs: `Docs/DOCS_INDEX.md`, `Docs/QUICK_REFERENCE.md`, `Docs/LINKED_SOURCES_VISION.md`
+- First reported: 2026-02-24
+
 ---
 
 ## Dead Code & Cleanup
@@ -129,6 +205,14 @@ Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from 
 ### ~~CH-L02 — Dead code artifacts~~ ✅ Fixed 2026-02-21
 
 `SystemStatus.swift` and `FeatureSettings.swift` deleted (confirmed zero references). `ProjectTabContent.swift:16` reported as unused import was a false positive — only `import SwiftUI` exists at line 1 and is used; no change needed.
+
+### CH-L03 — Legacy tab/browser views appear unreferenced after panel consolidation (Low)
+
+`BookmarksBrowserView`, `NotesTabContent`, and `NotesBrowserView` appear to be leftover from the pre-consolidation tab architecture and are not part of the current `CiderPanelView` flow. Validate and remove or rewire to avoid maintenance drag.
+
+- [ ]
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarksBrowserView.swift`, `Sources/Cider/Views/Notes/NotesTabContent.swift`, `Sources/Cider/Views/Notes/NotesBrowserView.swift`
+- First reported: 2026-02-24
 
 ---
 

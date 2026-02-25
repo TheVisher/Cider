@@ -43,6 +43,9 @@ extension Notification.Name {
     static let snapCiderPanel = Notification.Name("cider.snapCiderPanel")
     static let expandCiderPanelForSlideOut = Notification.Name("cider.expandCiderPanelForSlideOut")
     static let restoreCiderPanelAfterSlideOut = Notification.Name("cider.restoreCiderPanelAfterSlideOut")
+    static let requestScreenCapture = Notification.Name("cider.requestScreenCapture")
+    static let screenCaptureComplete = Notification.Name("cider.screenCaptureComplete")
+    static let openNewItemPopover = Notification.Name("cider.openNewItemPopover")
 }
 
 // MARK: - Snap Target
@@ -325,6 +328,19 @@ enum UndoToastDesign {
     static var panelHeight: CGFloat {
         height + shadowPadding * 2
     }
+}
+
+enum ScreenCaptureToastDesign {
+    static let width: CGFloat = 360
+    static let height: CGFloat = 112
+    static let cornerRadius: CGFloat = Radius.md
+    static let shadowPadding: CGFloat = 0
+    static let autoHideDuration: TimeInterval = 8.0
+    static let progressTickInterval: TimeInterval = 1.0 / 30.0
+    static let panelEdgeInset: CGFloat = Spacing.md
+
+    static var panelWidth: CGFloat { width + shadowPadding * 2 }
+    static var panelHeight: CGFloat { height + shadowPadding * 2 }
 }
 
 enum SearchPaletteDesign {

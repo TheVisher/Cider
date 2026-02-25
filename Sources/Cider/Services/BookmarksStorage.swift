@@ -1607,7 +1607,8 @@ final class BookmarksStorage: ObservableObject {
         for bookmarkID: UUID,
         tags: [String],
         ocrText: String?,
-        dominantColors: [String]?
+        dominantColors: [String]?,
+        title: String? = nil
     ) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         var bookmark = bookmarks[index]
@@ -1615,6 +1616,7 @@ final class BookmarksStorage: ObservableObject {
         if bookmark.tags != tags { bookmark.tags = tags; changed = true }
         if bookmark.ocrText != ocrText { bookmark.ocrText = ocrText; changed = true }
         if bookmark.dominantColors != dominantColors { bookmark.dominantColors = dominantColors; changed = true }
+        if let title, !title.isEmpty, bookmark.title != title { bookmark.title = title; changed = true }
         guard changed else { return }
         bookmarks[index] = bookmark
         persist()

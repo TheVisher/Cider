@@ -41,6 +41,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var undoToastRemaining: TimeInterval = UndoToastDesign.autoHideDuration
     private var undoToastLastTick: Date?
 
+    // Screen capture
+    private var screenCaptureHotkeyDetector: ScreenCaptureHotkeyDetector?
+    private var screenCaptureToastPanel: ScreenCaptureToastPanel?
+    private let screenCaptureToastModel = ScreenCaptureToastModel()
+    private var screenCaptureToastTimer: Timer?
+    private var screenCaptureToastIsHovering = false
+    private var screenCaptureToastRemaining: TimeInterval = ScreenCaptureToastDesign.autoHideDuration
+    private var screenCaptureToastLastTick: Date?
+
     // Services
     private var servicesProvider: CiderServicesProvider?
 
@@ -69,6 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startBookmarksHotkeyDetection()
         observeUndoNotifications()
         observeSourcesNotifications()
+        startScreenCaptureHotkeyDetection()
+        observeScreenCaptureNotifications()
 
         // Start Spotlight indexing.
         // Note: Core Spotlight requires a proper .app bundle to surface results in
@@ -91,8 +102,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if config.trashRetentionDays > 0 {
                 TrashStorage.shared.purgeExpired(olderThan: config.trashRetentionDays)
             }
-            // Load persisted embeddings so similarity search works immediately.
+            // Load persisted embeddings so similarity search works immediately,
+            // then backfill any bookmarks that have no vector yet.
             EmbeddingStore.shared.load()
+            if config.enableEmbeddings {
+                EmbeddingStore.shared.backfillMissing(bookmarks: BookmarksStorage.shared.bookmarks)
+            }
         }
     }
 
@@ -103,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bookmarkCaptureToastPanel?.orderOut(nil)
         stopUndoToastTimer()
         undoToastPanel?.orderOut(nil)
+        stopScreenCaptureToastTimer()
+        screenCaptureToastPanel?.orderOut(nil)
     }
 
     func applicationWillResignActive(_ notification: Notification) {
@@ -845,7 +862,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // including during user dragging, programmatic setFrame, and animations.
         panelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
             guard let frame = change.newValue else { return }
-            self?.ciderShadowPanel?.updateFrame(for: frame)
+            DispatchQueue.main.async {
+                self?.ciderShadowPanel?.updateFrame(for: frame)
+            }
         }
 
         updateCiderPanelView()
@@ -1124,6 +1143,201 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func persistCurrentCiderPanelFrameIfNeeded() {
         guard let panel = ciderPanel, panel.isVisible else { return }
         ciderPanelPositionStore.setFrame(panel.persistableFrame)
+    }
+
+    // MARK: - Screen Capture
+
+    private func startScreenCaptureHotkeyDetection() {
+        screenCaptureHotkeyDetector = ScreenCaptureHotkeyDetector()
+        screenCaptureHotkeyDetector?.start()
+    }
+
+    private func observeScreenCaptureNotifications() {
+        NotificationCenter.default.publisher(for: .requestScreenCapture)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.performScreenCapture()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func performScreenCapture() {
+        // Hide the Cider panel so it doesn't appear in the captured region
+        let wasVisible = ciderPanel?.isVisible ?? false
+        if wasVisible { hideCiderPanel() }
+
+        Task { @MainActor in
+            // Small delay to allow the panel to fully hide before capture
+            try? await Task.sleep(for: .milliseconds(150))
+
+            let image: NSImage?
+            do {
+                image = try await ScreenCaptureService.capture()
+            } catch ScreenCaptureService.CaptureError.permissionDenied {
+                if wasVisible { self.showCiderPanel() }
+                self.showBookmarkCaptureToast(
+                    message: "Enable Screen Recording for Cider in System Settings",
+                    isSuccess: false
+                )
+                return
+            } catch {
+                if wasVisible { self.showCiderPanel() }
+                return
+            }
+
+            guard let image else {
+                if wasVisible { self.showCiderPanel() }
+                return
+            }
+
+            if wasVisible { self.showCiderPanel() }
+
+            // Run OCR and routing analysis
+            let ocrText = await ScreenCaptureService.extractText(from: image)
+            let route = ScreenCaptureOCRRouter.detectRoute(in: ocrText ?? "")
+
+            self.showScreenCaptureToast(route: route, image: image, ocrText: ocrText)
+        }
+    }
+
+    private func showScreenCaptureToast(route: CaptureRoute, image: NSImage, ocrText: String?) {
+        stopScreenCaptureToastTimer()
+        screenCaptureToastIsHovering = false
+        let config = CiderConfig.load()
+        screenCaptureToastRemaining = TimeInterval(config.screenCaptureToastTimeout > 0
+            ? config.screenCaptureToastTimeout
+            : Int(ScreenCaptureToastDesign.autoHideDuration))
+        screenCaptureToastModel.progress = 1
+
+        if screenCaptureToastPanel == nil {
+            screenCaptureToastPanel = ScreenCaptureToastPanel()
+        }
+        guard let panel = screenCaptureToastPanel else { return }
+
+        let toastView = ScreenCaptureRoutingToastView(
+            model: screenCaptureToastModel,
+            route: route,
+            onHoverChanged: { [weak self] hovering in
+                guard let self else { return }
+                self.screenCaptureToastIsHovering = hovering
+                if hovering {
+                    self.stopScreenCaptureToastTimer()
+                } else {
+                    self.startScreenCaptureToastTimer()
+                }
+            },
+            onCreateNote: { [weak self] in
+                self?.dismissScreenCaptureToast()
+                NotesStorage.shared.createFromCapture(
+                    title: route.suggestedTitle.isEmpty ? "Screen Capture" : route.suggestedTitle,
+                    ocrText: ocrText ?? "",
+                    screenshot: image,
+                    sourceURL: nil
+                )
+                self?.showCiderPanel()
+            },
+            onCreateDateCard: { [weak self] in
+                self?.dismissScreenCaptureToast()
+                self?.showCiderPanel()
+                NotificationCenter.default.post(name: .openNewItemPopover, object: nil,
+                    userInfo: ["initialStep": "event"])
+            },
+            onCreateContact: { [weak self] in
+                self?.dismissScreenCaptureToast()
+                self?.showCiderPanel()
+                NotificationCenter.default.post(name: .openNewItemPopover, object: nil,
+                    userInfo: ["initialStep": "contact"])
+            }
+        )
+
+        let hostingView = BookmarkCaptureToastHostingView(rootView: toastView)
+        hostingView.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: ScreenCaptureToastDesign.panelWidth,
+                         height: ScreenCaptureToastDesign.panelHeight)
+        )
+        panel.contentView = hostingView
+        panel.setContentSize(NSSize(width: ScreenCaptureToastDesign.panelWidth,
+                                    height: ScreenCaptureToastDesign.panelHeight))
+
+        let frame = screenCaptureToastFrame()
+        panel.setFrame(frame, display: true)
+        panel.orderFrontRegardless()
+
+        startScreenCaptureToastTimer()
+    }
+
+    private func screenCaptureToastFrame() -> NSRect {
+        let w = ScreenCaptureToastDesign.panelWidth
+        let h = ScreenCaptureToastDesign.panelHeight
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
+            ?? NSScreen.main ?? NSScreen.screens.first
+        let visibleFrame = screen?.visibleFrame ?? .zero
+        let x = visibleFrame.midX - w / 2
+        let y = visibleFrame.maxY - h - Spacing.xxxl
+        return NSRect(x: x, y: y, width: w, height: h)
+    }
+
+    private func startScreenCaptureToastTimer() {
+        stopScreenCaptureToastTimer()
+        screenCaptureToastLastTick = Date()
+
+        let timer = Timer(timeInterval: ScreenCaptureToastDesign.progressTickInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.screenCaptureToastTimerTick()
+            }
+        }
+        screenCaptureToastTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopScreenCaptureToastTimer() {
+        screenCaptureToastTimer?.invalidate()
+        screenCaptureToastTimer = nil
+        screenCaptureToastLastTick = nil
+    }
+
+    private func screenCaptureToastTimerTick() {
+        guard !screenCaptureToastIsHovering else { return }
+        guard let lastTick = screenCaptureToastLastTick else {
+            screenCaptureToastLastTick = Date()
+            return
+        }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastTick)
+        screenCaptureToastLastTick = now
+        guard elapsed.isFinite, elapsed > 0 else { return }
+
+        screenCaptureToastRemaining -= elapsed
+        let config = CiderConfig.load()
+        let duration = max(
+            TimeInterval(config.screenCaptureToastTimeout > 0
+                ? config.screenCaptureToastTimeout
+                : Int(ScreenCaptureToastDesign.autoHideDuration)),
+            0.01
+        )
+
+        if screenCaptureToastRemaining <= 0 {
+            screenCaptureToastModel.progress = 0
+            // Execute default action when timer expires
+            executeScreenCaptureDefaultAction()
+            return
+        }
+
+        screenCaptureToastModel.progress = max(0, min(1, screenCaptureToastRemaining / duration))
+    }
+
+    private func executeScreenCaptureDefaultAction() {
+        dismissScreenCaptureToast()
+    }
+
+    private func dismissScreenCaptureToast() {
+        stopScreenCaptureToastTimer()
+        screenCaptureToastPanel?.orderOut(nil)
     }
 
     // MARK: - Debug Logging
