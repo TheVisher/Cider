@@ -9,12 +9,16 @@
 /* Begin PBXBuildFile section */
 		B1A000000000000000000002 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000001 /* main.swift */; };
 		B1A000000000000000000015 /* Cider in Frameworks */ = {isa = PBXBuildFile; productRef = B1A000000000000000000014 /* Cider */; };
+		B1A000000000000000000018 /* TipTapEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000016 /* TipTapEditor */; };
+		B1A000000000000000000019 /* ReaderMode in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000017 /* ReaderMode */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		B1A000000000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		B1A000000000000000000003 /* Cider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cider.entitlements; sourceTree = "<group>"; };
 		B1A000000000000000000007 /* Cider.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cider.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1A000000000000000000016 /* TipTapEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TipTapEditor; path = "Sources/Cider/Resources/TipTapEditor"; sourceTree = SOURCE_ROOT; };
+		B1A000000000000000000017 /* ReaderMode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReaderMode; path = "Sources/Cider/Resources/ReaderMode"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -34,6 +38,8 @@
 			children = (
 				B1A000000000000000000005 /* Sources/CiderApp */,
 				B1A000000000000000000003 /* Cider.entitlements */,
+				B1A000000000000000000016 /* TipTapEditor */,
+				B1A000000000000000000017 /* ReaderMode */,
 				B1A000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -57,9 +63,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		B1A000000000000000000008 /* Cider */ = {
+		B1A000000000000000000008 /* CiderApp */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B1A00000000000000000000E /* Build configuration list for PBXNativeTarget "Cider" */;
+			buildConfigurationList = B1A00000000000000000000E /* Build configuration list for PBXNativeTarget "CiderApp" */;
 			buildPhases = (
 				B1A00000000000000000000A /* Sources */,
 				B1A00000000000000000000B /* Frameworks */,
@@ -69,7 +75,7 @@
 			);
 			dependencies = (
 			);
-			name = Cider;
+			name = CiderApp;
 			packageProductDependencies = (
 				B1A000000000000000000014 /* Cider */,
 			);
@@ -118,6 +124,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B1A000000000000000000018 /* TipTapEditor in Resources */,
+				B1A000000000000000000019 /* ReaderMode in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -274,6 +282,7 @@
 				PRODUCT_NAME = Cider;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_MODULE_NAME = CiderApp;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
@@ -299,6 +308,7 @@
 				PRODUCT_NAME = Cider;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_MODULE_NAME = CiderApp;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
@@ -315,7 +325,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		B1A00000000000000000000E /* Build configuration list for PBXNativeTarget "Cider" */ = {
+		B1A00000000000000000000E /* Build configuration list for PBXNativeTarget "CiderApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B1A000000000000000000011 /* Debug */,

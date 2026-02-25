@@ -12,24 +12,11 @@ let package = Package(
         .target(
             name: "Cider",
             path: "Sources/Cider",
-            resources: [
-                .copy("Resources/TipTapEditor"),
-                .copy("Resources/ReaderMode"),
-            ]
-        ),
-        // Thin CLI entry point — only used for `swift run`.
-        // The Xcode project (Cider.xcodeproj) owns the .app build.
-        .executableTarget(
-            name: "CiderLauncher",
-            dependencies: ["Cider"],
-            path: "Sources/CiderApp",
-            linkerSettings: [
-                .unsafeFlags([
-                    "-Xlinker", "-sectcreate",
-                    "-Xlinker", "__TEXT",
-                    "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/Cider/Resources/Info.plist"
-                ])
+            exclude: [
+                // Resources are bundled by the Xcode project (Cider.xcodeproj).
+                // swift build is used for compilation verification only.
+                "Resources/TipTapEditor",
+                "Resources/ReaderMode",
             ]
         ),
         .testTarget(

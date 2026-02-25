@@ -32,7 +32,7 @@ struct BookmarkReaderView: NSViewRepresentable {
         private var articleURL: URL?
 
         private static let readabilityJS: String? = {
-            guard let url = Bundle.module.url(
+            guard let url = Bundle.main.url(
                 forResource: "Readability", withExtension: "js",
                 subdirectory: "ReaderMode"
             ) else { return nil }
@@ -40,7 +40,7 @@ struct BookmarkReaderView: NSViewRepresentable {
         }()
 
         private static let readerCSS: String? = {
-            guard let url = Bundle.module.url(
+            guard let url = Bundle.main.url(
                 forResource: "reader", withExtension: "css",
                 subdirectory: "ReaderMode"
             ) else { return nil }
