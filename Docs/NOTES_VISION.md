@@ -289,6 +289,15 @@ The Notes and Whiteboard tabs serve different mental modes:
 
 The promotion flow: **Whiteboard blocks → select → "Create Note" → Notes tab**
 
+### Screen Capture → Note
+
+Screen capture (Opt+Cmd+2) is a first-class note creation path. When the routing toast's "Create Note" action fires:
+- Title: first meaningful OCR line (≤ 60 chars), fallback "Screen Capture"
+- Body: full OCR text from Vision framework
+- Screenshot saved as `{notesDir}/Attachments/{uuid}.png` and embedded in the note
+
+This means any visible text on screen — a chat message, a document, a code snippet — can become a searchable, editable note in one gesture.
+
 ### Todos / Planner Tab
 
 Now has its own vision doc: `Docs/TODOS_VISION.md`. The core idea remains: separate actionable items (todos) from captured thoughts (notes) and freeform brainstorming (whiteboard).

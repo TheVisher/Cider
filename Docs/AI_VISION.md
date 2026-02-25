@@ -373,7 +373,7 @@ This bridges natural language input to concrete app actions — the model unders
 **Phase 4: Deeper intelligence**
 
 - ✅ "Find similar" UI — `RelatedItemsView` in bookmark detail panel (up to 3 related items via `SimilarItemsService` + cosine similarity on `EmbeddingStore`)
-- Vision OCR for screenshot-based capture and image search indexing
+- ✅ Screen capture OCR — `ScreenCaptureService` (ScreenCaptureKit), `ScreenCaptureOCRRouter` (NSDataDetector), routing toast (Note / Date Card / Contact). Triggered by Opt+Cmd+2 hotkey or title bar button. Toast appears before Cider restores so it's never hidden behind the panel.
 - Smart folder suggestions based on content patterns
 - Auto-organize nudges ("You saved 12 React articles this week — create a folder?")
 - App Intents for Siri and Shortcuts integration
