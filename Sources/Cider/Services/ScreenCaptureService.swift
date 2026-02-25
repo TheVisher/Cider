@@ -173,48 +173,60 @@ private final class ScreenCaptureSelectionView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
-        // Semi-transparent dim overlay
-        ctx.setFillColor(NSColor.black.withAlphaComponent(0.5).cgColor)
-        ctx.fill(bounds)
+        let dimColor = NSColor.black.withAlphaComponent(0.35).cgColor
 
-        guard let sel = selectionRect, sel.width > 2, sel.height > 2 else { return }
+        if let sel = selectionRect, sel.width > 2, sel.height > 2 {
+            // Draw dim as 4 rects around the selection — avoids blend-mode issues in layer-backed views.
+            // The selection rectangle itself is left clear so the underlying screenshot shows through.
+            let top = CGRect(x: bounds.minX, y: sel.maxY,
+                             width: bounds.width, height: bounds.maxY - sel.maxY)
+            let bottom = CGRect(x: bounds.minX, y: bounds.minY,
+                                width: bounds.width, height: sel.minY - bounds.minY)
+            let left = CGRect(x: bounds.minX, y: sel.minY,
+                              width: sel.minX - bounds.minX, height: sel.height)
+            let right = CGRect(x: sel.maxX, y: sel.minY,
+                               width: bounds.maxX - sel.maxX, height: sel.height)
+            ctx.setFillColor(dimColor)
+            for r in [top, bottom, left, right] where r.width > 0 && r.height > 0 {
+                ctx.fill(r)
+            }
 
-        // Punch through dim to show live content in selection
-        ctx.setBlendMode(.clear)
-        ctx.fill(sel)
-        ctx.setBlendMode(.normal)
+            // Selection border
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
+            ctx.setLineWidth(1.5)
+            ctx.stroke(sel.insetBy(dx: -0.75, dy: -0.75))
 
-        // Selection border
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
-        ctx.setLineWidth(1.5)
-        ctx.stroke(sel.insetBy(dx: -0.75, dy: -0.75))
+            // Corner handles
+            let h: CGFloat = 6
+            let corners: [CGPoint] = [
+                CGPoint(x: sel.minX, y: sel.minY), CGPoint(x: sel.maxX, y: sel.minY),
+                CGPoint(x: sel.minX, y: sel.maxY), CGPoint(x: sel.maxX, y: sel.maxY)
+            ]
+            ctx.setFillColor(NSColor.white.cgColor)
+            for c in corners {
+                ctx.fill(CGRect(x: c.x - h / 2, y: c.y - h / 2, width: h, height: h))
+            }
 
-        // Corner handles
-        let h: CGFloat = 6
-        let corners: [CGPoint] = [
-            CGPoint(x: sel.minX, y: sel.minY), CGPoint(x: sel.maxX, y: sel.minY),
-            CGPoint(x: sel.minX, y: sel.maxY), CGPoint(x: sel.maxX, y: sel.maxY)
-        ]
-        ctx.setFillColor(NSColor.white.cgColor)
-        for c in corners {
-            ctx.fill(CGRect(x: c.x - h / 2, y: c.y - h / 2, width: h, height: h))
+            // Dimensions label
+            let label = "\(Int(sel.width)) × \(Int(sel.height))"
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+            let str = label as NSString
+            let labelSize = str.size(withAttributes: attrs)
+            let pad: CGFloat = 4
+            var lx = sel.midX - labelSize.width / 2
+            var ly = sel.maxY + 8
+            if ly + labelSize.height > bounds.maxY - 8 { ly = sel.minY - labelSize.height - 8 }
+            lx = max(pad, min(bounds.maxX - labelSize.width - pad, lx))
+            ctx.setFillColor(NSColor.black.withAlphaComponent(0.55).cgColor)
+            ctx.fill(CGRect(x: lx - pad, y: ly - 2,
+                            width: labelSize.width + pad * 2, height: labelSize.height + 4))
+            str.draw(at: CGPoint(x: lx, y: ly), withAttributes: attrs)
+        } else {
+            // No selection yet — dim the full screen
+            ctx.setFillColor(dimColor)
+            ctx.fill(bounds)
         }
-
-        // Dimensions label
-        let label = "\(Int(sel.width)) × \(Int(sel.height))"
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
-        let str = label as NSString
-        let labelSize = str.size(withAttributes: attrs)
-        let pad: CGFloat = 4
-        var lx = sel.midX - labelSize.width / 2
-        var ly = sel.maxY + 8
-        if ly + labelSize.height > bounds.maxY - 8 { ly = sel.minY - labelSize.height - 8 }
-        lx = max(pad, min(bounds.maxX - labelSize.width - pad, lx))
-
-        ctx.setFillColor(NSColor.black.withAlphaComponent(0.55).cgColor)
-        ctx.fill(CGRect(x: lx - pad, y: ly - 2, width: labelSize.width + pad * 2, height: labelSize.height + 4))
-        str.draw(at: CGPoint(x: lx, y: ly), withAttributes: attrs)
     }
 
     private var selectionRect: NSRect? {

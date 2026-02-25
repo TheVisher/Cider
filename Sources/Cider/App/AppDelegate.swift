@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenCaptureToastIsHovering = false
     private var screenCaptureToastRemaining: TimeInterval = ScreenCaptureToastDesign.autoHideDuration
     private var screenCaptureToastLastTick: Date?
+    private var screenCaptureWasVisible = false
 
     // Services
     private var servicesProvider: CiderServicesProvider?
@@ -1166,6 +1167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func performScreenCapture() {
         // Hide the Cider panel so it doesn't appear in the captured region
         let wasVisible = ciderPanel?.isVisible ?? false
+        screenCaptureWasVisible = wasVisible
         if wasVisible { hideCiderPanel() }
 
         Task { @MainActor in
@@ -1176,6 +1178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 image = try await ScreenCaptureService.capture()
             } catch ScreenCaptureService.CaptureError.permissionDenied {
+                screenCaptureWasVisible = false
                 if wasVisible { self.showCiderPanel() }
                 self.showBookmarkCaptureToast(
                     message: "Enable Screen Recording for Cider in System Settings",
@@ -1183,18 +1186,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 return
             } catch {
+                screenCaptureWasVisible = false
                 if wasVisible { self.showCiderPanel() }
                 return
             }
 
             guard let image else {
+                // User cancelled — restore panel immediately
+                screenCaptureWasVisible = false
                 if wasVisible { self.showCiderPanel() }
                 return
             }
 
-            if wasVisible { self.showCiderPanel() }
+            // Give the selection overlay a frame to fully dismiss before anything appears
+            try? await Task.sleep(for: .milliseconds(100))
 
-            // Run OCR and routing analysis
+            // Run OCR and routing analysis — Cider stays hidden until toast action or expiry
             let ocrText = await ScreenCaptureService.extractText(from: image)
             let route = ScreenCaptureOCRRouter.detectRoute(in: ocrText ?? "")
 
@@ -1332,12 +1339,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func executeScreenCaptureDefaultAction() {
+        let shouldRestorePanel = screenCaptureWasVisible
         dismissScreenCaptureToast()
+        if shouldRestorePanel { showCiderPanel() }
     }
 
     private func dismissScreenCaptureToast() {
         stopScreenCaptureToastTimer()
         screenCaptureToastPanel?.orderOut(nil)
+        screenCaptureWasVisible = false
     }
 
     // MARK: - Debug Logging
