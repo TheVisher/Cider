@@ -97,6 +97,11 @@ Each tab has its own vision doc capturing features, roadmaps, and brainstorming.
 - Thumbnail rendering patterns
 - CPU/performance fixes (filesystem watcher loops, view switching)
 
+### For Code Health & Cleanup
+**Read:** `Docs/CODE_HEALTH.md`
+- Open issues by severity, agent instructions for reviews
+- Removed Code Archive — inventory of deleted files/types with rationale (check git history to recover)
+
 ### Before Release
 **Read:** `Docs/RELEASE_CHECKLIST.md` - QA verification
 
@@ -172,18 +177,18 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 ```
 Sources/Cider/
 ├── App/              # Entry point, AppDelegate, Panels (CiderPanel, DetailPopover, Settings)
-├── Models/           # Data models (Bookmark, Note, Folder, Project, CiderConfig, TrashItem, CiderTab, LibraryDisplayMode)
-├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, TrashStorage, CiderUndoManager, SpotlightIndexer, etc.)
+├── Models/           # Data models (Bookmark, Note, Folder, CiderConfig, TrashItem, CiderTab, LibraryDisplayMode)
+├── Services/         # Business logic (DoubleTapDetector, BookmarksStorage, NotesStorage, TrashStorage, CiderUndoManager, SpotlightIndexer, AI/, etc.)
 ├── Utilities/        # Constants, CiderFont, CiderColors, ButtonStyles, ContainerStyles, HoverState, helpers
 ├── ViewModels/       # ObservableObject view models (BookmarksViewModel, NotesViewModel, SettingsViewModel)
 └── Views/
-    ├── Bookmarks/         # Bookmark browser, cards (BookmarkCard, BookmarkListRow), masonry layout, panel view
+    ├── Bookmarks/         # BookmarkCard, BookmarkListRow, BookmarkThumbnailView, BookmarkDetailsDraft, ReaderView
     ├── Home/              # Home dashboard (Continue section + Library feed)
-    ├── Notes/             # Notes editor, tab content, panel view
-    ├── Projects/          # Project tab content
+    ├── Notes/             # Inline editor (TipTapEditorView, InlineNoteEditorView), NoteCardView, NoteListRow
+    ├── Projects/          # (dormant — Project subsystem removed, tab stripped)
     ├── Search/            # Search palette and tab content
     ├── Settings/          # Settings views (General, About)
-    └── Shared/            # Reusable: CiderTabBar, FolderSidebarView, ViewOptionsDropdown, etc.
+    └── Shared/            # CiderTabBar, FolderSidebarView, FolderDetailView, ViewOptionsDropdown, SelectionCheckmark, etc.
 ```
 
 ## Panel Structure
@@ -377,3 +382,5 @@ The notes editor uses a TipTap/ProseMirror instance inside a WKWebView.
 - **SWIFT_MODULE_NAME on app target:** The Xcode app target sets `SWIFT_MODULE_NAME = CiderApp` to avoid a Swift module name collision with the SPM library (both would default to "Cider" from `PRODUCT_NAME = Cider`). Do not remove this setting.
 - **Bundle.module vs Bundle.main:** Resources excluded from SPM via `exclude:` in `Package.swift` (TipTapEditor, ReaderMode) are owned by the Xcode target. Those call sites use `Bundle.main`, not `Bundle.module`. If adding new SPM-excluded resources, update the call site too.
 - **Layer-backed NSView transparency:** `.clear` CGContext blend mode does NOT punch through to show content below in `wantsLayer = true` views — it clears the layer to transparent but the composited result depends on window blending, not the pixels below. To create a "hole" in a dim overlay (e.g. screen capture selection), draw the dim as 4 rects around the selection instead of fill-all + clear-hole.
+- **Nested types in dead files:** Before deleting a "dead" file, grep for ALL types it defines (not just the primary struct). BookmarksBrowserView.swift contained `BookmarkThumbnailView` and `BookmarkVisualStyle` used elsewhere.
+- **Use `os.Logger` not `print()`:** `print()` goes to stdout, invisible when app launches from Dock/menu bar. Use `Logger(subsystem: "com.cider.app", category: "ClassName")` with `.info()` / `.error()`.
