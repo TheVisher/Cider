@@ -4,7 +4,6 @@ enum CiderTab: Identifiable, Hashable {
     case home
     case savedView(id: UUID, name: String)
     case search(id: UUID, query: String)
-    // NOTE: .project case removed — Projects UI stripped. ProjectStorage kept dormant.
     case externalSource(id: UUID, name: String)
 
     static func == (lhs: CiderTab, rhs: CiderTab) -> Bool {

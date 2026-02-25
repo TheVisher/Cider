@@ -233,7 +233,7 @@ struct HomeDashboardView: View {
                 onOpen: {
                     handleNormalAction {
                         NotificationCenter.default.post(
-                            name: Notification.Name("cider.openExternalFile"),
+                            name: .openExternalFile,
                             object: nil,
                             userInfo: ["fileURL": file.path]
                         )
@@ -339,7 +339,7 @@ struct HomeDashboardView: View {
                 onOpen: {
                     handleNormalAction {
                         NotificationCenter.default.post(
-                            name: Notification.Name("cider.openExternalFile"),
+                            name: .openExternalFile,
                             object: nil,
                             userInfo: ["fileURL": file.path]
                         )
@@ -451,7 +451,7 @@ struct HomeDashboardView: View {
         case .contact(let contact): presentContactDetail(contact)
         case .externalFile(let file):
             NotificationCenter.default.post(
-                name: Notification.Name("cider.openExternalFile"),
+                name: .openExternalFile,
                 object: nil,
                 userInfo: ["fileURL": file.path]
             )

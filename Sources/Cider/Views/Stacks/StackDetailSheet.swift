@@ -210,7 +210,7 @@ struct StackDetailSheet: View {
             onOpenContact?(contact)
         case .externalFile(let file):
             NotificationCenter.default.post(
-                name: Notification.Name("cider.openExternalFile"),
+                name: .openExternalFile,
                 object: nil,
                 userInfo: ["fileURL": file.path]
             )

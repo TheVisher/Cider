@@ -1,9 +1,12 @@
 import AppKit
 import Carbon.HIToolbox
+import os
 
 /// Detects Option+Cmd+2 and posts `.requestScreenCapture`.
 /// Falls back to Carbon `RegisterEventHotKey` if CGEventTap creation fails.
 final class ScreenCaptureHotkeyDetector: @unchecked Sendable {
+
+    private let logger = Logger(subsystem: "com.cider.app", category: "ScreenCaptureHotkeyDetector")
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -34,9 +37,9 @@ final class ScreenCaptureHotkeyDetector: @unchecked Sendable {
 
         guard let tap = eventTap else {
             if registerHotKeyFallback() {
-                print("[ScreenCaptureHotkeyDetector] Started (Carbon hotkey fallback)")
+                logger.info("Started (Carbon hotkey fallback)")
             } else {
-                print("[ScreenCaptureHotkeyDetector] Failed to create event tap or fallback hotkey")
+                logger.error("Failed to create event tap or fallback hotkey")
             }
             return
         }
@@ -49,7 +52,7 @@ final class ScreenCaptureHotkeyDetector: @unchecked Sendable {
             CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
-        print("[ScreenCaptureHotkeyDetector] Started")
+        logger.info("Started")
     }
 
     func stop() {

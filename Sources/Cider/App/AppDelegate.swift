@@ -265,7 +265,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CardLabelStorage.shared.reload()
         CardStackStorage.shared.reload()
         SavedViewStorage.shared.reload()
-        ProjectStorage.shared.reload()
         ExternalSourceStorage.shared.reload()
 
         // Toggle automatic bookmark capture from copied URLs/images
@@ -431,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - External Sources
 
     private func observeSourcesNotifications() {
-        NotificationCenter.default.publisher(for: Notification.Name("cider.openExternalFile"))
+        NotificationCenter.default.publisher(for: .openExternalFile)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 guard let self,

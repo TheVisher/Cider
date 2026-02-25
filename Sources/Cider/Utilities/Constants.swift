@@ -29,8 +29,6 @@ extension Notification.Name {
     static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")
     static let maximizeCiderPanel = Notification.Name("cider.maximizeCiderPanel")
     static let openBookmarkDetails = Notification.Name("cider.openBookmarkDetails")
-    static let showBookmarkAddForm = Notification.Name("cider.showBookmarkAddForm")
-    static let triggerNewNoteInTab = Notification.Name("cider.triggerNewNoteInTab")
     static let showFolderCreationField = Notification.Name("cider.showFolderCreationField")
     static let showUndoToast = Notification.Name("cider.showUndoToast")
     static let pauseUndoToastDismiss = Notification.Name("cider.pauseUndoToastDismiss")
@@ -44,7 +42,7 @@ extension Notification.Name {
     static let expandCiderPanelForSlideOut = Notification.Name("cider.expandCiderPanelForSlideOut")
     static let restoreCiderPanelAfterSlideOut = Notification.Name("cider.restoreCiderPanelAfterSlideOut")
     static let requestScreenCapture = Notification.Name("cider.requestScreenCapture")
-    static let screenCaptureComplete = Notification.Name("cider.screenCaptureComplete")
+    static let openExternalFile = Notification.Name("cider.openExternalFile")
     static let openNewItemPopover = Notification.Name("cider.openNewItemPopover")
 }
 
@@ -90,93 +88,21 @@ enum Radius {
 // MARK: - Animation Presets
 
 enum CiderAnimation {
-    static let smooth: Animation = .smooth
     static let snappy: Animation = .snappy
-    static let bouncy: Animation = .bouncy
-
-    // Reduce Motion: 0.2s opacity crossfade per DESIGN_SYSTEM.md
-    static let reduceMotion: Animation = .linear(duration: 0.2)
-
-    // Custom springs
-    static let hoverMagnify = Animation.spring(duration: 0.25, bounce: 0.05)
-    static let listReorder = Animation.spring(duration: 0.3, bounce: 0.08)
-}
-
-// MARK: - Design System
-
-enum CiderDesign {
-    // Components
-    static let cornerRadius: CGFloat = Radius.xl
-    static let componentSpacing: CGFloat = Spacing.sm
-    static let iconSize: CGFloat = 44
-    static let iconCornerRadius: CGFloat = Radius.lg
-
-    // Compact mode
-    static let compactIconSize: CGFloat = 20
-
-    // Specific visual elements
-    static let runningIndicatorSize: CGFloat = 6
-    static let runningIndicatorOffset: CGFloat = 6
-
 }
 
 enum NotesDesign {
-    static let defaultWidth: CGFloat = 400
-    static let defaultHeight: CGFloat = 520
-    static let minWidth: CGFloat = 300
-    static let minHeight: CGFloat = 300
-    static let cornerRadius: CGFloat = Radius.lg
-    static let shadowPadding: CGFloat = 0
-    static let titleBarHeight: CGFloat = 40
     static let toolbarHeight: CGFloat = 36
     static let findBarHeight: CGFloat = 36
     static let toolbarButtonSize: CGFloat = 28
     static let toolbarIconSize: CGFloat = 11
     static let toolbarDividerHeight: CGFloat = 16
-    static let panelTopPadding: CGFloat = 20
-    static let panelBottomPadding: CGFloat = 15
-    static let panelCollapsedBottomPadding: CGFloat = panelTopPadding
-    static let collapsedContentHeight: CGFloat = titleBarHeight
     static let trafficLightDiameter: CGFloat = 12
     static let trafficLightTapTarget: CGFloat = Spacing.lg
     static let trafficLightSpacing: CGFloat = Spacing.xs
-    static let trafficLightSymbolSize: CGFloat = 7
-    static let collapseToggleAnimationDuration: TimeInterval = 0.18
-
-    static var panelDefaultWidth: CGFloat {
-        defaultWidth + shadowPadding * 2
-    }
-
-    static var panelDefaultHeight: CGFloat {
-        defaultHeight + panelTopPadding + shadowPadding + panelBottomPadding
-    }
-
-    static var panelMinWidth: CGFloat {
-        minWidth + shadowPadding * 2
-    }
-
-    static var panelMinHeight: CGFloat {
-        minHeight + panelTopPadding + shadowPadding + panelBottomPadding
-    }
-
-    static var panelCollapsedHeight: CGFloat {
-        collapsedContentHeight + panelTopPadding + panelCollapsedBottomPadding
-    }
 }
 
 enum BookmarksDesign {
-    static let panelWidth: CGFloat = 760
-    static let panelHeight: CGFloat = 620
-    static let panelMinWidth: CGFloat = 520
-    static let panelMinHeight: CGFloat = 420
-    static let panelCornerRadius: CGFloat = Radius.lg
-    static let panelShadowPadding: CGFloat = 40
-    static let panelTopPadding: CGFloat = 20
-    static let panelBottomPadding: CGFloat = 15
-    static let panelCollapsedBottomPadding: CGFloat = panelTopPadding
-
-    static let toolbarHeight: CGFloat = 40
-    static let collapsedContentHeight: CGFloat = toolbarHeight
     static let thumbnailHeightGrid: CGFloat = 140
     static let thumbnailHeightMasonryMin: CGFloat = 120
     static let thumbnailHeightMasonryMax: CGFloat = 360
@@ -194,56 +120,23 @@ enum BookmarksDesign {
     static let cardMinWidth: CGFloat = 220
     static let cardContentSpacing: CGFloat = Spacing.sm
     static let cardCornerRadius: CGFloat = Radius.md
-    static let cardSizePickerMaxWidth: CGFloat = 168
     static let folderSidebarWidth: CGFloat = 224
     static let folderSidebarRowMinHeight: CGFloat = 30
     static let folderSidebarIndent: CGFloat = 14
-    static let detailsRequiredPanelWidth: CGFloat = 980
-    static let detailsSheetMinWidth: CGFloat = 760
-    static let detailsSheetMaxWidth: CGFloat = 1540
-    static let detailsSheetMinHeight: CGFloat = 460
-    static let detailsSheetMaxHeight: CGFloat = 940
-    static let detailsCanvasCornerRadius: CGFloat = Radius.md
-    static let detailsCanvasInset: CGFloat = Spacing.sm
     static let detailsFloatingLiftBlur: CGFloat = 8
     static let detailsFloatingLiftYOffset: CGFloat = 3
-    static let detailsSidebarMinWidth: CGFloat = 300
-    static let detailsSidebarMaxWidth: CGFloat = 440
-    static let detailsSidebarWidthRatio: CGFloat = 0.34
     static let detailsSidebarFixedWidth: CGFloat = 300
-    static let detailsHeroMinHeight: CGFloat = 200
-    static let detailsHeroMaxHeight: CGFloat = 520
     static let detailsSlideOutMinWidth: CGFloat = 600
     static let detailsSlideOutFloatInset: CGFloat = Spacing.md
-    static let detailsSlideOutMinVisibleContent: CGFloat = 100
     static let detailsSlideOutExpandedPanelMinWidth: CGFloat = 900
     static let cardFallbackLetterSize: CGFloat = 26
     static let listFallbackLetterSize: CGFloat = 16
     static let detailsHeroFallbackLetterSize: CGFloat = 54
-    static let detailsSheetPreferredWidthRatio: CGFloat = 0.96
-    static let detailsSheetPreferredHeightRatio: CGFloat = 0.97
     static let detailsSheetURLMinHeight: CGFloat = 44
     static let detailsSheetNotesMinHeight: CGFloat = 120
     static let detailsSheetNotesHeight: CGFloat = 200
-    static let detailsBackdropOpacity: CGFloat = 0.14
     static let detailsContentBlurRadius: CGFloat = 12
-    static let folderShelfMinHeight: CGFloat = 132
-    static let folderShelfCardWidth: CGFloat = 168
-    static let folderShelfCardHeight: CGFloat = 88
-    static let folderShelfPreviewGridDimension: Int = 2
-    static let folderShelfPreviewGridSpacing: CGFloat = 2
-    static let folderShelfPreviewCornerRadius: CGFloat = Radius.xs
-    static let folderShelfPreviewCellWidth: CGFloat = 24
-    static let folderShelfPreviewCellHeight: CGFloat = 18
-    static let folderShelfPreviewLetterSize: CGFloat = 10
     static let folderShelfDragStateTimeout: TimeInterval = 8.0
-    static let folderShelfRailHeight: CGFloat = 34
-    static let folderShelfRailChipMinWidth: CGFloat = 112
-    static let folderFlyoutMenuWidth: CGFloat = 280
-    static let folderFlyoutRowHeight: CGFloat = 30
-    static let folderFlyoutMaxHeight: CGFloat = 200
-    static let folderFlyoutRowIndent: CGFloat = 14
-    static let folderFlyoutVerticalGap: CGFloat = Spacing.sm
     static let dragPreviewWidth: CGFloat = 188
     static let dragPreviewThumbnailHeight: CGFloat = 96
     static let dragPreviewScale: CGFloat = 0.86
@@ -254,20 +147,6 @@ enum BookmarksDesign {
     static let multiDragFanXStep: CGFloat = 16
     static let multiDragFanYStep: CGFloat = 8
     static let buttonTapTarget: CGFloat = 28
-    static let layoutPickerMaxWidth: CGFloat = 320
-    static let collapseToggleAnimationDuration: TimeInterval = 0.18
-
-    static var panelContentWidth: CGFloat {
-        panelWidth + panelShadowPadding * 2
-    }
-
-    static var panelContentHeight: CGFloat {
-        panelHeight + panelTopPadding + panelShadowPadding + panelBottomPadding
-    }
-
-    static var panelCollapsedHeight: CGFloat {
-        collapsedContentHeight + panelTopPadding + panelCollapsedBottomPadding
-    }
 }
 
 enum BookmarksToastDesign {
@@ -345,11 +224,8 @@ enum ScreenCaptureToastDesign {
 
 enum SearchPaletteDesign {
     static let paletteWidth: CGFloat = 560
-    static let paletteMaxHeight: CGFloat = 480
     static let resultsMaxHeight: CGFloat = 400
     static let searchFieldHeight: CGFloat = 52
-    static let backdropOpacity: CGFloat = 0.28
-    static let paletteVerticalOffset: CGFloat = 60
     static let recentBookmarkCount = 3
     static let recentNoteCount = 2
 }

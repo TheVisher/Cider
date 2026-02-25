@@ -1,8 +1,11 @@
 import SwiftUI
 import ServiceManagement
+import os
 
 @MainActor
 final class SettingsViewModel: ObservableObject {
+    private let logger = Logger(subsystem: "com.cider.app", category: "SettingsViewModel")
+
     // General settings
     @Published var launchAtLogin: Bool {
         didSet { updateLaunchAtLogin() }
@@ -186,7 +189,7 @@ final class SettingsViewModel: ObservableObject {
                     try SMAppService.mainApp.unregister()
                 }
             } catch {
-                print("Failed to update launch at login: \(error)")
+                logger.error("Failed to update launch at login: \(error, privacy: .public)")
             }
         }
     }

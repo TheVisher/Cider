@@ -180,7 +180,7 @@ struct SourceDetailView: View {
     private func openFile(_ file: ExternalFile) {
         selectedFileID = file.id
         NotificationCenter.default.post(
-            name: Notification.Name("cider.openExternalFile"),
+            name: .openExternalFile,
             object: nil,
             userInfo: ["fileURL": file.path]
         )

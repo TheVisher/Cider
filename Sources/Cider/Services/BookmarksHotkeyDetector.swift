@@ -1,9 +1,12 @@
 import AppKit
 import Carbon.HIToolbox
+import os
 
 /// Detects Option+B and Option+Shift+B to capture bookmarks.
 /// Posts `.captureBookmark` notification.
 final class BookmarksHotkeyDetector: @unchecked Sendable {
+
+    private let logger = Logger(subsystem: "com.cider.app", category: "BookmarksHotkeyDetector")
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -35,9 +38,9 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
 
         guard let eventTap else {
             if registerHotKeyFallback() {
-                print("[BookmarksHotkeyDetector] Started (Carbon hotkey fallback)")
+                logger.info("Started (Carbon hotkey fallback)")
             } else {
-                print("[BookmarksHotkeyDetector] Failed to create event tap or fallback hotkey")
+                logger.error("Failed to create event tap or fallback hotkey")
             }
             return
         }
@@ -51,7 +54,7 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
         }
 
         CGEvent.tapEnable(tap: eventTap, enable: true)
-        print("[BookmarksHotkeyDetector] Started")
+        logger.info("Started")
     }
 
     func stop() {
@@ -91,7 +94,7 @@ final class BookmarksHotkeyDetector: @unchecked Sendable {
             retainedForHotKey = false
         }
 
-        print("[BookmarksHotkeyDetector] Stopped")
+        logger.info("Stopped")
     }
 
     func setEnabled(_ enabled: Bool) {

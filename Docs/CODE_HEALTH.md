@@ -124,6 +124,7 @@ Directory updates now load notes asynchronously. Existing code/tests that assume
 - [ ]
 - File refs: `Sources/Cider/Services/NotesStorage.swift`, `Tests/CiderTests/NotesStorageRegressionTests.swift`
 - First reported: 2026-02-24
+- Re-verified: 2026-02-25 (`swift test` still fails at `NotesStorageRegressionTests.swift:39`, `storage.notes.count == 1` expectation)
 
 ### CH-C12 — Bookmark labels are not represented in unified library filtering (Medium)
 
@@ -251,13 +252,17 @@ Three instances of `.foregroundColor(.white)` on text/icons over colored backgro
 
 `SystemStatus.swift` and `FeatureSettings.swift` deleted (confirmed zero references). `ProjectTabContent.swift:16` reported as unused import was a false positive — only `import SwiftUI` exists at line 1 and is used; no change needed.
 
-### CH-L03 — Legacy tab/browser views appear unreferenced after panel consolidation (Low)
+### ~~CH-L03 — Legacy tab/browser views appear unreferenced after panel consolidation~~ ✅ Fixed 2026-02-25
 
-`BookmarksBrowserView`, `NotesTabContent`, `NotesBrowserView`, `FolderContentView`, and `RootFolderOverviewView` are all confirmed dead code — zero instantiation call sites in the current `CiderPanelView` flow. `FolderDetailView` replaced the folder views; Home/SavedView tabs replaced the browser views.
+Deleted 6 dead view files, 2 dormant subsystem files, and 1 unused utility. Extracted `BookmarkThumbnailView` and `BookmarkVisualStyle` to their own files before deleting `BookmarksBrowserView.swift`. Stripped `AccessibilityHelpers.swift` to only `promptIfNeeded()`. Pruned ~70 dead constants from `Constants.swift`. Removed dead `LibraryItem` V1 enum. Converted `print()` to `Logger` in 4 files. See "Removed Code Archive" section for full inventory.
+
+### CH-L04 — Persistent SPM warning for unhandled `Info.plist` resource (Low)
+
+`swift test` and package builds emit a warning that `Sources/Cider/Resources/Info.plist` is "unhandled". The app still builds/runs, but warning noise can hide real issues in CI/local runs.
 
 - [ ]
-- File refs: `Sources/Cider/Views/Bookmarks/BookmarksBrowserView.swift`, `Sources/Cider/Views/Notes/NotesTabContent.swift`, `Sources/Cider/Views/Notes/NotesBrowserView.swift`, `Sources/Cider/Views/Shared/FolderContentView.swift`, `Sources/Cider/Views/Shared/RootFolderOverviewView.swift`
-- First reported: 2026-02-24
+- File refs: `Package.swift`, `Sources/Cider/Resources/Info.plist`
+- First reported: 2026-02-25
 
 ---
 
@@ -274,3 +279,60 @@ Stale tests from the window-manager era referenced removed types. Resolved when 
 Docs previously described SQLite metadata storage; implementation is file/JSON-based. Documentation updated to reflect actual architecture.
 
 - Fixed: 2026-02
+
+---
+
+## Removed Code Archive
+
+> **Purpose:** Paper trail of intentionally deleted code. If you want to resurrect anything here, check `git log` for the last commit containing it.
+
+### 2026-02-25 — Dead Code Cleanup
+
+#### Deleted View Files
+
+| File | What It Was | Why Removed |
+|---|---|---|
+| `Views/Notes/NotesTabContent.swift` | Standalone Notes tab wrapper that instantiated NotesBrowserView | Superseded by Home tab + Saved View architecture; zero call sites |
+| `Views/Notes/NotesBrowserView.swift` | Notes browsing view with display modes, search, masonry/grid/list | Only caller was dead NotesTabContent; all functionality now lives in HomeDashboardView + FolderDetailView + SavedViewTabContent |
+| `Views/Shared/FolderContentView.swift` | Basic folder content list (bookmarks + notes rows) | Superseded by FolderDetailView which adds rich cards, masonry, sticky headers |
+| `Views/Shared/RootFolderOverviewView.swift` | Root folder overview with sub-folder cards and unsorted items | Superseded by FolderDetailView |
+| `Views/Bookmarks/BookmarksBrowserView.swift` | Standalone Bookmarks browser with display modes, drag-drop, toolbar | Superseded by Home + SavedView architecture. `BookmarkThumbnailView` and `BookmarkVisualStyle` were extracted to their own files before deletion. |
+| `Utilities/PopoverAnchorView.swift` | NSViewRepresentable for manual NSPopover positioning | Documented as broken in non-activating panels (CLAUDE.md); SwiftUI `.popover()` used everywhere instead |
+
+#### Deleted Dormant Subsystems
+
+| Files | What It Was | Why Removed |
+|---|---|---|
+| `Services/ProjectStorage.swift` + `Models/Project.swift` | Full CRUD storage for Projects feature (create, rename, archive, add items) | `.project` CiderTab case was removed; no UI references Projects; only `reload()` was called from AppDelegate |
+
+#### Stripped Down: AccessibilityHelpers.swift
+
+Removed 16+ unused AX window-management methods (appElement, windows, title, windowID, isMinimized, get/setWindowPosition, get/setWindowSize, get/setEnhancedUI, isFullScreen, exitFullScreen, coordinate converters, private `_AXUIElementGetWindow` SPI). These were from the original window-tiling feature. Only `promptIfNeeded()` (and its internal helpers `isTrusted`/`promptForTrust`) retained.
+
+#### Deleted Dead Types
+
+| Location | Type | What It Was |
+|---|---|---|
+| `Models/LibraryDisplayMode.swift` | `enum LibraryItem` | V1 discriminated union (.bookmark/.note). Fully superseded by `LibraryItemV2` which adds .dateCard, .contact, .externalFile |
+
+#### Pruned Constants (Constants.swift)
+
+| Removed | What It Was |
+|---|---|
+| `enum CiderDesign` (7 constants) | Generic design tokens (cornerRadius, componentSpacing, iconSize, etc.) — never referenced; views use Radius/Spacing tokens directly |
+| `CiderAnimation.smooth/.bouncy/.reduceMotion/.hoverMagnify/.listReorder` | Animation presets — code uses SwiftUI's `.smooth`/`.bouncy` directly; only `.snappy` was referenced |
+| `BookmarksDesign` panel/shelf/flyout/detail-sheet groups (~35 constants) | Sizing for standalone bookmarks panel, folder shelf UI, folder flyout menus, detail sheet — all from pre-consolidation architecture |
+| `NotesDesign` panel sizing group (~13 constants) | Sizing for standalone notes panel — now inline in CiderPanel |
+| `SearchPaletteDesign.paletteMaxHeight/.backdropOpacity/.paletteVerticalOffset` | Unused palette sizing constants |
+| `.showBookmarkAddForm` notification | Never posted anywhere — observer existed in dead BookmarksBrowserView |
+| `.triggerNewNoteInTab` notification | Never posted or observed |
+| `.screenCaptureComplete` notification | Never posted or observed — screen capture flow uses toast model directly |
+
+#### Other Cleanup
+
+| Change | Detail |
+|---|---|
+| `print()` → `Logger` in hotkey detectors | BookmarksHotkeyDetector, NotesHotkeyDetector, ScreenCaptureHotkeyDetector — `print()` goes to stdout (invisible at runtime); converted to os.Logger |
+| `print()` → `Logger` in SettingsViewModel | SMAppService error logging |
+| `"cider.openExternalFile"` → typed constant | Raw string literal used in 7+ files; now `.openExternalFile` in Constants.swift |
+| Renamed `BookmarkDetailsSheet.swift` → `BookmarkDetailsDraft.swift` | File contains `BookmarkDetailsDraft`, `BookmarkMetadataSidebar`, `BookmarkDetailsHeroPreview` — not a "details sheet" |

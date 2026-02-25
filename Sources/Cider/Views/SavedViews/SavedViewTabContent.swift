@@ -733,7 +733,7 @@ struct SavedViewTabContent: View {
                     width: .infinity,
                     onOpen: {
                         NotificationCenter.default.post(
-                            name: Notification.Name("cider.openExternalFile"),
+                            name: .openExternalFile,
                             object: nil,
                             userInfo: ["fileURL": file.path]
                         )
@@ -902,7 +902,7 @@ struct SavedViewTabContent: View {
                 width: cardSizing.bookmarkSizing.cardMinWidth,
                 onOpen: {
                     NotificationCenter.default.post(
-                        name: Notification.Name("cider.openExternalFile"),
+                        name: .openExternalFile,
                         object: nil,
                         userInfo: ["fileURL": file.path]
                     )

@@ -1,9 +1,12 @@
 import AppKit
 import Carbon.HIToolbox
+import os
 
 /// Detects Option+N keyboard shortcut to toggle the inline note editor.
 /// Posts `.toggleNoteEditor` notification.
 final class NotesHotkeyDetector: @unchecked Sendable {
+
+    private let logger = Logger(subsystem: "com.cider.app", category: "NotesHotkeyDetector")
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -35,9 +38,9 @@ final class NotesHotkeyDetector: @unchecked Sendable {
 
         guard let eventTap else {
             if registerHotKeyFallback() {
-                print("[NotesHotkeyDetector] Started (Carbon hotkey fallback)")
+                logger.info("Started (Carbon hotkey fallback)")
             } else {
-                print("[NotesHotkeyDetector] Failed to create event tap or fallback hotkey")
+                logger.error("Failed to create event tap or fallback hotkey")
             }
             return
         }
@@ -52,7 +55,7 @@ final class NotesHotkeyDetector: @unchecked Sendable {
         }
 
         CGEvent.tapEnable(tap: eventTap, enable: true)
-        print("[NotesHotkeyDetector] Started")
+        logger.info("Started")
     }
 
     func stop() {
@@ -87,7 +90,7 @@ final class NotesHotkeyDetector: @unchecked Sendable {
             retainedForHotKey = false
         }
 
-        print("[NotesHotkeyDetector] Stopped")
+        logger.info("Stopped")
     }
 
     func setEnabled(_ enabled: Bool) {
