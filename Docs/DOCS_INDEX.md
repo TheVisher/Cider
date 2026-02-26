@@ -11,6 +11,7 @@
 | Doc | What it's for |
 | --- | --- |
 | **DOCS_INDEX.md** | This file. The map. |
+| **BETA_ROADMAP.md** | **READ FIRST EVERY SESSION.** The single source of truth for beta features, progress tracking, gate process, and agent behavior rules. |
 | **QUICK_REFERENCE.md** | Slash commands, end-of-session workflow, how to use Claude effectively on this project. |
 | **CODE_HEALTH.md** | Living bug/debt tracker. Known issues, open findings from code reviews, items to fix. Check off when fixed, add new ones when found. |
 
