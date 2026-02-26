@@ -294,13 +294,13 @@ struct Bookmark: Identifiable, Hashable, Codable {
         guard let thumbnailRelativePath, !thumbnailRelativePath.isEmpty else {
             return nil
         }
-        return StoragePaths.cachedCiderDataDirectoryURL.appendingPathComponent(thumbnailRelativePath)
+        return StoragePaths.cachedDirectoryURL(for: .bookmarks).appendingPathComponent(thumbnailRelativePath)
     }
 
     var originalImageFileURL: URL? {
         guard let originalImageRelativePath, !originalImageRelativePath.isEmpty else {
             return nil
         }
-        return StoragePaths.cachedCiderDataDirectoryURL.appendingPathComponent(originalImageRelativePath)
+        return StoragePaths.cachedDirectoryURL(for: .bookmarks).appendingPathComponent(originalImageRelativePath)
     }
 }

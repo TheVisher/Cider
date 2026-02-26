@@ -22,7 +22,7 @@ final class EmbeddingStore {
     private var saveTask: Task<Void, Never>?
 
     private var storeFileURL: URL {
-        let dir = StoragePaths.ciderDataDirectoryURL()
+        let dir = StoragePaths.vaultDirectoryURL()
         let aiDir = dir.appendingPathComponent(".ai", isDirectory: true)
         StoragePaths.ensureDirectory(aiDir)
         return aiDir.appendingPathComponent("embeddings.json")

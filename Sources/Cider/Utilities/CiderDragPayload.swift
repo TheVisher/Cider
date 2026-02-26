@@ -45,8 +45,7 @@ enum NoteDragPayload {
 
     static func registerPublicFileURL(on provider: NSItemProvider, note: Note) {
         guard !note.relativePath.isEmpty else { return }
-        let dir = NSString(string: StoragePaths.notesDirectoryPath).expandingTildeInPath
-        let fileURL = URL(fileURLWithPath: dir).appendingPathComponent(note.relativePath)
+        let fileURL = StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(note.relativePath)
         provider.registerDataRepresentation(
             forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
         ) { completion in

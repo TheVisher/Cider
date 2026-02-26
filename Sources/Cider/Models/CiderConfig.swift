@@ -94,12 +94,16 @@ struct CiderConfig: Codable {
         case detailModalMode
     }
 
-    // CodingKeys: keeps JSON key "bookmarksDirectory" for backward compat with existing UserDefaults data
+    // Legacy keys for reading old config format (pre-vault)
+    private enum LegacyDirectoryKeys: String, CodingKey {
+        case ciderDataDirectory = "bookmarksDirectory"
+        case notesDirectory
+    }
+
     private enum CodingKeys: String, CodingKey {
         case showMenuBarIcon
         case textSize
         case activationMode
-        case notesDirectory
         case enableNotesHotkey
         case notesEditorTextSize
         case enableBookmarksHotkey
@@ -107,7 +111,8 @@ struct CiderConfig: Codable {
         case autoCaptureCopiedURLs
         case confirmCopiedURLBeforeSave
         case autoCaptureCopiedImages
-        case ciderDataDirectory = "bookmarksDirectory"
+        case vaultDirectory
+        case directoryOverrides
         case rememberPanelPosition
         case bookmarksDefaultViewMode
         case bookmarksCardSize
@@ -142,7 +147,6 @@ struct CiderConfig: Codable {
     var showMenuBarIcon: Bool
     var textSize: TextSize
     var activationMode: ActivationMode
-    var notesDirectory: String  // Directory for notes .md files
     var enableNotesHotkey: Bool  // Enable Option+N to create note
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
     var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
@@ -150,7 +154,8 @@ struct CiderConfig: Codable {
     var autoCaptureCopiedURLs: Bool  // Automatically save copied URLs as bookmarks
     var confirmCopiedURLBeforeSave: Bool  // Require explicit save/discard for copied URLs
     var autoCaptureCopiedImages: Bool  // Detect copied images and offer to save as bookmark
-    var ciderDataDirectory: String  // Directory for Cider data (bookmarks, contacts, stacks, labels, date cards, saved views, projects)
+    var vaultDirectory: String  // Root directory for all Cider data (~/CiderVault)
+    var directoryOverrides: [String: String]  // Per-StorageType overrides, keyed by StorageType.rawValue
     var rememberPanelPosition: Bool  // Reopen the panel at its last position and size
     var bookmarksDefaultViewMode: BookmarkDisplayMode  // Default bookmarks layout mode
     var bookmarksCardSize: BookmarkCardSize  // Default bookmark card size preset
@@ -188,7 +193,6 @@ struct CiderConfig: Codable {
             showMenuBarIcon: true,
             textSize: .medium,
             activationMode: .doubleTap,
-            notesDirectory: "~/Documents/Cider/Notes",
             enableNotesHotkey: true,
             notesEditorTextSize: .normal,
             enableBookmarksHotkey: true,
@@ -196,7 +200,8 @@ struct CiderConfig: Codable {
             autoCaptureCopiedURLs: false,
             confirmCopiedURLBeforeSave: false,
             autoCaptureCopiedImages: false,
-            ciderDataDirectory: "~/Documents/Cider/Bookmarks",
+            vaultDirectory: "~/CiderVault",
+            directoryOverrides: [:],
             rememberPanelPosition: true,
             bookmarksDefaultViewMode: .masonry,
             bookmarksCardSize: .comfortable,
@@ -230,31 +235,8 @@ struct CiderConfig: Codable {
             return .default
         }
 
-        // Try to decode, handling missing fields gracefully
         do {
-            var config = try JSONDecoder().decode(CiderConfig.self, from: data)
-            var didMigrate = false
-
-            if config.notesDirectory == "~/Documents/Cider Notes" {
-                config.notesDirectory = "~/Documents/Cider/Notes"
-                didMigrate = true
-            }
-
-            let expandedLegacyNotes = NSString(string: "~/Documents/Cider Notes").expandingTildeInPath
-            if config.notesDirectory == expandedLegacyNotes {
-                config.notesDirectory = "~/Documents/Cider/Notes"
-                didMigrate = true
-            }
-
-            if config.ciderDataDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                config.ciderDataDirectory = "~/Documents/Cider/Bookmarks"
-                didMigrate = true
-            }
-
-            if didMigrate {
-                config.save()
-            }
-
+            let config = try JSONDecoder().decode(CiderConfig.self, from: data)
             return config
         } catch {
             NSLog("[Cider] Config decode error: \(error). Using defaults (saved config preserved).")
@@ -268,13 +250,12 @@ struct CiderConfig: Codable {
         }
     }
 
-    // Custom decoding to handle missing fields
+    // Custom decoding to handle missing fields + backward compat from pre-vault config
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
         activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
-        notesDirectory = try container.decodeIfPresent(String.self, forKey: .notesDirectory) ?? "~/Documents/Cider/Notes"
         enableNotesHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableNotesHotkey) ?? true
         notesEditorTextSize = try container.decodeIfPresent(
             NotesEditorTextSize.self,
@@ -297,10 +278,38 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .autoCaptureCopiedImages
         ) ?? false
-        ciderDataDirectory = try container.decodeIfPresent(
+
+        // Vault directory + overrides (with backward compat from pre-vault config)
+        vaultDirectory = try container.decodeIfPresent(
             String.self,
-            forKey: .ciderDataDirectory
-        ) ?? "~/Documents/Cider/Bookmarks"
+            forKey: .vaultDirectory
+        ) ?? Self.default.vaultDirectory
+        var overrides = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .directoryOverrides
+        ) ?? [:]
+
+        // Migrate legacy keys: if vaultDirectory was missing in JSON, check old keys
+        if !container.contains(.vaultDirectory) {
+            let legacyContainer = try decoder.container(keyedBy: LegacyDirectoryKeys.self)
+            if let oldBookmarksDir = try legacyContainer.decodeIfPresent(String.self, forKey: .ciderDataDirectory),
+               oldBookmarksDir != "~/Documents/Cider/Bookmarks" {
+                overrides[StorageType.bookmarks.rawValue] = oldBookmarksDir
+                // Contacts, date cards, stacks, labels, saved views, sources were also in this dir
+                overrides[StorageType.contacts.rawValue] = oldBookmarksDir
+                overrides[StorageType.dateCards.rawValue] = oldBookmarksDir
+                overrides[StorageType.stacks.rawValue] = oldBookmarksDir
+                overrides[StorageType.labels.rawValue] = oldBookmarksDir
+                overrides[StorageType.savedViews.rawValue] = oldBookmarksDir
+                overrides[StorageType.sources.rawValue] = oldBookmarksDir
+            }
+            if let oldNotesDir = try legacyContainer.decodeIfPresent(String.self, forKey: .notesDirectory),
+               oldNotesDir != "~/Documents/Cider/Notes" {
+                overrides[StorageType.notes.rawValue] = oldNotesDir
+            }
+        }
+        directoryOverrides = overrides
+
         rememberPanelPosition = try container.decodeIfPresent(
             Bool.self,
             forKey: .rememberPanelPosition
@@ -405,7 +414,6 @@ struct CiderConfig: Codable {
         showMenuBarIcon: Bool = true,
         textSize: TextSize = .medium,
         activationMode: ActivationMode = .doubleTap,
-        notesDirectory: String = "~/Documents/Cider/Notes",
         enableNotesHotkey: Bool = true,
         notesEditorTextSize: NotesEditorTextSize = .normal,
         enableBookmarksHotkey: Bool = true,
@@ -413,7 +421,8 @@ struct CiderConfig: Codable {
         autoCaptureCopiedURLs: Bool = false,
         confirmCopiedURLBeforeSave: Bool = false,
         autoCaptureCopiedImages: Bool = false,
-        ciderDataDirectory: String = "~/Documents/Cider/Bookmarks",
+        vaultDirectory: String = "~/CiderVault",
+        directoryOverrides: [String: String] = [:],
         rememberPanelPosition: Bool = true,
         bookmarksDefaultViewMode: BookmarkDisplayMode = .masonry,
         bookmarksCardSize: BookmarkCardSize = .comfortable,
@@ -447,7 +456,6 @@ struct CiderConfig: Codable {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
         self.activationMode = activationMode
-        self.notesDirectory = notesDirectory
         self.enableNotesHotkey = enableNotesHotkey
         self.notesEditorTextSize = notesEditorTextSize
         self.enableBookmarksHotkey = enableBookmarksHotkey
@@ -455,7 +463,8 @@ struct CiderConfig: Codable {
         self.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
         self.autoCaptureCopiedImages = autoCaptureCopiedImages
-        self.ciderDataDirectory = ciderDataDirectory
+        self.vaultDirectory = vaultDirectory
+        self.directoryOverrides = directoryOverrides
         self.rememberPanelPosition = rememberPanelPosition
         self.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         self.bookmarksCardSize = bookmarksCardSize

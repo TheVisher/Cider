@@ -302,19 +302,19 @@ struct SettingsView: View {
 
         case .dataDirectories:
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Directories") {
+                SettingsSection(title: "Vault Location") {
                     HStack {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text("Cider data")
+                            Text("Cider Vault")
                                 .font(CiderFont.body)
                                 .foregroundColor(CiderColors.primary)
 
-                            Text(viewModel.ciderDataDirectory)
+                            Text(viewModel.vaultDirectory)
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                                 .lineLimit(1)
 
-                            Text("Bookmarks, contacts, stacks, labels, date cards, saved views")
+                            Text("Default location for all Cider data")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
                                 .lineLimit(1)
@@ -323,42 +323,57 @@ struct SettingsView: View {
                         Spacer()
 
                         Button("Choose...") {
-                            chooseCiderDataDirectory()
+                            chooseVaultDirectory()
                         }
                         .controlSize(.small)
                     }
+                }
 
-                    Divider()
-                        .opacity(CiderColors.dividerSecondaryOpacity)
+                SettingsSection(title: "Directory Overrides") {
+                    Text("Point individual data types to custom locations (e.g., Notes to an Obsidian vault).")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
 
-                    HStack {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text("Notes")
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.primary)
-
-                            Text(viewModel.notesDirectory)
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.tertiary)
-                                .lineLimit(1)
-
-                            Text("Note files (.md)")
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.quaternary)
-                                .lineLimit(1)
+                    ForEach(overrideableTypes, id: \.self) { type in
+                        if type != overrideableTypes.first {
+                            Divider()
+                                .opacity(CiderColors.dividerSecondaryOpacity)
                         }
 
-                        Spacer()
+                        HStack {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                Text(type.rawValue)
+                                    .font(CiderFont.body)
+                                    .foregroundColor(CiderColors.primary)
 
-                        Button("Choose...") {
-                            chooseNotesDirectory()
+                                Text(viewModel.displayPath(for: type))
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(
+                                        viewModel.hasOverride(for: type)
+                                            ? CiderColors.secondary
+                                            : CiderColors.quaternary
+                                    )
+                                    .lineLimit(1)
+                            }
+
+                            Spacer()
+
+                            if viewModel.hasOverride(for: type) {
+                                Button("Reset") {
+                                    viewModel.clearDirectoryOverride(for: type)
+                                }
+                                .controlSize(.small)
+                            }
+
+                            Button("Override...") {
+                                chooseDirectoryOverride(for: type)
+                            }
+                            .controlSize(.small)
                         }
-                        .controlSize(.small)
                     }
+                }
 
-                    Divider()
-                        .opacity(CiderColors.dividerSecondaryOpacity)
-
+                SettingsSection(title: "Indexing") {
                     SettingsToggleRow(
                         title: "Spotlight indexing",
                         subtitle: "Index Cider items for Spotlight, Raycast, and Alfred (requires .app bundle)",
@@ -418,40 +433,46 @@ struct SettingsView: View {
         }
     }
 
-    private func chooseNotesDirectory() {
+    private var overrideableTypes: [StorageType] {
+        [.bookmarks, .notes, .contacts, .dateCards, .stacks, .labels, .savedViews, .sources]
+    }
+
+    private func chooseVaultDirectory() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        panel.message = "Select a directory for Cider notes"
+        panel.message = "Select a root directory for the Cider Vault"
 
+        NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, let url = panel.url {
             let path = url.path
             let home = NSHomeDirectory()
             if path.hasPrefix(home) {
-                viewModel.notesDirectory = "~" + path.dropFirst(home.count)
+                viewModel.vaultDirectory = "~" + path.dropFirst(home.count)
             } else {
-                viewModel.notesDirectory = path
+                viewModel.vaultDirectory = path
             }
         }
     }
 
-    private func chooseCiderDataDirectory() {
+    private func chooseDirectoryOverride(for type: StorageType) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        panel.message = "Select a directory for Cider data"
+        panel.message = "Select a directory for \(type.rawValue)"
 
+        NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, let url = panel.url {
             let path = url.path
             let home = NSHomeDirectory()
             if path.hasPrefix(home) {
-                viewModel.ciderDataDirectory = "~" + path.dropFirst(home.count)
+                viewModel.setDirectoryOverride(for: type, path: "~" + path.dropFirst(home.count))
             } else {
-                viewModel.ciderDataDirectory = path
+                viewModel.setDirectoryOverride(for: type, path: path)
             }
         }
     }

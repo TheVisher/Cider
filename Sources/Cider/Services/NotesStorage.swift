@@ -56,9 +56,7 @@ final class NotesStorage: ObservableObject {
     private var index: [UUID: NoteIndexEntry] = [:]
 
     private init() {
-        let config = CiderConfig.load()
-        let path = NSString(string: config.notesDirectory).expandingTildeInPath
-        self.directoryURL = URL(fileURLWithPath: path)
+        self.directoryURL = StoragePaths.directoryURL(for: .notes)
         ensureDirectory()
         startDirectoryWatcher()
         let dirURL = directoryURL

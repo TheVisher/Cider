@@ -36,6 +36,71 @@ Bookmarks participate in the cross-entity label and stack system alongside date 
   - Tag concert/event bookmarks with a "Tickets" label → a stack filters for upcoming events
   - Color-code bookmarks by project or person for quick visual scanning in mixed-content views
 
+## Future: Related Links Per Bookmark (Single Product, Multiple Sources)
+
+For product-like saves (apps, tools, services), Cider should support one bookmark with multiple source links instead of forcing users into multiple separate bookmarks.
+
+- Keep the one-item mental model:
+  - A single bookmark remains the canonical item.
+  - One `primary URL` (first captured link) plus `related links` in metadata.
+- Keep stacks focused on grouping multiple items:
+  - Stacks remain cross-item organization.
+  - Related links are per-item enrichment, not a stack substitute.
+
+### Metadata Actions (Planned)
+
+- `Add Related Link` (manual entry)
+- `Suggest Related Content` (AI-assisted scan)
+
+### Suggested Flow (Planned)
+
+1. User opens bookmark detail panel.
+2. User clicks `Suggest Related Content`.
+3. Cider extracts canonical entity signals (name, publisher, source domain).
+4. High-confidence pass searches for official site / app store / GitHub / docs.
+5. If confidence is low, run broader semantic/fuzzy pass.
+6. Show candidate links with type, confidence, and short reason.
+7. User explicitly selects links to attach (never auto-attach silently).
+
+### Suggested Related Link Types (Planned)
+
+- `official_site`
+- `app_store`
+- `play_store`
+- `github_repo`
+- `github_org`
+- `docs`
+- `support`
+- `pricing`
+- `changelog`
+- `community`
+
+### Data Shape (Planned)
+
+Add per-bookmark related links metadata:
+
+```swift
+struct RelatedLink: Codable, Identifiable {
+    var id: UUID
+    var urlCanonical: String
+    var type: String
+    var title: String?
+    var confidence: Int?          // 0...100 for AI suggestions
+    var reason: String?           // why this was suggested
+    var source: String            // manual | ai_suggested | accepted_ai
+    var createdAt: Date
+}
+```
+
+### Ranking Guardrails (Planned)
+
+- Score exact entity/publisher/domain matches highest.
+- Prefer trusted platforms (`apps.apple.com`, `github.com`, official domain).
+- Canonicalize/dedupe URLs before display.
+- Penalize likely collisions (same name, different publisher/category).
+- Hide low-confidence results behind an explicit "show low confidence" action.
+- Require user confirmation before attach.
+
 <!-- Removed: Standalone panel resize handle bug fix — standalone BookmarksPanel was removed in Feb 2026 panel consolidation. Bookmarks are now browsed exclusively in the main panel. -->
 
 ---

@@ -28,8 +28,7 @@ struct Note: Identifiable, Hashable {
     var resolvedContent: String {
         if !content.isEmpty { return content }
         guard !relativePath.isEmpty else { return "" }
-        let expanded = NSString(string: StoragePaths.notesDirectoryPath).expandingTildeInPath
-        let fileURL = URL(fileURLWithPath: expanded).appendingPathComponent(relativePath)
+        let fileURL = StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(relativePath)
         return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
     }
 
@@ -46,8 +45,7 @@ struct Note: Identifiable, Hashable {
     func imageURLs(from text: String) -> [URL] {
         guard !text.isEmpty else { return [] }
         var urls: [URL] = []
-        let expanded = NSString(string: StoragePaths.notesDirectoryPath).expandingTildeInPath
-        let baseURL = URL(fileURLWithPath: expanded)
+        let baseURL = StoragePaths.cachedDirectoryURL(for: .notes)
 
         // Markdown images: ![alt](./.attachments/file.png) or ![alt](path)
         let mdMatches = Self.mdImageRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))

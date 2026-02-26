@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         AccessibilityHelpers.promptIfNeeded()
+        StoragePaths.ensureVaultStructure()
 
         configureSettings()
         configureNotes()
@@ -251,13 +252,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         updateGlobalHotkeyEnablement()
 
-        // Update notes directory if changed
-        let expandedDir = NSString(string: config.notesDirectory).expandingTildeInPath
-        NotesStorage.shared.updateDirectory(to: expandedDir)
+        // Update storage directories from vault paths
+        let notesDir = StoragePaths.directoryURL(for: .notes).path
+        NotesStorage.shared.updateDirectory(to: notesDir)
 
-        // Update bookmarks directory if changed
-        let expandedBookmarksDir = NSString(string: config.ciderDataDirectory).expandingTildeInPath
-        BookmarksStorage.shared.updateDirectory(to: expandedBookmarksDir)
+        let bookmarksDir = StoragePaths.directoryURL(for: .bookmarks).path
+        BookmarksStorage.shared.updateDirectory(to: bookmarksDir)
 
         // Reload shared-data storages (they use computed fileURL, just need a fresh load)
         ContactStorage.shared.reload()

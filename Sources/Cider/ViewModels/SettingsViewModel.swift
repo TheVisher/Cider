@@ -30,9 +30,6 @@ final class SettingsViewModel: ObservableObject {
     @Published var enableNotesHotkey: Bool {
         didSet { saveConfig() }
     }
-    @Published var notesDirectory: String {
-        didSet { saveConfig() }
-    }
     @Published var notesEditorTextSize: NotesEditorTextSize {
         didSet { saveConfig() }
     }
@@ -53,9 +50,15 @@ final class SettingsViewModel: ObservableObject {
     @Published var autoCaptureCopiedImages: Bool {
         didSet { saveConfig() }
     }
-    @Published var ciderDataDirectory: String {
+
+    // Vault
+    @Published var vaultDirectory: String {
         didSet { saveConfig() }
     }
+    @Published var directoryOverrides: [String: String] {
+        didSet { saveConfig() }
+    }
+
     @Published var rememberPanelPosition: Bool {
         didSet { saveConfig() }
     }
@@ -113,14 +116,14 @@ final class SettingsViewModel: ObservableObject {
         self.textSize = config.textSize
         self.activationMode = config.activationMode
         self.enableNotesHotkey = config.enableNotesHotkey
-        self.notesDirectory = config.notesDirectory
         self.notesEditorTextSize = config.notesEditorTextSize
         self.enableBookmarksHotkey = config.enableBookmarksHotkey
         self.enableBookmarksCaptureHotkey = config.enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = config.autoCaptureCopiedURLs
         self.confirmCopiedURLBeforeSave = config.confirmCopiedURLBeforeSave
         self.autoCaptureCopiedImages = config.autoCaptureCopiedImages
-        self.ciderDataDirectory = config.ciderDataDirectory
+        self.vaultDirectory = config.vaultDirectory
+        self.directoryOverrides = config.directoryOverrides
         self.rememberPanelPosition = config.rememberPanelPosition
         self.enableSpotlightIndexing = config.enableSpotlightIndexing
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
@@ -145,19 +148,54 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
+    /// Returns the resolved path for a storage type (override or vault default).
+    func resolvedPath(for type: StorageType) -> String {
+        if let override = directoryOverrides[type.rawValue], !override.isEmpty {
+            return override
+        }
+        let expanded = NSString(string: vaultDirectory).expandingTildeInPath
+        return URL(fileURLWithPath: expanded).appendingPathComponent(type.rawValue).path
+    }
+
+    /// Returns the display-friendly path with ~ for home directory.
+    func displayPath(for type: StorageType) -> String {
+        let path = resolvedPath(for: type)
+        let home = NSHomeDirectory()
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
+    /// Whether a storage type has an active override.
+    func hasOverride(for type: StorageType) -> Bool {
+        if let override = directoryOverrides[type.rawValue], !override.isEmpty {
+            return true
+        }
+        return false
+    }
+
+    func setDirectoryOverride(for type: StorageType, path: String) {
+        directoryOverrides[type.rawValue] = path
+    }
+
+    func clearDirectoryOverride(for type: StorageType) {
+        directoryOverrides.removeValue(forKey: type.rawValue)
+    }
+
     private func saveConfig() {
         config.showMenuBarIcon = showMenuBarIcon
         config.textSize = textSize
         config.activationMode = activationMode
         config.enableNotesHotkey = enableNotesHotkey
-        config.notesDirectory = notesDirectory
         config.notesEditorTextSize = notesEditorTextSize
         config.enableBookmarksHotkey = enableBookmarksHotkey
         config.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         config.autoCaptureCopiedURLs = autoCaptureCopiedURLs
         config.confirmCopiedURLBeforeSave = confirmCopiedURLBeforeSave
         config.autoCaptureCopiedImages = autoCaptureCopiedImages
-        config.ciderDataDirectory = ciderDataDirectory
+        config.vaultDirectory = vaultDirectory
+        config.directoryOverrides = directoryOverrides
         config.rememberPanelPosition = rememberPanelPosition
         config.enableSpotlightIndexing = enableSpotlightIndexing
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode

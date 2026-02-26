@@ -14,7 +14,7 @@ final class ContactStorage: ObservableObject {
 
     private let fileName = "_cider_contacts.json"
     private var fileURL: URL {
-        let dir = StoragePaths.ciderDataDirectoryURL()
+        let dir = StoragePaths.directoryURL(for: .contacts)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }
@@ -81,7 +81,7 @@ final class ContactStorage: ObservableObject {
     // MARK: - Avatar Storage
 
     func avatarDirectoryURL() -> URL {
-        StoragePaths.ciderDataDirectoryURL().appendingPathComponent(".contact-avatars", isDirectory: true)
+        StoragePaths.directoryURL(for: .contacts).appendingPathComponent(".contact-avatars", isDirectory: true)
     }
 
     func avatarURL(for id: UUID) -> URL {

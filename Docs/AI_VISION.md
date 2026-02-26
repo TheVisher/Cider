@@ -179,6 +179,50 @@ This is a Tier 1 feature (NaturalLanguage framework, no Apple Intelligence requi
 
 ---
 
+## Related Link Suggestion (Entity-Scoped)
+
+This is distinct from "Similar Items Discovery." Similar items finds relationships between items already in Cider. Related link suggestion enriches a single bookmark with additional URLs about the same entity (for example: App Store page + GitHub repo + official site for one app).
+
+### Product Direction (Planned)
+
+- Keep one canonical bookmark per product/entity.
+- Add related links as metadata on that bookmark.
+- Provide two entry points in detail view:
+  - `Add Related Link` (manual)
+  - `Suggest Related Content` (AI-assisted)
+- Suggestions are always user-confirmed before attachment.
+
+### Suggested Pipeline (Planned)
+
+1. Extract entity signals from the current bookmark:
+   - normalized name
+   - publisher/developer/org
+   - source domain
+2. Run high-confidence discovery first:
+   - official site
+   - App Store / Play Store listing
+   - GitHub repo/org
+   - docs/support pages
+3. Run broader semantic/fuzzy discovery only if needed.
+4. Rank with confidence and include a short reason string.
+5. Dedupe/canonicalize URLs and present top candidates for selection.
+
+### Ranking Signals (Planned)
+
+- Positive:
+  - exact entity name match
+  - publisher/developer match
+  - trusted platform match
+  - path/type match (`/docs`, GitHub org/repo pattern)
+  - official root-domain alignment
+- Negative:
+  - conflicting publisher/category
+  - weak common-term-only matches
+  - already-saved duplicates
+  - low-trust/suspicious domains
+
+---
+
 ## The Auto-Enrichment Pipeline
 
 When a user captures a bookmark, this happens automatically — all on-device, all instant:

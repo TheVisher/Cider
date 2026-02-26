@@ -13,7 +13,7 @@ final class DateCardStorage: ObservableObject {
 
     private let fileName = "_cider_date_cards.json"
     private var fileURL: URL {
-        let dir = StoragePaths.ciderDataDirectoryURL()
+        let dir = StoragePaths.directoryURL(for: .dateCards)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }

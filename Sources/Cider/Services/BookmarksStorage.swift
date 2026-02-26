@@ -38,9 +38,7 @@ final class BookmarksStorage: ObservableObject {
     private var directoryURL: URL
 
     private init() {
-        let config = CiderConfig.load()
-        let expanded = NSString(string: config.ciderDataDirectory).expandingTildeInPath
-        directoryURL = URL(fileURLWithPath: expanded)
+        directoryURL = StoragePaths.directoryURL(for: .bookmarks)
         ensureDirectory()
 
         // Read files off the main thread; parse and apply on MainActor

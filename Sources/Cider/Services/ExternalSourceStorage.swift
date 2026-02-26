@@ -13,7 +13,7 @@ final class ExternalSourceStorage: ObservableObject {
 
     private let fileName = "_cider_sources.json"
     private var fileURL: URL {
-        let dir = StoragePaths.ciderDataDirectoryURL()
+        let dir = StoragePaths.directoryURL(for: .sources)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }

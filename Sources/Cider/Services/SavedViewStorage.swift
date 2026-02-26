@@ -13,7 +13,7 @@ final class SavedViewStorage: ObservableObject {
 
     private let fileName = "_cider_saved_views.json"
     private var fileURL: URL {
-        let dir = StoragePaths.ciderDataDirectoryURL()
+        let dir = StoragePaths.directoryURL(for: .savedViews)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }

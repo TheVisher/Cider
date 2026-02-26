@@ -72,10 +72,7 @@ final class TrashStorage {
     func restoreBookmark(_ trashItem: TrashItem) {
         guard let payload = trashItem.bookmarkPayload else { return }
 
-        let config = CiderConfig.load()
-        let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-        )
+        let bookmarksDir = StoragePaths.directoryURL(for: .bookmarks)
         let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
@@ -149,10 +146,7 @@ final class TrashStorage {
     func restoreNote(_ trashItem: TrashItem) {
         guard let payload = trashItem.notePayload else { return }
 
-        let config = CiderConfig.load()
-        let notesDir = URL(
-            fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
-        )
+        let notesDir = StoragePaths.directoryURL(for: .notes)
         let trashDir = notesDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
@@ -185,8 +179,8 @@ final class TrashStorage {
 
     // MARK: - Date Card Trash
 
-    func trashDateCard(_ dateCard: DateCard, ciderDir: URL) -> TrashItem {
-        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+    func trashDateCard(_ dateCard: DateCard, dateCardsDir: URL) -> TrashItem {
+        let trashDir = dateCardsDir.appendingPathComponent(trashDirName)
         try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
         let payload = DateCardTrashPayload(dateCard: dateCard)
@@ -205,8 +199,8 @@ final class TrashStorage {
     func restoreDateCard(_ trashItem: TrashItem) {
         guard let payload = trashItem.dateCardPayload else { return }
 
-        let ciderDir = StoragePaths.ciderDataDirectoryURL()
-        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+        let dateCardsDir = StoragePaths.directoryURL(for: .dateCards)
+        let trashDir = dateCardsDir.appendingPathComponent(trashDirName)
 
         DateCardStorage.shared.restoreFromTrash(payload.dateCard)
         removeFromManifest(trashItem.id, trashDir: trashDir)
@@ -214,8 +208,8 @@ final class TrashStorage {
 
     // MARK: - Contact Trash
 
-    func trashContact(_ contact: ContactCard, ciderDir: URL) -> TrashItem {
-        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+    func trashContact(_ contact: ContactCard, contactsDir: URL) -> TrashItem {
+        let trashDir = contactsDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
         try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
@@ -223,7 +217,7 @@ final class TrashStorage {
         let contactAvatarsDirName = "contact-avatars"
         var trashAvatarRelPath: String?
         if contact.hasAvatar {
-            let avatarSrc = ciderDir.appendingPathComponent(".contact-avatars/\(contact.id.uuidString).jpg")
+            let avatarSrc = contactsDir.appendingPathComponent(".contact-avatars/\(contact.id.uuidString).jpg")
             if fm.fileExists(atPath: avatarSrc.path) {
                 let trashAvatarsDir = trashDir.appendingPathComponent(contactAvatarsDirName)
                 try? fm.createDirectory(at: trashAvatarsDir, withIntermediateDirectories: true)
@@ -238,7 +232,7 @@ final class TrashStorage {
         for ref in contact.linkedEntities where ref.type == .dateCard {
             if let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) {
                 _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
-                let cascadedItem = trashDateCard(dateCard, ciderDir: ciderDir)
+                let cascadedItem = trashDateCard(dateCard, dateCardsDir: StoragePaths.directoryURL(for: .dateCards))
                 cascadedIDs.append(cascadedItem.id)
             }
         }
@@ -264,14 +258,14 @@ final class TrashStorage {
     func restoreContact(_ trashItem: TrashItem) {
         guard let payload = trashItem.contactPayload else { return }
 
-        let ciderDir = StoragePaths.ciderDataDirectoryURL()
-        let trashDir = ciderDir.appendingPathComponent(trashDirName)
+        let contactsDir = StoragePaths.directoryURL(for: .contacts)
+        let trashDir = contactsDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
         // Restore avatar file
         if let avatarRelPath = payload.trashAvatarRelativePath {
             let srcURL = trashDir.appendingPathComponent(avatarRelPath)
-            let destURL = ciderDir.appendingPathComponent(".contact-avatars/\(payload.contact.id.uuidString).jpg")
+            let destURL = contactsDir.appendingPathComponent(".contact-avatars/\(payload.contact.id.uuidString).jpg")
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.createDirectory(
                     at: destURL.deletingLastPathComponent(),
@@ -317,16 +311,16 @@ final class TrashStorage {
     // MARK: - All Items
 
     func allTrashItems() -> [TrashItem] {
-        let config = CiderConfig.load()
-        let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-        )
-        let notesDir = URL(
-            fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
-        )
-        let bookmarksItems = loadManifest(trashDir: bookmarksDir.appendingPathComponent(trashDirName))
-        let notesItems = loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
-        return (bookmarksItems + notesItems).sorted { $0.deletedAt > $1.deletedAt }
+        let bookmarksDir = StoragePaths.directoryURL(for: .bookmarks)
+        let notesDir = StoragePaths.directoryURL(for: .notes)
+        let dateCardsDir = StoragePaths.directoryURL(for: .dateCards)
+        let contactsDir = StoragePaths.directoryURL(for: .contacts)
+        var items: [TrashItem] = []
+        items += loadManifest(trashDir: bookmarksDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: dateCardsDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: contactsDir.appendingPathComponent(trashDirName))
+        return items.sorted { $0.deletedAt > $1.deletedAt }
     }
 
     // MARK: - Purge
@@ -334,21 +328,13 @@ final class TrashStorage {
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let config = CiderConfig.load()
-        let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-        )
-        let notesDir = URL(
-            fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
-        )
-        purgeExpired(
-            olderThan: cutoff,
-            in: bookmarksDir.appendingPathComponent(trashDirName)
-        )
-        purgeExpired(
-            olderThan: cutoff,
-            in: notesDir.appendingPathComponent(trashDirName)
-        )
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .contacts]
+        for type in trashTypes {
+            purgeExpired(
+                olderThan: cutoff,
+                in: StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
+            )
+        }
     }
 
     private func purgeExpired(olderThan cutoff: Date, in trashDir: URL) {
@@ -366,20 +352,13 @@ final class TrashStorage {
     // MARK: - Permanent Delete
 
     func permanentlyDelete(_ trashItem: TrashItem) {
-        let config = CiderConfig.load()
         switch trashItem.itemType {
         case .bookmark:
-            let bookmarksDir = URL(
-                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-            )
-            let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
+            let trashDir = StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .note:
-            let notesDir = URL(
-                fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
-            )
-            let trashDir = notesDir.appendingPathComponent(trashDirName)
+            let trashDir = StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .folder:
@@ -387,20 +366,15 @@ final class TrashStorage {
                 permanentlyDelete(content)
             }
         case .dateCard:
-            let ciderDir = URL(
-                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-            )
-            let trashDir = ciderDir.appendingPathComponent(trashDirName)
+            let trashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .contact:
-            let ciderDir = URL(
-                fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-            )
-            let trashDir = ciderDir.appendingPathComponent(trashDirName)
+            let trashDir = StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             // Permanently delete cascaded date cards
             if let payload = trashItem.contactPayload {
-                let manifest = loadManifest(trashDir: trashDir)
+                let dateCardsTrashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
+                let manifest = loadManifest(trashDir: dateCardsTrashDir)
                 for cascadedID in payload.cascadedDateCardTrashIDs {
                     if let cascadedItem = manifest.first(where: { $0.id == cascadedID }) {
                         permanentlyDelete(cascadedItem)
@@ -412,23 +386,13 @@ final class TrashStorage {
     }
 
     func emptyTrash() {
-        let config = CiderConfig.load()
-        let bookmarksDir = URL(
-            fileURLWithPath: NSString(string: config.ciderDataDirectory).expandingTildeInPath
-        )
-        let notesDir = URL(
-            fileURLWithPath: NSString(string: config.notesDirectory).expandingTildeInPath
-        )
-        let bookmarksTrashDir = bookmarksDir.appendingPathComponent(trashDirName)
-        let notesTrashDir = notesDir.appendingPathComponent(trashDirName)
-
-        let bookmarkItems = loadManifest(trashDir: bookmarksTrashDir)
-        for item in bookmarkItems { deleteFilesForItem(item, trashDir: bookmarksTrashDir) }
-        saveManifest([], trashDir: bookmarksTrashDir)
-
-        let noteItems = loadManifest(trashDir: notesTrashDir)
-        for item in noteItems { deleteFilesForItem(item, trashDir: notesTrashDir) }
-        saveManifest([], trashDir: notesTrashDir)
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .contacts]
+        for type in trashTypes {
+            let trashDir = StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
+            let items = loadManifest(trashDir: trashDir)
+            for item in items { deleteFilesForItem(item, trashDir: trashDir) }
+            saveManifest([], trashDir: trashDir)
+        }
     }
 
     // MARK: - Private Helpers

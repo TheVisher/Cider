@@ -13,7 +13,7 @@ final class CardStackStorage: ObservableObject {
 
     private let fileName = "_cider_stacks.json"
     private var fileURL: URL {
-        let dir = StoragePaths.ciderDataDirectoryURL()
+        let dir = StoragePaths.directoryURL(for: .stacks)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }
