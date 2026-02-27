@@ -98,6 +98,13 @@ struct BookmarkCard: View {
                     }
                 }
                 .buttonStyle(.plain)
+
+                if !bookmark.labelIDs.isEmpty {
+                    TagPillRow(
+                        labelIDs: bookmark.labelIDs,
+                        labels: CardLabelStorage.shared.labels
+                    )
+                }
             }
         }
         .padding(Spacing.sm)
@@ -127,7 +134,14 @@ struct BookmarkCard: View {
             onShowDetails: onShowDetails,
             onRefetchMetadata: { BookmarksStorage.shared.refetchMetadata(for: bookmark.id) },
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
-            onDelete: onDelete
+            onDelete: onDelete,
+            onToggleLabel: { labelID in
+                if bookmark.labelIDs.contains(labelID) {
+                    _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: labelID)
+                } else {
+                    _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: labelID)
+                }
+            }
         )
         .onDrop(
             of: Self.thumbnailDropTypeIdentifiers,

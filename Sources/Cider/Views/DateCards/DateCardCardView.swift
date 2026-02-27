@@ -101,6 +101,13 @@ struct DateCardCardView: View {
                             .lineLimit(3)
                     }
                 }
+
+                if !dateCard.labelIDs.isEmpty {
+                    TagPillRow(
+                        labelIDs: dateCard.labelIDs,
+                        labels: CardLabelStorage.shared.labels
+                    )
+                }
             }
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,9 +119,19 @@ struct DateCardCardView: View {
             onOpen: { onOpen?() },
             onToggleComplete: { onToggleComplete?() },
             isCompleted: dateCard.isCompleted,
+            labelIDs: dateCard.labelIDs,
             folders: folders,
             onMoveToFolder: { onMoveToFolder?($0) },
-            onDelete: { onDelete?() }
+            onDelete: { onDelete?() },
+            onToggleLabel: { labelID in
+                var updated = dateCard
+                if updated.labelIDs.contains(labelID) {
+                    updated.labelIDs.removeAll { $0 == labelID }
+                } else {
+                    updated.labelIDs.append(labelID)
+                }
+                _ = DateCardStorage.shared.updateDateCard(updated)
+            }
         )
     }
 
@@ -213,9 +230,19 @@ struct DateCardListRow: View {
             onOpen: { onOpen?() },
             onToggleComplete: { onToggleComplete?() },
             isCompleted: dateCard.isCompleted,
+            labelIDs: dateCard.labelIDs,
             folders: folders,
             onMoveToFolder: { onMoveToFolder?($0) },
-            onDelete: { onDelete?() }
+            onDelete: { onDelete?() },
+            onToggleLabel: { labelID in
+                var updated = dateCard
+                if updated.labelIDs.contains(labelID) {
+                    updated.labelIDs.removeAll { $0 == labelID }
+                } else {
+                    updated.labelIDs.append(labelID)
+                }
+                _ = DateCardStorage.shared.updateDateCard(updated)
+            }
         )
     }
 

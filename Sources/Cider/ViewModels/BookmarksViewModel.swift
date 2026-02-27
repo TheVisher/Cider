@@ -197,12 +197,13 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
-    func updateDetails(for bookmark: Bookmark, title: String, notes: String, tags: [String], urlString: String? = nil) -> Bool {
+    func updateDetails(for bookmark: Bookmark, title: String, notes: String, tags: [String], labelIDs: [UUID]? = nil, urlString: String? = nil) -> Bool {
         BookmarksStorage.shared.updateDetails(
             for: bookmark.id,
             title: title,
             notes: notes,
             tags: tags,
+            labelIDs: labelIDs,
             urlString: urlString
         )
     }

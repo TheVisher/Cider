@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Shows either a tag manager (all tags grid) or a single-tag filtered items view.
+/// Shows either a tag manager (all tags grid) or a filtered items view for selected tags.
 struct TagDetailView: View {
-    var tagID: UUID?
+    var tagIDs: Set<UUID>
     var showManager: Bool
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
@@ -26,8 +26,8 @@ struct TagDetailView: View {
     var body: some View {
         if showManager {
             tagManagerView
-        } else if let tagID, let label = labelStorage.label(for: tagID) {
-            singleTagView(label)
+        } else if !tagIDs.isEmpty {
+            filteredTagView
         } else {
             tagManagerView
         }
@@ -126,10 +126,14 @@ struct TagDetailView: View {
         .padding(Spacing.xxl)
     }
 
-    // MARK: - Single Tag View (Filtered Items)
+    // MARK: - Filtered Tag View (Single or Multi-Tag)
 
-    private func singleTagView(_ label: CardLabel) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private var filteredTagView: some View {
+        let resolvedLabels = tagIDs.compactMap { labelStorage.label(for: $0) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let totalCount = tagIDs.reduce(0) { $0 + itemCount(for: $1) }
+
+        return VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack(spacing: Spacing.sm) {
                 Button(action: onBack) {
@@ -139,15 +143,25 @@ struct TagDetailView: View {
                 }
                 .buttonStyle(.plain)
 
-                Circle()
-                    .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                    .frame(width: 10, height: 10)
+                if resolvedLabels.count == 1, let label = resolvedLabels.first {
+                    Circle()
+                        .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                        .frame(width: 10, height: 10)
 
-                Text(label.name)
-                    .font(CiderFont.subheadingSemibold)
-                    .foregroundColor(CiderColors.primary)
+                    Text(label.name)
+                        .font(CiderFont.subheadingSemibold)
+                        .foregroundColor(CiderColors.primary)
+                } else {
+                    Image(systemName: "tag")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
 
-                Text("\(itemCount(for: label.id)) items")
+                    Text("\(resolvedLabels.count) tags")
+                        .font(CiderFont.subheadingSemibold)
+                        .foregroundColor(CiderColors.primary)
+                }
+
+                Text("\(totalCount) items")
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
 
@@ -177,7 +191,7 @@ struct TagDetailView: View {
                 onEditContact: onEditContact,
                 onOpenDateCard: onOpenDateCard,
                 onOpenContact: onOpenContact,
-                activeLabelIDs: Set([label.id])
+                activeLabelIDs: tagIDs
             )
         }
     }
@@ -205,7 +219,7 @@ struct TagDetailView: View {
     }
 
     private func deleteTag(_ id: UUID) {
-        if tagID == id {
+        if tagIDs.contains(id), tagIDs.count <= 1 {
             onBack()
         }
         CardLabelStorage.shared.deleteLabel(id)

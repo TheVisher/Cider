@@ -92,6 +92,16 @@ final class DateCardStorage: ObservableObject {
         dateCards.first { $0.id == id }
     }
 
+    func removeLabelsFromAll(labelID: UUID) {
+        var changed = false
+        for i in dateCards.indices where dateCards[i].labelIDs.contains(labelID) {
+            dateCards[i].labelIDs.removeAll { $0 == labelID }
+            dateCards[i].updatedAt = Date()
+            changed = true
+        }
+        if changed { persist() }
+    }
+
     func restoreFromTrash(_ dateCard: DateCard) {
         guard !dateCards.contains(where: { $0.id == dateCard.id }) else { return }
         dateCards.append(dateCard)

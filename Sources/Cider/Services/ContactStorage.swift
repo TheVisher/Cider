@@ -71,6 +71,16 @@ final class ContactStorage: ObservableObject {
         contacts.first { $0.id == id }
     }
 
+    func removeLabelsFromAll(labelID: UUID) {
+        var changed = false
+        for i in contacts.indices where contacts[i].labelIDs.contains(labelID) {
+            contacts[i].labelIDs.removeAll { $0 == labelID }
+            contacts[i].updatedAt = Date()
+            changed = true
+        }
+        if changed { persist() }
+    }
+
     func restoreFromTrash(_ contact: ContactCard) {
         guard !contacts.contains(where: { $0.id == contact.id }) else { return }
         contacts.append(contact)

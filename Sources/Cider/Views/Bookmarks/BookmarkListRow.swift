@@ -109,7 +109,14 @@ struct BookmarkListRow: View {
             onShowDetails: onShowDetails,
             onRefetchMetadata: { BookmarksStorage.shared.refetchMetadata(for: bookmark.id) },
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
-            onDelete: onDelete
+            onDelete: onDelete,
+            onToggleLabel: { labelID in
+                if bookmark.labelIDs.contains(labelID) {
+                    _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: labelID)
+                } else {
+                    _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: labelID)
+                }
+            }
         )
         .ciderDraggable(dragProvider) {
             if let preview = dragPreviewOverride {

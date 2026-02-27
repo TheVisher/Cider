@@ -126,6 +126,7 @@ struct CiderConfig: Codable {
         case subFoldersCollapsed
         case homeDisplayMode
         case homeCardSizeScale
+        case tagsCollapsed
         case enableLinkedSources
         case trashRetentionDays
         case captureToastPosition
@@ -168,6 +169,7 @@ struct CiderConfig: Codable {
     var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
     var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
     var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
+    var tagsCollapsed: Bool  // Whether the sidebar tags section is collapsed
     var enableLinkedSources: Bool  // Feature flag for external directory linking
     var trashRetentionDays: Int  // 0 = never auto-purge, default 30
     var captureToastPosition: ToastPosition  // Position for bookmark capture toast
@@ -209,6 +211,7 @@ struct CiderConfig: Codable {
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
             homeDisplayMode: .list,
+            tagsCollapsed: false,
             enableLinkedSources: false,
             trashRetentionDays: 30,
             captureToastPosition: .topCenterScreen,
@@ -361,6 +364,7 @@ struct CiderConfig: Codable {
             Double.self,
             forKey: .homeCardSizeScale
         )
+        tagsCollapsed = try container.decodeIfPresent(Bool.self, forKey: .tagsCollapsed) ?? false
         enableLinkedSources = try container.decodeIfPresent(
             Bool.self,
             forKey: .enableLinkedSources
@@ -429,6 +433,7 @@ struct CiderConfig: Codable {
         subFoldersCollapsed: Bool = false,
         homeDisplayMode: LibraryDisplayMode = .list,
         homeCardSizeScale: Double? = nil,
+        tagsCollapsed: Bool = false,
         enableLinkedSources: Bool = false,
         trashRetentionDays: Int = 30,
         captureToastPosition: ToastPosition = .topCenterScreen,
@@ -470,6 +475,7 @@ struct CiderConfig: Codable {
         self.subFoldersCollapsed = subFoldersCollapsed
         self.homeDisplayMode = homeDisplayMode
         self.homeCardSizeScale = homeCardSizeScale
+        self.tagsCollapsed = tagsCollapsed
         self.enableLinkedSources = enableLinkedSources
         self.trashRetentionDays = trashRetentionDays
         self.captureToastPosition = captureToastPosition

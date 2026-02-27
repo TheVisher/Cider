@@ -10,6 +10,7 @@ struct BookmarkDetailsDraft: Equatable {
     let updatedAt: Date
     var title: String
     var tagsText: String
+    var labelIDs: [UUID]
     var notes: String
     var folderID: UUID?
 
@@ -23,6 +24,7 @@ struct BookmarkDetailsDraft: Equatable {
         updatedAt = bookmark.updatedAt
         title = bookmark.title
         tagsText = bookmark.tags.joined(separator: ", ")
+        labelIDs = bookmark.labelIDs
         notes = bookmark.notes
         folderID = bookmark.folderID
     }
@@ -46,16 +48,19 @@ struct BookmarkMetadataSidebar: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
+    @ObservedObject private var labelStorage = CardLabelStorage.shared
 
     @State private var isEditingNotes = false
     @State private var saveDebounceTask: Task<Void, Never>?
     @State private var fileSize: String?
     @State private var newTagText: String = ""
     @State private var copiedHex: String?
+    @State private var showAddTagPicker = false
 
     @State private var isSourceExpanded = true
     @State private var isFolderExpanded = true
     @State private var isTagsExpanded = true
+    @State private var isKeywordsExpanded = false
     @State private var isNotesExpanded = true
     @State private var isPropertiesExpanded = true
     @State private var isAIExpanded = true
@@ -86,6 +91,12 @@ struct BookmarkMetadataSidebar: View {
                     sectionDivider
                     tagsSection
                         .padding(.vertical, Spacing.md)
+
+                    if !parsedTags.isEmpty {
+                        sectionDivider
+                        keywordsSection
+                            .padding(.vertical, Spacing.md)
+                    }
 
                     sectionDivider
                     notesSection
@@ -312,33 +323,26 @@ struct BookmarkMetadataSidebar: View {
         }
     }
 
-    // MARK: - Tags
+    // MARK: - Tags (CardLabel-based)
 
-    private var parsedTags: [String] {
-        draft.tagsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-
-    private func removeTag(_ tag: String) {
-        let updated = parsedTags.filter { $0.lowercased() != tag.lowercased() }
-        draft.tagsText = updated.joined(separator: ", ")
-    }
-
-    private func commitNewTag() {
-        var text = newTagText
-        if text.hasSuffix(",") { text = String(text.dropLast()) }
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { newTagText = ""; return }
-        var tags = parsedTags
-        guard !tags.contains(where: { $0.lowercased() == trimmed.lowercased() }) else {
-            newTagText = ""
-            return
+    private var assignedLabels: [CardLabel] {
+        draft.labelIDs.compactMap { id in
+            labelStorage.labels.first(where: { $0.id == id })
         }
-        tags.append(trimmed)
-        draft.tagsText = tags.joined(separator: ", ")
-        newTagText = ""
+    }
+
+    private var unassignedLabels: [CardLabel] {
+        let assigned = Set(draft.labelIDs)
+        return labelStorage.labels.filter { !assigned.contains($0.id) }
+    }
+
+    private func toggleLabel(_ labelID: UUID) {
+        if let idx = draft.labelIDs.firstIndex(of: labelID) {
+            draft.labelIDs.remove(at: idx)
+        } else {
+            draft.labelIDs.append(labelID)
+        }
+        scheduleSave()
     }
 
     @ViewBuilder
@@ -348,58 +352,98 @@ struct BookmarkMetadataSidebar: View {
 
             if isTagsExpanded {
                 TagFlowLayout(spacing: Spacing.xs) {
-                    ForEach(parsedTags, id: \.self) { tag in
-                        HStack(spacing: 3) {
-                            Text(tag)
-                                .font(CiderFont.label(scale: textScale))
-                                .foregroundColor(CiderColors.primary)
-                                .lineLimit(1)
-                            Button {
-                                removeTag(tag)
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
-                                    .foregroundColor(CiderColors.tertiary)
+                    ForEach(assignedLabels) { label in
+                        TagPillView(
+                            label: label,
+                            onRemove: { toggleLabel(label.id) }
+                        )
+                    }
+
+                    // + Add Tag button with menu
+                    Menu {
+                        if unassignedLabels.isEmpty && labelStorage.labels.isEmpty {
+                            Button("New Tag...") {
+                                let newLabel = CardLabelStorage.shared.createLabel(
+                                    name: "New Tag",
+                                    colorHex: CardLabelStorage.randomPresetColor()
+                                )
+                                draft.labelIDs.append(newLabel.id)
+                                scheduleSave()
                             }
-                            .buttonStyle(.plain)
+                        } else {
+                            ForEach(unassignedLabels) { label in
+                                Button {
+                                    toggleLabel(label.id)
+                                } label: {
+                                    HStack(spacing: Spacing.xs) {
+                                        Circle()
+                                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                                            .frame(width: 8, height: 8)
+                                        Text(label.name)
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            Button("New Tag...") {
+                                let newLabel = CardLabelStorage.shared.createLabel(
+                                    name: "New Tag",
+                                    colorHex: CardLabelStorage.randomPresetColor()
+                                )
+                                draft.labelIDs.append(newLabel.id)
+                                scheduleSave()
+                            }
                         }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
+                            Text("Add Tag")
+                                .font(CiderFont.caption(scale: textScale))
+                        }
+                        .foregroundColor(CiderColors.controlAccent)
                         .padding(.horizontal, Spacing.xs)
                         .padding(.vertical, Spacing.xxs)
                         .background(
                             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                                .fill(CiderColors.surfaceInput)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                                .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                                .fill(CiderColors.accentSubtle)
                         )
                     }
+                    .menuStyle(.borderlessButton)
+                }
+            }
+        }
+    }
 
-                    TextField(parsedTags.isEmpty ? "Add tags…" : "Add tag…", text: $newTagText)
-                        .font(CiderFont.label(scale: textScale))
-                        .foregroundColor(CiderColors.primary)
-                        .textFieldStyle(.plain)
-                        .frame(minWidth: 64)
-                        .padding(.horizontal, Spacing.xs)
-                        .padding(.vertical, Spacing.xxs)
-                        .onSubmit { commitNewTag() }
-                        .onChange(of: newTagText) { _, new in
-                            if new.contains(",") {
-                                let parts = new.split(separator: ",", maxSplits: 1)
-                                let tagPart = parts.first.map(String.init)?
-                                    .trimmingCharacters(in: .whitespaces) ?? ""
-                                if !tagPart.isEmpty {
-                                    var tags = parsedTags
-                                    if !tags.contains(where: { $0.lowercased() == tagPart.lowercased() }) {
-                                        tags.append(tagPart)
-                                        draft.tagsText = tags.joined(separator: ", ")
-                                    }
-                                }
-                                newTagText = parts.count > 1
-                                    ? String(parts[1]).trimmingCharacters(in: .whitespaces)
-                                    : ""
-                            }
-                        }
+    // MARK: - Keywords (AI text tags, read-only)
+
+    private var parsedTags: [String] {
+        draft.tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    @ViewBuilder
+    private var keywordsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Keywords", isExpanded: $isKeywordsExpanded)
+
+            if isKeywordsExpanded {
+                TagFlowLayout(spacing: Spacing.xs) {
+                    ForEach(parsedTags, id: \.self) { tag in
+                        Text(tag)
+                            .font(CiderFont.label(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                            .padding(.horizontal, Spacing.xs)
+                            .padding(.vertical, Spacing.xxs)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                    }
                 }
             }
         }
@@ -676,57 +720,6 @@ struct BookmarkMetadataSidebar: View {
         }
     }
 
-}
-
-// MARK: - TagFlowLayout
-
-/// A wrapping row layout for tag chips. Wraps items to the next row when the current row is full.
-private struct TagFlowLayout: Layout {
-    var spacing: CGFloat = Spacing.xs
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = max(1, proposal.width ?? 200)
-        let rows = computeRows(in: width, subviews: subviews)
-        let height = rows.reduce(0.0) { acc, row in
-            acc + (row.map(\.1.height).max() ?? 0) + spacing
-        }
-        return CGSize(width: width, height: max(0, height - spacing))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let rows = computeRows(in: bounds.width, subviews: subviews)
-        var y = bounds.minY
-        for row in rows {
-            var x = bounds.minX
-            let rowH = row.map(\.1.height).max() ?? 0
-            for (subview, size) in row {
-                subview.place(
-                    at: CGPoint(x: x, y: y + (rowH - size.height) / 2),
-                    proposal: ProposedViewSize(size)
-                )
-                x += size.width + spacing
-            }
-            y += rowH + spacing
-        }
-    }
-
-    private func computeRows(in width: CGFloat, subviews: Subviews) -> [[(LayoutSubview, CGSize)]] {
-        var rows: [[(LayoutSubview, CGSize)]] = []
-        var current: [(LayoutSubview, CGSize)] = []
-        var used: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if !current.isEmpty && used + size.width > width {
-                rows.append(current)
-                current = []
-                used = 0
-            }
-            current.append((subview, size))
-            used += size.width + spacing
-        }
-        if !current.isEmpty { rows.append(current) }
-        return rows
-    }
 }
 
 // MARK: - Hero Preview

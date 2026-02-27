@@ -99,10 +99,10 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var labelIDs: Set<UUID> {
         switch self {
-        case .bookmark:
-            return []
-        case .note:
-            return []
+        case .bookmark(let bookmark):
+            return Set(bookmark.labelIDs)
+        case .note(let note):
+            return Set(note.labelIDs)
         case .dateCard(let dateCard):
             return Set(dateCard.labelIDs)
         case .contact(let contact):

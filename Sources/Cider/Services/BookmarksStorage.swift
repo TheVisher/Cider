@@ -218,6 +218,7 @@ final class BookmarksStorage: ObservableObject {
         title: String,
         notes: String,
         tags: [String],
+        labelIDs: [UUID]? = nil,
         urlString: String? = nil
     ) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else {
@@ -250,6 +251,10 @@ final class BookmarksStorage: ObservableObject {
         }
         if bookmark.tags != normalizedTags {
             bookmark.tags = normalizedTags
+            changed = true
+        }
+        if let labelIDs, bookmark.labelIDs != labelIDs {
+            bookmark.labelIDs = labelIDs
             changed = true
         }
         if let urlString {
@@ -351,6 +356,32 @@ final class BookmarksStorage: ObservableObject {
         bookmarks[index].folderID = folderID
         persist()
         return true
+    }
+
+    @discardableResult
+    func assignLabel(_ bookmarkID: UUID, labelID: UUID) -> Bool {
+        guard let idx = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        guard !bookmarks[idx].labelIDs.contains(labelID) else { return true }
+        bookmarks[idx].labelIDs.append(labelID)
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func removeLabel(_ bookmarkID: UUID, labelID: UUID) -> Bool {
+        guard let idx = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        bookmarks[idx].labelIDs.removeAll { $0 == labelID }
+        persist()
+        return true
+    }
+
+    func removeLabelsFromAll(labelID: UUID) {
+        var changed = false
+        for i in bookmarks.indices where bookmarks[i].labelIDs.contains(labelID) {
+            bookmarks[i].labelIDs.removeAll { $0 == labelID }
+            changed = true
+        }
+        if changed { persist() }
     }
 
     // MARK: - Folder Cover Images

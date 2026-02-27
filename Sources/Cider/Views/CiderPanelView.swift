@@ -42,7 +42,7 @@ struct CiderPanelView: View {
     @State private var newContactEditorContext: ContactEditorContext?
     @State private var contentAreaWidth: CGFloat = 800
     @State private var enableLinkedSources: Bool = CiderConfig.load().enableLinkedSources
-    @State private var selectedTagID: UUID?
+    @State private var selectedTagIDs: Set<UUID> = []
     @State private var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
     @ObservedObject private var labelStorage = CardLabelStorage.shared
 
@@ -97,7 +97,10 @@ struct CiderPanelView: View {
                         openNoteDetail(note)
                     },
                     onSpawnSearchTab: spawnSearchTab,
-                    onDismiss: { isSearchPaletteVisible = false }
+                    onDismiss: { isSearchPaletteVisible = false },
+                    onAction: { action in
+                        handleQuickAction(action)
+                    }
                 )
             }
             if isDetailFullPanel {
@@ -171,7 +174,7 @@ struct CiderPanelView: View {
         .onChange(of: selectedTab) { _, _ in
             selectedFolderID = nil
             selectedSourceID = nil
-            selectedTagID = nil
+            selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()
             searchDebounceTask?.cancel()
             sidebarSearchText = ""
@@ -179,7 +182,7 @@ struct CiderPanelView: View {
             closeAllDetails()
         }
         .onChange(of: selectedFolderID) { _, _ in
-            selectedTagID = nil
+            selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()
             searchDebounceTask?.cancel()
             sidebarSearchText = ""
@@ -496,15 +499,19 @@ struct CiderPanelView: View {
             showBackground: false,
             enableLinkedSources: enableLinkedSources,
             labels: labelStorage.labels,
-            selectedTagID: $selectedTagID,
+            selectedTagIDs: $selectedTagIDs,
             tagsCollapsed: $tagsCollapsed,
-            onSelectTag: { id in
-                selectedTagID = id
-                selectedFolderID = nil
-                selectedSourceID = nil
+            onToggleTag: { id in
+                if selectedTagIDs.contains(id) {
+                    selectedTagIDs.remove(id)
+                } else {
+                    selectedTagIDs.insert(id)
+                    selectedFolderID = nil
+                    selectedSourceID = nil
+                }
             },
-            onDeselectTag: {
-                selectedTagID = nil
+            onClearTags: {
+                selectedTagIDs.removeAll()
             },
             onOpenTagManager: {
                 openOrSelectTagTab()
@@ -515,7 +522,7 @@ struct CiderPanelView: View {
             onSelectSource: { id in
                 selectedSourceID = id
                 selectedFolderID = nil
-                selectedTagID = nil
+                selectedTagIDs.removeAll()
             },
             onToggleSourceTab: { id in
                 guard var source = externalSourceStorage.source(for: id) else { return }
@@ -795,9 +802,9 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var tabContentBody: some View {
-        if let tagID = selectedTagID {
+        if !selectedTagIDs.isEmpty {
             TagDetailView(
-                tagID: tagID,
+                tagIDs: selectedTagIDs,
                 showManager: false,
                 bookmarksViewModel: bookmarksViewModel,
                 notesViewModel: notesViewModel,
@@ -816,10 +823,10 @@ struct CiderPanelView: View {
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) },
                 onSelectTag: { id in
-                    selectedTagID = id
+                    selectedTagIDs = [id]
                 },
                 onBack: {
-                    selectedTagID = nil
+                    selectedTagIDs.removeAll()
                 }
             )
         } else if let sourceID = selectedSourceID,
@@ -926,7 +933,7 @@ struct CiderPanelView: View {
                 }
             case .tag:
                 TagDetailView(
-                    tagID: nil,
+                    tagIDs: [],
                     showManager: true,
                     bookmarksViewModel: bookmarksViewModel,
                     notesViewModel: notesViewModel,
@@ -945,7 +952,7 @@ struct CiderPanelView: View {
                     onOpenDateCard: { openDateCardDetail($0) },
                     onOpenContact: { openContactDetail($0) },
                     onSelectTag: { id in
-                        selectedTagID = id
+                        selectedTagIDs = [id]
                     }
                 )
             }
@@ -1033,6 +1040,30 @@ struct CiderPanelView: View {
                 .buttonStyle(CiderAccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Quick Actions
+
+    private func handleQuickAction(_ action: QuickAction) {
+        isSearchPaletteVisible = false
+        switch action {
+        case .newBookmark:
+            _ = bookmarksViewModel.captureBookmarkFromActiveBrowserOrClipboard()
+        case .newNote:
+            createNoteAndOpen(title: "", content: "")
+        case .newEvent:
+            newEventEditorContext = DateCardEditorContext(existingCard: nil, defaultDate: Date())
+        case .newContact:
+            newContactEditorContext = ContactEditorContext(existingContact: nil)
+        case .newFolder:
+            NotificationCenter.default.post(name: .showFolderCreationField, object: nil)
+        case .newTag:
+            openOrSelectTagTab()
+        case .newTab:
+            createSavedViewFromCurrentState()
+        case .openSettings:
+            NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+        }
     }
 
     // MARK: - Note Creation
@@ -1667,14 +1698,14 @@ struct CiderPanelView: View {
         if let existing = allTabs.first(where: { if case .tag = $0 { return true }; return false }) {
             selectedFolderID = nil
             selectedSourceID = nil
-            selectedTagID = nil
+            selectedTagIDs.removeAll()
             selectedTab = existing
         } else {
             let tab = CiderTab.tag(id: UUID())
             dynamicTabs.append(tab)
             selectedFolderID = nil
             selectedSourceID = nil
-            selectedTagID = nil
+            selectedTagIDs.removeAll()
             selectedTab = tab
         }
     }

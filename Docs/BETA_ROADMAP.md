@@ -50,7 +50,7 @@ These are structural changes that define how users interact with Cider. Must shi
 ### F-01: Cider Vault Storage
 > Consolidate all storage into a single "Cider Vault" root directory with per-type subdirectories, each individually overridable.
 
-**Status:** `🧪 Testing`
+**Status:** `✅ Complete`
 **Priority:** Critical — must be first (all other features build on this)
 
 **Scope:**
@@ -76,42 +76,49 @@ These are structural changes that define how users interact with Cider. Must shi
 | Gate 1: Implement | 2026-02-26 | Claude | StoragePaths enum, CiderConfig vault props, all 8 storages, TrashStorage, Settings UI |
 | Gate 2: Code Review | 2026-02-26 | Claude | Thread-safe cache (NSLock fix for EXC_BAD_ACCESS), cached paths in view closures |
 | Gate 3: User Test | 2026-02-26 | minivish | Bookmarks + notes migrated, override tested, data migration noted as post-beta |
+| Gate 5: Sign Off | 2026-02-26 | minivish | Signed off. Vault relocation deferred to post-beta. |
 
 ---
 
 ### F-02: Tab System Overhaul
 > Replace fixed Home tab with a fully flexible tab system. All tabs are saved views — draggable, sortable, renameable, closeable.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** Critical — defines core navigation
 **Depends on:** F-01 (SavedViews stored in vault)
 
 **Scope:**
 - Remove fixed `.home` tab from CiderTab enum — everything is `.savedView`
-- Default first-launch tabs: **Inbox** (leftmost, filter: `folderID == nil`) + **Library** (everything, no filter)
-- CiderTabBar: drag-to-reorder, double-click to rename, close button on every tab, `+` button at right end
-- Tab order persisted in CiderConfig or dedicated tabs.json
-- `+` button opens NewItemPopover (already exists) or a streamlined tab creation flow
+- Default first-launch tabs: **Inbox** (leftmost, filter: `onlyUnassigned`) + **Library** (everything, no filter)
+- CiderTabBar: drag-to-reorder, right-click to rename/close, `+` button at right end
+- Tab order persisted in SavedViewStorage (tabOrder: [UUID])
+- `+` button creates blank tab with welcome page and onboarding hints
+- Per-tab entity filter, sort mode, and unassigned toggle (stored on SavedView)
 - Deleting all tabs shows an empty state with prompt to create one
 - Inbox is just a saved view — users can rename to "Unsorted", "Triage", whatever they want
+- "Unassigned Only" toggle in ViewOptionsDropdown for recreating Inbox-style tabs
 
 **Testing checklist:**
-- [ ] First launch shows Inbox + Library tabs
-- [ ] Inbox shows only items with no folder assigned
-- [ ] Library shows all items
-- [ ] Tabs can be dragged to reorder
-- [ ] Double-click tab to rename works
-- [ ] Close button removes tab (with confirmation if it's a default?)
-- [ ] `+` button creates new tab
-- [ ] Tab order persists across launches
-- [ ] Renaming persists across launches
-- [ ] Capture from browser → item appears in Inbox
-- [ ] Assign item to folder → item disappears from Inbox
+- [x] First launch shows Inbox + Library tabs
+- [x] Inbox shows only items with no folder assigned
+- [x] Library shows all items
+- [x] Tabs can be dragged to reorder
+- [x] Right-click tab to rename works (auto-focuses text field)
+- [x] Right-click → Close Tab removes tab
+- [x] `+` button creates blank tab with welcome page
+- [x] Tab order persists across launches
+- [x] Renaming persists across launches
+- [x] Capture from browser → item appears in Inbox
+- [x] Assign item to folder → item disappears from Inbox
+- [x] Per-tab view options (sort, filter, unassigned) independent per tab
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-26 | Claude | Remove .home, add tabOrder, per-tab state, blank tab welcome, drag/rename/close |
+| Gate 3: User Test | 2026-02-26 | minivish | Multiple rounds: fixed routing through HomeDashboardView, gesture conflicts, per-tab bindings, blank tab UX |
+| Gate 4: Fix & Polish | 2026-02-26 | Claude | Right-click rename via .contextMenu, removed hover X, per-tab filter/sort bindings, blank tab empty entity types |
+| Gate 5: Sign Off | 2026-02-26 | minivish | All tests pass. Signed off. |
 
 ---
 
@@ -122,7 +129,7 @@ These make the beta feel complete. Without them, users would say "this is missin
 ### F-03: Full Tag System
 > Tags as a first-class organizational primitive. View, filter, create, manage, and auto-generate via AI.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** High — core organization alongside folders
 **Depends on:** F-01 (TagStorage in vault)
 
@@ -138,23 +145,26 @@ These make the beta feel complete. Without them, users would say "this is missin
 - **AI integration:** Existing NL auto-tagging creates Tag objects (not raw strings). Suggest tags on capture.
 
 **Testing checklist:**
-- [ ] Create tag from sidebar
-- [ ] Assign tag to bookmark, note, date card, contact
-- [ ] Tag pills visible on all card types
-- [ ] Click tag in sidebar filters library
-- [ ] Remove tag from item via context menu
-- [ ] Rename tag — all references update
-- [ ] Delete tag — removed from all items
-- [ ] Set tag color — pills reflect color
-- [ ] Merge two tags — items consolidated
-- [ ] AI auto-tag on bookmark capture creates Tag objects
-- [ ] Create saved view filtered by tag
-- [ ] Tags persist across launches
+- [x] Create tag from sidebar
+- [x] Assign tag to bookmark, note, date card, contact
+- [x] Tag pills visible on all card types
+- [x] Click tag in sidebar filters library (multi-select, clear all, show more/less)
+- [x] Remove tag from item via context menu
+- [x] Rename tag — all references update
+- [x] Delete tag — removed from all items
+- [x] Set tag color — pills reflect color
+- [ ] Merge two tags — items consolidated *(deferred to post-beta)*
+- [x] AI auto-tag on bookmark capture creates Tag objects *(works but needs tuning — deferred)*
+- [ ] Create saved view filtered by tag *(deferred to post-beta)*
+- [x] Tags persist across launches
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | CardLabel model, CardLabelStorage, tag pills, sidebar tags, tag manager tab, context menu tagging, detail view tagging, AI NLPipeline rewrite |
+| Gate 3: User Test | 2026-02-27 | minivish | Core tag CRUD all passes. Requested multi-select sidebar filtering, clear all, show more. AI tagging needs tuning (deferred). |
+| Gate 4: Fix & Polish | 2026-02-27 | Claude | Multi-select tag filtering (Set<UUID>), Clear button, Show More/Less pill with threshold, tag creation form in +New popover and tag manager |
+| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off. Merge tags and saved view tag filter deferred to post-beta. AI tag quality deferred. |
 
 ---
 
@@ -359,9 +369,9 @@ Known issues that would frustrate beta users.
 
 | ID | Feature | Phase | Status | Current Gate |
 |----|---------|-------|--------|-------------|
-| F-01 | Cider Vault Storage | 0 | ⬜ Not Started | — |
-| F-02 | Tab System Overhaul | 0 | ⬜ Not Started | — |
-| F-03 | Full Tag System | 1 | ⬜ Not Started | — |
+| F-01 | Cider Vault Storage | 0 | ✅ Complete | Gate 5 |
+| F-02 | Tab System Overhaul | 0 | ✅ Complete | Gate 5 |
+| F-03 | Full Tag System | 1 | ✅ Complete | Gate 5 |
 | F-04 | Cmd+K Quick Actions | 1 | ⬜ Not Started | — |
 | F-05 | Date Card Surfacing | 1 | ⬜ Not Started | — |
 | F-06 | Fix CH-C08 (Search Results) | 2 | ⬜ Not Started | — |
@@ -370,7 +380,7 @@ Known issues that would frustrate beta users.
 | F-09 | Distribution Pipeline | 3 | ⬜ Not Started | — |
 | F-10 | Landing Page & README | 3 | ⬜ Not Started | — |
 
-**Completed:** 0/10
+**Completed:** 3/10
 **In Progress:** 0/10
 
 ---
@@ -416,6 +426,9 @@ Items explicitly deferred. Add new ideas here instead of scope-creeping the beta
 | Documents tab | Tier 3 | PDFs, images, local files |
 | Todos tab | Tier 3 | Task management |
 | Books tab | Tier 3 | Reading tracker |
+| Merge tags | Tier 2 | Consolidate two tags into one, reassign all items |
+| Saved view tag filter | Tier 2 | Filter saved views by specific tags (smart folders) |
+| AI auto-tag quality tuning | Tier 2 | Improve semantic category matching, threshold tuning |
 | Themed folders (Media Hub, Recipe) | Tier 3 | Domain-specific views |
 | YouTube transcript sync | Tier 3 | Live captions, click-to-seek |
 | Clipboard viewer | Tier 3 | Recent items, action buttons |

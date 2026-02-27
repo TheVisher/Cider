@@ -36,16 +36,18 @@ final class NotesStorage: ObservableObject {
     private struct NoteIndexEntry: Codable, Equatable, Sendable {
         var filename: String
         var folderID: UUID?
+        var labelIDs: [UUID]?
         var createdAt: Date?
         /// Source URL captured from (if any), persisted for future metadata panel.
         var sourceURL: String?
         /// Filename under `{notesDir}/.attachments/` for an associated screenshot.
         var sourceImageFilename: String?
 
-        init(filename: String, folderID: UUID? = nil, createdAt: Date? = nil,
+        init(filename: String, folderID: UUID? = nil, labelIDs: [UUID]? = nil, createdAt: Date? = nil,
              sourceURL: String? = nil, sourceImageFilename: String? = nil) {
             self.filename = filename
             self.folderID = folderID
+            self.labelIDs = labelIDs
             self.createdAt = createdAt
             self.sourceURL = sourceURL
             self.sourceImageFilename = sourceImageFilename
@@ -177,6 +179,7 @@ final class NotesStorage: ObservableObject {
             let title = String(filename.dropLast(3)) // Remove .md
             let uuid = filenameToUUID[filename] ?? UUID()
             let folderID = index[uuid]?.folderID
+            let labelIDs = index[uuid]?.labelIDs ?? []
 
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             let modDate = attrs?[.modificationDate] as? Date ?? Date()
@@ -189,7 +192,7 @@ final class NotesStorage: ObservableObject {
 
             // Register in index if new, or backfill createdAt if missing
             if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
-                index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, createdAt: createDate)
+                index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate)
             }
 
             // Lazy: don't load content during scan
@@ -200,15 +203,16 @@ final class NotesStorage: ObservableObject {
                 createdAt: createDate,
                 modifiedAt: modDate,
                 relativePath: filename,
+                labelIDs: labelIDs,
                 folderID: folderID
             ))
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID and createdAt from existing entries.
+        // cleaned up automatically. Preserve folderID, labelIDs, and createdAt from existing entries.
         let previousIndex = index
         let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, createdAt: $0.createdAt))
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt))
         })
         index = rebuiltIndex
 
@@ -275,6 +279,7 @@ final class NotesStorage: ObservableObject {
             let title = String(filename.dropLast(3)) // Remove .md
             let uuid = filenameToUUID[filename] ?? UUID()
             let folderID = workingIndex[uuid]?.folderID
+            let labelIDs = workingIndex[uuid]?.labelIDs ?? []
 
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             let modDate = attrs?[.modificationDate] as? Date ?? Date()
@@ -287,7 +292,7 @@ final class NotesStorage: ObservableObject {
 
             // Register in index if new, or backfill createdAt if missing
             if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
-                workingIndex[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, createdAt: createDate)
+                workingIndex[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate)
             }
 
             // Lazy: don't load content during scan
@@ -298,14 +303,15 @@ final class NotesStorage: ObservableObject {
                 createdAt: createDate,
                 modifiedAt: modDate,
                 relativePath: filename,
+                labelIDs: labelIDs,
                 folderID: folderID
             ))
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID and createdAt from existing entries.
+        // cleaned up automatically. Preserve folderID, labelIDs, and createdAt from existing entries.
         let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, createdAt: $0.createdAt))
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt))
         })
 
         // Sort by newest created first
@@ -507,6 +513,44 @@ final class NotesStorage: ObservableObject {
         }
         saveIndex()
         return true
+    }
+
+    @discardableResult
+    func assignLabel(_ noteID: UUID, labelID: UUID) -> Bool {
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        guard !notes[idx].labelIDs.contains(labelID) else { return true }
+        notes[idx].labelIDs.append(labelID)
+        if var entry = index[noteID] {
+            entry.labelIDs = notes[idx].labelIDs
+            index[noteID] = entry
+        }
+        saveIndex()
+        return true
+    }
+
+    @discardableResult
+    func removeLabel(_ noteID: UUID, labelID: UUID) -> Bool {
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        notes[idx].labelIDs.removeAll { $0 == labelID }
+        if var entry = index[noteID] {
+            entry.labelIDs = notes[idx].labelIDs
+            index[noteID] = entry
+        }
+        saveIndex()
+        return true
+    }
+
+    func removeLabelsFromAll(labelID: UUID) {
+        var changed = false
+        for i in notes.indices where notes[i].labelIDs.contains(labelID) {
+            notes[i].labelIDs.removeAll { $0 == labelID }
+            if var entry = index[notes[i].id] {
+                entry.labelIDs = notes[i].labelIDs
+                index[notes[i].id] = entry
+            }
+            changed = true
+        }
+        if changed { saveIndex() }
     }
 
     @discardableResult

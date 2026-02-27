@@ -9,15 +9,17 @@ struct Note: Identifiable, Hashable {
     var modifiedAt: Date
     /// Relative path within the notes directory (e.g. "My Note.md")
     var relativePath: String
+    var labelIDs: [UUID]
     var folderID: UUID?
 
-    init(id: UUID = UUID(), title: String, content: String = "", createdAt: Date = Date(), modifiedAt: Date = Date(), relativePath: String = "", folderID: UUID? = nil) {
+    init(id: UUID = UUID(), title: String, content: String = "", createdAt: Date = Date(), modifiedAt: Date = Date(), relativePath: String = "", labelIDs: [UUID] = [], folderID: UUID? = nil) {
         self.id = id
         self.title = title
         self.content = content
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.relativePath = relativePath
+        self.labelIDs = labelIDs
         self.folderID = folderID
     }
 

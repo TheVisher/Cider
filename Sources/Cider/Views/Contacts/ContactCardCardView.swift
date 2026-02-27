@@ -74,6 +74,13 @@ struct ContactCardCardView: View {
                         }
                     }
                 }
+
+                if !contact.labelIDs.isEmpty {
+                    TagPillRow(
+                        labelIDs: contact.labelIDs,
+                        labels: CardLabelStorage.shared.labels
+                    )
+                }
             }
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,9 +95,19 @@ struct ContactCardCardView: View {
         .hoverState($isHovered, animation: .snappy)
         .contactContextMenu(
             onOpen: { onOpen?() },
+            labelIDs: contact.labelIDs,
             folders: folders,
             onMoveToFolder: { onMoveToFolder?($0) },
-            onDelete: { onDelete?() }
+            onDelete: { onDelete?() },
+            onToggleLabel: { labelID in
+                var updated = contact
+                if updated.labelIDs.contains(labelID) {
+                    updated.labelIDs.removeAll { $0 == labelID }
+                } else {
+                    updated.labelIDs.append(labelID)
+                }
+                _ = ContactStorage.shared.updateContact(updated)
+            }
         )
         .task(id: contact.updatedAt) {
             await loadAvatar()
@@ -227,9 +244,19 @@ struct ContactListRow: View {
         .buttonStyle(.plain)
         .contactContextMenu(
             onOpen: { onOpen?() },
+            labelIDs: contact.labelIDs,
             folders: folders,
             onMoveToFolder: { onMoveToFolder?($0) },
-            onDelete: { onDelete?() }
+            onDelete: { onDelete?() },
+            onToggleLabel: { labelID in
+                var updated = contact
+                if updated.labelIDs.contains(labelID) {
+                    updated.labelIDs.removeAll { $0 == labelID }
+                } else {
+                    updated.labelIDs.append(labelID)
+                }
+                _ = ContactStorage.shared.updateContact(updated)
+            }
         )
         .task(id: contact.updatedAt) {
             await loadAvatar()

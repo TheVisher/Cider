@@ -28,7 +28,7 @@ struct NotesStorageRegressionTests {
         try indexData.write(to: indexURL, options: .atomic)
 
         let storage = NotesStorage.shared
-        let originalPath = CiderConfig.load().notesDirectory
+        let originalPath = StoragePaths.directoryURL(for: .notes).path
         defer {
             storage.updateDirectory(to: originalPath)
             try? fileManager.removeItem(at: tempDirectory)

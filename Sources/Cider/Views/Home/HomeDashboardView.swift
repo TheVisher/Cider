@@ -20,6 +20,7 @@ struct HomeDashboardView: View {
     var onOpenDateCard: (DateCard) -> Void = { _ in }
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onlyUnassigned: Bool = false
+    var activeLabelIDs: Set<UUID> = []
 
     @State private var config = CiderConfig.load()
 
@@ -30,7 +31,7 @@ struct HomeDashboardView: View {
     private var filterSpec: SavedViewFilterSpec {
         SavedViewFilterSpec(
             entityTypes: entityFilter,
-            labelIDs: [],
+            labelIDs: activeLabelIDs,
             folderID: selectedFolderID,
             includeCompleted: true,
             textQuery: searchText,

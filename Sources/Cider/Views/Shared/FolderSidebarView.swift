@@ -18,6 +18,14 @@ struct FolderSidebarView: View {
     var showBackground: Bool = true
     var enableLinkedSources: Bool = false
 
+    // Tags
+    var labels: [CardLabel] = []
+    var selectedTagIDs: Binding<Set<UUID>> = .constant([])
+    var tagsCollapsed: Binding<Bool> = .constant(false)
+    var onToggleTag: ((UUID) -> Void)? = nil
+    var onClearTags: (() -> Void)? = nil
+    var onOpenTagManager: (() -> Void)? = nil
+
     // Sources (optional — all default to no-ops so existing call sites compile unchanged)
     var sources: [ExternalSource] = []
     var selectedSourceID: Binding<UUID?> = .constant(nil)
@@ -38,6 +46,7 @@ struct FolderSidebarView: View {
     @State private var draftSubFolderName = ""
     @State private var renamingFolderID: UUID?
     @State private var renamingFolderName = ""
+    @State private var tagsExpanded = false
 
     private var topLevelFolders: [Folder] {
         childFolders(of: nil)
@@ -116,6 +125,8 @@ struct FolderSidebarView: View {
                     .padding(.bottom, Spacing.xs)
             }
 
+            tagsSection
+
             if isFolderCreationFieldVisible {
                 HStack(spacing: Spacing.sm) {
                     TextField("New folder name", text: $draftFolderName)
@@ -154,6 +165,101 @@ struct FolderSidebarView: View {
             if showBackground {
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                     .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
+            }
+        }
+    }
+
+    // MARK: - Tags Section
+
+    private var tagsShowMoreThreshold: Int { 8 }
+
+    @ViewBuilder
+    private var tagsSection: some View {
+        let isCollapsed = tagsCollapsed.wrappedValue
+        let hasActiveFilters = !selectedTagIDs.wrappedValue.isEmpty
+        let visibleLabels = tagsExpanded ? labels : Array(labels.prefix(tagsShowMoreThreshold))
+        let hasMore = labels.count > tagsShowMoreThreshold
+
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Divider()
+                .background(CiderColors.separator)
+                .padding(.vertical, Spacing.xxs)
+
+            HStack(spacing: Spacing.xs) {
+                Button {
+                    onOpenTagManager?()
+                } label: {
+                    Label("Tags", systemImage: "tag")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .buttonStyle(.plain)
+
+                if hasActiveFilters {
+                    Button {
+                        onClearTags?()
+                    } label: {
+                        Text("Clear")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        tagsCollapsed.wrappedValue.toggle()
+                    }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.quaternary)
+                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !isCollapsed {
+                if labels.isEmpty {
+                    Text("No tags yet")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.xs)
+                } else {
+                    TagFlowLayout(spacing: Spacing.xs) {
+                        ForEach(visibleLabels) { label in
+                            SidebarTagPill(
+                                label: label,
+                                isSelected: selectedTagIDs.wrappedValue.contains(label.id),
+                                onTap: {
+                                    onToggleTag?(label.id)
+                                }
+                            )
+                        }
+
+                        if hasMore {
+                            Button {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    tagsExpanded.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: Spacing.xxs) {
+                                    Image(systemName: tagsExpanded ? "chevron.up" : "ellipsis")
+                                        .font(CiderFont.micro)
+                                    Text(tagsExpanded ? "Less" : "\(labels.count - tagsShowMoreThreshold) more")
+                                        .font(CiderFont.caption)
+                                }
+                                .foregroundColor(CiderColors.controlAccent)
+                                .padding(.horizontal, Spacing.sm)
+                                .padding(.vertical, Spacing.xxs + 1)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, CiderBorder.innerStrokeInset)
+                }
             }
         }
     }

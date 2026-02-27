@@ -202,6 +202,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var updatedAt: Date
     var notes: String
     var tags: [String]
+    var labelIDs: [UUID]
     var folderID: UUID?
     var thumbnailRemoteURLString: String?
     var thumbnailRelativePath: String?
@@ -222,6 +223,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case updatedAt
         case notes
         case tags
+        case labelIDs
         case folderID
         case thumbnailRemoteURLString
         case thumbnailRelativePath
@@ -240,6 +242,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         updatedAt: Date = Date(),
         notes: String = "",
         tags: [String] = [],
+        labelIDs: [UUID] = [],
         folderID: UUID? = nil,
         thumbnailRemoteURLString: String? = nil,
         thumbnailRelativePath: String? = nil,
@@ -257,6 +260,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.updatedAt = updatedAt
         self.notes = notes
         self.tags = tags
+        self.labelIDs = labelIDs
         self.folderID = folderID
         self.thumbnailRemoteURLString = thumbnailRemoteURLString
         self.thumbnailRelativePath = thumbnailRelativePath
@@ -266,6 +270,26 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.aiSummary = aiSummary
         self.ocrText = ocrText
         self.dominantColors = dominantColors
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        urlString = try container.decode(String.self, forKey: .urlString)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        notes = try container.decode(String.self, forKey: .notes)
+        tags = try container.decode([String].self, forKey: .tags)
+        labelIDs = try container.decodeIfPresent([UUID].self, forKey: .labelIDs) ?? []
+        folderID = try container.decodeIfPresent(UUID.self, forKey: .folderID)
+        thumbnailRemoteURLString = try container.decodeIfPresent(String.self, forKey: .thumbnailRemoteURLString)
+        thumbnailRelativePath = try container.decodeIfPresent(String.self, forKey: .thumbnailRelativePath)
+        originalImageRelativePath = try container.decodeIfPresent(String.self, forKey: .originalImageRelativePath)
+        metadataUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .metadataUpdatedAt)
+        aiSummary = try container.decodeIfPresent(String.self, forKey: .aiSummary)
+        ocrText = try container.decodeIfPresent(String.self, forKey: .ocrText)
+        dominantColors = try container.decodeIfPresent([String].self, forKey: .dominantColors)
     }
 
     var url: URL? {

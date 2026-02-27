@@ -110,6 +110,36 @@ private final class MenuActionTarget: NSObject {
     }
 }
 
+// MARK: - Tag Submenu Helper
+
+/// Builds a "Tags" submenu with all labels, toggling assignment.
+@MainActor
+private func tagMenuItems(
+    itemLabelIDs: [UUID],
+    onToggleLabel: @escaping (UUID) -> Void,
+    onCreateTag: (() -> Void)? = nil
+) -> [CardMenuItem] {
+    let allLabels = CardLabelStorage.shared.labels
+    var children: [CardMenuItem] = []
+
+    for label in allLabels {
+        let isAssigned = itemLabelIDs.contains(label.id)
+        let title = isAssigned ? "\u{2713} \(label.name)" : "    \(label.name)"
+        let labelID = label.id
+        children.append(.action(title: title) { onToggleLabel(labelID) })
+    }
+
+    if !children.isEmpty, onCreateTag != nil {
+        children.append(.separator)
+    }
+    if let onCreateTag {
+        children.append(.action(title: "New Tag\u{2026}", callback: onCreateTag))
+    }
+
+    guard !children.isEmpty else { return [] }
+    return [.submenu(title: "Tags", children: children)]
+}
+
 // MARK: - Folder Submenu Helper
 
 /// Builds standard "Move to Folder" menu items from a folder list.
@@ -132,58 +162,78 @@ private func folderMenuItems(
 // MARK: - View Extensions
 
 extension View {
-    /// Context menu for note cards — Open, Rename, Move to Folder, Delete.
+    /// Context menu for note cards — Open, Rename, Tags, Move to Folder, Delete.
     func noteContextMenu(
         note: Note,
         folders: [Folder],
         onOpen: @escaping () -> Void,
         onRename: @escaping () -> Void,
         onMoveToFolder: @escaping (UUID?) -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onToggleLabel: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
-            [.action(title: "Open", callback: onOpen),
-             .action(title: "Rename", callback: onRename)]
-            + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
-            + [.separator,
-               .destructive(title: "Delete", callback: onDelete)]
+            var items: [CardMenuItem] = [
+                .action(title: "Open", callback: onOpen),
+                .action(title: "Rename", callback: onRename)
+            ]
+            if let onToggleLabel {
+                items += tagMenuItems(itemLabelIDs: note.labelIDs, onToggleLabel: onToggleLabel)
+            }
+            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += [.separator, .destructive(title: "Delete", callback: onDelete)]
+            return items
         })
     }
 
-    /// Context menu for date card (event) cards — Open, Mark Complete, Move to Folder, Delete.
+    /// Context menu for date card (event) cards — Open, Mark Complete, Tags, Move to Folder, Delete.
     func dateCardContextMenu(
         onOpen: @escaping () -> Void,
         onToggleComplete: @escaping () -> Void,
         isCompleted: Bool,
+        labelIDs: [UUID] = [],
         folders: [Folder],
         onMoveToFolder: @escaping (UUID?) -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onToggleLabel: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
-            [.action(title: "Open", callback: onOpen),
-             .action(title: isCompleted ? "Mark Incomplete" : "Mark Complete", callback: onToggleComplete)]
-            + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
-            + [.separator,
-               .destructive(title: "Delete", callback: onDelete)]
+            var items: [CardMenuItem] = [
+                .action(title: "Open", callback: onOpen),
+                .action(title: isCompleted ? "Mark Incomplete" : "Mark Complete", callback: onToggleComplete)
+            ]
+            if let onToggleLabel {
+                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel)
+            }
+            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += [.separator, .destructive(title: "Delete", callback: onDelete)]
+            return items
         })
     }
 
-    /// Context menu for contact cards — Open, Move to Folder, Delete.
+    /// Context menu for contact cards — Open, Tags, Move to Folder, Delete.
     func contactContextMenu(
         onOpen: @escaping () -> Void,
+        labelIDs: [UUID] = [],
         folders: [Folder],
         onMoveToFolder: @escaping (UUID?) -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onToggleLabel: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
-            [.action(title: "Open", callback: onOpen)]
-            + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
-            + [.separator,
-               .destructive(title: "Delete", callback: onDelete)]
+            var items: [CardMenuItem] = [
+                .action(title: "Open", callback: onOpen)
+            ]
+            if let onToggleLabel {
+                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel)
+            }
+            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += [.separator, .destructive(title: "Delete", callback: onDelete)]
+            return items
         })
     }
 
-    /// Context menu for bookmark cards — Open in Browser, Show Details, Refetch Metadata, Move to Folder, Delete.
+    /// Context menu for bookmark cards — Open in Browser, Show Details, Refetch Metadata, Tags, Move to Folder, Delete.
     func bookmarkContextMenu(
         bookmark: Bookmark,
         folders: [Folder],
@@ -191,15 +241,21 @@ extension View {
         onShowDetails: @escaping () -> Void,
         onRefetchMetadata: @escaping () -> Void,
         onMoveToFolder: @escaping (UUID?) -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onToggleLabel: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
-            [.action(title: "Open in Browser", callback: onOpen),
-             .action(title: "Show Details", callback: onShowDetails),
-             .action(title: "Refetch Metadata", callback: onRefetchMetadata)]
-            + folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
-            + [.separator,
-               .destructive(title: "Delete", callback: onDelete)]
+            var items: [CardMenuItem] = [
+                .action(title: "Open in Browser", callback: onOpen),
+                .action(title: "Show Details", callback: onShowDetails),
+                .action(title: "Refetch Metadata", callback: onRefetchMetadata)
+            ]
+            if let onToggleLabel {
+                items += tagMenuItems(itemLabelIDs: bookmark.labelIDs, onToggleLabel: onToggleLabel)
+            }
+            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += [.separator, .destructive(title: "Delete", callback: onDelete)]
+            return items
         })
     }
 }

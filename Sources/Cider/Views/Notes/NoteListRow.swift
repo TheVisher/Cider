@@ -132,7 +132,14 @@ struct NoteListRow: View {
                 isRenaming = true
             },
             onMoveToFolder: onMoveToFolder,
-            onDelete: onDelete
+            onDelete: onDelete,
+            onToggleLabel: { labelID in
+                if note.labelIDs.contains(labelID) {
+                    _ = NotesStorage.shared.removeLabel(note.id, labelID: labelID)
+                } else {
+                    _ = NotesStorage.shared.assignLabel(note.id, labelID: labelID)
+                }
+            }
         )
         .ciderDraggable(dragProvider) {
             if let preview = dragPreviewOverride {
