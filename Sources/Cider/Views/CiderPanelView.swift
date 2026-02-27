@@ -1876,13 +1876,24 @@ struct CiderPanelView: View {
             }
         }
 
+        // Collect ALL trash items into a single unified undo recording.
+        // Don't use ViewModel bulk-delete methods — they each record their own
+        // undo action, and CiderUndoManager only tracks one pending action.
         var allTrashItems: [TrashItem] = []
 
         if !bookmarksToDelete.isEmpty {
-            bookmarksViewModel.deleteBookmarks(bookmarksToDelete)
+            let trashItems = BookmarksStorage.shared.removeAll(bookmarksToDelete)
+            allTrashItems.append(contentsOf: trashItems)
         }
         if !notesToDelete.isEmpty {
-            notesViewModel.deleteNotes(notesToDelete)
+            let idsToDelete = Set(notesToDelete.map(\.id))
+            if let selected = notesViewModel.selectedNote, idsToDelete.contains(selected.id) {
+                notesViewModel.clearSelectedNote()
+            }
+            for note in notesToDelete {
+                let trashItem = NotesStorage.shared.delete(note: note)
+                allTrashItems.append(trashItem)
+            }
         }
         for dcID in dateCardIDsToDelete {
             if let trashItem = DateCardStorage.shared.deleteDateCard(dcID) {

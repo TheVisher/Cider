@@ -997,7 +997,7 @@ final class NotesViewModel: ObservableObject {
         NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
     }
 
-    private func clearSelectedNote() {
+    func clearSelectedNote() {
         selectedNote = nil
         editingContent = ""
         editingTitle = ""
