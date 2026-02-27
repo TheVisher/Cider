@@ -204,8 +204,6 @@ struct SearchPaletteView: View {
                     .keyboardShortcut(.upArrow, modifiers: [])
                 Button("") { handleReturn() }
                     .keyboardShortcut(.return, modifiers: [])
-                Button("") { onDismiss() }
-                    .keyboardShortcut(.escape, modifiers: [])
             }
             .frame(width: 0, height: 0)
             .opacity(0)

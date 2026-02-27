@@ -325,7 +325,9 @@ struct CiderPanelView: View {
                 .hidden()
 
             Button("") {
-                if !sidebarSearchText.isEmpty {
+                if isSearchPaletteVisible {
+                    isSearchPaletteVisible = false
+                } else if !sidebarSearchText.isEmpty {
                     searchDebounceTask?.cancel()
                     sidebarSearchText = ""
                     debouncedSearchText = ""
