@@ -8,8 +8,22 @@ struct ContactCardCardView: View {
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
 
     @State private var isHovered = false
+
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
     @State private var avatarImage: NSImage?
     @State private var cardWidth: CGFloat = 220
 
@@ -20,7 +34,7 @@ struct ContactCardCardView: View {
 
     var body: some View {
         Button {
-            onOpen?()
+            handleClick { onOpen?() }
         } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 // Header: large avatar top-left + name / relationship
@@ -91,7 +105,13 @@ struct ContactCardCardView: View {
             })
         }
         .buttonStyle(.plain)
-        .cardContainer(isHovered: isHovered)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected)
+        .overlay(alignment: .topLeading) {
+            if isSelected {
+                SelectionCheckmark()
+                    .padding(Spacing.sm)
+            }
+        }
         .hoverState($isHovered, animation: .snappy)
         .contactContextMenu(
             onOpen: { onOpen?() },
@@ -187,14 +207,32 @@ struct ContactListRow: View {
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
 
     @State private var avatarImage: NSImage?
 
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
     var body: some View {
         Button {
-            onOpen?()
+            handleClick { onOpen?() }
         } label: {
             HStack(spacing: Spacing.sm) {
+                if isSelected {
+                    SelectionCheckmark()
+                }
+
                 avatarCircle(size: 28)
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -239,6 +277,10 @@ struct ContactListRow: View {
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.surfaceSubtle)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(CiderColors.controlAccent, lineWidth: isSelected ? CiderBorder.innerStrokeWidth : 0)
             )
         }
         .buttonStyle(.plain)

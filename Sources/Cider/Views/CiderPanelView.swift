@@ -285,9 +285,9 @@ struct CiderPanelView: View {
                     )
                 },
                 onDelete: { dateCard in
-                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
-                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, dateCardsDir: StoragePaths.cachedDirectoryURL(for: .dateCards))
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    }
                 }
             )
         }
@@ -311,9 +311,9 @@ struct CiderPanelView: View {
                     )
                 },
                 onDelete: { contact in
-                    _ = ContactStorage.shared.deleteContact(contact.id)
-                    let trashItem = TrashStorage.shared.trashContact(contact, contactsDir: StoragePaths.cachedDirectoryURL(for: .contacts))
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
                 }
             )
         }
@@ -1829,13 +1829,16 @@ struct CiderPanelView: View {
         if let folderID = selectedFolderID {
             let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
             let notes = notesViewModel.notes.filter { $0.folderID == folderID }
+            let dateCards = DateCardStorage.shared.dateCards.filter { $0.folderID == folderID }
+            let contacts = ContactStorage.shared.contacts.filter { $0.folderID == folderID }
             for b in bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
             for n in notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
+            for dc in dateCards { selectedItemIDs.insert("datecard-\(dc.id.uuidString)") }
+            for c in contacts { selectedItemIDs.insert("contact-\(c.id.uuidString)") }
         } else if selectedTab?.savedViewID != nil {
-            // TODO: CH-C04 — date cards and contacts visible in the feed are not selected here;
-            // address once bulk-delete/move actions support all entity types.
-            for b in bookmarksViewModel.bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
-            for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
+            for item in libraryViewModel.items {
+                selectedItemIDs.insert(item.id)
+            }
         }
     }
 
@@ -1844,6 +1847,8 @@ struct CiderPanelView: View {
     private func deleteSelectedItems() {
         var bookmarksToDelete: [Bookmark] = []
         var notesToDelete: [Note] = []
+        var dateCardIDsToDelete: [UUID] = []
+        var contactIDsToDelete: [UUID] = []
 
         for id in selectedItemIDs {
             if id.hasPrefix("bookmark-") {
@@ -1858,14 +1863,40 @@ struct CiderPanelView: View {
                    let note = notesViewModel.notes.first(where: { $0.id == uuid }) {
                     notesToDelete.append(note)
                 }
+            } else if id.hasPrefix("datecard-") {
+                let uuidString = String(id.dropFirst("datecard-".count))
+                if let uuid = UUID(uuidString: uuidString) {
+                    dateCardIDsToDelete.append(uuid)
+                }
+            } else if id.hasPrefix("contact-") {
+                let uuidString = String(id.dropFirst("contact-".count))
+                if let uuid = UUID(uuidString: uuidString) {
+                    contactIDsToDelete.append(uuid)
+                }
             }
         }
+
+        var allTrashItems: [TrashItem] = []
 
         if !bookmarksToDelete.isEmpty {
             bookmarksViewModel.deleteBookmarks(bookmarksToDelete)
         }
         if !notesToDelete.isEmpty {
             notesViewModel.deleteNotes(notesToDelete)
+        }
+        for dcID in dateCardIDsToDelete {
+            if let trashItem = DateCardStorage.shared.deleteDateCard(dcID) {
+                allTrashItems.append(trashItem)
+            }
+        }
+        for cID in contactIDsToDelete {
+            if let trashItem = ContactStorage.shared.deleteContact(cID) {
+                allTrashItems.append(trashItem)
+            }
+        }
+
+        if !allTrashItems.isEmpty {
+            CiderUndoManager.shared.record(.bulkDeletedToTrash(allTrashItems))
         }
 
         selectedItemIDs.removeAll()
@@ -1884,6 +1915,16 @@ struct CiderPanelView: View {
                 if let uuid = UUID(uuidString: uuidString),
                    let note = notesViewModel.notes.first(where: { $0.id == uuid }) {
                     _ = notesViewModel.assignNote(note, toFolder: folderID)
+                }
+            } else if id.hasPrefix("datecard-") {
+                let uuidString = String(id.dropFirst("datecard-".count))
+                if let uuid = UUID(uuidString: uuidString) {
+                    DateCardStorage.shared.assignDateCard(uuid, toFolder: folderID)
+                }
+            } else if id.hasPrefix("contact-") {
+                let uuidString = String(id.dropFirst("contact-".count))
+                if let uuid = UUID(uuidString: uuidString) {
+                    ContactStorage.shared.assignContact(uuid, toFolder: folderID)
                 }
             }
         }

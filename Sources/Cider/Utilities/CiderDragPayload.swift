@@ -131,6 +131,14 @@ enum CiderMultiDrag {
                let uuid = UUID(uuidString: String(selectedID.dropFirst("note-".count))) {
                 return ("note", uuid)
             }
+            if selectedID.hasPrefix("datecard-"),
+               let uuid = UUID(uuidString: String(selectedID.dropFirst("datecard-".count))) {
+                return ("datecard", uuid)
+            }
+            if selectedID.hasPrefix("contact-"),
+               let uuid = UUID(uuidString: String(selectedID.dropFirst("contact-".count))) {
+                return ("contact", uuid)
+            }
             return nil
         }
     }

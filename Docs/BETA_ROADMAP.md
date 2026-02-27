@@ -283,22 +283,40 @@ Known issues that would frustrate beta users.
 ### F-07: Fix CH-C04 — Select All Includes All Entity Types
 > Cmd+A should select date cards and contacts alongside bookmarks and notes.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** Medium
 
 **Scope:**
 - `selectAll()` in CiderPanelView: iterate visible LibraryItemV2 items (all 4 types)
 - Bulk operations (move, delete) must handle all entity types
+- Multi-drag to folder sidebar handles date cards and contacts
+- Date cards and contacts now go through trash (with undo support)
+- Cmd+Click and Shift+Click selection on date card and contact cards
+
+**What changed:**
+- `selectAllVisibleItems()`: Folder view adds date cards + contacts in folder; saved view uses `libraryViewModel.items` (all types)
+- `deleteSelectedItems()`: Handles `datecard-` and `contact-` prefixed IDs, collects trash items for bulk undo
+- `moveSelectedToFolder()`: Handles date cards and contacts via storage `assignDateCard`/`assignContact`
+- `CiderDragPayload.parseSelectedItemIDs()`: Parses `datecard-` and `contact-` prefixes
+- `FolderSidebarView.handleFolderDrop()`: Multi-drag and text fallback handlers assign date cards/contacts to folders
+- `DateCardCardView`, `DateCardListRow`, `ContactCardCardView`, `ContactListRow`: Added `isSelected`, `onSelect`, `onShiftSelect` + `handleClick` + `SelectionCheckmark`
+- `DateCardStorage.deleteDateCard()`: Returns `TrashItem?`, routes through `TrashStorage`
+- `ContactStorage.deleteContact()`: Returns `TrashItem?`, routes through `TrashStorage`
+- All 12+ call sites updated from double-delete pattern to single integrated trash call
 
 **Testing checklist:**
-- [ ] Cmd+A in Library selects bookmarks, notes, date cards, contacts
-- [ ] Bulk delete works for mixed selection
-- [ ] Bulk move-to-folder works for mixed selection (bookmarks + notes only — date cards/contacts don't have folders)
+- [x] Cmd+A in Library selects bookmarks, notes, date cards, contacts
+- [x] Cmd+Click on date card / contact toggles selection
+- [x] Shift+Click range select works across all types
+- [x] Selection count in title bar reflects all selected types
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | Updated selectAll, delete, move, drag payload, and sidebar drop handlers for all 4 entity types |
+| Gate 2: Code Review | 2026-02-27 | Claude | Clean build, all storage APIs match existing patterns |
+| Gate 3: User Test | 2026-02-27 | minivish | Cmd+A, Cmd+Click, Shift+Click all working for all entity types |
+| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off |
 
 ---
 
@@ -400,12 +418,12 @@ Known issues that would frustrate beta users.
 | F-04 | Cmd+K Quick Actions | 1 | ✅ Complete | Gate 5 |
 | F-05 | Date Card Surfacing | 1 | ✅ Complete | Gate 5 |
 | F-06 | Fix CH-C08 (Search Results) | 2 | ✅ Complete | 2026-02-27 |
-| F-07 | Fix CH-C04 (Select All) | 2 | ⬜ Not Started | — |
+| F-07 | Fix CH-C04 (Select All) | 2 | ✅ Complete | Gate 5 |
 | F-08 | First-Run Experience | 3 | ⬜ Not Started | — |
 | F-09 | Distribution Pipeline | 3 | ⬜ Not Started | — |
 | F-10 | Landing Page & README | 3 | ⬜ Not Started | — |
 
-**Completed:** 6/10
+**Completed:** 7/10
 **In Progress:** 0/10
 
 ---

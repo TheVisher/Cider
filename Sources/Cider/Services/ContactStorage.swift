@@ -50,12 +50,12 @@ final class ContactStorage: ObservableObject {
     }
 
     @discardableResult
-    func deleteContact(_ id: UUID) -> Bool {
-        let oldCount = contacts.count
+    func deleteContact(_ id: UUID) -> TrashItem? {
+        guard let contact = contacts.first(where: { $0.id == id }) else { return nil }
+        let trashItem = TrashStorage.shared.trashContact(contact, contactsDir: StoragePaths.cachedDirectoryURL(for: .contacts))
         contacts.removeAll { $0.id == id }
-        guard contacts.count != oldCount else { return false }
         persist()
-        return true
+        return trashItem
     }
 
     @discardableResult

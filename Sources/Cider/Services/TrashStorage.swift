@@ -230,10 +230,8 @@ final class TrashStorage {
         // Cascade-trash linked birthday date cards
         var cascadedIDs: [UUID] = []
         for ref in contact.linkedEntities where ref.type == .dateCard {
-            if let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) {
-                _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
-                let cascadedItem = trashDateCard(dateCard, dateCardsDir: StoragePaths.directoryURL(for: .dateCards))
-                cascadedIDs.append(cascadedItem.id)
+            if let trashItem = DateCardStorage.shared.deleteDateCard(ref.entityID) {
+                cascadedIDs.append(trashItem.id)
             }
         }
 

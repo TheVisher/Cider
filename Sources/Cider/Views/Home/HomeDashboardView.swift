@@ -190,9 +190,9 @@ struct HomeDashboardView: View {
                                 ))
                             },
                             onDelete: {
-                                _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
-                                let trashItem = TrashStorage.shared.trashDateCard(dateCard, dateCardsDir: StoragePaths.cachedDirectoryURL(for: .dateCards))
-                                CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                                if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                                }
                             }
                         )
                         .frame(width: 220)
@@ -267,10 +267,13 @@ struct HomeDashboardView: View {
                     ))
                 },
                 onDelete: {
-                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
-                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, dateCardsDir: StoragePaths.cachedDirectoryURL(for: .dateCards))
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
-                }
+                    if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .contact(let contact):
             ContactListRow(
@@ -287,10 +290,13 @@ struct HomeDashboardView: View {
                     ))
                 },
                 onDelete: {
-                    _ = ContactStorage.shared.deleteContact(contact.id)
-                    let trashItem = TrashStorage.shared.trashContact(contact, contactsDir: StoragePaths.cachedDirectoryURL(for: .contacts))
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
-                }
+                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .externalFile(let file):
             SourceCardView(
@@ -374,10 +380,13 @@ struct HomeDashboardView: View {
                     ))
                 },
                 onDelete: {
-                    _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
-                    let trashItem = TrashStorage.shared.trashDateCard(dateCard, dateCardsDir: StoragePaths.cachedDirectoryURL(for: .dateCards))
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
-                }
+                    if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .contact(let contact):
             ContactCardCardView(
@@ -394,10 +403,13 @@ struct HomeDashboardView: View {
                     ))
                 },
                 onDelete: {
-                    _ = ContactStorage.shared.deleteContact(contact.id)
-                    let trashItem = TrashStorage.shared.trashContact(contact, contactsDir: StoragePaths.cachedDirectoryURL(for: .contacts))
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
-                }
+                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
             )
         case .externalFile(let file):
             SourceCardView(

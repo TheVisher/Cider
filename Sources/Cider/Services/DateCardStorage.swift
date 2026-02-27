@@ -61,12 +61,12 @@ final class DateCardStorage: ObservableObject {
     }
 
     @discardableResult
-    func deleteDateCard(_ id: UUID) -> Bool {
-        let oldCount = dateCards.count
+    func deleteDateCard(_ id: UUID) -> TrashItem? {
+        guard let dateCard = dateCards.first(where: { $0.id == id }) else { return nil }
+        let trashItem = TrashStorage.shared.trashDateCard(dateCard, dateCardsDir: StoragePaths.cachedDirectoryURL(for: .dateCards))
         dateCards.removeAll { $0.id == id }
-        guard dateCards.count != oldCount else { return false }
         persist()
-        return true
+        return trashItem
     }
 
     @discardableResult

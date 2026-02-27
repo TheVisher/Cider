@@ -666,6 +666,10 @@ struct FolderSidebarView: View {
                         } else if item.type == "note",
                                   let note = notes.first(where: { $0.id == item.id }) {
                             _ = onAssignNoteToFolder?(note, targetFolderID)
+                        } else if item.type == "datecard" {
+                            DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID)
+                        } else if item.type == "contact" {
+                            ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID)
                         }
                     }
                 }
@@ -722,6 +726,10 @@ struct FolderSidebarView: View {
                             } else if item.type == "note",
                                       let note = notes.first(where: { $0.id == item.id }) {
                                 _ = onAssignNoteToFolder?(note, targetFolderID)
+                            } else if item.type == "datecard" {
+                                DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID)
+                            } else if item.type == "contact" {
+                                ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID)
                             }
                         }
                     }

@@ -8,8 +8,22 @@ struct DateCardCardView: View {
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
 
     @State private var isHovered = false
+
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
 
     private var dayString: String {
         let formatter = DateFormatter()
@@ -55,7 +69,7 @@ struct DateCardCardView: View {
 
     var body: some View {
         Button {
-            onOpen?()
+            handleClick { onOpen?() }
         } label: {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 // Header: large date block on left, vertical divider, title on right
@@ -136,7 +150,13 @@ struct DateCardCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .cardContainer(isHovered: isHovered)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected)
+        .overlay(alignment: .topLeading) {
+            if isSelected {
+                SelectionCheckmark()
+                    .padding(Spacing.sm)
+            }
+        }
         .hoverState($isHovered, animation: .snappy)
         .dateCardContextMenu(
             onOpen: { onOpen?() },
@@ -210,6 +230,20 @@ struct DateCardListRow: View {
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    var isSelected: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
+
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
 
     private var listMonthColor: Color {
         switch urgency {
@@ -231,9 +265,13 @@ struct DateCardListRow: View {
 
     var body: some View {
         Button {
-            onOpen?()
+            handleClick { onOpen?() }
         } label: {
             HStack(spacing: Spacing.sm) {
+                if isSelected {
+                    SelectionCheckmark()
+                }
+
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(dateCard.startAt.formatted(.dateTime.month(.abbreviated)))
                         .font(CiderFont.captionSemibold)
@@ -292,6 +330,10 @@ struct DateCardListRow: View {
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.surfaceSubtle)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(CiderColors.controlAccent, lineWidth: isSelected ? CiderBorder.innerStrokeWidth : 0)
             )
         }
         .buttonStyle(.plain)
