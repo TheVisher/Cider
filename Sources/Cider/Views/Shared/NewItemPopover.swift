@@ -10,6 +10,7 @@ struct NewItemPopover: View {
     var onCreateContact: (String, String) -> Void
     var onCreateFolder: (String, UUID?) -> Void
     var onCreateTab: (String, Set<LibraryEntityType>) -> Void
+    var onCreateTag: (String, String) -> Void
     var onDismiss: () -> Void
 
     @State private var step: NewItemStep = .picker
@@ -68,6 +69,14 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
+            case .tag:
+                TagCreationForm(
+                    onBack: back,
+                    onCreate: { name, colorHex in
+                        onCreateTag(name, colorHex)
+                        onDismiss()
+                    }
+                )
             }
         }
         // No animation on step changes: animating popover content size via ViewBridge
@@ -99,6 +108,7 @@ struct NewItemPopover: View {
                 typeCard(.contact)
                 typeCard(.folder)
                 typeCard(.tab)
+                typeCard(.tag)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
@@ -137,6 +147,7 @@ struct NewItemPopover: View {
         case .contact:  step = .contact
         case .folder:   step = .folder
         case .tab:      step = .tab
+        case .tag:      step = .tag
         }
     }
 }
@@ -144,13 +155,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, folder, tab
+    case picker, bookmark, note, event, contact, folder, tab, tag
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, folder, tab
+    case bookmark, note, event, contact, folder, tab, tag
 
     var id: String { rawValue }
 
@@ -162,6 +173,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .contact:  "Contact"
         case .folder:   "Folder"
         case .tab:      "Tab"
+        case .tag:      "Tag"
         }
     }
 
@@ -173,6 +185,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .contact:  "person.badge.plus"
         case .folder:   "folder.badge.plus"
         case .tab:      "rectangle.badge.plus"
+        case .tag:      "tag"
         }
     }
 }
@@ -726,5 +739,85 @@ private struct TabCreationForm: View {
         }
         let types = selectedTypes.isEmpty ? Set(LibraryEntityType.allCases) : selectedTypes
         onCreate(trimmedName, types)
+    }
+}
+
+// MARK: - Tag Form
+
+private struct TagCreationForm: View {
+    let onBack: () -> Void
+    let onCreate: (String, String) -> Void
+
+    @State private var name = ""
+    @State private var selectedColorHex: String = CardLabelStorage.randomPresetColor()
+    @State private var errorMessage = ""
+
+    private let presets = CardLabelStorage.tagColorPresets
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            FormHeader(title: "New Tag", onBack: onBack)
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                inputField("Tag name", text: $name, onSubmit: commit)
+
+                Text("Color")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xxs)
+                    .padding(.top, Spacing.xxs)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 28), spacing: Spacing.xs)],
+                    spacing: Spacing.xs
+                ) {
+                    ForEach(presets, id: \.hex) { preset in
+                        let isSelected = preset.hex.lowercased() == selectedColorHex.lowercased()
+                        Button {
+                            selectedColorHex = preset.hex
+                        } label: {
+                            Circle()
+                                .fill(Color(hex: preset.hex) ?? CiderColors.secondary)
+                                .frame(width: 24, height: 24)
+                                .overlay {
+                                    if isSelected {
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                            .frame(width: 18, height: 18)
+                                    }
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help(preset.name)
+                    }
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+            }
+
+            AddButton(
+                label: "Create Tag",
+                disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                action: commit
+            )
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private func commit() {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            errorMessage = "Name is required"
+            return
+        }
+        onCreate(trimmedName, selectedColorHex)
     }
 }

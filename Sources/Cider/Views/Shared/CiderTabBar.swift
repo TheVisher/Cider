@@ -145,6 +145,7 @@ struct CiderTabBar: View {
         case .savedView: 0
         case .search: 0
         case .externalSource(let id, _): externalSourceRegistry.files(for: id).count
+        case .tag: 0
         }
     }
 }

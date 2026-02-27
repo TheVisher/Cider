@@ -47,7 +47,8 @@ final class BookmarkAIEnrichment {
                 NLPipeline.suggestTags(
                     title: bookmark.title,
                     host: bookmark.hostDisplay,
-                    notes: bookmark.notes
+                    notes: bookmark.notes,
+                    urlString: bookmark.urlString
                 )
             }.value
         }
@@ -130,6 +131,16 @@ final class BookmarkAIEnrichment {
                 dominantColors: dominantColors,
                 title: suggestedTitle
             )
+        }
+
+        // ── Create CardLabel objects from AI tags and assign to bookmark ──
+        if !suggestedTags.isEmpty {
+            await MainActor.run {
+                for tagName in suggestedTags {
+                    let label = CardLabelStorage.shared.findOrCreate(name: tagName, colorHex: nil)
+                    _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+                }
+            }
         }
     }
 
