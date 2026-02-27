@@ -41,6 +41,13 @@ final class SavedViewStorage: ObservableObject {
         persist()
     }
 
+    func insertInTabOrder(_ id: UUID, at index: Int) {
+        tabOrder.removeAll { $0 == id }
+        let clampedIndex = min(max(index, 0), tabOrder.count)
+        tabOrder.insert(id, at: clampedIndex)
+        persist()
+    }
+
     func removeFromTabOrder(_ id: UUID) {
         tabOrder.removeAll { $0 == id }
         persist()
@@ -73,7 +80,8 @@ final class SavedViewStorage: ObservableObject {
         filterSpec: SavedViewFilterSpec = SavedViewFilterSpec(),
         sortSpec: SavedViewSortSpec = SavedViewSortSpec(),
         layoutSpec: SavedViewLayoutSpec = SavedViewLayoutSpec(),
-        isBlank: Bool = false
+        isBlank: Bool = false,
+        isOnboarding: Bool = false
     ) -> SavedView {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? "Untitled View" : trimmed
@@ -82,7 +90,8 @@ final class SavedViewStorage: ObservableObject {
             filterSpec: filterSpec,
             sortSpec: sortSpec,
             layoutSpec: layoutSpec,
-            isBlank: isBlank
+            isBlank: isBlank,
+            isOnboarding: isOnboarding
         )
         savedViews.append(savedView)
         persist()

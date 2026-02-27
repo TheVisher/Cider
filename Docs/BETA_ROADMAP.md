@@ -330,29 +330,46 @@ Known issues that would frustrate beta users.
 ### F-08: First-Run Experience
 > New users need to know how to activate and use Cider.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** High — without this, users won't know double-tap Option exists
 
 **Scope:**
-- Detect first launch (flag in CiderConfig)
-- 2-3 screen onboarding overlay:
-  1. "Double-tap Option to open Cider anytime" (with animation showing the gesture)
-  2. "Capture from your browser" (show capture button / hotkey)
-  3. "Organize with folders and tags" (show sidebar)
-- Dismissable, skip button, never shows again
-- Optional: re-trigger from Settings → About → "Show Onboarding"
+- `hasCompletedOnboarding: Bool` on CiderConfig (default false)
+- `isOnboarding: Bool` on SavedView model — distinguishes onboarding tab from blank tabs
+- Onboarding tab (not overlay) — auto-created on first launch, positioned first in tab bar
+- 10-card responsive grid (two-column at ≥560pt, single-column below):
+  1. Open Cider Anytime (double-tap Option)
+  2. Capture from Your Browser (Opt+B / capture button)
+  3. Clipboard Capture (URL/image detection, toast save/discard)
+  4. Write Notes (Opt+N, rich editor, paste text)
+  5. Drag & Drop Everything (thumbnails, notes images, folder organization)
+  6. Organize with Folders & Tags
+  7. Track Events & Contacts (+New, surfacing)
+  8. Custom Tabs (saved views, filters, layouts)
+  9. Search Everything (Cmd+K palette, sidebar search)
+  10. Keyboard Shortcuts (quick reference table)
+- "Get Started" button closes tab and marks onboarding complete
+- Re-triggerable from Settings → About → "Show Welcome Guide"
+- `.showOnboarding` notification for re-trigger
 
 **Testing checklist:**
-- [ ] First launch shows onboarding
-- [ ] Each screen is clear and informative
-- [ ] Dismissing marks it as seen (doesn't reappear)
-- [ ] Can re-trigger from Settings
-- [ ] Doesn't interfere with panel functionality
+- [ ] First launch shows Welcome tab first, selected, with onboarding content
+- [ ] Inbox and Library tabs also present
+- [ ] Two-column layout at normal panel width, single column when narrow
+- [ ] Cards in each row are equal height (top-aligned)
+- [ ] "Get Started" closes the tab and marks onboarding complete
+- [ ] Relaunching → onboarding tab does not reappear
+- [ ] Settings → About → "Show Welcome Guide" → re-creates the onboarding tab
+- [ ] Closing via right-click → Close Tab also works
+- [ ] No hardcoded colors/fonts — all CiderFont/CiderColors tokens
+- [ ] `swift build -Xswiftc -warnings-as-errors` clean
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | CiderConfig flag, SavedView isOnboarding, OnboardingTabView (10-card responsive grid), CiderPanelView routing + ensureDefaultTabs, AboutSettingsView re-trigger, .showOnboarding notification |
+| Gate 3: User Test | 2026-02-27 | minivish | Visual iteration: expanded content (clipboard, notes, drag-drop, events, tabs, search, shortcuts), two-column layout, equal-height rows |
+| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off |
 
 ---
 
@@ -424,11 +441,11 @@ Known issues that would frustrate beta users.
 | F-05 | Date Card Surfacing | 1 | ✅ Complete | Gate 5 |
 | F-06 | Fix CH-C08 (Search Results) | 2 | ✅ Complete | 2026-02-27 |
 | F-07 | Fix CH-C04 (Select All) | 2 | ✅ Complete | Gate 5 |
-| F-08 | First-Run Experience | 3 | ⬜ Not Started | — |
+| F-08 | First-Run Experience | 3 | ✅ Complete | Gate 5 |
 | F-09 | Distribution Pipeline | 3 | ⬜ Not Started | — |
 | F-10 | Landing Page & README | 3 | ⬜ Not Started | — |
 
-**Completed:** 7/10
+**Completed:** 8/10
 **In Progress:** 0/10
 
 ---
@@ -484,6 +501,7 @@ Items explicitly deferred. Add new ideas here instead of scope-creeping the beta
 | Themed folders (Media Hub, Recipe) | Tier 3 | Domain-specific views |
 | YouTube transcript sync | Tier 3 | Live captions, click-to-seek |
 | Clipboard viewer | Tier 3 | Recent items, action buttons |
+| Sparkle auto-updater | Tier 1 | Integrate Sparkle framework for automatic update checks. SPM dependency, Ed25519 signing, appcast XML on GitHub Pages. Replaces manual .dmg re-download. |
 | Vault directory migration prompt | Tier 2 | When vault root or override changes, offer "Move existing data to new location?" button — explicit, user-initiated, with confirmation. Currently users must move files manually in Finder. |
 | Web archival | Tier 3 | .webarchive snapshots |
 | GIF/video/carousel bookmarks | Tier 3 | Extended media types |

@@ -33,6 +33,14 @@ struct AboutSettingsView: View {
                 AboutLink(title: "Twitter", icon: "at", url: "https://twitter.com")
             }
 
+            // Onboarding re-trigger
+            Button("Show Welcome Guide") {
+                NotificationCenter.default.post(name: .showOnboarding, object: nil)
+            }
+            .buttonStyle(.plain)
+            .font(CiderFont.labelMedium)
+            .foregroundColor(CiderColors.controlAccent)
+
             Spacer()
 
             // Copyright

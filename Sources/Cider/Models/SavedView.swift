@@ -83,6 +83,7 @@ struct SavedView: Identifiable, Codable, Hashable {
     var layoutSpec: SavedViewLayoutSpec
     var isTabPinned: Bool
     var isBlank: Bool
+    var isOnboarding: Bool
     var createdAt: Date
     var updatedAt: Date
 
@@ -94,6 +95,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         layoutSpec: SavedViewLayoutSpec = SavedViewLayoutSpec(),
         isTabPinned: Bool = true,
         isBlank: Bool = false,
+        isOnboarding: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -104,6 +106,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         self.layoutSpec = layoutSpec
         self.isTabPinned = isTabPinned
         self.isBlank = isBlank
+        self.isOnboarding = isOnboarding
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -117,6 +120,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         layoutSpec = try container.decodeIfPresent(SavedViewLayoutSpec.self, forKey: .layoutSpec) ?? SavedViewLayoutSpec()
         isTabPinned = try container.decodeIfPresent(Bool.self, forKey: .isTabPinned) ?? true
         isBlank = try container.decodeIfPresent(Bool.self, forKey: .isBlank) ?? false
+        isOnboarding = try container.decodeIfPresent(Bool.self, forKey: .isOnboarding) ?? false
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }

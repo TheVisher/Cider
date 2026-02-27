@@ -143,6 +143,7 @@ struct CiderConfig: Codable {
         case screenCaptureToastTimeout
         case screenCaptureDefaultAction
         case dateCardSurfacingDays
+        case hasCompletedOnboarding
     }
 
     var showMenuBarIcon: Bool
@@ -187,6 +188,7 @@ struct CiderConfig: Codable {
     var screenCaptureToastTimeout: Int  // Seconds before routing toast auto-dismisses (0 = skip toast)
     var screenCaptureDefaultAction: String  // Default action: "note", "dateCard", "contact"
     var dateCardSurfacingDays: Int  // Days ahead to surface approaching date cards (0 = disabled)
+    var hasCompletedOnboarding: Bool  // Whether the user has dismissed the first-run onboarding tab
 
     static let storageKey = "CiderConfig"
 
@@ -229,7 +231,8 @@ struct CiderConfig: Codable {
             enableColorExtraction: true,
             screenCaptureToastTimeout: 8,
             screenCaptureDefaultAction: "note",
-            dateCardSurfacingDays: 7
+            dateCardSurfacingDays: 7,
+            hasCompletedOnboarding: false
         )
     }
 
@@ -409,6 +412,7 @@ struct CiderConfig: Codable {
             String.self, forKey: .screenCaptureDefaultAction
         ) ?? "note"
         dateCardSurfacingDays = try container.decodeIfPresent(Int.self, forKey: .dateCardSurfacingDays) ?? 7
+        hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
     }
 
     init(
@@ -453,7 +457,8 @@ struct CiderConfig: Codable {
         enableColorExtraction: Bool = true,
         screenCaptureToastTimeout: Int = 8,
         screenCaptureDefaultAction: String = "note",
-        dateCardSurfacingDays: Int = 7
+        dateCardSurfacingDays: Int = 7,
+        hasCompletedOnboarding: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -497,5 +502,6 @@ struct CiderConfig: Codable {
         self.screenCaptureToastTimeout = screenCaptureToastTimeout
         self.screenCaptureDefaultAction = screenCaptureDefaultAction
         self.dateCardSurfacingDays = dateCardSurfacingDays
+        self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 }

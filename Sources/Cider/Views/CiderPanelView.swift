@@ -266,6 +266,9 @@ struct CiderPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { _ in
             showNewItemPicker = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
+            openOrCreateOnboardingTab()
+        }
         .sheet(item: $newEventEditorContext) { context in
             DateCardEditorSheet(
                 existingCard: context.existingCard,
@@ -869,7 +872,11 @@ struct CiderPanelView: View {
             switch tab {
             case .savedView(let id, _):
                 if let savedView = savedViewStorage.savedView(for: id) {
-                    if savedView.isBlank {
+                    if savedView.isOnboarding {
+                        OnboardingTabView(onDismiss: {
+                            dismissOnboardingTab(id: id)
+                        })
+                    } else if savedView.isBlank {
                         blankTabWelcome(savedViewID: id)
                     } else {
                         HomeDashboardView(
@@ -1029,6 +1036,35 @@ struct CiderPanelView: View {
         guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
         savedView.isBlank = false
         savedViewStorage.updateSavedView(savedView)
+    }
+
+    private func dismissOnboardingTab(id: UUID) {
+        savedViewStorage.removeFromTabOrder(id)
+        savedViewStorage.deleteSavedView(id)
+        var config = CiderConfig.load()
+        config.hasCompletedOnboarding = true
+        config.save()
+        selectedTab = allTabs.first
+    }
+
+    private func openOrCreateOnboardingTab() {
+        // Check if an onboarding tab already exists in the tab bar
+        if let existing = savedViewStorage.savedViews.first(where: { $0.isOnboarding }),
+           savedViewStorage.tabOrder.contains(existing.id) {
+            selectedTab = .savedView(id: existing.id, name: existing.name)
+            selectedFolderID = nil
+            return
+        }
+        // Create a new onboarding tab at the front
+        let welcome = savedViewStorage.createSavedView(
+            name: "Welcome",
+            filterSpec: SavedViewFilterSpec(),
+            isBlank: true,
+            isOnboarding: true
+        )
+        savedViewStorage.insertInTabOrder(welcome.id, at: 0)
+        selectedTab = .savedView(id: welcome.id, name: welcome.name)
+        selectedFolderID = nil
     }
 
     private var noTabsEmptyState: some View {
@@ -1792,7 +1828,20 @@ struct CiderPanelView: View {
         )
         savedViewStorage.addToTabOrder(library.id)
 
-        selectedTab = .savedView(id: inbox.id, name: inbox.name)
+        // Create onboarding tab if not already completed
+        let config = CiderConfig.load()
+        if !config.hasCompletedOnboarding {
+            let welcome = savedViewStorage.createSavedView(
+                name: "Welcome",
+                filterSpec: SavedViewFilterSpec(),
+                isBlank: true,
+                isOnboarding: true
+            )
+            savedViewStorage.insertInTabOrder(welcome.id, at: 0)
+            selectedTab = .savedView(id: welcome.id, name: welcome.name)
+        } else {
+            selectedTab = .savedView(id: inbox.id, name: inbox.name)
+        }
     }
 
     private func expandPathToFolder(_ folderID: UUID) {
