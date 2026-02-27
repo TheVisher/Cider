@@ -16,6 +16,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
     // Home-tab-only extras — nil means the section is hidden
     var sortMode: Binding<LibrarySortMode>? = nil
     var entityFilter: Binding<Set<LibraryEntityType>>? = nil
+    var onlyUnassigned: Binding<Bool>? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
@@ -26,6 +27,11 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
 
             if let entityFilter {
                 entityFilterSection(entityFilter)
+                Divider().background(CiderColors.separator)
+            }
+
+            if let onlyUnassigned {
+                unassignedToggle(onlyUnassigned)
                 Divider().background(CiderColors.separator)
             }
 
@@ -107,6 +113,27 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
                     )
                 }
             }
+        }
+    }
+
+    // MARK: - Unassigned Toggle
+
+    @ViewBuilder
+    private func unassignedToggle(_ binding: Binding<Bool>) -> some View {
+        HStack(spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Unassigned Only")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                Text("Show items not in any folder")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            Spacer(minLength: 0)
+            Toggle("", isOn: binding)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
         }
     }
 

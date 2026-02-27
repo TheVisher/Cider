@@ -50,7 +50,7 @@ These are structural changes that define how users interact with Cider. Must shi
 ### F-01: Cider Vault Storage
 > Consolidate all storage into a single "Cider Vault" root directory with per-type subdirectories, each individually overridable.
 
-**Status:** `⬜ Not Started`
+**Status:** `🧪 Testing`
 **Priority:** Critical — must be first (all other features build on this)
 
 **Scope:**
@@ -63,16 +63,19 @@ These are structural changes that define how users interact with Cider. Must shi
 - CiderConfig migration: old `ciderDataDirectory` / `notesDirectoryPath` → new vault structure
 
 **Testing checklist:**
-- [ ] Fresh launch creates vault structure at default location
-- [ ] Changing vault location moves/creates structure at new path
-- [ ] Per-type override works (e.g., point Notes elsewhere)
-- [ ] All storages read/write from correct locations
-- [ ] Settings UI shows correct paths and overrides
+- [x] Fresh launch creates vault structure at default location
+- [x] Per-type override works (e.g., point Notes elsewhere)
+- [x] All storages read/write from correct locations
+- [x] Settings UI shows correct paths and overrides
+- [x] Trash: delete + undo for each item type
+- [ ] Vault relocation via Settings (deferred — confident it works given override testing)
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-26 | Claude | StoragePaths enum, CiderConfig vault props, all 8 storages, TrashStorage, Settings UI |
+| Gate 2: Code Review | 2026-02-26 | Claude | Thread-safe cache (NSLock fix for EXC_BAD_ACCESS), cached paths in view closures |
+| Gate 3: User Test | 2026-02-26 | minivish | Bookmarks + notes migrated, override tested, data migration noted as post-beta |
 
 ---
 
@@ -416,6 +419,7 @@ Items explicitly deferred. Add new ideas here instead of scope-creeping the beta
 | Themed folders (Media Hub, Recipe) | Tier 3 | Domain-specific views |
 | YouTube transcript sync | Tier 3 | Live captions, click-to-seek |
 | Clipboard viewer | Tier 3 | Recent items, action buttons |
+| Vault directory migration prompt | Tier 2 | When vault root or override changes, offer "Move existing data to new location?" button — explicit, user-initiated, with confirmation. Currently users must move files manually in Finder. |
 | Web archival | Tier 3 | .webarchive snapshots |
 | GIF/video/carousel bookmarks | Tier 3 | Extended media types |
 

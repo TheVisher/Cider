@@ -7,7 +7,7 @@ struct CiderPanelView: View {
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
     @ObservedObject private var externalSourceStorage = ExternalSourceStorage.shared
     @StateObject private var libraryViewModel = LibraryViewModel()
-    @State private var selectedTab: CiderTab = .home
+    @State private var selectedTab: CiderTab?
     @State private var isCollapsed = false
     @State private var selectedFolderID: UUID?
     @State private var selectedSourceID: UUID?
@@ -19,10 +19,8 @@ struct CiderPanelView: View {
     @State private var showNewItemPicker = false
     @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
-    @State private var continueSectionCollapsed: Bool = CiderConfig.load().continueSectionCollapsed
     @State private var homeSort: LibrarySortMode = CiderConfig.load().homeSort
     @State private var homeEntityFilter: Set<LibraryEntityType> = CiderConfig.load().homeEntityFilter
-    @State private var showContinueSection: Bool = CiderConfig.load().showContinueSection
     @State private var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     // Detail view state (centralized)
@@ -44,10 +42,9 @@ struct CiderPanelView: View {
     @State private var newContactEditorContext: ContactEditorContext?
     @State private var contentAreaWidth: CGFloat = 800
     @State private var enableLinkedSources: Bool = CiderConfig.load().enableLinkedSources
-    @State private var enableSavedViewTabs: Bool = CiderConfig.load().enableSavedViewTabs
 
     private var allTabs: [CiderTab] {
-        CiderTab.fixedTabs + savedViewTabs + sourceTabs + dynamicTabs
+        savedViewTabs + sourceTabs + dynamicTabs
     }
 
     private var sourceTabs: [CiderTab] {
@@ -58,8 +55,7 @@ struct CiderPanelView: View {
     }
 
     private var savedViewTabs: [CiderTab] {
-        guard enableSavedViewTabs else { return [] }
-        return savedViewStorage.pinnedSavedViews().map { savedView in
+        savedViewStorage.tabOrderedViews().map { savedView in
             .savedView(id: savedView.id, name: savedView.name)
         }
     }
@@ -156,6 +152,7 @@ struct CiderPanelView: View {
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailSlideOut)
         .environment(\.textScale, textScale)
+        .task { ensureDefaultTabs() }
         .onChange(of: sidebarSearchText) { _, newValue in
             searchDebounceTask?.cancel()
             if newValue.isEmpty {
@@ -205,11 +202,6 @@ struct CiderPanelView: View {
                 config.save()
             }
         }
-        .onChange(of: continueSectionCollapsed) { _, newValue in
-            var config = CiderConfig.load()
-            config.continueSectionCollapsed = newValue
-            config.save()
-        }
         .onChange(of: subFoldersCollapsed) { _, newValue in
             var config = CiderConfig.load()
             config.subFoldersCollapsed = newValue
@@ -232,7 +224,6 @@ struct CiderPanelView: View {
             let config = CiderConfig.load()
             textScale = config.textSize.scale
             enableLinkedSources = config.enableLinkedSources
-            enableSavedViewTabs = config.enableSavedViewTabs
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
             if isNoteDetailOpen {
@@ -362,7 +353,10 @@ struct CiderPanelView: View {
             tabs: allTabs,
             selectedFolderID: $selectedFolderID,
             selectedSourceID: $selectedSourceID,
-            onCloseTab: closeTab
+            onCloseTab: closeTab,
+            onReorderTab: { from, to in savedViewStorage.moveTab(from: from, to: to) },
+            onRenameTab: { id, name in savedViewStorage.renameSavedView(id, to: name) },
+            onAddTab: { createSavedViewFromCurrentState() }
         )
         .frame(maxWidth: .infinity)
 
@@ -386,26 +380,7 @@ struct CiderPanelView: View {
             }
             .help("Capture screen region (⌥⌘2)")
 
-        if selectedTab == .home && selectedFolderID == nil {
-            Image(systemName: "plus.square.on.square")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.secondary)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    createSavedViewFromCurrentHomeState()
-                }
-                .help("Save current view as tab")
-
-            if showContinueSection {
-                SectionCollapseToggle(
-                    label: "Recents",
-                    isCollapsed: $continueSectionCollapsed,
-                    collapsedHelp: "Show recent items",
-                    expandedHelp: "Hide recent items"
-                )
-            }
-        } else if selectedFolderID != nil && folderHasSubFolders {
+        if selectedFolderID != nil && folderHasSubFolders {
             SectionCollapseToggle(
                 label: "Folders",
                 isCollapsed: $subFoldersCollapsed,
@@ -536,7 +511,7 @@ struct CiderPanelView: View {
                     return false
                 }
                 if case .externalSource(let tabID, _) = selectedTab, tabID == id {
-                    selectedTab = .home
+                    selectedTab = allTabs.first
                 }
             }
         )
@@ -625,7 +600,6 @@ struct CiderPanelView: View {
         let contactContextSetter = _newContactEditorContext
         return NewItemPopover(
             folders: bvm.folders,
-            enableSavedViewTabs: enableSavedViewTabs,
             onCreateBookmark: { urlString, title in
                 _ = bvm.addBookmark(urlString: urlString, title: title)
             },
@@ -659,14 +633,9 @@ struct CiderPanelView: View {
                 bvm.createFolder(name: name, parentID: parentID)
             },
             onCreateTab: { [self] name, entityTypes in
-                if !enableSavedViewTabs {
-                    var config = CiderConfig.load()
-                    config.enableSavedViewTabs = true
-                    config.save()
-                    enableSavedViewTabs = true
-                }
                 let filter = SavedViewFilterSpec(entityTypes: entityTypes)
                 let savedView = savedViewStorage.createSavedView(name: name, filterSpec: filter)
+                savedViewStorage.addToTabOrder(savedView.id)
                 selectedFolderID = nil
                 selectedTab = .savedView(id: savedView.id, name: savedView.name)
             },
@@ -677,7 +646,7 @@ struct CiderPanelView: View {
     }
 
     private var showFolderViewOptions: Bool {
-        selectedFolderID != nil && selectedTab.isFixed
+        selectedFolderID != nil
     }
 
     @ViewBuilder
@@ -697,7 +666,7 @@ struct CiderPanelView: View {
                         cardSizeScale: $homeCardSizeScale
                     )
                 }
-        } else if selectedTab == .home {
+        } else if let savedViewID = selectedTab?.savedViewID {
             Image(systemName: "slider.horizontal.3")
                 .font(CiderFont.bodySemibold)
                 .foregroundColor(isHomeViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)
@@ -709,8 +678,9 @@ struct CiderPanelView: View {
                     ViewOptionsDropdown(
                         displayMode: $homeDisplayMode,
                         cardSizeScale: $homeCardSizeScale,
-                        sortMode: $homeSort,
-                        entityFilter: $homeEntityFilter
+                        sortMode: sortModeBinding(for: savedViewID),
+                        entityFilter: entityFilterBinding(for: savedViewID),
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
                     )
                 }
         } else {
@@ -718,6 +688,48 @@ struct CiderPanelView: View {
             Color.clear
                 .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
         }
+    }
+
+    private func onlyUnassignedBinding(for savedViewID: UUID) -> Binding<Bool> {
+        Binding(
+            get: {
+                savedViewStorage.savedView(for: savedViewID)?.filterSpec.onlyUnassigned ?? false
+            },
+            set: { newValue in
+                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
+                savedView.filterSpec.onlyUnassigned = newValue
+                if savedView.isBlank { savedView.isBlank = false }
+                savedViewStorage.updateSavedView(savedView)
+            }
+        )
+    }
+
+    private func entityFilterBinding(for savedViewID: UUID) -> Binding<Set<LibraryEntityType>> {
+        Binding(
+            get: {
+                savedViewStorage.savedView(for: savedViewID)?.filterSpec.entityTypes ?? Set(LibraryEntityType.allCases)
+            },
+            set: { newValue in
+                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
+                savedView.filterSpec.entityTypes = newValue
+                if savedView.isBlank && !newValue.isEmpty { savedView.isBlank = false }
+                savedViewStorage.updateSavedView(savedView)
+            }
+        )
+    }
+
+    private func sortModeBinding(for savedViewID: UUID) -> Binding<LibrarySortMode> {
+        Binding(
+            get: {
+                savedViewStorage.savedView(for: savedViewID)?.sortSpec.mode ?? .createdDescending
+            },
+            set: { newValue in
+                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
+                savedView.sortSpec.mode = newValue
+                if savedView.isBlank { savedView.isBlank = false }
+                savedViewStorage.updateSavedView(savedView)
+            }
+        )
     }
 
     // MARK: - Content Area
@@ -753,10 +765,6 @@ struct CiderPanelView: View {
         )
     }
 
-    private var isHomeActive: Bool {
-        selectedTab == .home && selectedFolderID == nil && selectedSourceID == nil
-    }
-
     @ViewBuilder
     private var tabContentBody: some View {
         if let sourceID = selectedSourceID,
@@ -766,7 +774,7 @@ struct CiderPanelView: View {
                 displayMode: $homeDisplayMode,
                 cardSizeScale: $homeCardSizeScale
             )
-        } else if let folderID = selectedFolderID, selectedTab.isFixed {
+        } else if let folderID = selectedFolderID {
             FolderDetailView(
                 bookmarksViewModel: bookmarksViewModel,
                 notesViewModel: notesViewModel,
@@ -791,127 +799,161 @@ struct CiderPanelView: View {
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) }
             )
-        } else {
-            ZStack {
-                // Home is always alive — survives tab switches without resetting state
-                HomeDashboardView(
-                    bookmarksViewModel: bookmarksViewModel,
-                    notesViewModel: notesViewModel,
-                    libraryViewModel: libraryViewModel,
-                    selectedFolderID: selectedFolderID,
-                    displayMode: $homeDisplayMode,
-                    cardSizeScale: $homeCardSizeScale,
-                    continueSectionCollapsed: $continueSectionCollapsed,
-                    selectedItemIDs: $selectedItemIDs,
-                    sortMode: $homeSort,
-                    entityFilter: $homeEntityFilter,
-                    searchText: debouncedSearchText,
-                    onOpenNote: { note in openNoteDetail(note) },
-                    onShowBookmarkDetails: { openBookmarkDetails($0) },
-                    onEditDateCard: { dateCard in
-                        newEventEditorContext = DateCardEditorContext(
-                            existingCard: dateCard,
-                            defaultDate: dateCard.startAt
-                        )
-                    },
-                    onEditContact: { contact in
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
-                    },
-                    onOpenDateCard: { openDateCardDetail($0) },
-                    onOpenContact: { openContactDetail($0) }
-                )
-                .opacity(isHomeActive ? 1 : 0)
-                .allowsHitTesting(isHomeActive)
-
-                // Other tabs are created/destroyed on demand
-                if !isHomeActive, selectedFolderID == nil, selectedSourceID == nil {
-                    switch selectedTab {
-                    case .home:
-                        EmptyView()
-                    case .savedView(let id, _):
-                        if let savedView = savedViewStorage.savedView(for: id) {
-                            SavedViewTabContent(
-                                savedView: savedView,
-                                libraryViewModel: libraryViewModel,
-                                folders: bookmarksViewModel.folders,
-                                onOpenBookmark: { bookmark in
-                                    if NSEvent.modifierFlags.contains(.command) {
-                                        bookmarksViewModel.open(bookmark)
-                                    } else {
-                                        openBookmarkDetails(bookmark)
-                                    }
-                                },
-                                onOpenNote: { note in
-                                    openNoteDetail(note)
-                                },
-                                onDeleteBookmark: { bookmark in
-                                    bookmarksViewModel.deleteBookmarks([bookmark])
-                                },
-                                onDeleteNote: { note in
-                                    notesViewModel.deleteNotes([note])
-                                },
-                                onRenameNote: { note, newTitle in
-                                    NotesStorage.shared.rename(note: note, to: newTitle)
-                                },
-                                onMoveBookmarkToFolder: { bookmark, folderID in
-                                    _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
-                                },
-                                onMoveNoteToFolder: { note, folderID in
-                                    _ = notesViewModel.assignNote(note, toFolder: folderID)
-                                },
-                                onOpenDateCard: { openDateCardDetail($0) },
-                                onOpenContact: { openContactDetail($0) },
-                                searchText: debouncedSearchText,
-                                onUpdateSavedView: { updated in
-                                    _ = savedViewStorage.updateSavedView(updated)
-                                    if case .savedView(let selectedID, _) = selectedTab,
-                                       selectedID == updated.id {
-                                        selectedTab = .savedView(id: updated.id, name: updated.name)
-                                    }
-                                },
-                                onDeleteSavedView: { savedViewID in
-                                    deleteSavedView(savedViewID)
-                                }
-                            )
-                        } else {
-                            EmptyStateView(
-                                icon: "square.grid.2x2",
-                                title: "Saved view not found"
-                            )
-                        }
-                    case .search(_, let query):
-                        SearchTabContent(
-                            query: query,
-                            bookmarks: bookmarksViewModel.bookmarks,
-                            notes: notesViewModel.notes,
-                            onOpenBookmark: { bookmark in
-                                if NSEvent.modifierFlags.contains(.command) {
-                                    bookmarksViewModel.open(bookmark)
-                                } else {
-                                    openBookmarkDetails(bookmark)
-                                }
+        } else if let tab = selectedTab {
+            switch tab {
+            case .savedView(let id, _):
+                if let savedView = savedViewStorage.savedView(for: id) {
+                    if savedView.isBlank {
+                        blankTabWelcome(savedViewID: id)
+                    } else {
+                        HomeDashboardView(
+                            bookmarksViewModel: bookmarksViewModel,
+                            notesViewModel: notesViewModel,
+                            libraryViewModel: libraryViewModel,
+                            selectedFolderID: nil,
+                            displayMode: $homeDisplayMode,
+                            cardSizeScale: $homeCardSizeScale,
+                            continueSectionCollapsed: .constant(true),
+                            selectedItemIDs: $selectedItemIDs,
+                            sortMode: sortModeBinding(for: id),
+                            entityFilter: entityFilterBinding(for: id),
+                            searchText: debouncedSearchText,
+                            onOpenNote: { note in openNoteDetail(note) },
+                            onShowBookmarkDetails: { openBookmarkDetails($0) },
+                            onEditDateCard: { dateCard in
+                                newEventEditorContext = DateCardEditorContext(
+                                    existingCard: dateCard,
+                                    defaultDate: dateCard.startAt
+                                )
                             },
-                            onOpenNote: { note in
-                                openNoteDetail(note)
-                            }
+                            onEditContact: { contact in
+                                newContactEditorContext = ContactEditorContext(existingContact: contact)
+                            },
+                            onOpenDateCard: { openDateCardDetail($0) },
+                            onOpenContact: { openContactDetail($0) },
+                            onlyUnassigned: savedView.filterSpec.onlyUnassigned
                         )
-                    case .externalSource(let id, _):
-                        if let source = externalSourceStorage.source(for: id) {
-                            SourceDetailView(
-                                source: source,
-                                displayMode: $homeDisplayMode,
-                                cardSizeScale: $homeCardSizeScale
-                            )
-                        } else {
-                            EmptyStateView(
-                                icon: "folder.badge.gear",
-                                title: "Source not found"
-                            )
-                        }
                     }
+                } else {
+                    EmptyStateView(
+                        icon: "square.grid.2x2",
+                        title: "Saved view not found"
+                    )
+                }
+            case .search(_, let query):
+                SearchTabContent(
+                    query: query,
+                    bookmarks: bookmarksViewModel.bookmarks,
+                    notes: notesViewModel.notes,
+                    onOpenBookmark: { bookmark in
+                        if NSEvent.modifierFlags.contains(.command) {
+                            bookmarksViewModel.open(bookmark)
+                        } else {
+                            openBookmarkDetails(bookmark)
+                        }
+                    },
+                    onOpenNote: { note in
+                        openNoteDetail(note)
+                    }
+                )
+            case .externalSource(let id, _):
+                if let source = externalSourceStorage.source(for: id) {
+                    SourceDetailView(
+                        source: source,
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale
+                    )
+                } else {
+                    EmptyStateView(
+                        icon: "folder.badge.gear",
+                        title: "Source not found"
+                    )
                 }
             }
+        } else {
+            noTabsEmptyState
         }
+    }
+
+    @ViewBuilder
+    private func blankTabWelcome(savedViewID: UUID) -> some View {
+        VStack(spacing: Spacing.xl) {
+            Spacer()
+
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.system(size: 36))
+                .foregroundColor(CiderColors.tertiary)
+
+            VStack(spacing: Spacing.sm) {
+                Text("New Tab")
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Text("Configure this tab to show exactly what you need.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                blankTabHint(icon: "line.3.horizontal.decrease.circle", text: "Filter by bookmarks, notes, events, or contacts")
+                blankTabHint(icon: "arrow.up.arrow.down", text: "Sort by date added, modified, title, or event date")
+                blankTabHint(icon: "tray", text: "Toggle \"Unassigned Only\" to create an inbox")
+                blankTabHint(icon: "square.grid.2x2", text: "Switch between list, grid, and masonry layouts")
+                blankTabHint(icon: "textformat.size", text: "Adjust card size with the slider")
+            }
+
+            Button("Open View Options") {
+                isHomeViewOptionsVisible = true
+            }
+            .buttonStyle(CiderAccentButtonStyle())
+
+            Button("Show All Items") {
+                activateBlankTab(savedViewID)
+            }
+            .buttonStyle(.plain)
+            .font(CiderFont.labelMedium)
+            .foregroundColor(CiderColors.controlAccent)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func blankTabHint(icon: String, text: String) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: icon)
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(CiderColors.controlAccent)
+                .frame(width: 20, alignment: .center)
+            Text(text)
+                .font(CiderFont.body)
+                .foregroundColor(CiderColors.secondary)
+        }
+    }
+
+    private func activateBlankTab(_ savedViewID: UUID) {
+        guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
+        savedView.isBlank = false
+        savedViewStorage.updateSavedView(savedView)
+    }
+
+    private var noTabsEmptyState: some View {
+        VStack(spacing: Spacing.lg) {
+            Image(systemName: "rectangle.stack.badge.plus")
+                .font(.system(size: 40))
+                .foregroundColor(CiderColors.tertiary)
+            Text("No tabs open")
+                .font(CiderFont.headingSemibold)
+                .foregroundColor(CiderColors.secondary)
+            Text("Create a tab to start organizing")
+                .font(CiderFont.body)
+                .foregroundColor(CiderColors.tertiary)
+            Button("New Tab") { showNewItemPicker = true }
+                .buttonStyle(CiderAccentButtonStyle())
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Note Creation
@@ -1541,37 +1583,26 @@ struct CiderPanelView: View {
     }
 
     private func closeTab(_ tab: CiderTab) {
-        guard tab.isCloseable else { return }
-        if case .savedView(let id, _) = tab, var savedView = savedViewStorage.savedView(for: id) {
-            savedView.isTabPinned = false
-            _ = savedViewStorage.updateSavedView(savedView)
-            if selectedTab == tab {
-                selectedTab = .home
-            }
-            return
-        }
-        if case .externalSource(let id, _) = tab, var source = externalSourceStorage.source(for: id) {
+        let wasSelected = selectedTab == tab
+
+        if case .savedView(let id, _) = tab {
+            savedViewStorage.removeFromTabOrder(id)
+        } else if case .externalSource(let id, _) = tab, var source = externalSourceStorage.source(for: id) {
             source.isTabPinned = false
             externalSourceStorage.updateSource(source)
-            if selectedTab == tab {
-                selectedTab = .home
-            }
-            return
+        } else {
+            dynamicTabs.removeAll { $0 == tab }
         }
-        dynamicTabs.removeAll { $0 == tab }
-        if selectedTab == tab {
-            selectedTab = .home
+
+        if wasSelected {
+            // Select adjacent tab or nil
+            selectedTab = allTabs.first
         }
     }
 
-    private func createSavedViewFromCurrentHomeState() {
-        var config = CiderConfig.load()
-        if !config.enableSavedViewTabs {
-            config.enableSavedViewTabs = true
-            config.save()
-        }
-
+    private func createSavedViewFromCurrentState() {
         let name = nextSavedViewName()
+        let filter = SavedViewFilterSpec(entityTypes: [])
         let layout = SavedViewLayoutSpec(
             displayMode: homeDisplayMode,
             cardSizeScale: homeCardSizeScale,
@@ -1580,26 +1611,54 @@ struct CiderPanelView: View {
         )
         let savedView = savedViewStorage.createSavedView(
             name: name,
-            layoutSpec: layout
+            filterSpec: filter,
+            layoutSpec: layout,
+            isBlank: true
         )
+        savedViewStorage.addToTabOrder(savedView.id)
         selectedTab = .savedView(id: savedView.id, name: savedView.name)
     }
 
     private func deleteSavedView(_ id: UUID) {
-        let wasSelected = selectedTab.savedViewID == id
+        let wasSelected = selectedTab?.savedViewID == id
         _ = savedViewStorage.deleteSavedView(id)
         if wasSelected {
-            selectedTab = .home
+            selectedTab = allTabs.first
         }
     }
 
     private func nextSavedViewName() -> String {
-        let usedNames = Set(savedViewStorage.pinnedSavedViews().map(\.name))
+        let usedNames = Set(savedViewStorage.tabOrderedViews().map(\.name))
         var index = 1
         while usedNames.contains("View \(index)") {
             index += 1
         }
         return "View \(index)"
+    }
+
+    private func ensureDefaultTabs() {
+        guard savedViewStorage.tabOrder.isEmpty else {
+            // Tabs exist — just select the first one if nothing is selected
+            if selectedTab == nil {
+                selectedTab = allTabs.first
+            }
+            return
+        }
+
+        // First launch — create Inbox (unassigned items) + Library (all items)
+        let inbox = savedViewStorage.createSavedView(
+            name: "Inbox",
+            filterSpec: SavedViewFilterSpec(onlyUnassigned: true)
+        )
+        savedViewStorage.addToTabOrder(inbox.id)
+
+        let library = savedViewStorage.createSavedView(
+            name: "Library",
+            filterSpec: SavedViewFilterSpec()
+        )
+        savedViewStorage.addToTabOrder(library.id)
+
+        selectedTab = .savedView(id: inbox.id, name: inbox.name)
     }
 
     private func expandPathToFolder(_ folderID: UUID) {
@@ -1633,21 +1692,16 @@ struct CiderPanelView: View {
     // MARK: - Select All
 
     private func selectAllVisibleItems() {
-        if let folderID = selectedFolderID, selectedTab.isFixed {
+        if let folderID = selectedFolderID {
             let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
             let notes = notesViewModel.notes.filter { $0.folderID == folderID }
             for b in bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
             for n in notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
-        } else {
-            switch selectedTab {
-            case .home:
-                // TODO: CH-C04 — date cards and contacts visible in the feed are not selected here;
-                // address once bulk-delete/move actions support all entity types.
-                for b in bookmarksViewModel.bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
-                for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
-            default:
-                break
-            }
+        } else if selectedTab?.savedViewID != nil {
+            // TODO: CH-C04 — date cards and contacts visible in the feed are not selected here;
+            // address once bulk-delete/move actions support all entity types.
+            for b in bookmarksViewModel.bookmarks { selectedItemIDs.insert("bookmark-\(b.id.uuidString)") }
+            for n in notesViewModel.notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
         }
     }
 

@@ -19,19 +19,32 @@ struct SavedViewFilterSpec: Codable, Hashable {
     var folderID: UUID?
     var includeCompleted: Bool
     var textQuery: String
+    var onlyUnassigned: Bool
 
     init(
         entityTypes: Set<LibraryEntityType> = Set(LibraryEntityType.allCases),
         labelIDs: Set<UUID> = [],
         folderID: UUID? = nil,
         includeCompleted: Bool = true,
-        textQuery: String = ""
+        textQuery: String = "",
+        onlyUnassigned: Bool = false
     ) {
         self.entityTypes = entityTypes
         self.labelIDs = labelIDs
         self.folderID = folderID
         self.includeCompleted = includeCompleted
         self.textQuery = textQuery
+        self.onlyUnassigned = onlyUnassigned
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entityTypes = try container.decodeIfPresent(Set<LibraryEntityType>.self, forKey: .entityTypes) ?? Set(LibraryEntityType.allCases)
+        labelIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .labelIDs) ?? []
+        folderID = try container.decodeIfPresent(UUID.self, forKey: .folderID)
+        includeCompleted = try container.decodeIfPresent(Bool.self, forKey: .includeCompleted) ?? true
+        textQuery = try container.decodeIfPresent(String.self, forKey: .textQuery) ?? ""
+        onlyUnassigned = try container.decodeIfPresent(Bool.self, forKey: .onlyUnassigned) ?? false
     }
 }
 
@@ -69,6 +82,7 @@ struct SavedView: Identifiable, Codable, Hashable {
     var sortSpec: SavedViewSortSpec
     var layoutSpec: SavedViewLayoutSpec
     var isTabPinned: Bool
+    var isBlank: Bool
     var createdAt: Date
     var updatedAt: Date
 
@@ -79,6 +93,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         sortSpec: SavedViewSortSpec = SavedViewSortSpec(),
         layoutSpec: SavedViewLayoutSpec = SavedViewLayoutSpec(),
         isTabPinned: Bool = true,
+        isBlank: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -88,7 +103,21 @@ struct SavedView: Identifiable, Codable, Hashable {
         self.sortSpec = sortSpec
         self.layoutSpec = layoutSpec
         self.isTabPinned = isTabPinned
+        self.isBlank = isBlank
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        filterSpec = try container.decodeIfPresent(SavedViewFilterSpec.self, forKey: .filterSpec) ?? SavedViewFilterSpec()
+        sortSpec = try container.decodeIfPresent(SavedViewSortSpec.self, forKey: .sortSpec) ?? SavedViewSortSpec()
+        layoutSpec = try container.decodeIfPresent(SavedViewLayoutSpec.self, forKey: .layoutSpec) ?? SavedViewLayoutSpec()
+        isTabPinned = try container.decodeIfPresent(Bool.self, forKey: .isTabPinned) ?? true
+        isBlank = try container.decodeIfPresent(Bool.self, forKey: .isBlank) ?? false
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 }

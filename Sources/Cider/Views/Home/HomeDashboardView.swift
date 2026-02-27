@@ -19,6 +19,7 @@ struct HomeDashboardView: View {
     var onEditContact: (ContactCard) -> Void = { _ in }
     var onOpenDateCard: (DateCard) -> Void = { _ in }
     var onOpenContact: (ContactCard) -> Void = { _ in }
+    var onlyUnassigned: Bool = false
 
     @State private var config = CiderConfig.load()
 
@@ -32,7 +33,8 @@ struct HomeDashboardView: View {
             labelIDs: [],
             folderID: selectedFolderID,
             includeCompleted: true,
-            textQuery: searchText
+            textQuery: searchText,
+            onlyUnassigned: onlyUnassigned
         )
     }
 

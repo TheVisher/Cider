@@ -57,6 +57,10 @@ final class LibraryViewModel: ObservableObject {
                 return false
             }
 
+            if filterSpec.onlyUnassigned, item.folderID != nil {
+                return false
+            }
+
             if !filterSpec.includeCompleted, item.isCompleted {
                 return false
             }
