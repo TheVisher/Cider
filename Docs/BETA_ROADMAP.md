@@ -303,20 +303,25 @@ Known issues that would frustrate beta users.
 - `DateCardStorage.deleteDateCard()`: Returns `TrashItem?`, routes through `TrashStorage`
 - `ContactStorage.deleteContact()`: Returns `TrashItem?`, routes through `TrashStorage`
 - All 12+ call sites updated from double-delete pattern to single integrated trash call
+- `deleteSelectedItems()`: Calls storage directly (not ViewModel wrappers) to collect all trash items into one unified `bulkDeletedToTrash` undo recording — fixes bug where per-type undo recordings overwrote each other
 
 **Testing checklist:**
 - [x] Cmd+A in Library selects bookmarks, notes, date cards, contacts
 - [x] Cmd+Click on date card / contact toggles selection
 - [x] Shift+Click range select works across all types
 - [x] Selection count in title bar reflects all selected types
+- [x] Deleting date cards and contacts goes through trash
+- [x] Undo restores date cards and contacts from trash
+- [x] Bulk delete of mixed types (bookmark + note + date card + contact) undoes all at once
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
 | Gate 1: Implement | 2026-02-27 | Claude | Updated selectAll, delete, move, drag payload, and sidebar drop handlers for all 4 entity types |
 | Gate 2: Code Review | 2026-02-27 | Claude | Clean build, all storage APIs match existing patterns |
-| Gate 3: User Test | 2026-02-27 | minivish | Cmd+A, Cmd+Click, Shift+Click all working for all entity types |
-| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off |
+| Gate 3: User Test | 2026-02-27 | minivish | Cmd+A, Cmd+Click, Shift+Click all working. Found: date cards/contacts not clickable-selectable, no trash integration, bulk undo losing bookmarks |
+| Gate 4: Fix & Polish | 2026-02-27 | Claude | Added selection to card views, trash integration for date cards/contacts, unified bulk delete undo (single recording instead of per-type) |
+| Gate 5: Sign Off | 2026-02-27 | minivish | All selection + trash + undo verified |
 
 ---
 
