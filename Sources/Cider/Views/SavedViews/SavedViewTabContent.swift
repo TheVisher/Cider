@@ -676,6 +676,7 @@ struct SavedViewTabContent: View {
             return AnyView(
                 DateCardListRow(
                     dateCard: dateCard,
+                    urgency: dateCard.urgency(windowDays: CiderConfig.load().dateCardSurfacingDays),
                     onOpen: {
                         if let cb = onOpenDateCard { cb(dateCard) }
                         else { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) }
@@ -848,6 +849,7 @@ struct SavedViewTabContent: View {
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
+                urgency: dateCard.urgency(windowDays: CiderConfig.load().dateCardSurfacingDays),
                 onOpen: {
                     if let cb = onOpenDateCard { cb(dateCard) }
                     else { editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt) }

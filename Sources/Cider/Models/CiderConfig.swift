@@ -142,6 +142,7 @@ struct CiderConfig: Codable {
         case enableColorExtraction
         case screenCaptureToastTimeout
         case screenCaptureDefaultAction
+        case dateCardSurfacingDays
     }
 
     var showMenuBarIcon: Bool
@@ -185,6 +186,7 @@ struct CiderConfig: Codable {
     var enableColorExtraction: Bool  // Extract dominant colors from thumbnails for display
     var screenCaptureToastTimeout: Int  // Seconds before routing toast auto-dismisses (0 = skip toast)
     var screenCaptureDefaultAction: String  // Default action: "note", "dateCard", "contact"
+    var dateCardSurfacingDays: Int  // Days ahead to surface approaching date cards (0 = disabled)
 
     static let storageKey = "CiderConfig"
 
@@ -226,7 +228,8 @@ struct CiderConfig: Codable {
             enableOCRIndexing: false,
             enableColorExtraction: true,
             screenCaptureToastTimeout: 8,
-            screenCaptureDefaultAction: "note"
+            screenCaptureDefaultAction: "note",
+            dateCardSurfacingDays: 7
         )
     }
 
@@ -405,6 +408,7 @@ struct CiderConfig: Codable {
         screenCaptureDefaultAction = try container.decodeIfPresent(
             String.self, forKey: .screenCaptureDefaultAction
         ) ?? "note"
+        dateCardSurfacingDays = try container.decodeIfPresent(Int.self, forKey: .dateCardSurfacingDays) ?? 7
     }
 
     init(
@@ -448,7 +452,8 @@ struct CiderConfig: Codable {
         enableOCRIndexing: Bool = false,
         enableColorExtraction: Bool = true,
         screenCaptureToastTimeout: Int = 8,
-        screenCaptureDefaultAction: String = "note"
+        screenCaptureDefaultAction: String = "note",
+        dateCardSurfacingDays: Int = 7
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -491,5 +496,6 @@ struct CiderConfig: Codable {
         self.enableColorExtraction = enableColorExtraction
         self.screenCaptureToastTimeout = screenCaptureToastTimeout
         self.screenCaptureDefaultAction = screenCaptureDefaultAction
+        self.dateCardSurfacingDays = dateCardSurfacingDays
     }
 }

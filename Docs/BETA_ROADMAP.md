@@ -171,60 +171,80 @@ These make the beta feel complete. Without them, users would say "this is missin
 ### F-04: Cmd+K Quick Actions
 > Enhance the search palette with quick action commands alongside search results.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** Medium
-**Depends on:** F-06 (CH-C08 fix for clickable search results)
 
 **Scope:**
 - Actions section above search results in SearchPaletteView
-- Built-in actions: New Bookmark, New Note, New Date Card, New Contact, New Folder, New Tag, Open Settings
+- Built-in actions: New Bookmark, New Note, New Event, New Contact, New Folder, New Tag, New Tab, Open Settings
 - Actions filter by query text (type "new" → show all "New X" actions; type "set" → show Settings)
 - Execute on Enter/click: perform action (create item, open sheet, navigate)
 - Keyboard navigation: arrow keys move through actions then results seamlessly
+- 20 unit tests for QuickAction model (identity, matching, filtering)
 
 **Testing checklist:**
-- [ ] Cmd+K opens palette
-- [ ] Empty query shows action suggestions
-- [ ] Typing "new" filters to creation actions
-- [ ] Selecting "New Bookmark" triggers capture flow
-- [ ] Selecting "New Note" creates and opens note
-- [ ] Selecting "Open Settings" navigates to settings
-- [ ] Arrow keys navigate actions → results seamlessly
-- [ ] Escape closes palette
+- [x] Cmd+K opens palette
+- [x] Empty query shows action suggestions (8 actions)
+- [x] Typing "new" filters to creation actions (7 shown)
+- [x] Typing "set" filters to Open Settings only
+- [x] Keyword matching works (e.g., "capture" → New Bookmark)
+- [x] Selecting "New Bookmark" triggers capture flow
+- [x] Selecting "New Note" creates and opens note
+- [x] Selecting "New Event" opens date card editor
+- [x] Selecting "New Contact" opens contact editor
+- [x] Selecting "New Folder" triggers folder creation in sidebar
+- [x] Selecting "New Tag" opens/selects Tags tab
+- [x] Selecting "New Tab" creates saved view tab
+- [x] Selecting "Open Settings" navigates to settings
+- [x] Arrow keys navigate actions → results seamlessly
+- [x] Enter executes highlighted item; enter with no highlight + text spawns search tab
+- [x] Escape closes palette
+- [x] Click on action row executes + dismisses
+- [x] Changing query resets selection highlight
+- [x] Long result list scrolls to keep selection visible
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | QuickAction enum, actions section, keyboard nav, handleQuickAction wiring, 20 unit tests |
+| Gate 2: Code Review | 2026-02-27 | Claude | Fixed: .onExitCommand → hidden button pattern, @FocusState 150ms delay, rawValue IDs, palette dismiss before action, deduplicated scroll anchor IDs |
+| Gate 3: User Test | 2026-02-27 | minivish | All 19 manual test items pass. Escape fix applied (parent Escape chain priority). |
+| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off. All tests pass. |
 
 ---
 
 ### F-05: Date Card Surfacing
 > Date cards with approaching dates are visually surfaced in the library feed so users don't miss important dates.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** High — the core value of date cards
 
 **Scope:**
-- LibraryViewModel: compute `isApproaching` flag for date cards where `startAt` is within N days (default 7, configurable)
-- Visual indicator on DateCardCardView: accent border or "Coming Up" badge
-- Library feed: approaching date cards float toward top (or pinned section)
-- Optional: "Coming Up" section in Library tab (like Continue section) showing approaching dates
-- Configurable: `dateCardSurfacingDays` in CiderConfig (default 7)
-- Overdue date cards (past date, not completed) get a different indicator ("Overdue")
+- `DateCardUrgency` enum on DateCard model: `.approaching(daysUntil:)`, `.today`, `.overdue`
+- `urgency(now:windowDays:)` computed method — returns nil for completed cards or cards outside window
+- Visual indicators: date block tinting (red/yellow/accent) + urgency badge pills on DateCardCardView and DateCardListRow
+- "Coming Up" horizontal scroll section on Home/Inbox tab between Continue and library feed
+- `CiderConfig.dateCardSurfacingDays: Int` (default 7, 0 = disabled)
+- All render sites wired: Home, FolderDetailView, SavedViewTabContent
+- 9 unit tests for urgency logic (overdue, today, approaching, boundary, completed, window=0)
 
 **Testing checklist:**
-- [ ] Date card with date in 3 days shows "Coming Up" indicator
-- [ ] Date card with past date shows "Overdue" indicator
-- [ ] Approaching date cards appear near top of library feed
-- [ ] Completed date cards don't surface
-- [ ] Configuring surfacing window changes behavior
-- [ ] Date cards beyond the window show normally (no badge)
+- [x] Date card with date in 3 days shows accent date block + "In 3 days" badge
+- [x] Date card with today's date shows yellow date block + "Today" badge
+- [x] Date card with past date shows red date block + "Overdue" badge
+- [x] Completed date cards don't show indicators
+- [x] Date cards beyond the window show normally (no badge)
+- [x] "Coming Up" section appears with qualifying cards, hidden when empty
+- [x] Indicators appear in Home, Folder, and Saved View tabs
+- [x] Marking a card complete removes it from Coming Up
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | DateCardUrgency enum, urgency() method, visual indicators, Coming Up section, CiderConfig prop, 9 unit tests |
+| Gate 3: User Test | 2026-02-27 | minivish | All urgency states verified. Coming Up cards too tall — fixed with fixedSize constraint. |
+| Gate 4: Fix & Polish | 2026-02-27 | Claude | Fixed card height in Coming Up section (fixedSize + alignment) |
+| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off. Per-view toggle and notification settings deferred to post-beta (noted in HOME_VISION.md). |
 
 ---
 
@@ -372,15 +392,15 @@ Known issues that would frustrate beta users.
 | F-01 | Cider Vault Storage | 0 | ✅ Complete | Gate 5 |
 | F-02 | Tab System Overhaul | 0 | ✅ Complete | Gate 5 |
 | F-03 | Full Tag System | 1 | ✅ Complete | Gate 5 |
-| F-04 | Cmd+K Quick Actions | 1 | ⬜ Not Started | — |
-| F-05 | Date Card Surfacing | 1 | ⬜ Not Started | — |
+| F-04 | Cmd+K Quick Actions | 1 | ✅ Complete | Gate 5 |
+| F-05 | Date Card Surfacing | 1 | ✅ Complete | Gate 5 |
 | F-06 | Fix CH-C08 (Search Results) | 2 | ⬜ Not Started | — |
 | F-07 | Fix CH-C04 (Select All) | 2 | ⬜ Not Started | — |
 | F-08 | First-Run Experience | 3 | ⬜ Not Started | — |
 | F-09 | Distribution Pipeline | 3 | ⬜ Not Started | — |
 | F-10 | Landing Page & README | 3 | ⬜ Not Started | — |
 
-**Completed:** 3/10
+**Completed:** 5/10
 **In Progress:** 0/10
 
 ---
@@ -428,6 +448,9 @@ Items explicitly deferred. Add new ideas here instead of scope-creeping the beta
 | Books tab | Tier 3 | Reading tracker |
 | Merge tags | Tier 2 | Consolidate two tags into one, reassign all items |
 | Saved view tag filter | Tier 2 | Filter saved views by specific tags (smart folders) |
+| Per-view Coming Up toggle | Tier 2 | Show/hide Coming Up section per saved view tab |
+| Coming Up notification settings | Tier 2 | Sidebar badge counts, system notifications for approaching/overdue items |
+| Per-card surfacing override | Tier 2 | Evaluate DateCard.rules surfaceDaysBeforeDate(N) per card |
 | AI auto-tag quality tuning | Tier 2 | Improve semantic category matching, threshold tuning |
 | Themed folders (Media Hub, Recipe) | Tier 3 | Domain-specific views |
 | YouTube transcript sync | Tier 3 | Live captions, click-to-seek |

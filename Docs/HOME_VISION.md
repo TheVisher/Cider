@@ -116,47 +116,26 @@ Sort controls in ViewOptionsDropdown for the Home library feed:
 
 ---
 
-## Planned: Date Card Surfacing
+## Implemented: Date Card Surfacing (F-05)
 
-Date cards should behave like calendar events — they surface near the top of the library feed when their scheduled date approaches, not just when they were created.
+Date cards with approaching dates are visually surfaced so users don't miss important dates.
 
-### Behavior
+### Current State
 
-- A date card created in January for a June birthday should sit in the library at its creation position, then **resurface near the top** as the date approaches
-- Surfacing window is configurable: "Show N days before" (default: 7 days)
-- Once surfaced, the card stays promoted until the event passes or is marked completed
-- Completed date cards stop surfacing regardless of date proximity
+- **`DateCardUrgency` enum** on `DateCard` model: `.approaching(daysUntil:)`, `.today`, `.overdue` — computed via `urgency(now:windowDays:)`
+- **Visual indicators:** Date block (month + day) tints by urgency (red = overdue, yellow = today, accent = approaching). Urgency badge pill on cards and list rows ("Overdue", "Today", "In N days")
+- **"Coming Up" section** on Home/Inbox tab: horizontal scroll of compact date card cards between Continue section and library feed. Sorted by `startAt` (most urgent first). Hidden when empty.
+- **Configuration:** `CiderConfig.dateCardSurfacingDays: Int` (default 7). Set to 0 to disable.
+- **All render sites:** Home/Inbox, Folder detail view, Saved View tabs — all pass urgency through.
+- Completed date cards never show urgency indicators or appear in Coming Up.
 
-### Sort Integration
+### Future Enhancements (Post-Beta)
 
-The library feed sort should support a **hybrid mode** (likely the default) that:
-1. Evaluates each date card's `startAt` against the current date + surfacing window
-2. Promotes matching date cards above the normal sort order
-3. Among promoted cards, sorts by nearest `startAt` first (most urgent on top)
-4. Non-promoted items follow the user's chosen sort (created, modified, title, etc.)
-
-### Configuration
-
-- **Global default**: `CiderConfig.dateCardSurfaceDaysBefore: Int` (default 7) — applies to all date cards without per-card rules
-- **Per-card override**: `DateCard.rules: [SurfacingRule]` already exists (stored but not evaluated) — `surfaceDaysBeforeDate(N)` should override the global default when present
-- **Settings UI**: slider or stepper in Settings → General or a dedicated "Surfacing" section
-
-### Implementation Notes
-
-- `DateCard.rules` field is already persisted in JSON — just needs evaluation in `LibraryViewModel`
-- `LibraryItemV2.dateAnchor` already extracts `startAt` — the surfacing check is: `dateAnchor >= now && dateAnchor <= now + N days`
-- Stack surfacing logic (`isSurfaceRuleTriggered`) already implements `surfaceDaysBeforeDate(N)` — the same logic applies to individual date cards
-- The Continue section (top 8 recents) could optionally include surfaced date cards, or surfacing could be limited to the library feed only
-
-### Examples
-
-| Scenario | Surfacing window | Behavior |
-| --- | --- | --- |
-| Birthday on June 15, created Jan 10 | 14 days | Appears at creation position until June 1, then surfaces to top |
-| Bill due March 1, created Feb 20 | 7 days | Surfaces Feb 22 (7 days before) |
-| Meeting tomorrow, created today | 1 day | Surfaces immediately (within window) |
-| Past event (Feb 10), today is Feb 21 | any | Does not surface (date has passed) |
-| Completed event | any | Does not surface |
+- **Per-view "Coming Up" toggle:** Let users show/hide the Coming Up section per saved view tab, not just globally. Some tabs (e.g., a "Bills" tab) might always want it; others (e.g., a "Notes" tab) never do.
+- **Notification / sidebar surfacing settings:** Dedicated settings section for Coming Up behavior — configure surfacing window per entity type, enable/disable sidebar badge counts for approaching items, optional system notification for Today/Overdue items.
+- **Per-card surfacing override:** `DateCard.rules: [SurfacingRule]` already stores `surfaceDaysBeforeDate(N)` — evaluate it to override the global default per card (e.g., birthdays surface 14 days ahead, bills 7 days).
+- **Hybrid sort mode:** Library feed sort that promotes approaching date cards above the normal sort order, with non-promoted items following the user's chosen sort.
+- **Continue section integration:** Optionally include surfaced date cards in the Continue section (top 8 recents) alongside recent items.
 
 ## Planned: Resurfacing & Rediscovery
 

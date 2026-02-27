@@ -563,6 +563,7 @@ struct FolderDetailView: View {
         case .dateCard(let dateCard):
             DateCardListRow(
                 dateCard: dateCard,
+                urgency: dateCard.urgency(windowDays: CiderConfig.load().dateCardSurfacingDays),
                 onOpen: { (onOpenDateCard ?? onEditDateCard)?(dateCard) },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: bookmarksViewModel.folders,
@@ -655,6 +656,7 @@ struct FolderDetailView: View {
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
+                urgency: dateCard.urgency(windowDays: CiderConfig.load().dateCardSurfacingDays),
                 onOpen: { (onOpenDateCard ?? onEditDateCard)?(dateCard) },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: bookmarksViewModel.folders,

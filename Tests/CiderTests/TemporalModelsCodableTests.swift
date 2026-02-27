@@ -32,6 +32,68 @@ final class TemporalModelsCodableTests: XCTestCase {
         XCTAssertEqual(decoded.rules.first?.type, .surfaceDaysBeforeDate)
     }
 
+    // MARK: - DateCardUrgency
+
+    func testUrgencyOverdue() {
+        let now = Date()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now)!
+        let card = DateCard(title: "Past event", startAt: yesterday)
+        XCTAssertEqual(card.urgency(now: now, windowDays: 7), .overdue)
+    }
+
+    func testUrgencyToday() {
+        let now = Date()
+        let card = DateCard(title: "Today event", startAt: now)
+        XCTAssertEqual(card.urgency(now: now, windowDays: 7), .today)
+    }
+
+    func testUrgencyApproaching() {
+        let now = Date()
+        let threeDaysOut = Calendar.current.date(byAdding: .day, value: 3, to: now)!
+        let card = DateCard(title: "Soon event", startAt: threeDaysOut)
+        XCTAssertEqual(card.urgency(now: now, windowDays: 7), .approaching(daysUntil: 3))
+    }
+
+    func testUrgencyBeyondWindow() {
+        let now = Date()
+        let tenDaysOut = Calendar.current.date(byAdding: .day, value: 10, to: now)!
+        let card = DateCard(title: "Far event", startAt: tenDaysOut)
+        XCTAssertNil(card.urgency(now: now, windowDays: 7))
+    }
+
+    func testUrgencyCompletedReturnsNil() {
+        let now = Date()
+        let card = DateCard(title: "Done event", startAt: now, isCompleted: true)
+        XCTAssertNil(card.urgency(now: now, windowDays: 7))
+    }
+
+    func testUrgencyOverdueCompleted() {
+        let now = Date()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now)!
+        let card = DateCard(title: "Past done", startAt: yesterday, isCompleted: true)
+        XCTAssertNil(card.urgency(now: now, windowDays: 7))
+    }
+
+    func testUrgencyWindowZeroDisabled() {
+        let now = Date()
+        let card = DateCard(title: "Tomorrow", startAt: Calendar.current.date(byAdding: .day, value: 1, to: now)!)
+        XCTAssertNil(card.urgency(now: now, windowDays: 0))
+    }
+
+    func testUrgencyExactlyAtWindowBoundary() {
+        let now = Date()
+        let sevenDaysOut = Calendar.current.date(byAdding: .day, value: 7, to: now)!
+        let card = DateCard(title: "Boundary", startAt: sevenDaysOut)
+        XCTAssertEqual(card.urgency(now: now, windowDays: 7), .approaching(daysUntil: 7))
+    }
+
+    func testUrgencyOneDayPastWindow() {
+        let now = Date()
+        let eightDaysOut = Calendar.current.date(byAdding: .day, value: 8, to: now)!
+        let card = DateCard(title: "Just outside", startAt: eightDaysOut)
+        XCTAssertNil(card.urgency(now: now, windowDays: 7))
+    }
+
     func testSavedViewCodableRoundTrip() throws {
         var filter = SavedViewFilterSpec()
         filter.entityTypes = [.bookmark, .dateCard]

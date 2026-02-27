@@ -57,6 +57,17 @@ struct HomeDashboardView: View {
         libraryViewModel.filteredItems(using: filterSpec, sort: sortSpec)
     }
 
+    /// Date cards with approaching/today/overdue dates, sorted by startAt
+    private var comingUpItems: [DateCard] {
+        let windowDays = config.dateCardSurfacingDays
+        guard windowDays > 0 else { return [] }
+        return libraryItems.compactMap { item -> DateCard? in
+            guard case .dateCard(let dc) = item,
+                  dc.urgency(windowDays: windowDays) != nil else { return nil }
+            return dc
+        }.sorted { $0.startAt < $1.startAt }
+    }
+
     private var cardSizing: LibraryCardSizing {
         LibraryCardSizing(scale: cardSizeScale)
     }
@@ -94,6 +105,10 @@ struct HomeDashboardView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.md)
                     }
+                }
+
+                if !isSearching && !comingUpItems.isEmpty {
+                    comingUpSection
                 }
 
                 ScrollView {
@@ -143,6 +158,54 @@ struct HomeDashboardView: View {
         }
     }
 
+    // MARK: - Coming Up Section
+
+    private var comingUpSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                Text("COMING UP")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    ForEach(comingUpItems) { dateCard in
+                        DateCardCardView(
+                            dateCard: dateCard,
+                            urgency: dateCard.urgency(windowDays: config.dateCardSurfacingDays),
+                            onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                            onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                            folders: bookmarksViewModel.folders,
+                            onMoveToFolder: { folderID in
+                                let oldFolderID = dateCard.folderID
+                                DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                                let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                                CiderUndoManager.shared.record(.movedToFolder(
+                                    itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                                    fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                                ))
+                            },
+                            onDelete: {
+                                _ = DateCardStorage.shared.deleteDateCard(dateCard.id)
+                                let trashItem = TrashStorage.shared.trashDateCard(dateCard, dateCardsDir: StoragePaths.cachedDirectoryURL(for: .dateCards))
+                                CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                            }
+                        )
+                        .frame(width: 220)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, Spacing.md + Spacing.xxs)
+        .padding(.top, Spacing.md)
+    }
+
     // MARK: - List Row
 
     @ViewBuilder
@@ -190,6 +253,7 @@ struct HomeDashboardView: View {
         case .dateCard(let dateCard):
             DateCardListRow(
                 dateCard: dateCard,
+                urgency: dateCard.urgency(windowDays: config.dateCardSurfacingDays),
                 onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: bookmarksViewModel.folders,
@@ -296,6 +360,7 @@ struct HomeDashboardView: View {
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
+                urgency: dateCard.urgency(windowDays: config.dateCardSurfacingDays),
                 onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
                 onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
                 folders: bookmarksViewModel.folders,

@@ -23,6 +23,12 @@ struct DateCardRecurrenceRule: Codable, Hashable {
     }
 }
 
+enum DateCardUrgency: Equatable {
+    case approaching(daysUntil: Int)  // 1...windowDays, not completed
+    case today                         // startAt is today, not completed
+    case overdue                       // startAt in the past, not completed
+}
+
 struct DateCard: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
@@ -99,5 +105,17 @@ struct DateCard: Identifiable, Codable, Hashable {
         rules = (try c.decodeIfPresent([SurfacingRule].self, forKey: .rules)) ?? []
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func urgency(now: Date = Date(), windowDays: Int = 7) -> DateCardUrgency? {
+        guard !isCompleted else { return nil }
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfEvent = calendar.startOfDay(for: startAt)
+        let days = calendar.dateComponents([.day], from: startOfToday, to: startOfEvent).day ?? 0
+        if days < 0 { return .overdue }
+        if days == 0 { return .today }
+        if days <= windowDays { return .approaching(daysUntil: days) }
+        return nil
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DateCardCardView: View {
     let dateCard: DateCard
+    var urgency: DateCardUrgency? = nil
     var onOpen: (() -> Void)? = nil
     var onToggleComplete: (() -> Void)? = nil
     var folders: [Folder] = []
@@ -20,6 +21,24 @@ struct DateCardCardView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM"
         return formatter.string(from: dateCard.startAt).uppercased()
+    }
+
+    private var dateBlockMonthColor: Color {
+        switch urgency {
+        case .overdue: return CiderColors.destructive
+        case .today: return CiderColors.warning
+        case .approaching: return CiderColors.controlAccent
+        case nil: return CiderColors.tertiary
+        }
+    }
+
+    private var dateBlockDayColor: Color {
+        switch urgency {
+        case .overdue: return CiderColors.destructive
+        case .today: return CiderColors.warning
+        case .approaching: return CiderColors.controlAccent
+        case nil: return CiderColors.primary
+        }
     }
 
     private var timeString: String {
@@ -45,10 +64,10 @@ struct DateCardCardView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(monthString)
                             .font(CiderFont.captionSemibold)
-                            .foregroundColor(CiderColors.tertiary)
+                            .foregroundColor(dateBlockMonthColor)
                         Text(dayString)
                             .font(CiderFont.heroFallback)
-                            .foregroundColor(CiderColors.primary)
+                            .foregroundColor(dateBlockDayColor)
                             .monospacedDigit()
                     }
                     .frame(width: 48, alignment: .leading)
@@ -108,6 +127,10 @@ struct DateCardCardView: View {
                         labels: CardLabelStorage.shared.labels
                     )
                 }
+
+                if let urgency {
+                    urgencyBadge(urgency)
+                }
             }
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -135,6 +158,29 @@ struct DateCardCardView: View {
         )
     }
 
+    private func urgencyBadge(_ urgency: DateCardUrgency) -> some View {
+        let (text, fgColor, bgColor): (String, Color, Color) = {
+            switch urgency {
+            case .overdue:
+                return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
+            case .today:
+                return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+            case .approaching(let d):
+                return ("In \(d) day\(d == 1 ? "" : "s")", CiderColors.controlAccent, CiderColors.accentSubtle)
+            }
+        }()
+
+        return Text(text)
+            .font(CiderFont.captionSemibold)
+            .foregroundColor(fgColor)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule()
+                    .fill(bgColor)
+            )
+    }
+
     private func detailRow(icon: String, text: String) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
@@ -158,11 +204,30 @@ struct DateCardCardView: View {
 
 struct DateCardListRow: View {
     let dateCard: DateCard
+    var urgency: DateCardUrgency? = nil
     var onOpen: (() -> Void)? = nil
     var onToggleComplete: (() -> Void)? = nil
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+
+    private var listMonthColor: Color {
+        switch urgency {
+        case .overdue: return CiderColors.destructive
+        case .today: return CiderColors.warning
+        case .approaching: return CiderColors.controlAccent
+        case nil: return CiderColors.tertiary
+        }
+    }
+
+    private var listDayColor: Color {
+        switch urgency {
+        case .overdue: return CiderColors.destructive
+        case .today: return CiderColors.warning
+        case .approaching: return CiderColors.controlAccent
+        case nil: return CiderColors.primary
+        }
+    }
 
     var body: some View {
         Button {
@@ -172,10 +237,10 @@ struct DateCardListRow: View {
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(dateCard.startAt.formatted(.dateTime.month(.abbreviated)))
                         .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
+                        .foregroundColor(listMonthColor)
                     Text(dateCard.startAt.formatted(.dateTime.day()))
                         .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.primary)
+                        .foregroundColor(listDayColor)
                 }
                 .frame(width: 42, alignment: .leading)
 
@@ -208,6 +273,10 @@ struct DateCardListRow: View {
                 }
 
                 Spacer(minLength: Spacing.sm)
+
+                if let urgency {
+                    listUrgencyBadge(urgency)
+                }
 
                 Button {
                     onToggleComplete?()
@@ -244,6 +313,29 @@ struct DateCardListRow: View {
                 _ = DateCardStorage.shared.updateDateCard(updated)
             }
         )
+    }
+
+    private func listUrgencyBadge(_ urgency: DateCardUrgency) -> some View {
+        let (text, fgColor, bgColor): (String, Color, Color) = {
+            switch urgency {
+            case .overdue:
+                return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
+            case .today:
+                return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+            case .approaching(let d):
+                return ("In \(d) day\(d == 1 ? "" : "s")", CiderColors.controlAccent, CiderColors.accentSubtle)
+            }
+        }()
+
+        return Text(text)
+            .font(CiderFont.micro)
+            .foregroundColor(fgColor)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule()
+                    .fill(bgColor)
+            )
     }
 
     private static let currencyFormatter: NumberFormatter = {
