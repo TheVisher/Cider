@@ -255,23 +255,28 @@ Known issues that would frustrate beta users.
 ### F-06: Fix CH-C08 — Search Results for Date Cards/Contacts
 > Clicking a date card or contact in search results should open their detail/edit view.
 
-**Status:** `⬜ Not Started`
+**Status:** `✅ Complete`
 **Priority:** High
 
 **Scope:**
-- SearchPaletteView: selection handler for `.dateCard` and `.contact` results opens detail sheet or navigates to detail view
-- SearchTabContent: same — selection opens detail flow
-- Reuse existing DateCardDetailView and ContactDetailView
+- SearchPaletteView: added `onOpenDateCard` / `onOpenContact` callbacks, replaced `break` no-ops with handler calls, wrapped recent date cards/contacts in Buttons
+- SearchTabContent: same callbacks and handler wiring
+- CiderPanelView: wired both call sites to `openDateCardDetail()` / `openContactDetail()`
 
 **Testing checklist:**
-- [ ] Search for a date card → click result → detail view opens
-- [ ] Search for a contact → click result → detail view opens
-- [ ] Works in both palette (Cmd+K) and search tab
+- [x] Search for a date card → click result → detail view opens
+- [x] Search for a contact → click result → detail view opens
+- [x] Works in both palette (Cmd+K) and search tab
+- [x] Recent date cards/contacts clickable in empty-query palette
+- [x] Keyboard navigation (arrow keys + Enter) works for date card/contact results
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | Added callbacks to SearchPaletteView + SearchTabContent, wired in CiderPanelView, wrapped recents in Buttons |
+| Gate 2: Code Review | 2026-02-27 | Claude | Guard pattern on nil callbacks to prevent silent palette dismiss |
+| Gate 3: User Test | 2026-02-27 | minivish | All tests pass, no issues |
+| Gate 5: Sign Off | 2026-02-27 | minivish | Signed off |
 
 ---
 
@@ -394,13 +399,13 @@ Known issues that would frustrate beta users.
 | F-03 | Full Tag System | 1 | ✅ Complete | Gate 5 |
 | F-04 | Cmd+K Quick Actions | 1 | ✅ Complete | Gate 5 |
 | F-05 | Date Card Surfacing | 1 | ✅ Complete | Gate 5 |
-| F-06 | Fix CH-C08 (Search Results) | 2 | ⬜ Not Started | — |
+| F-06 | Fix CH-C08 (Search Results) | 2 | ✅ Complete | 2026-02-27 |
 | F-07 | Fix CH-C04 (Select All) | 2 | ⬜ Not Started | — |
 | F-08 | First-Run Experience | 3 | ⬜ Not Started | — |
 | F-09 | Distribution Pipeline | 3 | ⬜ Not Started | — |
 | F-10 | Landing Page & README | 3 | ⬜ Not Started | — |
 
-**Completed:** 5/10
+**Completed:** 6/10
 **In Progress:** 0/10
 
 ---

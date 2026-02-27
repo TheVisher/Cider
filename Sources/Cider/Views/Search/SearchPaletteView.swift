@@ -77,6 +77,8 @@ struct SearchPaletteView: View {
     let notes: [Note]
     let onOpenBookmark: (Bookmark) -> Void
     let onOpenNote: (Note) -> Void
+    var onOpenDateCard: ((DateCard) -> Void)? = nil
+    var onOpenContact: ((ContactCard) -> Void)? = nil
     let onSpawnSearchTab: ((String) -> Void)?
     let onDismiss: () -> Void
     var onAction: ((QuickAction) -> Void)?
@@ -263,8 +265,14 @@ struct SearchPaletteView: View {
                 if let note = result.note {
                     onOpenNote(note)
                 }
-            case .dateCard, .contact:
-                break
+            case .dateCard:
+                if let dateCard = result.dateCard {
+                    onOpenDateCard?(dateCard)
+                }
+            case .contact:
+                if let contact = result.contact {
+                    onOpenContact?(contact)
+                }
             }
             onDismiss()
         }
@@ -494,21 +502,35 @@ struct SearchPaletteView: View {
             }
 
             ForEach(recentDateCards) { card in
-                recentRowContent(
-                    icon: "calendar",
-                    title: card.title,
-                    subtitle: card.startAt.formatted(.dateTime.month().day().year()),
-                    date: card.updatedAt
-                )
+                Button {
+                    guard let handler = onOpenDateCard else { return }
+                    handler(card)
+                    onDismiss()
+                } label: {
+                    recentRowContent(
+                        icon: "calendar",
+                        title: card.title,
+                        subtitle: card.startAt.formatted(.dateTime.month().day().year()),
+                        date: card.updatedAt
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
             ForEach(recentContacts) { contact in
-                recentRowContent(
-                    icon: "person",
-                    title: contact.displayName,
-                    subtitle: contact.relationshipLabel.isEmpty ? nil : contact.relationshipLabel,
-                    date: contact.updatedAt
-                )
+                Button {
+                    guard let handler = onOpenContact else { return }
+                    handler(contact)
+                    onDismiss()
+                } label: {
+                    recentRowContent(
+                        icon: "person",
+                        title: contact.displayName,
+                        subtitle: contact.relationshipLabel.isEmpty ? nil : contact.relationshipLabel,
+                        date: contact.updatedAt
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }

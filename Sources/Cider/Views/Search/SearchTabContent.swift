@@ -6,6 +6,8 @@ struct SearchTabContent: View {
     let notes: [Note]
     let onOpenBookmark: (Bookmark) -> Void
     let onOpenNote: (Note) -> Void
+    var onOpenDateCard: ((DateCard) -> Void)? = nil
+    var onOpenContact: ((ContactCard) -> Void)? = nil
 
     @State private var results: [SearchResult] = []
 
@@ -108,8 +110,14 @@ struct SearchTabContent: View {
                 if let note = result.note {
                     onOpenNote(note)
                 }
-            case .dateCard, .contact:
-                break
+            case .dateCard:
+                if let dateCard = result.dateCard {
+                    onOpenDateCard?(dateCard)
+                }
+            case .contact:
+                if let contact = result.contact {
+                    onOpenContact?(contact)
+                }
             }
         } label: {
             HStack(spacing: Spacing.sm) {

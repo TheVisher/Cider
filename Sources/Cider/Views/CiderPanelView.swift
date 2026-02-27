@@ -96,6 +96,8 @@ struct CiderPanelView: View {
                     onOpenNote: { note in
                         openNoteDetail(note)
                     },
+                    onOpenDateCard: { openDateCardDetail($0) },
+                    onOpenContact: { openContactDetail($0) },
                     onSpawnSearchTab: spawnSearchTab,
                     onDismiss: { isSearchPaletteVisible = false },
                     onAction: { action in
@@ -918,7 +920,9 @@ struct CiderPanelView: View {
                     },
                     onOpenNote: { note in
                         openNoteDetail(note)
-                    }
+                    },
+                    onOpenDateCard: { openDateCardDetail($0) },
+                    onOpenContact: { openContactDetail($0) }
                 )
             case .externalSource(let id, _):
                 if let source = externalSourceStorage.source(for: id) {
