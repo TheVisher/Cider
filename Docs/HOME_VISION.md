@@ -134,6 +134,7 @@ Date cards with approaching dates are visually surfaced so users don't miss impo
 - **Per-view "Coming Up" toggle:** Let users show/hide the Coming Up section per saved view tab, not just globally. Some tabs (e.g., a "Bills" tab) might always want it; others (e.g., a "Notes" tab) never do.
 - **Notification / sidebar surfacing settings:** Dedicated settings section for Coming Up behavior — configure surfacing window per entity type, enable/disable sidebar badge counts for approaching items, optional system notification for Today/Overdue items.
 - **Per-card surfacing override:** `DateCard.rules: [SurfacingRule]` already stores `surfaceDaysBeforeDate(N)` — evaluate it to override the global default per card (e.g., birthdays surface 14 days ahead, bills 7 days).
+- **Recurring event surfacing:** Evaluate `DateCardRecurrenceRule` to compute the next occurrence date from today, and use that for urgency instead of the raw `startAt`. Birthdays, bills, and other recurring events would automatically resurface in Coming Up each cycle.
 - **Hybrid sort mode:** Library feed sort that promotes approaching date cards above the normal sort order, with non-promoted items following the user's chosen sort.
 - **Continue section integration:** Optionally include surfaced date cards in the Continue section (top 8 recents) alongside recent items.
 

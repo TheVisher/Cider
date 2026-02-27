@@ -451,6 +451,7 @@ Items explicitly deferred. Add new ideas here instead of scope-creeping the beta
 | Per-view Coming Up toggle | Tier 2 | Show/hide Coming Up section per saved view tab |
 | Coming Up notification settings | Tier 2 | Sidebar badge counts, system notifications for approaching/overdue items |
 | Per-card surfacing override | Tier 2 | Evaluate DateCard.rules surfaceDaysBeforeDate(N) per card |
+| Recurring event surfacing | Tier 2 | Evaluate DateCardRecurrenceRule to compute next occurrence date — use that for urgency instead of raw startAt. Birthdays, bills, etc. resurface annually/monthly. |
 | AI auto-tag quality tuning | Tier 2 | Improve semantic category matching, threshold tuning |
 | Themed folders (Media Hub, Recipe) | Tier 3 | Domain-specific views |
 | YouTube transcript sync | Tier 3 | Live captions, click-to-seek |
