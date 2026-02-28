@@ -21,16 +21,16 @@ struct AboutSettingsView: View {
             }
 
             // Description
-            Text("A command palette for macOS that replaces\nDock, Stage Manager, and Spotlight.")
+            Text("A floating workspace for saving\nand organizing anything on macOS.")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)
 
             // Links
             HStack(spacing: Spacing.xl) {
-                AboutLink(title: "Website", icon: "globe", url: "https://github.com")
-                AboutLink(title: "GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com")
-                AboutLink(title: "Twitter", icon: "at", url: "https://twitter.com")
+                AboutLink(title: "GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com/TheVisher/Cider")
+                AboutLink(title: "Feedback", icon: "bubble.left.and.exclamationmark.bubble.right", url: "https://github.com/TheVisher/Cider/issues")
+                AboutLink(title: "Releases", icon: "arrow.down.circle", url: "https://github.com/TheVisher/Cider/releases")
             }
 
             // Onboarding re-trigger

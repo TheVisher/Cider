@@ -1,0 +1,25 @@
+name: Feature Request
+description: Suggest an idea or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What would you like?
+      description: Describe the feature or improvement.
+      placeholder: "e.g. I'd love a way to import bookmarks from Safari"
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Why is this useful?
+      description: What problem does it solve or what workflow does it improve?
+      placeholder: "e.g. I have hundreds of bookmarks in Safari and adding them one by one isn't practical"
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Mockups, examples from other apps, or additional context.

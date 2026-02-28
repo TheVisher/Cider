@@ -135,6 +135,8 @@ xcodebuild archive \
     CODE_SIGN_IDENTITY="Developer ID Application" \
     DEVELOPMENT_TEAM="$TEAM_ID" \
     CODE_SIGN_STYLE=Manual \
+    ENABLE_HARDENED_RUNTIME=YES \
+    OTHER_CODE_SIGN_FLAGS="--options=runtime" \
     2>&1 | tail -5
 
 [ -d "$ARCHIVE_PATH" ] || fail "Archive failed — no .xcarchive produced"
@@ -167,14 +169,26 @@ else
     NOTARIZE_ZIP="$BUILD_DIR/Cider-notarize.zip"
     ditto -c -k --keepParent "$APP_PATH" "$NOTARIZE_ZIP"
 
-    xcrun notarytool submit "$NOTARIZE_ZIP" \
+    NOTARIZE_OUTPUT=$(xcrun notarytool submit "$NOTARIZE_ZIP" \
         --keychain-profile "$NOTARY_PROFILE" \
         --wait \
-        2>&1
+        2>&1)
+    echo "$NOTARIZE_OUTPUT"
+
+    # Check if notarization succeeded
+    if echo "$NOTARIZE_OUTPUT" | grep -q "status: Invalid"; then
+        echo ""
+        warn "Notarization failed. Check the log:"
+        SUBMISSION_ID=$(echo "$NOTARIZE_OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
+        if [ -n "$SUBMISSION_ID" ]; then
+            echo "  xcrun notarytool log $SUBMISSION_ID --keychain-profile $NOTARY_PROFILE"
+        fi
+        fail "Notarization returned Invalid status"
+    fi
 
     # Staple the notarization ticket
     step "Stapling notarization ticket"
-    xcrun stapler staple "$APP_PATH" 2>&1
+    xcrun stapler staple "$APP_PATH" 2>&1 || fail "Stapling failed"
     success "Notarization complete and stapled"
 
     rm -f "$NOTARIZE_ZIP"

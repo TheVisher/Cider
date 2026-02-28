@@ -269,7 +269,7 @@
 				CODE_SIGN_ENTITLEMENTS = Cider.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = S9SS3NNGSW;
 				INFOPLIST_FILE = "Sources/Cider/Resources/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -277,7 +277,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1.0-beta.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.cider.app";
 				PRODUCT_NAME = Cider;
 				SDKROOT = macosx;
@@ -295,7 +295,7 @@
 				CODE_SIGN_ENTITLEMENTS = Cider.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = S9SS3NNGSW;
 				INFOPLIST_FILE = "Sources/Cider/Resources/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -303,7 +303,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1.0-beta.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.cider.app";
 				PRODUCT_NAME = Cider;
 				SDKROOT = macosx;

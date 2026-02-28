@@ -1,0 +1,48 @@
+name: Bug Report
+description: Something isn't working right
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what went wrong.
+      placeholder: "e.g. Clicking Opt+B doesn't capture the browser tab"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "e.g. It should save the current tab as a bookmark"
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Open Cider
+        2. Navigate to a browser tab
+        3. Press Opt+B
+        4. Nothing happens
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: "e.g. 15.3 (Sequoia)"
+
+  - type: input
+    id: cider-version
+    attributes:
+      label: Cider version
+      description: Found in Settings > About
+      placeholder: "e.g. 0.1.0-beta.1"
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, screen recordings, or console logs are helpful.

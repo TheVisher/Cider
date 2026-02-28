@@ -376,22 +376,25 @@ Known issues that would frustrate beta users.
 ### F-09: Distribution Pipeline
 > Code signing, notarization, .dmg packaging, GitHub Releases.
 
-**Status:** `⬜ Not Started`
+**Status:** `🧪 Testing`
 **Priority:** Critical — can't ship without this
 
 **Scope:**
-- Xcode project: release build configuration, proper Info.plist versioning
-- Code signing with Apple Developer certificate
-- Notarization via `notarytool`
-- .dmg creation (drag app to Applications)
+- `scripts/release.sh`: full pipeline (version bump, archive, export, notarize, .dmg, GitHub Release)
+- `scripts/ExportOptions.plist`: Developer ID signing config
+- Code signing with Developer ID Application certificate
+- Hardened runtime enabled for notarization
+- Notarization via `notarytool` with keychain profile
+- .dmg creation with Applications symlink
 - GitHub Release with .dmg attached
-- Automate with script or Makefile for repeatable releases
+- Flags: `--skip-notarize`, `--skip-github`
 - Version numbering: 0.1.0-beta.1
 
 **Testing checklist:**
-- [ ] Release build compiles without warnings
-- [ ] App is properly code signed
-- [ ] App is notarized (passes Gatekeeper)
+- [x] Release build compiles without warnings
+- [x] App is properly code signed
+- [x] Export with Developer ID signing succeeds
+- [ ] App is notarized (passes Gatekeeper) — submitted, awaiting Apple processing
 - [ ] .dmg opens cleanly with drag-to-Applications
 - [ ] App launches from Applications folder
 - [ ] GitHub Release page shows correct version and .dmg download
@@ -399,32 +402,36 @@ Known issues that would frustrate beta users.
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | release.sh, ExportOptions.plist, Developer ID cert setup, notary credentials |
+| Gate 3: User Test | 2026-02-27 | minivish | Archive + export succeed; notarization submitted but Apple processing slow |
 
 ---
 
 ### F-10: Landing Page & README
 > What users see when they find Cider. Clear value prop, screenshot, download link.
 
-**Status:** `⬜ Not Started`
+**Status:** `🔍 In Review`
 **Priority:** Medium
 
 **Scope:**
 - GitHub README.md: one-liner, key features, screenshot/GIF, download link, "Beta" badge
-- Optional: simple landing page (GitHub Pages or standalone)
+- Optional: simple landing page (GitHub Pages or standalone) — deferred
 - In-app: "Send Feedback" link in Settings → About → opens GitHub Issues
 - GitHub Issues templates: Bug Report, Feature Request
+- Screenshot/GIF assets — deferred (needs capture workflow)
 
 **Testing checklist:**
-- [ ] README is clear and compelling
-- [ ] Screenshot/GIF shows the panel in action
-- [ ] Download link points to latest release
-- [ ] "Send Feedback" in app opens browser to GitHub Issues
+- [x] README is clear and compelling (no em dashes, no AI fluff)
+- [ ] Screenshot/GIF shows the panel in action — deferred
+- [x] Download link points to latest release
+- [x] "Send Feedback" in app opens browser to GitHub Issues
+- [x] GitHub issue templates (Bug Report, Feature Request)
 
 **Gate log:**
 | Gate | Date | Agent/User | Notes |
 |------|------|------------|-------|
-| | | | |
+| Gate 1: Implement | 2026-02-27 | Claude | README.md, AboutSettingsView links (GitHub, Feedback, Releases), issue templates (bug_report.yml, feature_request.yml) |
+| Gate 2: Code Review | 2026-02-27 | Claude | Cleaned em dashes, removed placeholder URLs, matched tagline |
 
 ---
 
@@ -442,11 +449,11 @@ Known issues that would frustrate beta users.
 | F-06 | Fix CH-C08 (Search Results) | 2 | ✅ Complete | 2026-02-27 |
 | F-07 | Fix CH-C04 (Select All) | 2 | ✅ Complete | Gate 5 |
 | F-08 | First-Run Experience | 3 | ✅ Complete | Gate 5 |
-| F-09 | Distribution Pipeline | 3 | ⬜ Not Started | — |
-| F-10 | Landing Page & README | 3 | ⬜ Not Started | — |
+| F-09 | Distribution Pipeline | 3 | 🧪 Testing | Gate 3 |
+| F-10 | Landing Page & README | 3 | 🔍 In Review | Gate 2 |
 
 **Completed:** 8/10
-**In Progress:** 0/10
+**In Progress:** 2/10
 
 ---
 
