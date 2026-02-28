@@ -97,9 +97,3 @@ This is an early beta. Things will break and features are still landing. If you 
 ## License
 
 Cider is source-available. You're welcome to read the code, learn from it, and file issues. See [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  Made with care for macOS.
-</p>
