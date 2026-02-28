@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -11,14 +11,20 @@
 		B1A000000000000000000015 /* Cider in Frameworks */ = {isa = PBXBuildFile; productRef = B1A000000000000000000014 /* Cider */; };
 		B1A000000000000000000018 /* TipTapEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000016 /* TipTapEditor */; };
 		B1A000000000000000000019 /* ReaderMode in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000017 /* ReaderMode */; };
+		B1A00000000000000000001A /* menubar-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001C /* menubar-icon.png */; };
+		B1A00000000000000000001B /* cider-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001D /* cider-icon.png */; };
+		B1A00000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001F /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		B1A000000000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		B1A000000000000000000003 /* Cider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cider.entitlements; sourceTree = "<group>"; };
 		B1A000000000000000000007 /* Cider.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cider.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B1A000000000000000000016 /* TipTapEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TipTapEditor; path = "Sources/Cider/Resources/TipTapEditor"; sourceTree = SOURCE_ROOT; };
-		B1A000000000000000000017 /* ReaderMode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReaderMode; path = "Sources/Cider/Resources/ReaderMode"; sourceTree = SOURCE_ROOT; };
+		B1A000000000000000000016 /* TipTapEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TipTapEditor; path = Sources/Cider/Resources/TipTapEditor; sourceTree = SOURCE_ROOT; };
+		B1A000000000000000000017 /* ReaderMode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReaderMode; path = Sources/Cider/Resources/ReaderMode; sourceTree = SOURCE_ROOT; };
+		B1A00000000000000000001C /* menubar-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "menubar-icon.png"; path = "Sources/Cider/Resources/menubar-icon.png"; sourceTree = SOURCE_ROOT; };
+		B1A00000000000000000001D /* cider-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "cider-icon.png"; path = "Sources/Cider/Resources/cider-icon.png"; sourceTree = SOURCE_ROOT; };
+		B1A00000000000000000001F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Sources/Cider/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,17 +39,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		B1A000000000000000000006 = {
-			isa = PBXGroup;
-			children = (
-				B1A000000000000000000005 /* Sources/CiderApp */,
-				B1A000000000000000000003 /* Cider.entitlements */,
-				B1A000000000000000000016 /* TipTapEditor */,
-				B1A000000000000000000017 /* ReaderMode */,
-				B1A000000000000000000004 /* Products */,
-			);
-			sourceTree = "<group>";
-		};
 		B1A000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -57,7 +52,21 @@
 			children = (
 				B1A000000000000000000001 /* main.swift */,
 			);
-			path = "Sources/CiderApp";
+			path = Sources/CiderApp;
+			sourceTree = "<group>";
+		};
+		B1A000000000000000000006 = {
+			isa = PBXGroup;
+			children = (
+				B1A000000000000000000005 /* Sources/CiderApp */,
+				B1A000000000000000000003 /* Cider.entitlements */,
+				B1A000000000000000000016 /* TipTapEditor */,
+				B1A000000000000000000017 /* ReaderMode */,
+				B1A00000000000000000001C /* menubar-icon.png */,
+				B1A00000000000000000001D /* cider-icon.png */,
+				B1A00000000000000000001F /* Assets.xcassets */,
+				B1A000000000000000000004 /* Products */,
+			);
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -114,7 +123,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				B1A000000000000000000008 /* Cider */,
+				B1A000000000000000000008 /* CiderApp */,
 			);
 		};
 /* End PBXProject section */
@@ -126,6 +135,9 @@
 			files = (
 				B1A000000000000000000018 /* TipTapEditor in Resources */,
 				B1A000000000000000000019 /* ReaderMode in Resources */,
+				B1A00000000000000000001A /* menubar-icon.png in Resources */,
+				B1A00000000000000000001B /* cider-icon.png in Resources */,
+				B1A00000000000000000001E /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,20 +278,34 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Cider.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = S9SS3NNGSW;
-				INFOPLIST_FILE = "Sources/Cider/Resources/Info.plist";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
+				INFOPLIST_FILE = Sources/Cider/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.0-beta.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.cider.app";
+				MARKETING_VERSION = "0.1.0-beta.1";
+				PRODUCT_BUNDLE_IDENTIFIER = com.cider.app;
 				PRODUCT_NAME = Cider;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_MODULE_NAME = CiderApp;
@@ -292,20 +318,34 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Cider.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = S9SS3NNGSW;
-				INFOPLIST_FILE = "Sources/Cider/Resources/Info.plist";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
+				INFOPLIST_FILE = Sources/Cider/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.0-beta.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.cider.app";
+				MARKETING_VERSION = "0.1.0-beta.1";
+				PRODUCT_BUNDLE_IDENTIFIER = com.cider.app;
 				PRODUCT_NAME = Cider;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_MODULE_NAME = CiderApp;
@@ -339,7 +379,7 @@
 /* Begin XCLocalSwiftPackageReference section */
 		B1A000000000000000000013 /* XCLocalSwiftPackageReference "." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ".";
+			relativePath = .;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -350,7 +390,6 @@
 			productName = Cider;
 		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = B1A000000000000000000009 /* Project object */;
 }

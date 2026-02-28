@@ -17,6 +17,7 @@ let package = Package(
                 // swift build is used for compilation verification only.
                 "Resources/TipTapEditor",
                 "Resources/ReaderMode",
+                "Resources/Assets.xcassets",
             ]
         ),
         .testTarget(

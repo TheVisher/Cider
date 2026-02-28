@@ -7,9 +7,19 @@ struct AboutSettingsView: View {
 
             // App icon and name
             VStack(spacing: Spacing.md) {
-                Image(systemName: "cube.fill")
-                    .font(CiderFont.appIcon)
-                    .foregroundColor(CiderColors.controlAccent)
+                Group {
+                    if let iconURL = Bundle.main.url(forResource: "cider-icon", withExtension: "png"),
+                       let nsImage = NSImage(contentsOf: iconURL) {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 64, height: 64)
+                    } else {
+                        Image(systemName: "cube.fill")
+                            .font(CiderFont.appIcon)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                }
 
                 Text("Cider")
                     .font(CiderFont.displayBold)

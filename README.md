@@ -1,13 +1,5 @@
 <p align="center">
-  <img src="assets/cider-icon.png" alt="Cider" width="128" />
-</p>
-
-<h1 align="center">Cider</h1>
-
-<p align="center">
-  <strong>A floating workspace for saving and organizing anything on macOS.</strong>
-  <br />
-  Double-tap Option. Capture. Organize. Done.
+  <img src="brand/assets/readme-banner-1600x400.png" alt="Cider - macOS Utility" width="800" />
 </p>
 
 <p align="center">

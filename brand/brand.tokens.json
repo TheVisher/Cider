@@ -1,0 +1,26 @@
+{
+  "brand": {
+    "name": "Cider",
+    "personality": ["native", "clean", "focused", "premium", "calm"]
+  },
+  "colors": {
+    "peelHighlight": "#F4A42B",
+    "peelMid": "#D97706",
+    "peelDeep": "#B45309",
+    "darkPrimary": "#0F1115",
+    "darkPanel": "#1C1F24",
+    "darkMuted": "#2A2D33"
+  },
+  "typography": {
+    "font": "SF Pro Display",
+    "weight": "Semibold",
+    "wordmarkCase": "Cider"
+  },
+  "rules": {
+    "noSeams": true,
+    "noHeavyGloss": true,
+    "noChrome": true,
+    "noCartoonFruit": true,
+    "gradientFollowsCurve": true
+  }
+}

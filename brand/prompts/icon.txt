@@ -1,0 +1,21 @@
+Generate an app icon for "Cider", a native macOS utility.
+
+Concept: Apple peel forming a subtle "C" as a continuous ribbon.
+
+Style rules:
+- Continuous ribbon form, no breaks or seams
+- Subtle depth only at the top curl
+- No harsh shading splits
+- No heavy gloss or chrome effects
+- No cartoon fruit interpretation
+- Single soft light source from top-left
+- Gradient follows the curvature of the ribbon (not vertical)
+
+Color gradient (along ribbon arc):
+- Top highlight: #F4A42B
+- Mid tone: #D97706
+- Deep amber: #B45309
+
+Background: Transparent or #0F1115 (dark)
+
+Output: 1024x1024 PNG, no padding, centered.

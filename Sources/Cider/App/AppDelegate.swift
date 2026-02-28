@@ -185,7 +185,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Cider")
+            if let iconURL = Bundle.main.url(forResource: "menubar-icon", withExtension: "png"),
+               let icon = NSImage(contentsOf: iconURL) {
+                icon.size = NSSize(width: 18, height: 18)
+                icon.isTemplate = true
+                button.image = icon
+            } else {
+                button.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Cider")
+            }
         }
 
         let menu = NSMenu()

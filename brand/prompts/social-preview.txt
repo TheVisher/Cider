@@ -1,0 +1,17 @@
+Generate a GitHub social preview image for "Cider", a native macOS utility.
+
+Dimensions: 1280x640
+
+Layout:
+- Centered app icon (apple peel "C" ribbon, golden amber gradient)
+- "Cider" wordmark below icon in SF Pro Display Semibold
+- Wordmark color: #EAEAEA
+- Soft amber glow behind icon at 12-18% opacity
+
+Background:
+- Dark gradient from #0F1115 to #1C1F24
+- No pure black
+- Subtle radial gradient centered on icon
+
+Style: Minimal, premium, native macOS feel. No decorative elements.
+No tagline needed. Let the icon and name speak.
