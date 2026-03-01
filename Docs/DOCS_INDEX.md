@@ -11,7 +11,9 @@
 | Doc | What it's for |
 | --- | --- |
 | **DOCS_INDEX.md** | This file. The map. |
-| **BETA_ROADMAP.md** | **READ FIRST EVERY SESSION.** The single source of truth for beta features, progress tracking, gate process, and agent behavior rules. |
+| **1_0_ROADMAP.md** | **READ FIRST EVERY SESSION.** The active roadmap from beta to 1.0 release. 19 features across 4 phases, plus post-1.0 backlog. |
+| **BETA_ROADMAP.md** | Archived. The beta launch roadmap (9/10 complete, F-09 pending notarization). Post-beta backlog now superseded by 1_0_ROADMAP.md. |
+| **USER_FEEDBACK.md** | Inbox for beta tester feedback. Raw feedback collected here, periodically triaged into the 1.0 roadmap. |
 | **QUICK_REFERENCE.md** | Slash commands, end-of-session workflow, how to use Claude effectively on this project. |
 | **CODE_HEALTH.md** | Living bug/debt tracker. Known issues, open findings from code reviews, items to fix. Check off when fixed, add new ones when found. |
 

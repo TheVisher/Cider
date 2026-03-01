@@ -28,6 +28,29 @@ final class SettingsWindow: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        let action: Selector? = switch event.charactersIgnoringModifiers {
+        case "x": #selector(NSText.cut(_:))
+        case "c": #selector(NSText.copy(_:))
+        case "v": #selector(NSText.paste(_:))
+        case "a": #selector(NSText.selectAll(_:))
+        case "z" where event.modifierFlags.contains(.shift): #selector(UndoManager.redo)
+        case "z": #selector(UndoManager.undo)
+        default: nil
+        }
+
+        if let action, let responder = firstResponder, responder.responds(to: action) {
+            responder.doCommand(by: action)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
     func centerOnScreen() {
         // Use mouse location to find the screen (same as command palette)
         let mouseLocation = NSEvent.mouseLocation

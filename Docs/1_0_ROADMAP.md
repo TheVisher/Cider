@@ -1,0 +1,531 @@
+# Cider 1.0 Roadmap
+
+> **This is the active roadmap from beta to 1.0 release.** The beta launch roadmap (`BETA_ROADMAP.md`) is complete and archived. Every agent session should check this doc first. If the user gets sidetracked with post-1.0 ideas, acknowledge and redirect.
+
+**Created:** 2026-02-28
+**Target:** Stable 1.0 release (out of beta)
+**Guiding Principle:** Polish what exists, complete half-finished features, add new card types, nail distribution. No ambitious new systems until after 1.0.
+
+---
+
+## Process: How Features Ship
+
+Same 5-gate process from the beta roadmap. Nothing is "done" until Gate 5.
+
+```
+Gate 1: IMPLEMENT     — Agent writes the code
+Gate 2: CODE REVIEW   — Agent reviews for bugs, conventions, accessibility
+Gate 3: USER TEST     — User (minivish) manually tests the feature, reports issues
+Gate 4: FIX & POLISH  — Address any issues from testing and review
+Gate 5: SIGN OFF      — User confirms it's good. Status -> Complete
+```
+
+### Status Legend
+| Status | Meaning |
+|--------|---------|
+| `Not Started` | Work hasn't begun |
+| `Implementing` | Agent is actively building |
+| `In Review` | Code review in progress |
+| `Testing` | User is manually testing |
+| `Fixing` | Issues found, being addressed |
+| `Complete` | User signed off. Done. |
+| `Blocked` | Can't proceed — dependency or decision needed |
+
+### Agent Rules
+
+1. **Check this doc at the start of every session.**
+2. **When the user asks "what should we work on next?"** — point to the next Not Started item in the current phase.
+3. **When the user gets sidetracked** — acknowledge the idea, add it to the post-1.0 backlog at the bottom, and redirect.
+4. **Never mark an item Complete** without user sign-off.
+5. **After implementing**, do a code review (conventions, reduce motion, tokens, etc.).
+6. **Update this doc** after each gate transition.
+7. **Check `USER_FEEDBACK.md`** periodically for tester feedback that should be promoted to this roadmap.
+
+---
+
+## Phase 1: Infrastructure & Distribution
+
+Must be solid before 1.0. Users need auto-updates and a proper install path.
+
+### R-01: Sparkle Auto-Updater
+> Integrate Sparkle framework for automatic update checks so users don't manually re-download .dmg files.
+
+**Status:** `Not Started`
+**Priority:** Critical
+
+**Scope:**
+- SPM dependency on Sparkle
+- Ed25519 signing for update payloads
+- Appcast XML hosted on GitHub Pages (or GitHub Releases feed)
+- "Check for Updates" in Settings and/or menu bar
+- Automatic background check on launch (configurable interval)
+- Update-available notification with changelog
+
+---
+
+### R-02: Mac App Store Listing
+> Distribute Cider through the Mac App Store for discoverability and trust.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- App Store Connect setup (screenshots, description, categories)
+- Sandboxing audit (identify what needs entitlements)
+- App Store review guidelines compliance
+- Pricing decision (free with IAP? paid? free beta period?)
+- Dual distribution: direct download (GitHub) + MAS
+
+---
+
+### R-03: Code Health Fixes
+> Resolve high and medium severity issues from CODE_HEALTH.md.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- CH-S03: SSRF validation in bookmark enrichment
+- CH-S04: Symlink traversal blocking in ExternalSourceScanner
+- CH-C05: Orphan attachment cleanup race condition
+- CH-C06: Short UUID collision risk (use full UUID)
+- CH-C07: NetscapeBookmarksCodec unit tests
+- CH-C11: NotesStorage async directory update
+- CH-C12: Bookmark labels in unified library filtering
+
+---
+
+### R-04: Vault Directory Migration
+> When the user changes the vault location in Settings, offer to move existing files automatically.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- "Move existing data?" confirmation dialog when vault root or per-type override changes
+- File move with progress indicator for large vaults
+- Rollback on failure
+- Works for both vault root changes and per-type override changes
+
+---
+
+## Phase 2: Complete & Polish Existing Features
+
+Make everything that shipped in beta feel finished.
+
+### R-05: Tag System Completion
+> Merge tags and saved view tag filter — the two deferred tag features.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- **Merge tags:** Select two tags, consolidate into one, reassign all items
+- **Saved view tag filter:** Filter a saved view/tab by specific tags (smart folders via tags)
+- UI for both in tag manager and view options
+
+---
+
+### R-06: Date Card Surfacing Completion
+> Notifications, per-view toggle, per-card override, and recurring event support.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- **Coming Up notifications:** Sidebar badge counts, optional system notifications for approaching/overdue items
+- **Per-view toggle:** Show/hide Coming Up section per saved view tab
+- **Per-card surfacing override:** Individual date cards set their own "remind X days before"
+- **Recurring event surfacing:** Compute next occurrence from DateCardRecurrenceRule, resurface annually/monthly (birthdays, bills, etc.)
+
+---
+
+### R-07: AI Auto-Tag Quality
+> Improve semantic category matching and threshold tuning for auto-generated tags.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- Evaluate current NLPipeline tag quality on real bookmark corpus
+- Tune confidence thresholds
+- Improve category taxonomy
+- Consider user feedback loop (accept/reject suggested tags)
+
+---
+
+### R-08: Keyboard Navigation
+> Arrow keys, Enter, Delete — standard keyboard interaction for grid and masonry views.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- Arrow keys move selection in grid/masonry (spatial awareness)
+- Enter opens selected item
+- Delete/Backspace trashes selected items
+- Tab/Shift+Tab for sequential navigation
+- Works across all display modes (list, grid, masonry)
+
+---
+
+### R-09: Notes Editor Polish
+> Missing formatting options and note pinning.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- **Block quotes:** Toolbar button (extension already exists, just needs button)
+- **Strikethrough:** Toolbar button + keyboard shortcut
+- **Highlight color:** Toolbar button with color options
+- **Horizontal rule:** Toolbar button for section dividers
+- **Note pinning:** Pin notes to top of view, persisted flag on Note model
+
+---
+
+### R-10: Custom Folder Icons
+> Let users pick SF Symbols or emoji for folder icons.
+
+**Status:** `Not Started`
+**Priority:** Low
+
+**Scope:**
+- `icon: String?` on Folder model (SF Symbol name or emoji)
+- Icon picker in folder edit/context menu
+- Display in sidebar and folder headers
+- Default icon when none set (current folder icon)
+
+---
+
+### R-11: Drag Out to External Apps
+> Drag bookmarks and notes out of Cider into other apps.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- Bookmarks: register `public.url` drag provider (URL opens in browser)
+- Notes: register `public.file-url` drag provider (.md file)
+- Bookmarks with images: also offer `public.file-url` for the image
+- Works from cards in all display modes
+
+---
+
+### R-12: Clipboard Viewer
+> Show recent clipboard items with action buttons.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- Last N clipboard items (URLs, images, text snippets)
+- Action buttons per item: Save as Bookmark, Save as Note, Dismiss
+- Accessible from panel (tab? section? popover?)
+- Builds on existing clipboard monitor infrastructure
+
+---
+
+### R-13: Advanced Search
+> Scope modifiers for power users.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- `@bookmarks`, `@notes`, `@datecards`, `@contacts` type filters
+- `@folder:name` scope to specific folder
+- `@tag:name` scope to specific tag
+- Works in both Cmd+K palette and sidebar search
+
+---
+
+## Phase 3: Detail View & Media
+
+Richer content display and media type support.
+
+### R-14: Bookmark Detail View V2
+> Redesigned detail view with multiple view modes and rich metadata.
+
+**Status:** `Not Started`
+**Priority:** High
+
+**Scope:**
+- Three view modes: Slide-out panel, Full panel, Page view
+- Metadata panel with collapsible sections (Title, Folders, Tags, Notes, Source, Colors, Properties)
+- Content tabs for URL bookmarks: Preview / Reader / Web mode switching
+- Replaces current detail popover
+
+---
+
+### R-15: GIF, Video & Carousel Bookmarks
+> Extended media type support beyond static images.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- **GIF support:** Clipboard monitor detects GIFs, store as originals with first-frame PNG thumbnails, animate on hover
+- **Video bookmarks:** Accept .mp4/.mov/.webm drag-drop, thumbnail extraction via AVAssetImageGenerator
+- **Multi-image/carousel:** Support multiple images per bookmark, horizontal scroll on cards, useful for Instagram posts, design boards
+
+---
+
+## Phase 4: New Card Types & Views
+
+Expand Cider beyond bookmarks and notes.
+
+### R-16: Books Card Type
+> Track books as library items alongside bookmarks and notes.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- `Book` model as new `LibraryItemV2` case
+- Fields: title, author, cover image, reading status (want/reading/finished/abandoned), rating, notes
+- `BookStorage` in vault (`~/CiderVault/Books/`)
+- Card view (cover-forward) and list row
+- Manual entry (title + author minimum)
+- Shows in library feed, folders, search, tags — like every other card type
+- Full book system (ISBN lookup, Goodreads import, progress tracking) deferred to post-1.0
+
+---
+
+### R-17: Todos Card Type
+> Task cards that live in the library alongside everything else.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- `TodoCard` model as new `LibraryItemV2` case
+- Fields: title, checklist items (title + done), due date (optional), priority (optional)
+- `TodoStorage` in vault (`~/CiderVault/Todos/`)
+- Card view showing checklist with interactive checkboxes
+- Quick-add from +New popover
+- Shows in library feed, folders, search, tags
+- Full todo system (daily lists, templates, recurring, views) deferred to post-1.0
+
+---
+
+### R-18: Documents Card Type
+> Upload and organize files (PDFs, images, documents).
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- `Document` model as new `LibraryItemV2` case
+- Fields: title, file path/URL, file type, size, thumbnail
+- `DocumentStorage` in vault (`~/CiderVault/Documents/`)
+- Drag-drop file ingestion (copy to vault)
+- Card view with file type icon and/or thumbnail preview
+- Open in default app, reveal in Finder
+- Shows in library feed, folders, search, tags
+- Full document system (filesystem watcher, OCR, full-text search) deferred to post-1.0
+
+---
+
+### R-19: Whiteboard Folder Theme
+> Display a folder as a freeform canvas instead of list/grid/masonry.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- New display mode on folders: Whiteboard (alongside list/grid/masonry)
+- Infinite canvas with dot grid background
+- Existing cards (bookmarks, notes, etc.) rendered as draggable blocks
+- Drag to reposition, persist positions per item per folder
+- Pan (scroll) and zoom (Cmd+scroll)
+- Drag items from other folders/tabs onto the canvas
+- Phase 2 (post-1.0): connections between blocks, lasso select, block rotation, export as image
+
+---
+
+## Stretch Goals
+
+If time allows before 1.0. Otherwise, first post-1.0 priorities.
+
+| Item | Notes |
+|------|-------|
+| Resurfacing system | Track `lastOpenedAt` / `openCount`, surface forgotten items |
+| Smart folder suggestions | AI: "You saved 12 React articles — create a folder?" |
+| AI page summaries | Summarize bookmarked pages via Foundation Models |
+| Similar items discovery | Cosine similarity suggestions in detail view |
+| Group-by | Group items by date, type, domain, tags with collapsible headers |
+| Web archival | .webarchive snapshots for offline access |
+| Compact notes formatting toolbar | Grouped dropdowns instead of flat icon strip |
+| Related links per bookmark | Multiple URLs for one entity (App Store + GitHub + docs) |
+| Quick-capture inline text field | Type and hit Enter to create note/bookmark from Home |
+
+---
+
+## Progress Dashboard
+
+| ID | Feature | Phase | Status |
+|----|---------|-------|--------|
+| R-01 | Sparkle Auto-Updater | 1 | Not Started |
+| R-02 | Mac App Store Listing | 1 | Not Started |
+| R-03 | Code Health Fixes | 1 | Not Started |
+| R-04 | Vault Directory Migration | 1 | Not Started |
+| R-05 | Tag System Completion | 2 | Not Started |
+| R-06 | Date Card Surfacing Completion | 2 | Not Started |
+| R-07 | AI Auto-Tag Quality | 2 | Not Started |
+| R-08 | Keyboard Navigation | 2 | Not Started |
+| R-09 | Notes Editor Polish | 2 | Not Started |
+| R-10 | Custom Folder Icons | 2 | Not Started |
+| R-11 | Drag Out to External Apps | 2 | Not Started |
+| R-12 | Clipboard Viewer | 2 | Not Started |
+| R-13 | Advanced Search | 2 | Not Started |
+| R-14 | Bookmark Detail View V2 | 3 | Not Started |
+| R-15 | GIF/Video/Carousel Bookmarks | 3 | Not Started |
+| R-16 | Books Card Type | 4 | Not Started |
+| R-17 | Todos Card Type | 4 | Not Started |
+| R-18 | Documents Card Type | 4 | Not Started |
+| R-19 | Whiteboard Folder Theme | 4 | Not Started |
+
+**Completed:** 0/19
+
+---
+
+## Already Shipped (Beta)
+
+These shipped in the beta launch and are maintained, not re-implemented:
+
+- Import/Export (Netscape HTML bookmark import and export)
+- Floating panel (NSPanel, double-tap Option, all-edge resize, compact mode)
+- Bookmark capture (browser, clipboard, drag-drop, Opt+B hotkey)
+- Notes editor (TipTap/ProseMirror, inline editing, formatting toolbar)
+- Folders (hierarchical, universal, cover images, sticky headers)
+- Tab system (saved views, drag-to-reorder, rename, close, +New)
+- Full tag system (create, assign, filter, color, sidebar multi-select)
+- Display modes (list/grid/masonry + continuous card size slider)
+- Multi-select + drag-drop + fanned preview
+- Trash & undo (30-day retention, 5-second toast, configurable)
+- AI enrichment (auto-tagging, embeddings, OCR, color extraction, page summaries)
+- Reader mode (Readability.js + Foundation Models)
+- Linked sources (external directory watching)
+- Screen capture with OCR routing
+- Stacks (query objects, surfacing rules, built-in templates)
+- Calendar projection (month view, ghost cells)
+- Date card surfacing (Coming Up section, urgency badges)
+- Cmd+K quick actions
+- Search (token-based, cross-entity, snippets)
+- Sound effects (configurable)
+- Settings (7 categories)
+- Spotlight indexing
+- First-run onboarding
+- Distribution pipeline (code signing, notarization, .dmg, GitHub Releases)
+- Standard Edit key equivalents (Cmd+C/V/X/A/Z routed in non-activating panels)
+
+---
+
+## Post-1.0 Backlog
+
+Everything here is tracked but not planned for 1.0. Ideas get promoted to the roadmap above based on user feedback and priorities.
+
+### AI & Intelligence
+| Item | Source | Notes |
+|------|--------|-------|
+| Conversational AI assistant | AI_VISION | Chat overlay, natural language queries, structured output |
+| BYOAI (bring your own API key) | BETA_ROADMAP | For users without Apple Intelligence |
+| Voice note capture | AI_VISION | Dictate notes via speech-to-text |
+| Audio bookmark annotation | AI_VISION | Record voice memo about a bookmark |
+| Screenshot-to-text (Vision OCR) | AI_VISION | Alternative to Chrome extension |
+| Image search indexing | AI_VISION | Extract text from thumbnails, make searchable |
+| GIF finder | AI_VISION, HOME_VISION | Screenshot conversation -> OCR -> AI -> search GIFs |
+| Content classification | AI_VISION | Categorize items (tutorial vs news vs recipe) |
+| Semantic search via embeddings | AI_VISION | Beyond keyword matching |
+| Auto-generate bookmark titles | AI_VISION | From page content via Foundation Models |
+| Auto-generate note titles | AI_VISION | From content |
+| Generate transcript summaries | AI_VISION | Bullet-point summarization |
+| Search via App Intents / Shortcuts | AI_VISION | Siri and Shortcuts integration |
+| Hybrid summary validation | AI_VISION | Cross-check FM summary against author's meta description |
+| Smart organization nudges | AI_VISION | "You saved 12 React articles — create a folder?" (beyond stretch goal) |
+
+### Notes
+| Item | Source | Notes |
+|------|--------|-------|
+| Split view (browser + editor) | NOTES_VISION | Resizable divider at wider panel widths |
+| Multi-folder membership | NOTES_VISION | `folderIDs: [UUID]` instead of `folderID: UUID?` |
+| Drag reorder for manual sort | NOTES_VISION | Manual sort order |
+| Advanced image treatment | NOTES_VISION | Fanned/angled image stacks with click-to-cycle |
+| Interactive checkboxes on cards | NOTES_VISION | Toggle checkboxes without opening the editor |
+| Per-folder sort persistence | NOTES_VISION | Each folder remembers its own sort order/view mode |
+
+### Bookmarks
+| Item | Source | Notes |
+|------|--------|-------|
+| YouTube transcript sync | BOOKMARKS_VISION | Live captions, click-to-seek |
+| PiP video player | BOOKMARKS_VISION | Mini-panel playback when panel closed |
+| Richer import feedback | BOOKMARKS_VISION | Malformed file diagnostics |
+| Thumbnail dimension settings | BOOKMARKS_VISION | User-facing 720/512/360px toggle |
+| Bookmark sorting/filter chips | BOOKMARKS_VISION | Has thumbnail, no thumbnail, recent, tagged |
+| Large-library performance pass | BOOKMARKS_VISION | Optimize for 1000+ bookmarks |
+
+### Views & Organization
+| Item | Source | Notes |
+|------|--------|-------|
+| Kanban display mode | WORKSPACES_VISION | Columns by attribute, drag between columns |
+| Themed folders: Media Hub | WORKSPACES_VISION | Netflix-style, TMDB/OMDB enrichment, episode tracking |
+| Themed folders: Recipe | WORKSPACES_VISION | Schema.org extraction, cooking mode, meal planning |
+| Themed folders: other | WORKSPACES_VISION | Reading List, Music, Travel, Shopping, Learning |
+| Card customization sliders | WORKSPACES_VISION | Padding and spacing controls |
+| Manual item refs on saved views | WORKSPACES_VISION | "Send to view" context action |
+| Sidebar folder drag reorder & nesting | WORKSPACES_VISION | Drag to reorder siblings, nest under other folders |
+| Folder breadcrumb path | WORKSPACES_VISION | "Work > Internal Tools > APIs" in folder header |
+| Folder inline rename | WORKSPACES_VISION | Right-click context menu + inline editing in sidebar |
+
+### Full Systems (card type expansions)
+| Item | Source | Notes |
+|------|--------|-------|
+| Books: ISBN/barcode lookup | BOOKS_VISION | Goodreads/StoryGraph import |
+| Books: progress tracking | BOOKS_VISION | Page tracking, reading dates |
+| Books: highlight extraction | BOOKS_VISION | Kindle/Apple Books highlights |
+| Books: statistics | BOOKS_VISION | Books/year, genre distribution |
+| Books: shelf display mode | BOOKS_VISION | Books spine-out visual layout |
+| Todos: daily lists | TODOS_VISION | Named lists, auto-archive, templates |
+| Todos: recurring tasks | TODOS_VISION | Recurring structures |
+| Todos: views (Today/Upcoming/All) | TODOS_VISION | Dedicated task views |
+| Todos: note integration | TODOS_VISION | Pull checkboxes from notes into unified view |
+| Todos: global hotkey capture | TODOS_VISION | Add todo without opening panel |
+| Todos: natural language dates | TODOS_VISION | Parse "tomorrow", "next Friday" |
+| Documents: filesystem watcher | DOCUMENTS_VISION | FSEvents directory monitoring |
+| Documents: full-text search | DOCUMENTS_VISION | PDF text, image OCR |
+| Documents: window-based capture | DOCUMENTS_VISION | Proxy icon drops, AX file path detection |
+| Whiteboard: connections | WHITEBOARD_VISION | Draw lines between blocks |
+| Whiteboard: lasso select | WHITEBOARD_VISION | Multi-select on canvas |
+| Whiteboard: sketch/draw | WHITEBOARD_VISION | PencilKit blocks |
+| Whiteboard: templates | WHITEBOARD_VISION | Brainstorming, planning layouts |
+| Whiteboard: export as image | WHITEBOARD_VISION | PNG/PDF export of canvas |
+| Whiteboard: clipboard capture flow | WHITEBOARD_VISION | Route text/images to whiteboard via toast |
+
+### Home & UX
+| Item | Source | Notes |
+|------|--------|-------|
+| Today's activity summary | HOME_VISION | Dashboard widget |
+| Streak / activity indicators | HOME_VISION | Visual usage feedback |
+| Customizable widget layout | HOME_VISION | Choose which sections on Home |
+| Pinned items section | HOME_VISION | Show pinned items at top |
+| Search shortcut / recent searches | HOME_VISION | Persist recent queries |
+| Continue section resurfacing | HOME_VISION | Mix 1-2 forgotten items into Continue alongside recents |
+
+### Infrastructure
+| Item | Source | Notes |
+|------|--------|-------|
+| Collaboration | WHITEBOARD_VISION | Shared whiteboards |
+| JSON full backup/restore | BETA_ROADMAP | Single-file export of everything |
+| OPML format support | BETA_ROADMAP | RSS reader compatibility |
+| Docs status audit | CODE_HEALTH | CH-D06: Multiple docs disagree on shipped status |
+
+---
+
+## Issues Log
+
+Track issues found during review and testing. Reference the feature ID.
+
+| Issue | Feature | Found During | Severity | Status | Notes |
+|-------|---------|-------------|----------|--------|-------|
+| | | | | | |

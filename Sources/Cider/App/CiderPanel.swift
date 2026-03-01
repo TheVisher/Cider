@@ -55,6 +55,32 @@ final class CiderPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    // Non-activating borderless panels have no main menu, so standard Edit
+    // key equivalents (Cmd+C/V/X/A/Z) never fire. Intercept them here and
+    // route to the first responder manually.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        let action: Selector? = switch event.charactersIgnoringModifiers {
+        case "x": #selector(NSText.cut(_:))
+        case "c": #selector(NSText.copy(_:))
+        case "v": #selector(NSText.paste(_:))
+        case "a": #selector(NSText.selectAll(_:))
+        case "z" where event.modifierFlags.contains(.shift): #selector(UndoManager.redo)
+        case "z": #selector(UndoManager.undo)
+        default: nil
+        }
+
+        if let action, let responder = firstResponder, responder.responds(to: action) {
+            responder.doCommand(by: action)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
     // Allow the panel to be dragged freely across all monitors (don't constrain
     // position to visibleFrame like the default implementation does), but still
     // enforce minimum width so the panel can't be shrunk to nothing.

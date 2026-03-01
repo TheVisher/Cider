@@ -1,10 +1,13 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
     @State private var selectedCategory: SettingsCategory = .general
     @State private var selectedSubcategory: SettingsSubcategory = .startup
+    @State private var importResult: String?
+    @State private var exportResult: String?
 
     var body: some View {
         ZStack {
@@ -410,6 +413,58 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .dataImportExport:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Import Bookmarks") {
+                    Text("Import bookmarks from Chrome, Firefox, Safari, or any browser that exports Netscape HTML format.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    HStack(spacing: Spacing.sm) {
+                        Button(action: importBookmarks) {
+                            Label("Import from File\u{2026}", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(CiderAccentButtonStyle())
+
+                        if let importResult {
+                            Text(importResult)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+
+                    Text("To export from your browser: Chrome \u{2192} Bookmarks Manager \u{2192} \u{22EE} \u{2192} Export bookmarks. Firefox \u{2192} Bookmarks \u{2192} Manage \u{2192} Import and Backup \u{2192} Export to HTML. Safari \u{2192} File \u{2192} Export Bookmarks.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
+                }
+
+                SettingsSection(title: "Export Bookmarks") {
+                    Text("Export all bookmarks as Netscape HTML. This file can be imported into any browser or bookmark manager.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    HStack(spacing: Spacing.sm) {
+                        Button(action: exportBookmarks) {
+                            Label("Export to File\u{2026}", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(CiderSecondaryButtonStyle())
+
+                        if let exportResult {
+                            Text(exportResult)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        } else {
+                            Text("\(BookmarksStorage.shared.bookmarks.count) bookmarks")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
         case .intelligenceFeatures:
             IntelligenceSettingsView()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -477,6 +532,46 @@ struct SettingsView: View {
         }
     }
 
+    private func importBookmarks() {
+        // Defer to next run loop tick — NSSavePanel/NSOpenPanel init deadlocks
+        // when called synchronously inside a SwiftUI button gesture dispatch.
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.canCreateDirectories = false
+            panel.allowedContentTypes = [.html]
+            panel.prompt = "Import"
+            panel.message = "Select a bookmark HTML file to import"
+
+            NSApp.activate(ignoringOtherApps: true)
+            if panel.runModal() == .OK, let url = panel.url {
+                let count = BookmarksStorage.shared.importNetscapeHTML(from: url)
+                importResult = "Imported \(count) bookmarks"
+            }
+        }
+    }
+
+    private func exportBookmarks() {
+        DispatchQueue.main.async {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.html]
+            panel.nameFieldStringValue = "CiderBookmarks.html"
+            panel.prompt = "Export"
+            panel.message = "Choose where to save your bookmarks"
+
+            NSApp.activate(ignoringOtherApps: true)
+            if panel.runModal() == .OK, let url = panel.url {
+                do {
+                    try BookmarksStorage.shared.exportNetscapeHTML(to: url)
+                    exportResult = "Exported successfully"
+                } catch {
+                    exportResult = "Export failed"
+                }
+            }
+        }
+    }
+
     private func openAccessibilityPreferences() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
@@ -536,7 +631,7 @@ private enum SettingsCategory: String, CaseIterable {
         case .intelligence:
             [.intelligenceFeatures]
         case .data:
-            [.dataDirectories, .dataTrash, .dataNotifications]
+            [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport]
         case .advanced:
             [.advancedAccessibility, .advancedReset]
         case .about:
@@ -561,6 +656,7 @@ private enum SettingsSubcategory: Hashable {
     case dataDirectories
     case dataTrash
     case dataNotifications
+    case dataImportExport
     case intelligenceFeatures
     case advancedAccessibility
     case advancedReset
@@ -595,6 +691,8 @@ private enum SettingsSubcategory: Hashable {
             "Trash"
         case .dataNotifications:
             "Notifications"
+        case .dataImportExport:
+            "Import & Export"
         case .intelligenceFeatures:
             "Features"
         case .advancedAccessibility:

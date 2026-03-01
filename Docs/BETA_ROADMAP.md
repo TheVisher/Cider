@@ -410,7 +410,7 @@ Known issues that would frustrate beta users.
 ### F-10: Landing Page & README
 > What users see when they find Cider. Clear value prop, screenshot, download link.
 
-**Status:** `🔍 In Review`
+**Status:** `✅ Complete`
 **Priority:** Medium
 
 **Scope:**
@@ -432,6 +432,8 @@ Known issues that would frustrate beta users.
 |------|------|------------|-------|
 | Gate 1: Implement | 2026-02-27 | Claude | README.md, AboutSettingsView links (GitHub, Feedback, Releases), issue templates (bug_report.yml, feature_request.yml) |
 | Gate 2: Code Review | 2026-02-27 | Claude | Cleaned em dashes, removed placeholder URLs, matched tagline |
+| Gate 3: User Test | 2026-02-28 | minivish | Reviewed README, icons, brand kit, issue templates |
+| Gate 5: Sign Off | 2026-02-28 | minivish | Good enough for beta. Icon/branding may evolve later. |
 
 ---
 
@@ -450,10 +452,10 @@ Known issues that would frustrate beta users.
 | F-07 | Fix CH-C04 (Select All) | 2 | ✅ Complete | Gate 5 |
 | F-08 | First-Run Experience | 3 | ✅ Complete | Gate 5 |
 | F-09 | Distribution Pipeline | 3 | 🧪 Testing | Gate 3 |
-| F-10 | Landing Page & README | 3 | 🔍 In Review | Gate 2 |
+| F-10 | Landing Page & README | 3 | ✅ Complete | Gate 5 |
 
-**Completed:** 8/10
-**In Progress:** 2/10
+**Completed:** 9/10
+**In Progress:** 1/10
 
 ---
 
@@ -484,34 +486,34 @@ These are built, tested through development, and ship as-is:
 
 ## Post-Beta Backlog
 
-Items explicitly deferred. Add new ideas here instead of scope-creeping the beta.
+> **This backlog is now superseded by `1_0_ROADMAP.md`.** All items below have been triaged into the 1.0 roadmap or its post-1.0 backlog. See that doc for the active plan.
 
-| Item | Priority | Notes |
-|------|----------|-------|
-| Mac App Store listing | Tier 1 | Revenue. Do after beta stabilizes. |
-| Import/Export (Netscape HTML, OPML) | Tier 1 | Onboarding for users with existing bookmarks |
-| Notes Phase 2 (checkboxes, pinning, drag reorder) | Tier 1 | Based on beta feedback |
-| BYOAI (bring your own API key) | Tier 2 | For non-Apple Intelligence users |
-| Drag out to external apps | Tier 2 | public.url, public.file-url |
-| Advanced search (scope modifiers) | Tier 2 | @bookmarks, @notes, @folder:name |
-| Whiteboard tab | Tier 3 | Freeform canvas |
-| Documents tab | Tier 3 | PDFs, images, local files |
-| Todos tab | Tier 3 | Task management |
-| Books tab | Tier 3 | Reading tracker |
-| Merge tags | Tier 2 | Consolidate two tags into one, reassign all items |
-| Saved view tag filter | Tier 2 | Filter saved views by specific tags (smart folders) |
-| Per-view Coming Up toggle | Tier 2 | Show/hide Coming Up section per saved view tab |
-| Coming Up notification settings | Tier 2 | Sidebar badge counts, system notifications for approaching/overdue items |
-| Per-card surfacing override | Tier 2 | Evaluate DateCard.rules surfaceDaysBeforeDate(N) per card |
-| Recurring event surfacing | Tier 2 | Evaluate DateCardRecurrenceRule to compute next occurrence date — use that for urgency instead of raw startAt. Birthdays, bills, etc. resurface annually/monthly. |
-| AI auto-tag quality tuning | Tier 2 | Improve semantic category matching, threshold tuning |
-| Themed folders (Media Hub, Recipe) | Tier 3 | Domain-specific views |
-| YouTube transcript sync | Tier 3 | Live captions, click-to-seek |
-| Clipboard viewer | Tier 3 | Recent items, action buttons |
-| Sparkle auto-updater | Tier 1 | Integrate Sparkle framework for automatic update checks. SPM dependency, Ed25519 signing, appcast XML on GitHub Pages. Replaces manual .dmg re-download. |
-| Vault directory migration prompt | Tier 2 | When vault root or override changes, offer "Move existing data to new location?" button — explicit, user-initiated, with confirmation. Currently users must move files manually in Finder. |
-| Web archival | Tier 3 | .webarchive snapshots |
-| GIF/video/carousel bookmarks | Tier 3 | Extended media types |
+| Item | Priority | Disposition |
+|------|----------|-------------|
+| Import/Export (Netscape HTML) | Tier 1 | **Done** — shipped 2026-02-28 (Settings > Data > Import & Export) |
+| Sparkle auto-updater | Tier 1 | Moved to 1.0 roadmap (R-01) |
+| Mac App Store listing | Tier 1 | Moved to 1.0 roadmap (R-02) |
+| Notes Phase 2 (pinning, formatting) | Tier 1 | Moved to 1.0 roadmap (R-09). Checkboxes already work. |
+| Drag out to external apps | Tier 2 | Moved to 1.0 roadmap (R-11) |
+| Advanced search (scope modifiers) | Tier 2 | Moved to 1.0 roadmap (R-13) |
+| Merge tags | Tier 2 | Moved to 1.0 roadmap (R-05) |
+| Saved view tag filter | Tier 2 | Moved to 1.0 roadmap (R-05) |
+| Per-view Coming Up toggle | Tier 2 | Moved to 1.0 roadmap (R-06) |
+| Coming Up notification settings | Tier 2 | Moved to 1.0 roadmap (R-06) |
+| Per-card surfacing override | Tier 2 | Moved to 1.0 roadmap (R-06) |
+| Recurring event surfacing | Tier 2 | Moved to 1.0 roadmap (R-06) |
+| AI auto-tag quality tuning | Tier 2 | Moved to 1.0 roadmap (R-07) |
+| Vault directory migration prompt | Tier 2 | Moved to 1.0 roadmap (R-04) |
+| Clipboard viewer | Tier 3 | Moved to 1.0 roadmap (R-12) |
+| GIF/video/carousel bookmarks | Tier 3 | Moved to 1.0 roadmap (R-15) |
+| Whiteboard tab | Tier 3 | Reimagined as folder theme — 1.0 roadmap (R-19) |
+| Documents tab | Tier 3 | Reimagined as card type — 1.0 roadmap (R-18) |
+| Todos tab | Tier 3 | Reimagined as card type — 1.0 roadmap (R-17) |
+| Books tab | Tier 3 | Reimagined as card type — 1.0 roadmap (R-16) |
+| Themed folders (Media Hub, Recipe) | Tier 3 | Post-1.0 backlog |
+| YouTube transcript sync | Tier 3 | Post-1.0 backlog |
+| Web archival | Tier 3 | 1.0 stretch goal |
+| BYOAI (bring your own API key) | Tier 2 | Post-1.0 backlog |
 
 ---
 

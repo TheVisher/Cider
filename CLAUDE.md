@@ -2,17 +2,22 @@
 
 Cider is a native macOS **floating panel** app for capturing and organizing bookmarks, notes, and projects. Activated by double-tapping Option, it provides a persistent workspace panel with tabbed content, a universal folder sidebar, and inline search. Uses SwiftUI + AppKit, targets macOS 14+.
 
-## Beta Roadmap (ACTIVE — Read First Every Session)
+## 1.0 Roadmap (ACTIVE — Read First Every Session)
 
-**Read:** `Docs/BETA_ROADMAP.md` — the single source of truth for what ships in beta.
+**Read:** `Docs/1_0_ROADMAP.md` — the single source of truth for what ships in 1.0.
+
+**Also check:** `Docs/USER_FEEDBACK.md` — beta tester feedback inbox, triage periodically.
+
+**Archived:** `Docs/BETA_ROADMAP.md` — beta launch roadmap (complete, F-09 pending notarization).
 
 **Agent behavior:**
-- Check the roadmap at the start of every session. Know what's in progress, next, and done.
-- When the user asks "what should we work on?" — point to the next `⬜ Not Started` item.
-- When the user gets sidetracked with new features — acknowledge the idea, suggest adding it to the post-beta backlog, and redirect to the current roadmap item.
-- Never mark a feature ✅ Complete — only the user does that after testing.
+- Check the 1.0 roadmap at the start of every session. Know what's in progress, next, and done.
+- When the user asks "what should we work on?" — point to the next `Not Started` item in the current phase.
+- When the user gets sidetracked with post-1.0 features — acknowledge the idea, add it to the post-1.0 backlog in the roadmap, and redirect to the current roadmap item.
+- Never mark a feature Complete — only the user does that after testing.
 - After implementing any feature, run a code review (conventions, reduce motion, tokens, etc.) before handing to the user for testing.
 - Update the roadmap doc after each gate transition.
+- Periodically check USER_FEEDBACK.md for items that should be promoted to the 1.0 roadmap.
 
 ## Critical Rules (Always Follow)
 
