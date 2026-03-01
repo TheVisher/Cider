@@ -61,7 +61,7 @@ Each tab and major feature area has its own doc. These capture what's been built
 
 | Doc | What it covers | Status |
 | --- | --- | --- |
-| **LINKED_SOURCES_VISION.md** | External filesystem folders surfaced in Cider — sidebar, tabs, library feed. Makes Cider a default `.md` editor/viewer. | 🔲 Not started |
+| **LINKED_SOURCES_VISION.md** | External filesystem folders surfaced in Cider — sidebar, tabs, library feed. Makes Cider a default `.md` editor/viewer. | ✅ Implemented |
 | **AI_VISION.md** | On-device ML, smart tagging, semantic search, Apple Intelligence integration, tiered AI strategy | 🔲 Future |
 | **INTEGRATION_DESIGN.md** | Obsidian / knowledge-base sync architecture and design | 🔲 Future (Phase 2+) |
 
@@ -75,6 +75,12 @@ These exist to preserve ideas and design thinking for when these tabs get built.
 | **WHITEBOARD_VISION.md** | Freeform canvas for brain-dumping |
 | **BOOKS_VISION.md** | Reading tracker |
 | **DOCUMENTS_VISION.md** | PDFs, images, local files |
+
+### Setup Guides
+
+| Doc | What it covers | Status |
+| --- | --- | --- |
+| **SPARKLE_SETUP.md** | Sparkle auto-updater: Xcode project setup, Ed25519 key generation, appcast hosting, release signing | In Progress |
 
 ---
 

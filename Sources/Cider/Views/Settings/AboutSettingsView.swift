@@ -43,13 +43,22 @@ struct AboutSettingsView: View {
                 AboutLink(title: "Releases", icon: "arrow.down.circle", url: "https://github.com/TheVisher/Cider/releases")
             }
 
-            // Onboarding re-trigger
-            Button("Show Welcome Guide") {
-                NotificationCenter.default.post(name: .showOnboarding, object: nil)
+            // Update + onboarding
+            VStack(spacing: Spacing.sm) {
+                Button("Check for Updates...") {
+                    SparkleUpdaterService.shared.checkForUpdates()
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.labelMedium)
+                .foregroundColor(CiderColors.controlAccent)
+
+                Button("Show Welcome Guide") {
+                    NotificationCenter.default.post(name: .showOnboarding, object: nil)
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.labelMedium)
+                .foregroundColor(CiderColors.controlAccent)
             }
-            .buttonStyle(.plain)
-            .font(CiderFont.labelMedium)
-            .foregroundColor(CiderColors.controlAccent)
 
             Spacer()
 

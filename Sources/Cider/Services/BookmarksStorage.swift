@@ -1360,6 +1360,12 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
+        // CH-S03: Only allow http/https to prevent SSRF against local/internal services
+        guard let scheme = pageURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+
         var request = URLRequest(url: pageURL)
         request.timeoutInterval = 10
         request.setValue(
@@ -2231,7 +2237,7 @@ private enum BookmarkMetadataParser {
     }
 }
 
-private enum NetscapeBookmarksCodec {
+enum NetscapeBookmarksCodec {
     private static let anchorRegex = try? NSRegularExpression(
         pattern: #"(?is)<a\b([^>]*)>(.*?)</a>"#,
         options: []

@@ -31,9 +31,10 @@ final class ExternalSourceScanner: ObservableObject {
 
     func scan() {
         let fm = FileManager.default
+        // CH-S04: Block symlink traversal — only scan regular files
         guard let fileURLs = try? fm.contentsOfDirectory(
             at: directoryURL,
-            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else {
             files = []
@@ -41,7 +42,11 @@ final class ExternalSourceScanner: ObservableObject {
         }
 
         files = fileURLs
-            .filter { $0.pathExtension.lowercased() == "md" }
+            .filter { url in
+                guard url.pathExtension.lowercased() == "md" else { return false }
+                let isSymlink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink ?? false
+                return !isSymlink
+            }
             .compactMap { url -> ExternalFile? in
                 let attrs = try? fm.attributesOfItem(atPath: url.path)
                 let modDate = attrs?[.modificationDate] as? Date ?? Date()

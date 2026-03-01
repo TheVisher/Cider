@@ -99,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.servicesProvider = provider
         servicesProvider = provider
 
+        // Start Sparkle auto-updater
+        SparkleUpdaterService.shared.start()
+
         Task { @MainActor in
             let config = CiderConfig.load()
             if config.trashRetentionDays > 0 {

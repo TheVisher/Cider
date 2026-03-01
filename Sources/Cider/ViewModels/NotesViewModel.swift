@@ -250,9 +250,19 @@ final class NotesViewModel: ObservableObject {
     }
 
     /// Focus the TipTap editor.
+    /// In a non-activating NSPanel, JavaScript focus alone isn't enough —
+    /// the WKWebView must also become the window's first responder.
     func focusEditor() {
         guard editorIsReady, let webView = editorWebView else { return }
-        webView.evaluateJavaScript("window.editorAPI.focus()")
+        // Make the WKWebView the first responder at the AppKit level.
+        // Delay is required for non-activating panels (see CLAUDE.md).
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let window = webView.window else { return }
+            window.makeKey()
+            window.makeFirstResponder(webView)
+            _ = try? await webView.evaluateJavaScript("window.editorAPI.focus()")
+        }
     }
 
     /// Focus editor unless the find UI is currently active.
@@ -360,7 +370,14 @@ final class NotesViewModel: ObservableObject {
         // Clear editor and focus
         if editorIsReady, let webView = editorWebView {
             webView.evaluateJavaScript("window.editorAPI.clear()")
-            webView.evaluateJavaScript("window.editorAPI.focus()")
+            // Delay + AppKit first responder needed for non-activating panel
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard let window = webView.window else { return }
+                window.makeKey()
+                window.makeFirstResponder(webView)
+                _ = try? await webView.evaluateJavaScript("window.editorAPI.focus()")
+            }
         }
     }
 

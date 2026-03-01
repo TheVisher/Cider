@@ -87,6 +87,10 @@ final class NotesStorage: ObservableObject {
         attachmentCleanupWorkItem = nil
         let expanded = NSString(string: newPath).expandingTildeInPath
         directoryURL = URL(fileURLWithPath: expanded)
+        // CH-C11: Clear stale notes immediately so no operations reference
+        // old directory paths while the async scan loads from the new one.
+        notes = []
+        index = [:]
         ensureDirectory()
         startDirectoryWatcher()
         let dirURL = directoryURL
@@ -375,7 +379,7 @@ final class NotesStorage: ObservableObject {
             if !fm.fileExists(atPath: attachmentsDir.path) {
                 try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
             }
-            let fname = "\(uuid.uuidString.prefix(8))-capture.png"
+            let fname = "\(uuid.uuidString)-capture.png"
             let imgURL = attachmentsDir.appendingPathComponent(fname)
             if (try? png.write(to: imgURL, options: .atomic)) != nil {
                 screenshotFilename = fname
@@ -640,7 +644,7 @@ final class NotesStorage: ObservableObject {
         }
 
         // Prefix with short UUID to avoid collisions
-        let uniqueName = "\(UUID().uuidString.prefix(8))-\(filename)"
+        let uniqueName = "\(UUID().uuidString)-\(filename)"
         let fileURL = attachmentsDir.appendingPathComponent(uniqueName)
         try? data.write(to: fileURL, options: .atomic)
         return fileURL
@@ -655,7 +659,7 @@ final class NotesStorage: ObservableObject {
             let candidate = "\(base) \(i)"
             if !existingTitles.contains(candidate) { return candidate }
         }
-        return "\(base) \(UUID().uuidString.prefix(4))"
+        return "\(base) \(UUID().uuidString.prefix(8))"
     }
 
     private func snapshotsRootURL() -> URL {
@@ -761,7 +765,7 @@ final class NotesStorage: ObservableObject {
 
         guard let attachmentURLs = try? fm.contentsOfDirectory(
             at: attachmentsDir,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
             return
@@ -772,7 +776,7 @@ final class NotesStorage: ObservableObject {
 
         for fileURL in attachmentURLs {
             guard let values = try? fileURL.resourceValues(
-                forKeys: [.contentModificationDateKey, .isRegularFileKey]
+                forKeys: [.contentModificationDateKey, .creationDateKey, .isRegularFileKey]
             ) else {
                 continue
             }
@@ -781,8 +785,12 @@ final class NotesStorage: ObservableObject {
             let filename = fileURL.lastPathComponent
             guard !referencedFiles.contains(filename) else { continue }
 
+            // CH-C05: Check both creation and modification date — a recently
+            // created file must survive the grace period even if its mtime is old.
             let modifiedAt = values.contentModificationDate ?? .distantFuture
-            guard modifiedAt < orphanCutoff else { continue }
+            let createdAt = values.creationDate ?? .distantFuture
+            let newestDate = max(modifiedAt, createdAt)
+            guard newestDate < orphanCutoff else { continue }
 
             try? fm.removeItem(at: fileURL)
         }

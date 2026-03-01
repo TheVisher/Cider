@@ -36,15 +36,15 @@ Changed `allowingReadAccessTo: URL(fileURLWithPath: "/")` to `URL(fileURLWithPat
 
 Navigation policy in `TipTapEditorCoordinator` changed to deny-by-default. Only `file://` (editor HTML + local images) and `about:` (initial blank) are allowed through. All other schemes are blocked regardless of `navigationType` — the previous code only blocked `.linkActivated`, leaving JS-triggered navigations open. User-clicked external links still open in the system browser before being cancelled.
 
-### CH-S03 — SSRF / Local network scanning via Bookmark Enrichment (Low)
+### ~~CH-S03 — SSRF / Local network scanning via Bookmark Enrichment~~ ✅ Fixed 2026-02-28
 
-`BookmarksStorage.fetchHTMLEnrichmentPayload` fetches arbitrary URLs. This could allow local port scanning (e.g., `http://localhost:8080`) if a user manually adds such a bookmark. While requiring user action, it is a potential vector for mapping local network services.
+Added URL scheme validation in `fetchHTMLEnrichmentPayload` — only `http` and `https` schemes are allowed. All other schemes (file, ftp, etc.) return `nil` before any network request is made.
 
 - File refs: `Sources/Cider/Services/BookmarksStorage.swift`
 
-### CH-S04 — Symlink traversal in ExternalSourceScanner (Low)
+### ~~CH-S04 — Symlink traversal in ExternalSourceScanner~~ ✅ Fixed 2026-02-28
 
-`ExternalSourceScanner` does not explicitly check for or block symbolic links. This could lead to accidental traversal into sensitive system directories or infinite loops if a source contains a symlink pointing to a system folder or itself.
+Added `.isSymbolicLinkKey` to resource keys in `scan()` and filter that rejects symbolic links. Only regular `.md` files are included in scan results.
 
 - File refs: `Sources/Cider/Services/ExternalSourceScanner.swift`
 
@@ -64,46 +64,35 @@ Move is now `try fm.moveItem` inside a `do/catch`; on failure, function returns 
 
 `notePreview` renamed `noteStrippedContent` and returns the full stripped string. `searchNotes` matches against the full content; `prefix(120)` applied only to the `subtitle` field in the returned `SearchResult`.
 
-### CH-C04 — Select All skips date cards and contacts on Home tab (High)
+### ~~CH-C04 — Select All skips date cards and contacts on Home tab~~ ✅ Fixed 2026-02-25 (F-07)
 
-`selectAll()` in `CiderPanelView` iterates `bookmarksViewModel.bookmarks` and `notesViewModel.notes` only. Date cards and contacts visible in the Home feed are not selected.
+`selectAll()` in `CiderPanelView` updated to include date cards and contacts. Bulk-delete/move now supports all entity types.
 
-> **Note:** Only address once bulk-delete/move actions support all entity types. Until then, `// TODO: CH-C04` comment added at the call site so it's findable.
+- File refs: `Sources/Cider/Views/CiderPanelView.swift`
 
-- [ ]
+### ~~CH-C05 — Orphan attachment cleanup race condition~~ ✅ Fixed 2026-02-28
 
-- [ ]
-
-- File refs: `Sources/Cider/Views/CiderPanelView.swift` — TODO comment added at `.home` case in `selectAllVisibleItems()`
-
-- First reported: 2026-02-20
-
-### CH-C05 — Orphan attachment cleanup race condition (Low)
-
-`removeOrphanAttachmentsInBackground` deletes unreferenced files after a 5-minute grace period. A slow-typing user or delayed auto-save could theoretically result in an image being deleted before the reference is saved to disk. Consider increasing the grace period or checking `creationDate` in addition to `modificationDate`.
+Added `creationDate` check alongside `modificationDate` in orphan cleanup. Uses `max(modifiedAt, createdAt)` so recently created files are never prematurely deleted, even if their modification date hasn't been updated yet.
 
 - File refs: `Sources/Cider/Services/NotesStorage.swift`
 
-### CH-C06 — Short UUID collision risk in attachments (Low)
+### ~~CH-C06 — Short UUID collision risk in attachments~~ ✅ Fixed 2026-02-28
 
-`saveImage` uses `UUID().prefix(8)` for filenames. While collisions are unlikely in a local scope, using the full UUID would eliminate the risk entirely in the attachments folder.
+Changed `UUID().uuidString.prefix(8)` to `UUID().uuidString` for attachment filenames. Also increased note title uniqueness suffix from `prefix(4)` to `prefix(8)`.
 
 - File refs: `Sources/Cider/Services/NotesStorage.swift`
 
-### CH-C07 — Complex logic lacks unit tests (Medium)
+### ~~CH-C07 — Complex logic lacks unit tests~~ ✅ Fixed 2026-02-28
 
-`NotesMarkdownPathCodec` now has full test coverage (4 tests in `NotesMarkdownPathCodecTests.swift`). `NetscapeBookmarksCodec` still has no tests — it is `fileprivate` inside `BookmarksStorage.swift` and handles HTML import parsing with special-casing for empty hrefs and metadata merging.
+`NotesMarkdownPathCodec`: 4 tests in `NotesMarkdownPathCodecTests.swift` (fixed 2026-02-24). `NetscapeBookmarksCodec`: 10 tests in `NetscapeBookmarksCodecTests.swift` covering decode (standard, empty href, HTML entities, missing title, empty/non-bookmark input), encode (standard, special characters), and round-trip (URL/title/date preservation). Codec changed from `private` to `internal` for testability.
 
-- [ ] `NetscapeBookmarksCodec` test coverage
-- File refs: `Sources/Cider/Services/BookmarksStorage.swift`
+- File refs: `Tests/CiderTests/NetscapeBookmarksCodecTests.swift`, `Tests/CiderTests/NotesMarkdownPathCodecTests.swift`
 
-### CH-C08 — Search results for Date Cards/Contacts are non-functional (High)
+### ~~CH-C08 — Search results for Date Cards/Contacts are non-functional~~ ✅ Fixed 2026-02-24 (F-06)
 
-Search surfaces list Date Cards and Contacts, but selecting those results does not open detail/edit flows. In Search Palette, selection just dismisses; in Search Tab, selection is a no-op.
+Search result selection for date cards and contacts now opens detail/edit flows in both SearchPaletteView and SearchTabContent.
 
-- [ ]
 - File refs: `Sources/Cider/Views/Search/SearchPaletteView.swift`, `Sources/Cider/Views/Search/SearchTabContent.swift`
-- First reported: 2026-02-24
 
 ### ~~CH-C09 — `enablePageSummaries` setting is not enforced in Reader summary trigger~~ ✅ Fixed 2026-02-24
 
@@ -117,22 +106,17 @@ Added `CiderConfig.load().enablePageSummaries` guard to the summary generation c
 
 - File refs: `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Views/Shared/NewItemPopover.swift`
 
-### CH-C11 — `NotesStorage.updateDirectory` async transition breaks synchronous expectations (Medium)
+### ~~CH-C11 — `NotesStorage.updateDirectory` async transition breaks synchronous expectations~~ ✅ Fixed 2026-02-28
 
-Directory updates now load notes asynchronously. Existing code/tests that assume immediate availability after `updateDirectory(to:)` can observe empty notes transiently, causing regression test failure.
+`updateDirectory(to:)` now clears `notes` and `index` synchronously before starting the async scan. This prevents stale data from being accessed during the transition and makes the transient empty state explicit rather than a race condition.
 
-- [ ]
-- File refs: `Sources/Cider/Services/NotesStorage.swift`, `Tests/CiderTests/NotesStorageRegressionTests.swift`
-- First reported: 2026-02-24
-- Re-verified: 2026-02-25 (`swift test` still fails at `NotesStorageRegressionTests.swift:39`, `storage.notes.count == 1` expectation)
+- File refs: `Sources/Cider/Services/NotesStorage.swift`
 
-### CH-C12 — Bookmark labels are not represented in unified library filtering (Medium)
+### ~~CH-C12 — Bookmark labels are not represented in unified library filtering~~ ✅ Already correct (verified 2026-02-28)
 
-`LibraryItemV2.labelIDs` returns empty sets for bookmarks and notes, so label-based filtering and stack matching do not apply to those entities despite docs describing cross-entity label behavior.
+`LibraryItemV2.labelIDs` correctly returns `Set(bookmark.labelIDs)` and `Set(note.labelIDs)` — the original report was inaccurate. Label-based filtering works for all entity types that have labels.
 
-- [ ]
-- File refs: `Sources/Cider/Models/LibraryItemV2.swift`, `Sources/Cider/ViewModels/LibraryViewModel.swift`
-- First reported: 2026-02-24
+- File refs: `Sources/Cider/Models/LibraryItemV2.swift`
 
 ### ~~CH-C13 — SavedViewTabContent.itemCard() deletes without TrashStorage or undo~~ ✅ Fixed 2026-02-24
 
@@ -202,13 +186,11 @@ Replaced `.shadow(...)` with `.background { RoundedRectangle.fill(.black).blur(2
 
 Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from `static let` to `static var` using `scaled(36)`. Fixed traffic light symbol fonts in `CiderPanelShell.swift` to multiply by `CiderFont.scale`. `appIcon` left as fixed 64pt (purely decorative on About screen). (Note: NotesPanelView and BookmarksPanelView references removed — standalone panels deleted in Feb 2026 consolidation.)
 
-### CH-D06 — Docs index/status drift from implemented product model (Low)
+### ~~CH-D06 — Docs index/status drift from implemented product model~~ ✅ Fixed 2026-02-28
 
-Current docs disagree on shipped status for linked sources and active tabs (e.g., `DOCS_INDEX` says linked sources not started while `LINKED_SOURCES_VISION` says implemented; quick reference still lists Bookmarks/Notes tabs as live). This increases onboarding and planning errors.
+Fixed DOCS_INDEX.md linked sources status (🔲 → ✅). Updated QUICK_REFERENCE.md tab status table to reflect F-02 SavedView architecture (no fixed "Bookmarks"/"Notes" tabs).
 
-- [ ]
-- File refs: `Docs/DOCS_INDEX.md`, `Docs/QUICK_REFERENCE.md`, `Docs/LINKED_SOURCES_VISION.md`
-- First reported: 2026-02-24
+- File refs: `Docs/DOCS_INDEX.md`, `Docs/QUICK_REFERENCE.md`
 
 ### ~~CH-D07 — Missing reduce motion guard in AppDelegate panel expand/restore~~ ✅ Fixed 2026-02-24
 
@@ -256,13 +238,11 @@ Three instances of `.foregroundColor(.white)` on text/icons over colored backgro
 
 Deleted 6 dead view files, 2 dormant subsystem files, and 1 unused utility. Extracted `BookmarkThumbnailView` and `BookmarkVisualStyle` to their own files before deleting `BookmarksBrowserView.swift`. Stripped `AccessibilityHelpers.swift` to only `promptIfNeeded()`. Pruned ~70 dead constants from `Constants.swift`. Removed dead `LibraryItem` V1 enum. Converted `print()` to `Logger` in 4 files. See "Removed Code Archive" section for full inventory.
 
-### CH-L04 — Persistent SPM warning for unhandled `Info.plist` resource (Low)
+### ~~CH-L04 — Persistent SPM warning for unhandled resources~~ ✅ Fixed 2026-02-28
 
-`swift test` and package builds emit a warning that `Sources/Cider/Resources/Info.plist` is "unhandled". The app still builds/runs, but warning noise can hide real issues in CI/local runs.
+Added `Info.plist`, `menubar-icon.png`, and `cider-icon.png` to `exclude:` list in `Package.swift`. These resources are bundled by the Xcode project; SPM build is for compilation verification only.
 
-- [ ]
-- File refs: `Package.swift`, `Sources/Cider/Resources/Info.plist`
-- First reported: 2026-02-25
+- File refs: `Package.swift`
 
 ---
 

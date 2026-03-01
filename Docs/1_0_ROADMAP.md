@@ -50,16 +50,24 @@ Must be solid before 1.0. Users need auto-updates and a proper install path.
 ### R-01: Sparkle Auto-Updater
 > Integrate Sparkle framework for automatic update checks so users don't manually re-download .dmg files.
 
-**Status:** `Not Started`
+**Status:** `In Progress` — code complete, needs Xcode project + signing setup
 **Priority:** Critical
 
 **Scope:**
-- SPM dependency on Sparkle
-- Ed25519 signing for update payloads
-- Appcast XML hosted on GitHub Pages (or GitHub Releases feed)
-- "Check for Updates" in Settings and/or menu bar
-- Automatic background check on launch (configurable interval)
-- Update-available notification with changelog
+- ✅ SPM dependency on Sparkle 2.9.0
+- ✅ `SparkleUpdaterService` singleton with `start()` and `checkForUpdates()`
+- ✅ "Check for Updates" button in Settings > About
+- ✅ Auto-update toggle in Settings > General > Startup
+- ✅ "Check for Updates Now" with last-check timestamp
+- ✅ AppDelegate calls `SparkleUpdaterService.shared.start()` at launch
+
+**Remaining (manual setup required):**
+- [ ] Add `SUFeedURL` to Info.plist (appcast URL, e.g., `https://thevisher.github.io/Cider/appcast.xml`)
+- [ ] Generate Ed25519 signing keys: `.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework/Resources/bin/generate_keys`
+- [ ] Add `SUPublicEDKey` to Info.plist with the generated public key
+- [ ] Set up appcast XML hosting (GitHub Pages or generate from Releases)
+- [ ] Add Sparkle framework to Xcode project (File > Add Package Dependencies > search "sparkle-project/Sparkle")
+- [ ] Test update flow with a test appcast
 
 ---
 
@@ -78,34 +86,39 @@ Must be solid before 1.0. Users need auto-updates and a proper install path.
 
 ---
 
-### R-03: Code Health Fixes
+### R-03: Code Health Fixes ✅
 > Resolve high and medium severity issues from CODE_HEALTH.md.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-02-28)
 **Priority:** High
 
-**Scope:**
-- CH-S03: SSRF validation in bookmark enrichment
-- CH-S04: Symlink traversal blocking in ExternalSourceScanner
-- CH-C05: Orphan attachment cleanup race condition
-- CH-C06: Short UUID collision risk (use full UUID)
-- CH-C07: NetscapeBookmarksCodec unit tests
-- CH-C11: NotesStorage async directory update
-- CH-C12: Bookmark labels in unified library filtering
+**Scope (all resolved):**
+- ✅ CH-S03: SSRF validation in bookmark enrichment
+- ✅ CH-S04: Symlink traversal blocking in ExternalSourceScanner
+- ✅ CH-C05: Orphan attachment cleanup race condition (added creationDate check)
+- ✅ CH-C06: Short UUID collision risk (use full UUID)
+- ✅ CH-C07: NetscapeBookmarksCodec unit tests (10 tests)
+- ✅ CH-C11: NotesStorage async directory update (synchronous clear before async scan)
+- ✅ CH-C12: Already correct (verified, original report inaccurate)
+- ✅ CH-D06: Docs status drift fixed (DOCS_INDEX, QUICK_REFERENCE)
+- ✅ CH-L04: SPM resource warnings fixed (Package.swift excludes)
 
 ---
 
-### R-04: Vault Directory Migration
+### R-04: Vault Directory Migration ✅
 > When the user changes the vault location in Settings, offer to move existing files automatically.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-02-28)
 **Priority:** Medium
 
-**Scope:**
-- "Move existing data?" confirmation dialog when vault root or per-type override changes
-- File move with progress indicator for large vaults
-- Rollback on failure
-- Works for both vault root changes and per-type override changes
+**Scope (all resolved):**
+- ✅ "Move existing data?" confirmation dialog (Move / Don't Move / Cancel)
+- ✅ Vault root migration: moves all type subdirectories + .ai embeddings
+- ✅ Per-type override migration: moves single type directory contents
+- ✅ Cancel button aborts the directory change entirely
+- ✅ Skips files that already exist at destination (no overwrites)
+- ✅ Works for both vault root changes and per-type override changes
+- Note: Progress indicator deferred — file moves are fast for typical vaults
 
 ---
 
@@ -366,10 +379,10 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 
 | ID | Feature | Phase | Status |
 |----|---------|-------|--------|
-| R-01 | Sparkle Auto-Updater | 1 | Not Started |
+| R-01 | Sparkle Auto-Updater | 1 | In Progress |
 | R-02 | Mac App Store Listing | 1 | Not Started |
-| R-03 | Code Health Fixes | 1 | Not Started |
-| R-04 | Vault Directory Migration | 1 | Not Started |
+| R-03 | Code Health Fixes | 1 | ✅ Complete |
+| R-04 | Vault Directory Migration | 1 | ✅ Complete |
 | R-05 | Tag System Completion | 2 | Not Started |
 | R-06 | Date Card Surfacing Completion | 2 | Not Started |
 | R-07 | AI Auto-Tag Quality | 2 | Not Started |

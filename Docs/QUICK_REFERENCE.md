@@ -63,12 +63,15 @@ Docs/
 
 ## Current Tab Status
 
-| Tab | Status | Vision Doc |
-|-----|--------|------------|
-| Home | Live | HOME_VISION.md |
-| Bookmarks | Live | BOOKMARKS_VISION.md |
-| Notes | Live | NOTES_VISION.md |
-| Whiteboard | Planned | WHITEBOARD_VISION.md |
-| Documents | Planned | DOCUMENTS_VISION.md |
-| Books | Planned | BOOKS_VISION.md |
-| Todos | Planned | TODOS_VISION.md |
+All tabs are dynamic SavedViews (F-02). Default tabs are Inbox + Library. Users can create, rename, reorder, and close any tab.
+
+| Default Tab | Vision Doc |
+|-------------|------------|
+| Home | HOME_VISION.md |
+
+| Planned Tab Types | Vision Doc |
+|-------------------|------------|
+| Whiteboard | WHITEBOARD_VISION.md |
+| Documents | DOCUMENTS_VISION.md |
+| Books | BOOKS_VISION.md |
+| Todos | TODOS_VISION.md |
