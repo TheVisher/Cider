@@ -134,6 +134,14 @@ final class CardLabelStorage: ObservableObject {
         labels.first { $0.id == id }
     }
 
+    /// Total item count across all entity storages for a given label.
+    func itemCount(for labelID: UUID) -> Int {
+        BookmarksStorage.shared.bookmarks.filter { $0.labelIDs.contains(labelID) }.count
+        + NotesStorage.shared.notes.filter { $0.labelIDs.contains(labelID) }.count
+        + DateCardStorage.shared.dateCards.filter { $0.labelIDs.contains(labelID) }.count
+        + ContactStorage.shared.contacts.filter { $0.labelIDs.contains(labelID) }.count
+    }
+
     private func sortLabels() {
         labels.sort { lhs, rhs in
             let cmp = lhs.name.localizedCaseInsensitiveCompare(rhs.name)

@@ -17,6 +17,7 @@ struct FolderDetailView: View {
     var onEditContact: ((ContactCard) -> Void)?
     var onOpenDateCard: ((DateCard) -> Void)?
     var onOpenContact: ((ContactCard) -> Void)?
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
@@ -535,7 +536,8 @@ struct FolderDetailView: View {
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .note(let note):
             NoteListRow(
@@ -558,7 +560,8 @@ struct FolderDetailView: View {
                 dragProvider: noteDragProvider(for: note),
                 dragPreviewOverride: multiDragPreview(for: item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .dateCard(let dateCard):
             DateCardListRow(
@@ -583,7 +586,8 @@ struct FolderDetailView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .contact(let contact):
             ContactListRow(
@@ -606,7 +610,8 @@ struct FolderDetailView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .externalFile:
             EmptyView()
@@ -633,7 +638,8 @@ struct FolderDetailView: View {
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .note(let note):
             NoteCardView(
@@ -657,7 +663,8 @@ struct FolderDetailView: View {
                 dragPreviewOverride: multiDragPreview(for: item),
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .dateCard(let dateCard):
             DateCardCardView(
@@ -682,7 +689,8 @@ struct FolderDetailView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .contact(let contact):
             ContactCardCardView(
@@ -705,7 +713,8 @@ struct FolderDetailView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .externalFile:
             EmptyView()

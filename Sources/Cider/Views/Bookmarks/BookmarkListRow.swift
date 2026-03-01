@@ -15,6 +15,7 @@ struct BookmarkListRow: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -116,7 +117,9 @@ struct BookmarkListRow: View {
                 } else {
                     _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: labelID)
                 }
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
         .ciderDraggable(dragProvider) {
             if let preview = dragPreviewOverride {

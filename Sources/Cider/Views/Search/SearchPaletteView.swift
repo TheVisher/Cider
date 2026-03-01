@@ -60,11 +60,13 @@ enum QuickAction: String, CaseIterable, Identifiable {
 
 private enum SelectableItem: Identifiable {
     case action(QuickAction)
+    case tag(CardLabel)
     case result(SearchResult)
 
     var id: String {
         switch self {
         case .action(let a): return "action-\(a.id)"
+        case .tag(let t): return "tag-\(t.id.uuidString)"
         case .result(let r): return "result-\(r.id.uuidString)"
         }
     }
@@ -82,6 +84,7 @@ struct SearchPaletteView: View {
     let onSpawnSearchTab: ((String) -> Void)?
     let onDismiss: () -> Void
     var onAction: ((QuickAction) -> Void)?
+    var onSelectTag: ((CardLabel) -> Void)?
 
     @State private var query = ""
     @State private var results: [SearchResult] = []
@@ -113,6 +116,12 @@ struct SearchPaletteView: View {
         results.filter { $0.type == .contact }
     }
 
+    private var filteredTags: [CardLabel] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return CardLabelStorage.shared.labels.filter { $0.name.localizedStandardContains(trimmed) }
+    }
+
     private var hasResults: Bool {
         !results.isEmpty
     }
@@ -123,6 +132,7 @@ struct SearchPaletteView: View {
 
     private var selectableItems: [SelectableItem] {
         var items: [SelectableItem] = filteredActions.map { .action($0) }
+        items += filteredTags.map { .tag($0) }
         items += results.map { .result($0) }
         return items
     }
@@ -255,6 +265,9 @@ struct SearchPaletteView: View {
         case .action(let action):
             onAction?(action)
             onDismiss()
+        case .tag(let label):
+            onSelectTag?(label)
+            onDismiss()
         case .result(let result):
             switch result.type {
             case .bookmark:
@@ -350,15 +363,21 @@ struct SearchPaletteView: View {
 
     private var queryContent: some View {
         let actions = filteredActions
+        let tags = filteredTags
         let showActions = !actions.isEmpty
+        let showTags = !tags.isEmpty
         let showResults = hasResults
-        let showNoResults = !showActions && !showResults
+        let showNoResults = !showActions && !showTags && !showResults
 
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     if showActions {
                         actionsSection(actions: actions)
+                    }
+
+                    if showTags {
+                        tagsSection(tags: tags)
                     }
 
                     if showResults {
@@ -453,6 +472,75 @@ struct SearchPaletteView: View {
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
         .contentShape(Rectangle())
+    }
+
+    // MARK: - Tags Section
+
+    private func tagsSection(tags: [CardLabel]) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "tag")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text("Tags")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .textCase(.uppercase)
+
+                Text("\(tags.count)")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+
+            ForEach(tags) { label in
+                let isSelected = isItemSelected(.tag(label))
+                let count = CardLabelStorage.shared.itemCount(for: label.id)
+
+                Button {
+                    executeItem(.tag(label))
+                } label: {
+                    HStack(spacing: Spacing.sm) {
+                        Circle()
+                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                            .frame(width: 10, height: 10)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(label.name)
+                                .font(CiderFont.subheadingMedium)
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(1)
+
+                            Text("Filter by tag \u{00B7} \(count) item\(count == 1 ? "" : "s")")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: Spacing.sm)
+
+                        Text("Tag")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.quaternary)
+                            .padding(.horizontal, Spacing.xs)
+                            .padding(.vertical, Spacing.xxs)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isSelected ? CiderColors.selectedFill : Color.clear)
+                )
+                .id("tag-\(label.id.uuidString)")
+            }
+        }
     }
 
     // MARK: - Recent Items Section

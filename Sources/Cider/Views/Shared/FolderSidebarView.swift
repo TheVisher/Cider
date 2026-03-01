@@ -177,8 +177,10 @@ struct FolderSidebarView: View {
     private var tagsSection: some View {
         let isCollapsed = tagsCollapsed.wrappedValue
         let hasActiveFilters = !selectedTagIDs.wrappedValue.isEmpty
-        let visibleLabels = tagsExpanded ? labels : Array(labels.prefix(tagsShowMoreThreshold))
-        let hasMore = labels.count > tagsShowMoreThreshold
+        let searchQuery = searchText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseLabels = searchQuery.isEmpty ? labels : labels.filter { $0.name.localizedStandardContains(searchQuery) }
+        let visibleLabels = tagsExpanded ? baseLabels : Array(baseLabels.prefix(tagsShowMoreThreshold))
+        let hasMore = baseLabels.count > tagsShowMoreThreshold
 
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Divider()

@@ -102,6 +102,13 @@ struct CiderPanelView: View {
                     onDismiss: { isSearchPaletteVisible = false },
                     onAction: { action in
                         handleQuickAction(action)
+                    },
+                    onSelectTag: { tag in
+                        let filter = SavedViewFilterSpec(labelIDs: [tag.id])
+                        let savedView = savedViewStorage.createSavedView(name: tag.name, filterSpec: filter)
+                        savedViewStorage.addToTabOrder(savedView.id)
+                        selectedFolderID = nil
+                        selectedTab = .savedView(id: savedView.id, name: savedView.name)
                     }
                 )
             }
@@ -466,6 +473,43 @@ struct CiderPanelView: View {
         .fixedSize()
         .help("Move selected items to folder")
 
+        Menu {
+            ForEach(CardLabelStorage.shared.labels) { label in
+                Button {
+                    toggleTagOnSelected(label.id)
+                } label: {
+                    HStack {
+                        if selectedItemsAllHaveLabel(label.id) {
+                            Image(systemName: "checkmark")
+                        }
+                        Circle()
+                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                            .frame(width: 8, height: 8)
+                        Text(label.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "tag")
+                    .font(CiderFont.captionSemibold)
+                Text("Tag")
+                    .font(CiderFont.bodyMedium)
+            }
+            .foregroundColor(CiderColors.secondary)
+            .padding(.horizontal, Spacing.sm)
+            .frame(height: 28)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Tag selected items")
+
         Button {
             deleteSelectedItems()
         } label: {
@@ -722,6 +766,7 @@ struct CiderPanelView: View {
                         cardSizeScale: $homeCardSizeScale,
                         sortMode: sortModeBinding(for: savedViewID),
                         entityFilter: entityFilterBinding(for: savedViewID),
+                        tagFilter: tagFilterBinding(for: savedViewID),
                         onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
                     )
                 }
@@ -741,6 +786,20 @@ struct CiderPanelView: View {
                 guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
                 savedView.filterSpec.onlyUnassigned = newValue
                 if savedView.isBlank { savedView.isBlank = false }
+                savedViewStorage.updateSavedView(savedView)
+            }
+        )
+    }
+
+    private func tagFilterBinding(for savedViewID: UUID) -> Binding<Set<UUID>> {
+        Binding(
+            get: {
+                savedViewStorage.savedView(for: savedViewID)?.filterSpec.labelIDs ?? []
+            },
+            set: { newValue in
+                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
+                savedView.filterSpec.labelIDs = newValue
+                if savedView.isBlank && !newValue.isEmpty { savedView.isBlank = false }
                 savedViewStorage.updateSavedView(savedView)
             }
         )
@@ -834,7 +893,8 @@ struct CiderPanelView: View {
                 },
                 onBack: {
                     selectedTagIDs.removeAll()
-                }
+                },
+                onToggleLabelBulk: { toggleTagOnSelected($0) }
             )
         } else if let sourceID = selectedSourceID,
            let source = externalSourceStorage.source(for: sourceID) {
@@ -866,7 +926,8 @@ struct CiderPanelView: View {
                     newContactEditorContext = ContactEditorContext(existingContact: contact)
                 },
                 onOpenDateCard: { openDateCardDetail($0) },
-                onOpenContact: { openContactDetail($0) }
+                onOpenContact: { openContactDetail($0) },
+                onToggleLabelBulk: { toggleTagOnSelected($0) }
             )
         } else if let tab = selectedTab {
             switch tab {
@@ -904,7 +965,9 @@ struct CiderPanelView: View {
                             },
                             onOpenDateCard: { openDateCardDetail($0) },
                             onOpenContact: { openContactDetail($0) },
-                            onlyUnassigned: savedView.filterSpec.onlyUnassigned
+                            onlyUnassigned: savedView.filterSpec.onlyUnassigned,
+                            activeLabelIDs: savedView.filterSpec.labelIDs,
+                            onToggleLabelBulk: { toggleTagOnSelected($0) }
                         )
                     }
                 } else {
@@ -966,7 +1029,8 @@ struct CiderPanelView: View {
                     onOpenContact: { openContactDetail($0) },
                     onSelectTag: { id in
                         selectedTagIDs = [id]
-                    }
+                    },
+                    onToggleLabelBulk: { toggleTagOnSelected($0) }
                 )
             }
         } else {
@@ -1990,6 +2054,88 @@ struct CiderPanelView: View {
         }
 
         selectedItemIDs.removeAll()
+    }
+
+    // MARK: - Bulk Tag
+
+    private func toggleTagOnSelected(_ labelID: UUID) {
+        let allHave = selectedItemsAllHaveLabel(labelID)
+        for id in selectedItemIDs {
+            if id.hasPrefix("bookmark-") {
+                let uuidString = String(id.dropFirst("bookmark-".count))
+                if let uuid = UUID(uuidString: uuidString) {
+                    if allHave {
+                        BookmarksStorage.shared.removeLabel(uuid, labelID: labelID)
+                    } else {
+                        BookmarksStorage.shared.assignLabel(uuid, labelID: labelID)
+                    }
+                }
+            } else if id.hasPrefix("note-") {
+                let uuidString = String(id.dropFirst("note-".count))
+                if let uuid = UUID(uuidString: uuidString) {
+                    if allHave {
+                        NotesStorage.shared.removeLabel(uuid, labelID: labelID)
+                    } else {
+                        NotesStorage.shared.assignLabel(uuid, labelID: labelID)
+                    }
+                }
+            } else if id.hasPrefix("datecard-") {
+                let uuidString = String(id.dropFirst("datecard-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let card = DateCardStorage.shared.dateCard(for: uuid) {
+                    var updated = card
+                    if allHave {
+                        updated.labelIDs.removeAll { $0 == labelID }
+                    } else if !updated.labelIDs.contains(labelID) {
+                        updated.labelIDs.append(labelID)
+                    }
+                    DateCardStorage.shared.updateDateCard(updated)
+                }
+            } else if id.hasPrefix("contact-") {
+                let uuidString = String(id.dropFirst("contact-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let contact = ContactStorage.shared.contact(for: uuid) {
+                    var updated = contact
+                    if allHave {
+                        updated.labelIDs.removeAll { $0 == labelID }
+                    } else if !updated.labelIDs.contains(labelID) {
+                        updated.labelIDs.append(labelID)
+                    }
+                    ContactStorage.shared.updateContact(updated)
+                }
+            }
+        }
+    }
+
+    private func selectedItemsAllHaveLabel(_ labelID: UUID) -> Bool {
+        for id in selectedItemIDs {
+            if id.hasPrefix("bookmark-") {
+                let uuidString = String(id.dropFirst("bookmark-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == uuid }) {
+                    if !bookmark.labelIDs.contains(labelID) { return false }
+                }
+            } else if id.hasPrefix("note-") {
+                let uuidString = String(id.dropFirst("note-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let note = notesViewModel.notes.first(where: { $0.id == uuid }) {
+                    if !note.labelIDs.contains(labelID) { return false }
+                }
+            } else if id.hasPrefix("datecard-") {
+                let uuidString = String(id.dropFirst("datecard-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let card = DateCardStorage.shared.dateCard(for: uuid) {
+                    if !card.labelIDs.contains(labelID) { return false }
+                }
+            } else if id.hasPrefix("contact-") {
+                let uuidString = String(id.dropFirst("contact-".count))
+                if let uuid = UUID(uuidString: uuidString),
+                   let contact = ContactStorage.shared.contact(for: uuid) {
+                    if !contact.labelIDs.contains(labelID) { return false }
+                }
+            }
+        }
+        return true
     }
 
     // MARK: - Collapse State Sync

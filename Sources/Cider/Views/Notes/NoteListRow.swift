@@ -16,6 +16,7 @@ struct NoteListRow: View {
     var dragPreviewOverride: AnyView? = nil
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @State private var isHovered = false
     @State private var cardData: NoteCardData = .empty
@@ -139,7 +140,9 @@ struct NoteListRow: View {
                 } else {
                     _ = NotesStorage.shared.assignLabel(note.id, labelID: labelID)
                 }
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
         .ciderDraggable(dragProvider) {
             if let preview = dragPreviewOverride {

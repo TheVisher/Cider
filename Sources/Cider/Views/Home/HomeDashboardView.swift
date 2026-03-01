@@ -21,6 +21,7 @@ struct HomeDashboardView: View {
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @State private var config = CiderConfig.load()
 
@@ -225,7 +226,8 @@ struct HomeDashboardView: View {
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .note(let note):
             NoteListRow(
@@ -248,7 +250,8 @@ struct HomeDashboardView: View {
                 dragProvider: noteDragProvider(for: note),
                 dragPreviewOverride: multiDragPreview(for: item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .dateCard(let dateCard):
             DateCardListRow(
@@ -273,7 +276,8 @@ struct HomeDashboardView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .contact(let contact):
             ContactListRow(
@@ -296,7 +300,8 @@ struct HomeDashboardView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .externalFile(let file):
             SourceCardView(
@@ -337,7 +342,8 @@ struct HomeDashboardView: View {
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .note(let note):
             NoteCardView(
@@ -361,7 +367,8 @@ struct HomeDashboardView: View {
                 dragPreviewOverride: multiDragPreview(for: item),
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .dateCard(let dateCard):
             DateCardCardView(
@@ -386,7 +393,8 @@ struct HomeDashboardView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .contact(let contact):
             ContactCardCardView(
@@ -409,7 +417,8 @@ struct HomeDashboardView: View {
                 },
                 isSelected: isItemSelected(item),
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
             )
         case .externalFile(let file):
             SourceCardView(

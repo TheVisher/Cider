@@ -113,20 +113,24 @@ private final class MenuActionTarget: NSObject {
 // MARK: - Tag Submenu Helper
 
 /// Builds a "Tags" submenu with all labels, toggling assignment.
+/// When `isSelected` is true and `onToggleLabelBulk` is provided, tag actions apply to all selected items.
 @MainActor
 private func tagMenuItems(
     itemLabelIDs: [UUID],
     onToggleLabel: @escaping (UUID) -> Void,
+    isSelected: Bool = false,
+    onToggleLabelBulk: ((UUID) -> Void)? = nil,
     onCreateTag: (() -> Void)? = nil
 ) -> [CardMenuItem] {
     let allLabels = CardLabelStorage.shared.labels
     var children: [CardMenuItem] = []
+    let handler = (isSelected && onToggleLabelBulk != nil) ? onToggleLabelBulk! : onToggleLabel
 
     for label in allLabels {
         let isAssigned = itemLabelIDs.contains(label.id)
         let title = isAssigned ? "\u{2713} \(label.name)" : "    \(label.name)"
         let labelID = label.id
-        children.append(.action(title: title) { onToggleLabel(labelID) })
+        children.append(.action(title: title) { handler(labelID) })
     }
 
     if !children.isEmpty, onCreateTag != nil {
@@ -170,7 +174,9 @@ extension View {
         onRename: @escaping () -> Void,
         onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void,
-        onToggleLabel: ((UUID) -> Void)? = nil
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        isSelected: Bool = false,
+        onToggleLabelBulk: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
             var items: [CardMenuItem] = [
@@ -178,7 +184,7 @@ extension View {
                 .action(title: "Rename", callback: onRename)
             ]
             if let onToggleLabel {
-                items += tagMenuItems(itemLabelIDs: note.labelIDs, onToggleLabel: onToggleLabel)
+                items += tagMenuItems(itemLabelIDs: note.labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
             items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
@@ -195,7 +201,9 @@ extension View {
         folders: [Folder],
         onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void,
-        onToggleLabel: ((UUID) -> Void)? = nil
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        isSelected: Bool = false,
+        onToggleLabelBulk: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
             var items: [CardMenuItem] = [
@@ -203,7 +211,7 @@ extension View {
                 .action(title: isCompleted ? "Mark Incomplete" : "Mark Complete", callback: onToggleComplete)
             ]
             if let onToggleLabel {
-                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel)
+                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
             items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
@@ -218,14 +226,16 @@ extension View {
         folders: [Folder],
         onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void,
-        onToggleLabel: ((UUID) -> Void)? = nil
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        isSelected: Bool = false,
+        onToggleLabelBulk: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
             var items: [CardMenuItem] = [
                 .action(title: "Open", callback: onOpen)
             ]
             if let onToggleLabel {
-                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel)
+                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
             items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
@@ -242,7 +252,9 @@ extension View {
         onRefetchMetadata: @escaping () -> Void,
         onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void,
-        onToggleLabel: ((UUID) -> Void)? = nil
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        isSelected: Bool = false,
+        onToggleLabelBulk: ((UUID) -> Void)? = nil
     ) -> some View {
         modifier(CardContextMenuModifier {
             var items: [CardMenuItem] = [
@@ -251,7 +263,7 @@ extension View {
                 .action(title: "Refetch Metadata", callback: onRefetchMetadata)
             ]
             if let onToggleLabel {
-                items += tagMenuItems(itemLabelIDs: bookmark.labelIDs, onToggleLabel: onToggleLabel)
+                items += tagMenuItems(itemLabelIDs: bookmark.labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
             items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]

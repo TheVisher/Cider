@@ -18,10 +18,14 @@ struct TagDetailView: View {
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onSelectTag: (UUID) -> Void = { _ in }
     var onBack: () -> Void = {}
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showCreateForm = false
+    @State private var showHygiene = false
+    @State private var hygieneGroups: [SimilarTagGroup] = []
+    @State private var dismissedGroupIDs: Set<UUID> = []
 
     var body: some View {
         if showManager {
@@ -48,6 +52,25 @@ struct TagDetailView: View {
                     .foregroundColor(CiderColors.primary)
 
                 Spacer(minLength: 0)
+
+                Button {
+                    runHygiene()
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "wand.and.stars")
+                            .font(CiderFont.captionSemibold)
+                        Text("Tag Hygiene")
+                            .font(CiderFont.captionSemibold)
+                    }
+                    .foregroundColor(CiderColors.secondary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                }
+                .buttonStyle(.plain)
 
                 Button {
                     showCreateForm = true
@@ -80,8 +103,12 @@ struct TagDetailView: View {
             Divider()
                 .padding(.horizontal, Spacing.md + Spacing.xxs)
 
-            // Tags grid
+            // Tags grid + hygiene section
             ScrollView(.vertical, showsIndicators: false) {
+                if showHygiene {
+                    hygieneSection
+                }
+
                 if labelStorage.labels.isEmpty {
                     emptyTagsState
                 } else {
@@ -93,9 +120,11 @@ struct TagDetailView: View {
                             TagManagerCard(
                                 label: label,
                                 itemCount: itemCount(for: label.id),
+                                allLabels: labelStorage.labels,
                                 onSelect: { onSelectTag(label.id) },
                                 onRename: { newName in renameTag(label, to: newName) },
                                 onSetColor: { hex in setTagColor(label, hex: hex) },
+                                onMergeInto: { targetID in mergeTag(label.id, into: targetID) },
                                 onDelete: { deleteTag(label.id) }
                             )
                         }
@@ -105,6 +134,124 @@ struct TagDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Tag Hygiene Section
+
+    private var hygieneSection: some View {
+        let visibleGroups = hygieneGroups.filter { !dismissedGroupIDs.contains($0.id) }
+        let unusedTags = labelStorage.labels.filter { itemCount(for: $0.id) == 0 }
+
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "wand.and.stars")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+
+                Text("Tag Hygiene")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        showHygiene = false
+                    }
+                } label: {
+                    Text("Done")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.controlAccent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !visibleGroups.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Similar Tags (\(visibleGroups.count) groups)")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+
+                    ForEach(visibleGroups) { group in
+                        SimilarGroupRow(
+                            group: group,
+                            itemCountForLabel: { itemCount(for: $0) },
+                            onMerge: { targetID in
+                                let sourceIDs = group.labels.map(\.id).filter { $0 != targetID }
+                                CardLabelStorage.shared.mergeLabels(sourceIDs: sourceIDs, into: targetID)
+                                dismissedGroupIDs.insert(group.id)
+                                hygieneGroups.removeAll { $0.id == group.id }
+                            },
+                            onDismiss: {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    _ = dismissedGroupIDs.insert(group.id)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
+            if !unusedTags.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Unused Tags (\(unusedTags.count))")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+
+                    ForEach(unusedTags) { tag in
+                        HStack(spacing: Spacing.sm) {
+                            Circle()
+                                .fill(Color(hex: tag.colorHex) ?? CiderColors.secondary)
+                                .frame(width: 8, height: 8)
+
+                            Text(tag.name)
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.primary)
+
+                            Text("0 items")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+
+                            Spacer(minLength: 0)
+
+                            Button {
+                                CardLabelStorage.shared.deleteLabel(tag.id)
+                            } label: {
+                                Text("Delete")
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(CiderColors.destructive)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, Spacing.xxs)
+                    }
+                }
+            }
+
+            if visibleGroups.isEmpty && unusedTags.isEmpty {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "checkmark.circle")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(CiderColors.success)
+
+                    Text("All tags look clean!")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .padding(.vertical, Spacing.sm)
+            }
+        }
+        .padding(Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .padding(.horizontal, Spacing.md + Spacing.xxs)
+        .padding(.top, Spacing.sm)
     }
 
     private var emptyTagsState: some View {
@@ -191,7 +338,8 @@ struct TagDetailView: View {
                 onEditContact: onEditContact,
                 onOpenDateCard: onOpenDateCard,
                 onOpenContact: onOpenContact,
-                activeLabelIDs: tagIDs
+                activeLabelIDs: tagIDs,
+                onToggleLabelBulk: onToggleLabelBulk
             )
         }
     }
@@ -199,11 +347,7 @@ struct TagDetailView: View {
     // MARK: - Actions
 
     private func itemCount(for labelID: UUID) -> Int {
-        let bookmarkCount = bookmarksViewModel.bookmarks.filter { $0.labelIDs.contains(labelID) }.count
-        let noteCount = notesViewModel.notes.filter { $0.labelIDs.contains(labelID) }.count
-        let dateCardCount = DateCardStorage.shared.dateCards.filter { $0.labelIDs.contains(labelID) }.count
-        let contactCount = ContactStorage.shared.contacts.filter { $0.labelIDs.contains(labelID) }.count
-        return bookmarkCount + noteCount + dateCardCount + contactCount
+        CardLabelStorage.shared.itemCount(for: labelID)
     }
 
     private func renameTag(_ label: CardLabel, to newName: String) {
@@ -224,6 +368,85 @@ struct TagDetailView: View {
         }
         CardLabelStorage.shared.deleteLabel(id)
     }
+
+    private func mergeTag(_ sourceID: UUID, into targetID: UUID) {
+        CardLabelStorage.shared.mergeLabels(sourceIDs: [sourceID], into: targetID)
+    }
+
+    private func runHygiene() {
+        hygieneGroups = TagSimilarity.findSimilarGroups(in: labelStorage.labels)
+        dismissedGroupIDs.removeAll()
+        withAnimation(reduceMotion ? .none : .snappy) {
+            showHygiene = true
+        }
+    }
+}
+
+// MARK: - Similar Group Row
+
+private struct SimilarGroupRow: View {
+    let group: SimilarTagGroup
+    let itemCountForLabel: (UUID) -> Int
+    let onMerge: (UUID) -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Text(group.reason)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .italic()
+
+                Spacer(minLength: 0)
+
+                Button(action: onDismiss) {
+                    Text("Dismiss")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                ForEach(group.labels) { label in
+                    HStack(spacing: Spacing.xxs) {
+                        Circle()
+                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                            .frame(width: 6, height: 6)
+                        Text(label.name)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.primary)
+                    }
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                }
+            }
+
+            let target = TagSimilarity.suggestedTarget(in: group)
+            Button {
+                onMerge(target.id)
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "arrow.triangle.merge")
+                        .font(CiderFont.captionSemibold)
+                    Text("Merge All \u{2192} \"\(target.name)\"")
+                        .font(CiderFont.captionSemibold)
+                }
+                .foregroundColor(CiderColors.controlAccent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+        )
+    }
 }
 
 // MARK: - Tag Manager Card
@@ -231,15 +454,18 @@ struct TagDetailView: View {
 private struct TagManagerCard: View {
     let label: CardLabel
     let itemCount: Int
+    let allLabels: [CardLabel]
     var onSelect: () -> Void
     var onRename: (String) -> Void
     var onSetColor: (String) -> Void
+    var onMergeInto: (UUID) -> Void
     var onDelete: () -> Void
 
     @State private var isHovered = false
     @State private var isRenaming = false
     @State private var renamingText = ""
     @State private var showColorPicker = false
+    @State private var showMergePopover = false
     @FocusState private var isRenameFocused: Bool
 
     var body: some View {
@@ -292,6 +518,9 @@ private struct TagManagerCard: View {
                 .action(title: "Set Color") {
                     showColorPicker = true
                 },
+                .action(title: "Merge Into\u{2026}") {
+                    showMergePopover = true
+                },
                 .separator,
                 .destructive(title: "Delete Tag") { onDelete() }
             ]
@@ -302,6 +531,16 @@ private struct TagManagerCard: View {
                 onSelect: { hex in
                     onSetColor(hex)
                     showColorPicker = false
+                }
+            )
+        }
+        .popover(isPresented: $showMergePopover, arrowEdge: .bottom) {
+            MergeTargetPopover(
+                sourceLabel: label,
+                allLabels: allLabels,
+                onMerge: { targetID in
+                    onMergeInto(targetID)
+                    showMergePopover = false
                 }
             )
         }
@@ -317,6 +556,67 @@ private struct TagManagerCard: View {
             onRename(trimmed)
         }
         isRenaming = false
+    }
+}
+
+// MARK: - Merge Target Popover
+
+private struct MergeTargetPopover: View {
+    let sourceLabel: CardLabel
+    let allLabels: [CardLabel]
+    let onMerge: (UUID) -> Void
+
+    private var otherLabels: [CardLabel] {
+        allLabels.filter { $0.id != sourceLabel.id }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Merge \"\(sourceLabel.name)\" into\u{2026}")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.secondary)
+
+            if otherLabels.isEmpty {
+                Text("No other tags to merge into.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: Spacing.xxs) {
+                        ForEach(otherLabels) { target in
+                            Button {
+                                onMerge(target.id)
+                            } label: {
+                                HStack(spacing: Spacing.sm) {
+                                    Circle()
+                                        .fill(Color(hex: target.colorHex) ?? CiderColors.secondary)
+                                        .frame(width: 8, height: 8)
+
+                                    Text(target.name)
+                                        .font(CiderFont.body)
+                                        .foregroundColor(CiderColors.primary)
+                                        .lineLimit(1)
+
+                                    Spacer(minLength: 0)
+
+                                    let count = CardLabelStorage.shared.itemCount(for: target.id)
+                                    Text("\(count) item\(count == 1 ? "" : "s")")
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                }
+                                .padding(.horizontal, Spacing.sm)
+                                .padding(.vertical, Spacing.xs)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+        }
+        .padding(Spacing.md)
+        .frame(width: 240)
     }
 }
 
@@ -435,4 +735,3 @@ private struct InlineTagCreationForm: View {
         onCreate(trimmed, selectedColorHex)
     }
 }
-

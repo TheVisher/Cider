@@ -253,6 +253,42 @@ Make everything that shipped in beta feel finished.
 
 ---
 
+### R-20: Screen Capture Polish
+> Complete the screen capture flow — Date Card and Contact OCR routing is broken, and the feature needs general polish.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- **Fix Date Card OCR routing:** Screen capture → OCR text is not passed to the Date Card editor (data lost)
+- **Fix Contact OCR routing:** Same issue — OCR text not passed to Contact editor
+- **Notes routing works:** Verified functional (OCR text → new note)
+- **Image preview in capture toast:** Show a thumbnail of the captured region
+- **General UX polish:** Review the full capture flow end-to-end, fix any rough edges
+
+---
+
+### R-21: Keyboard Shortcuts Reference
+> A discoverable place showing all keybinds — currently no way for users to find them.
+
+**Status:** `Not Started`
+**Priority:** Medium
+
+**Scope:**
+- **Shortcuts reference UI:** Settings page section or help overlay listing all keybinds
+- **Current keybinds to document:**
+  - `Option` double-tap — Toggle panel
+  - `Opt+B` — Capture bookmark from active browser
+  - `Opt+N` — Quick-capture note
+  - `Opt+Cmd+2` — Screen capture with OCR
+  - `Cmd+K` — Quick actions palette
+  - `Cmd+A` — Select all items
+  - `Escape` — Clear search → close editor → clear selection → dismiss panel
+  - Arrow keys / Enter — Search result navigation
+- Future: user-configurable keybinds (post-1.0)
+
+---
+
 ## Phase 3: Detail View & Media
 
 Richer content display and media type support.
@@ -392,6 +428,8 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-11 | Drag Out to External Apps | 2 | Not Started |
 | R-12 | Clipboard Viewer | 2 | Not Started |
 | R-13 | Advanced Search | 2 | Not Started |
+| R-20 | Screen Capture Polish | 2 | Not Started |
+| R-21 | Keyboard Shortcuts Reference | 2 | Not Started |
 | R-14 | Bookmark Detail View V2 | 3 | Not Started |
 | R-15 | GIF/Video/Carousel Bookmarks | 3 | Not Started |
 | R-16 | Books Card Type | 4 | Not Started |
@@ -399,7 +437,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 0/19
+**Completed:** 2/21
 
 ---
 

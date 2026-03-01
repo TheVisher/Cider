@@ -11,6 +11,7 @@ struct DateCardCardView: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @State private var isHovered = false
 
@@ -174,7 +175,9 @@ struct DateCardCardView: View {
                     updated.labelIDs.append(labelID)
                 }
                 _ = DateCardStorage.shared.updateDateCard(updated)
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
     }
 
@@ -233,6 +236,7 @@ struct DateCardListRow: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     private func handleClick(normalAction: () -> Void) {
         let flags = NSEvent.modifierFlags
@@ -353,7 +357,9 @@ struct DateCardListRow: View {
                     updated.labelIDs.append(labelID)
                 }
                 _ = DateCardStorage.shared.updateDateCard(updated)
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
     }
 

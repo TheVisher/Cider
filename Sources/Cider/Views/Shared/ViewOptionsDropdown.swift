@@ -16,6 +16,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
     // Home-tab-only extras — nil means the section is hidden
     var sortMode: Binding<LibrarySortMode>? = nil
     var entityFilter: Binding<Set<LibraryEntityType>>? = nil
+    var tagFilter: Binding<Set<UUID>>? = nil
     var onlyUnassigned: Binding<Bool>? = nil
 
     var body: some View {
@@ -27,6 +28,11 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
 
             if let entityFilter {
                 entityFilterSection(entityFilter)
+                Divider().background(CiderColors.separator)
+            }
+
+            if let tagFilter {
+                tagFilterSection(tagFilter)
                 Divider().background(CiderColors.separator)
             }
 
@@ -134,6 +140,57 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
+        }
+    }
+
+    // MARK: - Tag Filter Section
+
+    @ViewBuilder
+    private func tagFilterSection(_ binding: Binding<Set<UUID>>) -> some View {
+        let labels = CardLabelStorage.shared.labels
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.xs) {
+                Text("Tags")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+
+                if !binding.wrappedValue.isEmpty {
+                    Spacer(minLength: 0)
+                    Button {
+                        binding.wrappedValue.removeAll()
+                    } label: {
+                        Text("Clear")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if labels.isEmpty {
+                Text("No tags")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    TagFlowLayout(spacing: Spacing.xs) {
+                        ForEach(labels) { label in
+                            TagFilterChip(
+                                label: label,
+                                isOn: binding.wrappedValue.contains(label.id),
+                                onTap: {
+                                    if binding.wrappedValue.contains(label.id) {
+                                        binding.wrappedValue.remove(label.id)
+                                    } else {
+                                        binding.wrappedValue.insert(label.id)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                .frame(maxHeight: 120)
+            }
         }
     }
 
@@ -301,6 +358,39 @@ private struct EntityFilterChip: View {
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, Spacing.xs)
             .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                    .fill(isOn ? CiderColors.accentSelected : isHovered ? CiderColors.surfaceHover : CiderColors.surfaceInput)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverState($isHovered)
+    }
+}
+
+// MARK: - Tag Filter Chip
+
+private struct TagFilterChip: View {
+    let label: CardLabel
+    let isOn: Bool
+    let onTap: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: Spacing.xxs) {
+                Circle()
+                    .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                    .frame(width: 6, height: 6)
+                Text(label.name)
+                    .font(CiderFont.caption)
+                    .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs + 1)
             .background(
                 RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                     .fill(isOn ? CiderColors.accentSelected : isHovered ? CiderColors.surfaceHover : CiderColors.surfaceInput)

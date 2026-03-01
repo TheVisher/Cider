@@ -187,8 +187,12 @@ final class LibraryViewModel: ObservableObject {
             fields = [file.title, content]
         }
 
+        // Also match against label names for the item
+        let labelNames = item.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
+
         return tokens.allSatisfy { token in
             fields.contains { $0.localizedStandardContains(token) }
+            || labelNames.contains { $0.localizedStandardContains(token) }
         }
     }
 

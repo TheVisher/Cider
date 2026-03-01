@@ -11,6 +11,7 @@ struct ContactCardCardView: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @State private var isHovered = false
 
@@ -127,7 +128,9 @@ struct ContactCardCardView: View {
                     updated.labelIDs.append(labelID)
                 }
                 _ = ContactStorage.shared.updateContact(updated)
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
         .task(id: contact.updatedAt) {
             await loadAvatar()
@@ -210,6 +213,7 @@ struct ContactListRow: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     @State private var avatarImage: NSImage?
 
@@ -298,7 +302,9 @@ struct ContactListRow: View {
                     updated.labelIDs.append(labelID)
                 }
                 _ = ContactStorage.shared.updateContact(updated)
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
         .task(id: contact.updatedAt) {
             await loadAvatar()

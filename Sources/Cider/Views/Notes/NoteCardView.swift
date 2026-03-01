@@ -16,6 +16,7 @@ struct NoteCardView: View {
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
 
     enum NoteCardMode {
         case grid
@@ -123,7 +124,9 @@ struct NoteCardView: View {
                 } else {
                     _ = NotesStorage.shared.assignLabel(note.id, labelID: labelID)
                 }
-            }
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
         )
         .ciderDraggable(dragProvider) {
             if let preview = dragPreviewOverride {
