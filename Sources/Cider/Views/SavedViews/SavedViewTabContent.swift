@@ -97,7 +97,7 @@ struct SavedViewTabContent: View {
             DateCardEditorSheet(
                 existingCard: context.existingCard,
                 defaultDate: context.defaultDate,
-                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule in
+                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule, rules in
                     LibraryItemEditor.saveDateCard(
                         existingCard: context.existingCard,
                         title: title,
@@ -108,7 +108,8 @@ struct SavedViewTabContent: View {
                         location: location,
                         amount: amount,
                         labelIDs: labelIDs,
-                        recurrenceRule: recurrenceRule
+                        recurrenceRule: recurrenceRule,
+                        rules: rules
                     )
                 },
                 onDelete: { dateCard in

@@ -11,6 +11,7 @@ struct CiderTabBar: View {
     var onAddTab: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
+    @ObservedObject private var dateCardStorage = DateCardStorage.shared
 
     @State private var draggingTabID: String?
     @State private var renamingTabID: UUID?
@@ -142,10 +143,13 @@ struct CiderTabBar: View {
 
     private func badgeCount(for tab: CiderTab) -> Int {
         switch tab {
-        case .savedView: 0
-        case .search: 0
-        case .externalSource(let id, _): externalSourceRegistry.files(for: id).count
-        case .tag: 0
+        case .savedView(let id, _):
+            // Show urgent date card count on the first (Home) tab
+            guard tabs.first?.savedViewID == id else { return 0 }
+            return dateCardStorage.dateCards.filter { $0.urgency() != nil }.count
+        case .search: return 0
+        case .externalSource(let id, _): return externalSourceRegistry.files(for: id).count
+        case .tag: return 0
         }
     }
 }

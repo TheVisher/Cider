@@ -3,7 +3,7 @@ import SwiftUI
 struct DateCardEditorSheet: View {
     let existingCard: DateCard?
     let defaultDate: Date
-    let onSave: (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?) -> Void
+    let onSave: (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?, [SurfacingRule]) -> Void
     let onDelete: ((DateCard) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -22,11 +22,15 @@ struct DateCardEditorSheet: View {
     @State private var recurrenceFrequency: DateCardRecurrenceFrequency
     @State private var recurrenceInterval: Int
     @State private var draftLabelName = ""
+    @State private var customReminderEnabled: Bool
+    @State private var reminderDays: Int
+    @State private var notificationEnabled: Bool
+    @State private var notificationMinutes: Int
 
     init(
         existingCard: DateCard?,
         defaultDate: Date,
-        onSave: @escaping (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?) -> Void,
+        onSave: @escaping (String, String, Date, Date?, Bool, String, Double?, [UUID], DateCardRecurrenceRule?, [SurfacingRule]) -> Void,
         onDelete: ((DateCard) -> Void)? = nil
     ) {
         self.existingCard = existingCard
@@ -49,6 +53,14 @@ struct DateCardEditorSheet: View {
         _hasRecurrence = State(initialValue: existingCard?.recurrenceRule != nil)
         _recurrenceFrequency = State(initialValue: existingCard?.recurrenceRule?.frequency ?? .weekly)
         _recurrenceInterval = State(initialValue: existingCard?.recurrenceRule?.interval ?? 1)
+
+        let existingReminderRule = existingCard?.rules.first(where: { $0.type == .surfaceDaysBeforeDate && $0.isEnabled })
+        _customReminderEnabled = State(initialValue: existingReminderRule != nil)
+        _reminderDays = State(initialValue: existingReminderRule?.integerValue ?? 7)
+
+        let existingNotificationRule = existingCard?.rules.first(where: { $0.type == .remindBeforeMinutes && $0.isEnabled })
+        _notificationEnabled = State(initialValue: existingNotificationRule != nil)
+        _notificationMinutes = State(initialValue: existingNotificationRule?.integerValue ?? 30)
     }
 
     var body: some View {
@@ -113,6 +125,42 @@ struct DateCardEditorSheet: View {
                 }
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("Reminders")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    Toggle("Custom reminder window", isOn: $customReminderEnabled)
+                        .toggleStyle(.switch)
+
+                    if customReminderEnabled {
+                        HStack(spacing: Spacing.sm) {
+                            Text("Surface")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.secondary)
+                            Stepper(value: $reminderDays, in: 1...30) {
+                                Text("\(reminderDays) day\(reminderDays == 1 ? "" : "s") before")
+                                    .font(CiderFont.body)
+                                    .foregroundColor(CiderColors.secondary)
+                            }
+                        }
+                    }
+
+                    Toggle("System notification", isOn: $notificationEnabled)
+                        .toggleStyle(.switch)
+
+                    if notificationEnabled {
+                        Picker("Notify before", selection: $notificationMinutes) {
+                            Text("5 minutes").tag(5)
+                            Text("15 minutes").tag(15)
+                            Text("30 minutes").tag(30)
+                            Text("1 hour").tag(60)
+                            Text("2 hours").tag(120)
+                            Text("1 day").tag(1440)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Labels")
                         .font(CiderFont.captionSemibold)
                         .foregroundColor(CiderColors.tertiary)
@@ -166,6 +214,13 @@ struct DateCardEditorSheet: View {
                     let rule: DateCardRecurrenceRule? = hasRecurrence
                         ? DateCardRecurrenceRule(frequency: recurrenceFrequency, interval: max(recurrenceInterval, 1))
                         : nil
+                    var surfacingRules: [SurfacingRule] = []
+                    if customReminderEnabled {
+                        surfacingRules.append(SurfacingRule(type: .surfaceDaysBeforeDate, integerValue: reminderDays))
+                    }
+                    if notificationEnabled {
+                        surfacingRules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: notificationMinutes))
+                    }
                     onSave(
                         title.trimmingCharacters(in: .whitespacesAndNewlines),
                         details.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -175,7 +230,8 @@ struct DateCardEditorSheet: View {
                         location.trimmingCharacters(in: .whitespacesAndNewlines),
                         parsedAmount,
                         Array(selectedLabelIDs),
-                        rule
+                        rule,
+                        surfacingRules
                     )
                     dismiss()
                 }

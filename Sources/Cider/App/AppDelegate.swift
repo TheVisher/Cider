@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Spotlight
     private var spotlightIndexer: SpotlightIndexer?
 
+    // Notifications
+    private var dateCardNotificationService: DateCardNotificationService?
+    private var dateCardNotificationCancellable: AnyCancellable?
+
     // Settings
     private var settingsWindow: SettingsWindow?
 
@@ -113,6 +117,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if config.enableEmbeddings {
                 EmbeddingStore.shared.backfillMissing(bookmarks: BookmarksStorage.shared.bookmarks)
             }
+
+            // Date card notifications — always subscribe, service gates on config internally
+            let notificationService = DateCardNotificationService.shared
+            self.dateCardNotificationService = notificationService
+            if config.enableDateCardNotifications {
+                Task {
+                    let granted = await notificationService.requestPermission()
+                    if granted {
+                        notificationService.rescheduleAll()
+                    }
+                }
+            }
+            self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards
+                .debounce(for: .seconds(2), scheduler: RunLoop.main)
+                .sink { dateCards in
+                    notificationService.scheduleNotifications(for: dateCards)
+                }
         }
     }
 
@@ -285,6 +306,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             spotlightIndexer?.start()
         } else {
             spotlightIndexer?.stop()
+        }
+
+        // Toggle date card notifications
+        if config.enableDateCardNotifications {
+            Task {
+                let granted = await DateCardNotificationService.shared.requestPermission()
+                if granted {
+                    DateCardNotificationService.shared.rescheduleAll()
+                }
+            }
+        } else {
+            DateCardNotificationService.shared.rescheduleAll() // clears all when disabled
         }
     }
 

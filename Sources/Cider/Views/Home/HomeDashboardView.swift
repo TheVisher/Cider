@@ -22,6 +22,7 @@ struct HomeDashboardView: View {
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
+    var showComingUp: Bool = true
 
     @State private var config = CiderConfig.load()
 
@@ -66,7 +67,7 @@ struct HomeDashboardView: View {
             guard case .dateCard(let dc) = item,
                   dc.urgency(windowDays: windowDays) != nil else { return nil }
             return dc
-        }.sorted { $0.startAt < $1.startAt }
+        }.sorted { $0.effectiveDate() < $1.effectiveDate() }
     }
 
     private var cardSizing: LibraryCardSizing {
@@ -108,7 +109,7 @@ struct HomeDashboardView: View {
                     }
                 }
 
-                if !isSearching && !comingUpItems.isEmpty {
+                if showComingUp && !isSearching && !comingUpItems.isEmpty {
                     comingUpSection
                 }
 

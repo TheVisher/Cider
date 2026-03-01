@@ -143,6 +143,8 @@ struct CiderConfig: Codable {
         case screenCaptureToastTimeout
         case screenCaptureDefaultAction
         case dateCardSurfacingDays
+        case enableDateCardNotifications
+        case dateCardDefaultNotificationMinutes
         case hasCompletedOnboarding
     }
 
@@ -188,6 +190,8 @@ struct CiderConfig: Codable {
     var screenCaptureToastTimeout: Int  // Seconds before routing toast auto-dismisses (0 = skip toast)
     var screenCaptureDefaultAction: String  // Default action: "note", "dateCard", "contact"
     var dateCardSurfacingDays: Int  // Days ahead to surface approaching date cards (0 = disabled)
+    var enableDateCardNotifications: Bool  // Send system notifications for approaching date cards
+    var dateCardDefaultNotificationMinutes: Int  // Default notification lead time in minutes (15, 30, 60, 120, 1440)
     var hasCompletedOnboarding: Bool  // Whether the user has dismissed the first-run onboarding tab
 
     static let storageKey = "CiderConfig"
@@ -232,6 +236,8 @@ struct CiderConfig: Codable {
             screenCaptureToastTimeout: 8,
             screenCaptureDefaultAction: "note",
             dateCardSurfacingDays: 7,
+            enableDateCardNotifications: false,
+            dateCardDefaultNotificationMinutes: 30,
             hasCompletedOnboarding: false
         )
     }
@@ -412,6 +418,8 @@ struct CiderConfig: Codable {
             String.self, forKey: .screenCaptureDefaultAction
         ) ?? "note"
         dateCardSurfacingDays = try container.decodeIfPresent(Int.self, forKey: .dateCardSurfacingDays) ?? 7
+        enableDateCardNotifications = try container.decodeIfPresent(Bool.self, forKey: .enableDateCardNotifications) ?? false
+        dateCardDefaultNotificationMinutes = try container.decodeIfPresent(Int.self, forKey: .dateCardDefaultNotificationMinutes) ?? 30
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
     }
 
@@ -458,6 +466,8 @@ struct CiderConfig: Codable {
         screenCaptureToastTimeout: Int = 8,
         screenCaptureDefaultAction: String = "note",
         dateCardSurfacingDays: Int = 7,
+        enableDateCardNotifications: Bool = false,
+        dateCardDefaultNotificationMinutes: Int = 30,
         hasCompletedOnboarding: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
@@ -502,6 +512,8 @@ struct CiderConfig: Codable {
         self.screenCaptureToastTimeout = screenCaptureToastTimeout
         self.screenCaptureDefaultAction = screenCaptureDefaultAction
         self.dateCardSurfacingDays = dateCardSurfacingDays
+        self.enableDateCardNotifications = enableDateCardNotifications
+        self.dateCardDefaultNotificationMinutes = dateCardDefaultNotificationMinutes
         self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 }

@@ -280,7 +280,7 @@ struct CiderPanelView: View {
             DateCardEditorSheet(
                 existingCard: context.existingCard,
                 defaultDate: context.defaultDate,
-                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule in
+                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule, rules in
                     LibraryItemEditor.saveDateCard(
                         existingCard: context.existingCard,
                         title: title,
@@ -291,7 +291,8 @@ struct CiderPanelView: View {
                         location: location,
                         amount: amount,
                         labelIDs: labelIDs,
-                        recurrenceRule: recurrenceRule
+                        recurrenceRule: recurrenceRule,
+                        rules: rules
                     )
                 },
                 onDelete: { dateCard in
@@ -767,7 +768,8 @@ struct CiderPanelView: View {
                         sortMode: sortModeBinding(for: savedViewID),
                         entityFilter: entityFilterBinding(for: savedViewID),
                         tagFilter: tagFilterBinding(for: savedViewID),
-                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID)
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID),
+                        showComingUp: showComingUpBinding(for: savedViewID)
                     )
                 }
         } else {
@@ -828,6 +830,19 @@ struct CiderPanelView: View {
                 guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
                 savedView.sortSpec.mode = newValue
                 if savedView.isBlank { savedView.isBlank = false }
+                savedViewStorage.updateSavedView(savedView)
+            }
+        )
+    }
+
+    private func showComingUpBinding(for savedViewID: UUID) -> Binding<Bool> {
+        Binding(
+            get: {
+                savedViewStorage.savedView(for: savedViewID)?.layoutSpec.showComingUpSection ?? true
+            },
+            set: { newValue in
+                guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }
+                savedView.layoutSpec.showComingUpSection = newValue
                 savedViewStorage.updateSavedView(savedView)
             }
         )
@@ -967,7 +982,8 @@ struct CiderPanelView: View {
                             onOpenContact: { openContactDetail($0) },
                             onlyUnassigned: savedView.filterSpec.onlyUnassigned,
                             activeLabelIDs: savedView.filterSpec.labelIDs,
-                            onToggleLabelBulk: { toggleTagOnSelected($0) }
+                            onToggleLabelBulk: { toggleTagOnSelected($0) },
+                            showComingUp: savedView.layoutSpec.showComingUpSection
                         )
                     }
                 } else {

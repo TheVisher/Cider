@@ -433,6 +433,39 @@ struct SettingsView: View {
                         label: { $0.displayName }
                     )
                 }
+
+                SettingsSection(title: "Date Card Notifications") {
+                    SettingsToggleRow(
+                        title: "Enable notifications",
+                        subtitle: "Send system notifications for approaching date cards",
+                        isOn: $viewModel.enableDateCardNotifications
+                    )
+
+                    if viewModel.enableDateCardNotifications {
+                        SettingsPickerRow(
+                            title: "Default notification time",
+                            subtitle: "When to notify before events without a custom reminder",
+                            selection: $viewModel.dateCardDefaultNotificationMinutes,
+                            options: [5, 15, 30, 60, 120, 1440],
+                            label: { minutes in
+                                switch minutes {
+                                case 5: return "5 minutes before"
+                                case 15: return "15 minutes before"
+                                case 30: return "30 minutes before"
+                                case 60: return "1 hour before"
+                                case 120: return "2 hours before"
+                                case 1440: return "1 day before"
+                                default: return "\(minutes) minutes before"
+                                }
+                            }
+                        )
+
+                        Text("Grant notification permission in System Settings \u{2192} Notifications if notifications don't appear.")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+                    }
+                }
+
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

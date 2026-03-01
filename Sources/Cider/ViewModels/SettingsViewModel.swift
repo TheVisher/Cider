@@ -90,6 +90,14 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Date Card Notifications
+    @Published var enableDateCardNotifications: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var dateCardDefaultNotificationMinutes: Int {
+        didSet { saveConfig() }
+    }
+
     // Intelligence
     @Published var enableAutoTagging: Bool {
         didSet { saveConfig() }
@@ -134,6 +142,8 @@ final class SettingsViewModel: ObservableObject {
         self.captureToastPosition = config.captureToastPosition
         self.undoToastPosition = config.undoToastPosition
         self.enableSoundEffects = config.enableSoundEffects
+        self.enableDateCardNotifications = config.enableDateCardNotifications
+        self.dateCardDefaultNotificationMinutes = config.dateCardDefaultNotificationMinutes
         self.enableAutoTagging = config.enableAutoTagging
         self.enableEmbeddings = config.enableEmbeddings
         self.enablePageSummaries = config.enablePageSummaries
@@ -207,6 +217,8 @@ final class SettingsViewModel: ObservableObject {
         config.captureToastPosition = captureToastPosition
         config.undoToastPosition = undoToastPosition
         config.enableSoundEffects = enableSoundEffects
+        config.enableDateCardNotifications = enableDateCardNotifications
+        config.dateCardDefaultNotificationMinutes = dateCardDefaultNotificationMinutes
         config.enableAutoTagging = enableAutoTagging
         config.enableEmbeddings = enableEmbeddings
         config.enablePageSummaries = enablePageSummaries

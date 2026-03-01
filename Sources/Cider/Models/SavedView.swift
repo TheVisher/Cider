@@ -61,17 +61,30 @@ struct SavedViewLayoutSpec: Codable, Hashable {
     var cardSizeScale: Double
     var showsGhostCells: Bool
     var showsCalendarProjection: Bool
+    var showComingUpSection: Bool
 
     init(
         displayMode: LibraryDisplayMode = .list,
         cardSizeScale: Double = 1.0,
         showsGhostCells: Bool = true,
-        showsCalendarProjection: Bool = false
+        showsCalendarProjection: Bool = false,
+        showComingUpSection: Bool = true
     ) {
         self.displayMode = displayMode
         self.cardSizeScale = min(max(cardSizeScale, 0), 3)
         self.showsGhostCells = showsGhostCells
         self.showsCalendarProjection = showsCalendarProjection
+        self.showComingUpSection = showComingUpSection
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        displayMode = try container.decodeIfPresent(LibraryDisplayMode.self, forKey: .displayMode) ?? .list
+        let rawScale = try container.decodeIfPresent(Double.self, forKey: .cardSizeScale) ?? 1.0
+        cardSizeScale = min(max(rawScale, 0), 3)
+        showsGhostCells = try container.decodeIfPresent(Bool.self, forKey: .showsGhostCells) ?? true
+        showsCalendarProjection = try container.decodeIfPresent(Bool.self, forKey: .showsCalendarProjection) ?? false
+        showComingUpSection = try container.decodeIfPresent(Bool.self, forKey: .showComingUpSection) ?? true
     }
 }
 

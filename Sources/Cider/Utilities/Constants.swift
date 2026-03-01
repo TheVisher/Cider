@@ -45,6 +45,7 @@ extension Notification.Name {
     static let openExternalFile = Notification.Name("cider.openExternalFile")
     static let openNewItemPopover = Notification.Name("cider.openNewItemPopover")
     static let showOnboarding = Notification.Name("cider.showOnboarding")
+    static let openDateCardFromNotification = Notification.Name("cider.openDateCardFromNotification")
 }
 
 // MARK: - Snap Target

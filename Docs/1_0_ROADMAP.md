@@ -126,30 +126,35 @@ Must be solid before 1.0. Users need auto-updates and a proper install path.
 
 Make everything that shipped in beta feel finished.
 
-### R-05: Tag System Completion
+### R-05: Tag System Completion ✅
 > Merge tags and saved view tag filter — the two deferred tag features.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-03-01)
 **Priority:** High
 
-**Scope:**
-- **Merge tags:** Select two tags, consolidate into one, reassign all items
-- **Saved view tag filter:** Filter a saved view/tab by specific tags (smart folders via tags)
-- UI for both in tag manager and view options
+**Scope (all resolved):**
+- ✅ Tag merge UI in tag manager ("Merge Into..." context menu + target popover)
+- ✅ Tag hygiene with similarity detection (edit distance, stemming, punctuation) + unused tag cleanup
+- ✅ Saved view tag filter UI in ViewOptionsDropdown with tag chips
+- ✅ Tag search in sidebar (filters tag pills) and Cmd+K (creates filtered saved view tab)
+- ✅ Bulk tag from selection title bar "Tag" button
+- ✅ Context menu tag actions apply to all selected items when multi-selected
+- ✅ Sidebar live search matches items by tag name
 
 ---
 
 ### R-06: Date Card Surfacing Completion
 > Notifications, per-view toggle, per-card override, and recurring event support.
 
-**Status:** `Not Started`
+**Status:** `Complete`
 **Priority:** High
 
 **Scope:**
-- **Coming Up notifications:** Sidebar badge counts, optional system notifications for approaching/overdue items
-- **Per-view toggle:** Show/hide Coming Up section per saved view tab
-- **Per-card surfacing override:** Individual date cards set their own "remind X days before"
-- **Recurring event surfacing:** Compute next occurrence from DateCardRecurrenceRule, resurface annually/monthly (birthdays, bills, etc.)
+- **Recurring event surfacing:** `nextOccurrence(after:)` and `effectiveDate(now:)` on DateCard — recurring events surface before their next occurrence, not just the original date
+- **Per-card surfacing override:** `SurfacingRule` model activated — custom reminder window (days) and notification lead time (minutes) per card, editable in DateCardEditorSheet
+- **Per-view toggle:** `showComingUpSection` on `SavedViewLayoutSpec` — "Show Coming Up" toggle in ViewOptionsDropdown, gates HomeDashboardView section
+- **Home tab badge count:** CiderTabBar shows count of urgent date cards on the Home tab
+- **System notifications:** `DateCardNotificationService` using `UNUserNotificationCenter` — per-card or default notification time, category with "Open" and "Mark Complete" actions, Settings UI under Data → Notifications
 
 ---
 
@@ -419,8 +424,8 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-02 | Mac App Store Listing | 1 | Not Started |
 | R-03 | Code Health Fixes | 1 | ✅ Complete |
 | R-04 | Vault Directory Migration | 1 | ✅ Complete |
-| R-05 | Tag System Completion | 2 | Not Started |
-| R-06 | Date Card Surfacing Completion | 2 | Not Started |
+| R-05 | Tag System Completion | 2 | ✅ Complete |
+| R-06 | Date Card Surfacing Completion | 2 | Complete |
 | R-07 | AI Auto-Tag Quality | 2 | Not Started |
 | R-08 | Keyboard Navigation | 2 | Not Started |
 | R-09 | Notes Editor Polish | 2 | Not Started |
@@ -437,7 +442,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 2/21
+**Completed:** 3/21
 
 ---
 

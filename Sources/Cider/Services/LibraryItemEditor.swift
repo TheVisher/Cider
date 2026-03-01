@@ -35,7 +35,8 @@ enum LibraryItemEditor {
         location: String,
         amount: Double?,
         labelIDs: [UUID],
-        recurrenceRule: DateCardRecurrenceRule? = nil
+        recurrenceRule: DateCardRecurrenceRule? = nil,
+        rules: [SurfacingRule] = []
     ) {
         if var existingCard {
             existingCard.title = title
@@ -47,6 +48,7 @@ enum LibraryItemEditor {
             existingCard.amount = amount
             existingCard.labelIDs = labelIDs
             existingCard.recurrenceRule = recurrenceRule
+            existingCard.rules = rules
             _ = DateCardStorage.shared.updateDateCard(existingCard)
             return
         }
@@ -63,6 +65,7 @@ enum LibraryItemEditor {
         created.amount = amount
         created.labelIDs = labelIDs
         created.recurrenceRule = recurrenceRule
+        created.rules = rules
         _ = DateCardStorage.shared.updateDateCard(created)
     }
 

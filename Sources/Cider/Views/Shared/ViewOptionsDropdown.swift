@@ -18,6 +18,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
     var entityFilter: Binding<Set<LibraryEntityType>>? = nil
     var tagFilter: Binding<Set<UUID>>? = nil
     var onlyUnassigned: Binding<Bool>? = nil
+    var showComingUp: Binding<Bool>? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
@@ -38,6 +39,11 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
 
             if let onlyUnassigned {
                 unassignedToggle(onlyUnassigned)
+                Divider().background(CiderColors.separator)
+            }
+
+            if let showComingUp {
+                comingUpToggle(showComingUp)
                 Divider().background(CiderColors.separator)
             }
 
@@ -132,6 +138,27 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
                     .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.secondary)
                 Text("Show items not in any folder")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            Spacer(minLength: 0)
+            Toggle("", isOn: binding)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+        }
+    }
+
+    // MARK: - Coming Up Toggle
+
+    @ViewBuilder
+    private func comingUpToggle(_ binding: Binding<Bool>) -> some View {
+        HStack(spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Show Coming Up")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                Text("Approaching and overdue events")
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
             }

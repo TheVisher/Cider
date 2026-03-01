@@ -107,15 +107,50 @@ struct DateCard: Identifiable, Codable, Hashable {
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
     }
 
+    /// For recurring events, computes the next occurrence after `date`.
+    /// Returns `nil` for non-recurring events or if past the end date.
+    func nextOccurrence(after date: Date = Date()) -> Date? {
+        guard let rule = recurrenceRule else { return nil }
+        let calendar = Calendar.current
+        var candidate = startAt
+        while candidate <= date {
+            guard let next = calendar.date(
+                byAdding: rule.frequency.calendarComponent,
+                value: rule.interval,
+                to: candidate
+            ) else { return nil }
+            candidate = next
+            if let end = rule.endDate, candidate > end { return nil }
+        }
+        return candidate
+    }
+
+    /// The next relevant date for surfacing: `nextOccurrence` for recurring, `startAt` otherwise.
+    func effectiveDate(now: Date = Date()) -> Date {
+        if let next = nextOccurrence(after: now) { return next }
+        return startAt
+    }
+
     func urgency(now: Date = Date(), windowDays: Int = 7) -> DateCardUrgency? {
         guard !isCompleted else { return nil }
+        let effectiveWindowDays = rules.first(where: { $0.type == .surfaceDaysBeforeDate && $0.isEnabled })?.integerValue ?? windowDays
+        let target = effectiveDate(now: now)
         let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: now)
-        let startOfEvent = calendar.startOfDay(for: startAt)
-        let days = calendar.dateComponents([.day], from: startOfToday, to: startOfEvent).day ?? 0
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: target)).day ?? 0
         if days < 0 { return .overdue }
         if days == 0 { return .today }
-        if days <= windowDays { return .approaching(daysUntil: days) }
+        if days <= effectiveWindowDays { return .approaching(daysUntil: days) }
         return nil
+    }
+}
+
+extension DateCardRecurrenceFrequency {
+    var calendarComponent: Calendar.Component {
+        switch self {
+        case .daily: return .day
+        case .weekly: return .weekOfYear
+        case .monthly: return .month
+        case .yearly: return .year
+        }
     }
 }
