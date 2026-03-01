@@ -203,6 +203,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var notes: String
     var tags: [String]
     var labelIDs: [UUID]
+    var dismissedLabelIDs: [UUID]
     var folderID: UUID?
     var thumbnailRemoteURLString: String?
     var thumbnailRelativePath: String?
@@ -224,6 +225,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case notes
         case tags
         case labelIDs
+        case dismissedLabelIDs
         case folderID
         case thumbnailRemoteURLString
         case thumbnailRelativePath
@@ -243,6 +245,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         notes: String = "",
         tags: [String] = [],
         labelIDs: [UUID] = [],
+        dismissedLabelIDs: [UUID] = [],
         folderID: UUID? = nil,
         thumbnailRemoteURLString: String? = nil,
         thumbnailRelativePath: String? = nil,
@@ -261,6 +264,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.notes = notes
         self.tags = tags
         self.labelIDs = labelIDs
+        self.dismissedLabelIDs = dismissedLabelIDs
         self.folderID = folderID
         self.thumbnailRemoteURLString = thumbnailRemoteURLString
         self.thumbnailRelativePath = thumbnailRelativePath
@@ -282,6 +286,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         notes = try container.decode(String.self, forKey: .notes)
         tags = try container.decode([String].self, forKey: .tags)
         labelIDs = try container.decodeIfPresent([UUID].self, forKey: .labelIDs) ?? []
+        dismissedLabelIDs = try container.decodeIfPresent([UUID].self, forKey: .dismissedLabelIDs) ?? []
         folderID = try container.decodeIfPresent(UUID.self, forKey: .folderID)
         thumbnailRemoteURLString = try container.decodeIfPresent(String.self, forKey: .thumbnailRemoteURLString)
         thumbnailRelativePath = try container.decodeIfPresent(String.self, forKey: .thumbnailRelativePath)

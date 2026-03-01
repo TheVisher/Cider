@@ -35,6 +35,20 @@ final class BookmarkAIEnrichment {
         activeTasks.removeValue(forKey: id)
     }
 
+    /// Re-run AI enrichment on all bookmarks with the latest algorithm.
+    /// Throttled to avoid saturating the main thread.
+    func retagAll() {
+        let bookmarks = BookmarksStorage.shared.bookmarks
+        Task { @MainActor in
+            for bookmark in bookmarks {
+                guard !Task.isCancelled else { break }
+                schedule(for: bookmark)
+                // Yield between scheduling to keep UI responsive
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
     // MARK: - Enrichment Pipeline
 
     private func run(for bookmark: Bookmark, config: CiderConfig) async {
@@ -134,10 +148,14 @@ final class BookmarkAIEnrichment {
         }
 
         // ── Create CardLabel objects from AI tags and assign to bookmark ──
+        // Re-fetch bookmark from storage — it may have been modified during async AI work.
+        // Skip any label the user previously dismissed.
         if !suggestedTags.isEmpty {
             await MainActor.run {
+                let current = BookmarksStorage.shared.bookmarks.first(where: { $0.id == bookmark.id })
                 for tagName in suggestedTags {
                     let label = CardLabelStorage.shared.findOrCreate(name: tagName, colorHex: nil)
+                    if let current, current.dismissedLabelIDs.contains(label.id) { continue }
                     _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
                 }
             }

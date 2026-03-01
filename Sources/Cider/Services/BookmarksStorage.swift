@@ -371,6 +371,9 @@ final class BookmarksStorage: ObservableObject {
     func removeLabel(_ bookmarkID: UUID, labelID: UUID) -> Bool {
         guard let idx = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
         bookmarks[idx].labelIDs.removeAll { $0 == labelID }
+        if !bookmarks[idx].dismissedLabelIDs.contains(labelID) {
+            bookmarks[idx].dismissedLabelIDs.append(labelID)
+        }
         persist()
         return true
     }

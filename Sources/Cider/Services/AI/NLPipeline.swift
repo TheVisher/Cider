@@ -14,24 +14,38 @@ struct NLPipeline {
     ///    (e.g. "Claude Code", "Devin AI")
     /// 3. **URL path extraction** — meaningful identifiers from the URL
     ///    (e.g. channel names like "@wubby", repo owners, usernames)
-    /// Returns up to 3 tags. Categories first, then entities + URL tokens.
+    /// Returns up to 4 tags. Categories first, then entities + URL tokens.
     static func suggestTags(title: String, host: String, notes: String, urlString: String = "") -> [String] {
-        let text = [title, notes]
+        let titleNotesText = [title, notes]
             .filter { !$0.isEmpty }
             .joined(separator: ". ")
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        guard !titleNotesText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+
+        // Include host in embedding text — the domain name carries strong signal
+        let embeddingText = [title, host, notes]
+            .filter { !$0.isEmpty }
+            .joined(separator: ". ")
 
         let hostExclusions = hostDerivedWords(from: host)
 
+        // Stage 0: Host keyword matching — fast direct check against taxonomy
+        let hostCategoryTags = matchHostKeywords(host: host)
+
         // Stage 1: Semantic category matching — understand what this page IS
-        let categoryTags = matchCategoryTags(text: text)
+        let semanticTags = matchCategoryTags(text: embeddingText)
+
+        // Merge host keywords (high confidence) + semantic, deduped, cap at 2
+        let hostSet = Set(hostCategoryTags)
+        let categoryTags = Array(
+            (hostCategoryTags + semanticTags.filter { !hostSet.contains($0) }).prefix(2)
+        )
 
         // Stage 2: Named entities — specific proper nouns (people, orgs, places)
         let categorySet = Set(categoryTags)
-        let entityTags = extractEntities(from: text)
+        let entityTags = extractEntities(from: titleNotesText)
             .map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { token in
-                token.count > 3
+                (token.count > 3 || (token.count == 3 && token == token.uppercased()))
                 && !stopwords.contains(token)
                 && !hostExclusions.contains(token)
                 && !categorySet.contains(token)
@@ -46,7 +60,7 @@ struct NLPipeline {
 
         // Categories first (better for organization), then entities, then URL tokens
         let combined = categoryTags + entityTags + urlTokens
-        return Array(combined.prefix(3))
+        return Array(combined.prefix(4))
     }
 
     // MARK: - Semantic Category Matching
@@ -125,7 +139,9 @@ struct NLPipeline {
         ) { tag, tokenRange in
             if let tag, [.personalName, .organizationName, .placeName].contains(tag) {
                 let token = String(text[tokenRange])
-                if token.count > 3 { results.append(token) }
+                if token.count > 3 || (token.count == 3 && token == token.uppercased()) {
+                    results.append(token)
+                }
             }
             return true
         }
@@ -282,6 +298,35 @@ struct NLPipeline {
         CategoryEntry(tag: "open-source",
                       descriptor: "open source software community projects and code repositories",
                       keywords: ["opensource", "repository", "contribute", "libre", "foss"]),
+
+        // Additional domain categories
+        CategoryEntry(tag: "cooking",
+                      descriptor: "cooking recipes meal planning and food preparation",
+                      keywords: ["cooking", "recipe", "recipes", "meal", "food", "ingredients"]),
+        CategoryEntry(tag: "travel",
+                      descriptor: "travel planning destinations hotels flights and vacation",
+                      keywords: ["travel", "vacation", "flights", "hotels", "destinations", "booking", "airbnb", "tripadvisor"]),
+        CategoryEntry(tag: "photography",
+                      descriptor: "photography camera editing and photo sharing platform",
+                      keywords: ["photography", "camera", "photos", "lightroom", "editing"]),
+        CategoryEntry(tag: "sports",
+                      descriptor: "sports scores teams athletes and live game coverage",
+                      keywords: ["sports", "football", "basketball", "baseball", "soccer", "mlb", "nfl", "nba", "nhl", "espn"]),
+        CategoryEntry(tag: "entertainment",
+                      descriptor: "movies television shows streaming entertainment and media",
+                      keywords: ["movies", "television", "shows", "streaming", "entertainment", "imdb", "netflix", "hulu"]),
+        CategoryEntry(tag: "business",
+                      descriptor: "business startup entrepreneurship and company management",
+                      keywords: ["business", "startup", "entrepreneur", "company", "revenue"]),
+        CategoryEntry(tag: "real-estate",
+                      descriptor: "real estate property listings housing market and rentals",
+                      keywords: ["realestate", "property", "housing", "rental", "mortgage"]),
+        CategoryEntry(tag: "government",
+                      descriptor: "government services public policy laws and civic resources",
+                      keywords: ["government", "policy", "legal", "civic", "regulation"]),
+        CategoryEntry(tag: "cryptocurrency",
+                      descriptor: "cryptocurrency blockchain bitcoin ethereum and web3",
+                      keywords: ["crypto", "bitcoin", "ethereum", "blockchain", "web3"]),
     ]
 
     // MARK: - URL Path Extraction
@@ -358,8 +403,29 @@ struct NLPipeline {
         "issues", "pulls", "actions", "settings", "releases",
         "wiki", "blob", "tree", "commit", "commits",
         "explore", "trending", "topics", "search",
-        "comments", "submit", "about", "wiki",
+        "comments", "submit", "about",
+        "status", "blog", "posts", "tags", "categories",
+        "archive", "page", "pages",
     ]
+
+    // MARK: - Host Keyword Matching
+
+    /// Fast direct check: does the hostname contain any taxonomy keyword?
+    /// Catches cases like "allrecipes.com" → "recipes" → cooking,
+    /// "booking.com" → "booking" → travel, "espn.com" → "espn" → sports.
+    private static func matchHostKeywords(host: String) -> [String] {
+        let hostLower = host.lowercased()
+        var matches: [String] = []
+        for entry in taxonomy {
+            for keyword in entry.keywords where keyword.count >= 3 {
+                if hostLower.contains(keyword) {
+                    matches.append(entry.tag)
+                    break
+                }
+            }
+        }
+        return matches
+    }
 
     // MARK: - Host Exclusion
 
@@ -405,6 +471,13 @@ struct NLPipeline {
 
         // TLDs and web fragments
         "http", "https", "html", "json",
+
+        // Release/version noise
+        "beta", "alpha", "release", "version", "update", "latest",
+
+        // Generic filler words
+        "powered", "built", "using", "just", "good", "great", "really",
+        "want", "need", "way", "ways",
 
         // Overly broad words that create meaningless tags
         "apps", "data", "info", "information", "type", "types",

@@ -4,6 +4,7 @@ import FoundationModels
 struct IntelligenceSettingsView: View {
     @EnvironmentObject private var viewModel: SettingsViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var didRetag = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -16,6 +17,8 @@ struct IntelligenceSettingsView: View {
                     subtitle: "Suggest tags from bookmark title and content using NaturalLanguage",
                     isOn: $viewModel.enableAutoTagging
                 )
+
+                retagAllButton
 
                 SettingsToggleRow(
                     title: "Color extraction",
@@ -83,6 +86,28 @@ struct IntelligenceSettingsView: View {
                       ? CiderColors.success.opacity(0.08)
                       : CiderColors.surfaceSubtle)
         )
+    }
+
+    // MARK: - Re-tag All
+
+    @ViewBuilder
+    private var retagAllButton: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Button {
+                BookmarkAIEnrichment.shared.retagAll()
+                didRetag = true
+            } label: {
+                Text(didRetag ? "Auto-tagging scheduled" : "Re-run Auto-Tagging on All Bookmarks")
+                    .font(CiderFont.caption)
+            }
+            .buttonStyle(CiderSecondaryButtonStyle())
+            .disabled(didRetag || !viewModel.enableAutoTagging)
+
+            Text("Re-analyze all bookmarks with the latest tagging algorithm.")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(.leading, Spacing.sm)
     }
 
     private var isAppleIntelligenceAvailable: Bool {
