@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import ImageIO
+import os
 import UniformTypeIdentifiers
 
 private struct BookmarksDiskSnapshot {
@@ -1015,16 +1016,16 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID) async -> BookmarkImageAssets? {
+        let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         var request = URLRequest(url: remoteURL)
         request.timeoutInterval = 8
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Cider/1.0",
-            forHTTPHeaderField: "User-Agent"
-        )
+        Self.applyBrowserHeaders(&request)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard !Task.isCancelled else { return nil }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            enrichLog.info("Image download \(remoteURL.host ?? "?", privacy: .public): HTTP \(code), \(data.count) bytes")
             let fileExtension = inferredImageFileExtension(response: response, remoteURL: remoteURL)
             return cacheImageAssets(
                 from: data,
@@ -1032,6 +1033,7 @@ final class BookmarksStorage: ObservableObject {
                 preferredFileExtension: fileExtension
             )
         } catch {
+            enrichLog.warning("Image download error \(remoteURL.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -1343,23 +1345,45 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private static func fetchEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
+        let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
 
-        // If HTML gave us a thumbnail, we're done
-        if let htmlResult, htmlResult.thumbnailURL != nil {
+        // If HTML gave us a real thumbnail (not just a favicon), we're done
+        let hasRealThumbnail = htmlResult?.thumbnailURL != nil
+            && !isFaviconURL(htmlResult?.thumbnailURL)
+        if let htmlResult, hasRealThumbnail {
             return htmlResult
         }
 
         // Try oEmbed fallback for known providers
         if let oembedResult = await BookmarkMetadataParser.fetchOEmbedPayload(for: pageURL) {
-            // Merge: prefer HTML title if we got one, supplement with oEmbed thumbnail
             return BookmarkEnrichmentPayload(
                 title: htmlResult?.title ?? oembedResult.title,
                 thumbnailURL: oembedResult.thumbnailURL
             )
         }
 
+        // WebView fallback — renders JS-heavy pages (IMDB WAF, Booking, etc.)
+        let needsWebView = htmlResult?.title == nil || !hasRealThumbnail
+        if needsWebView {
+            enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
+            let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
+            if extracted.title != nil || extracted.imageURL != nil {
+                enrichLog.info("WebView result for \(pageURL.host ?? "?", privacy: .public): title=\(extracted.title ?? "nil", privacy: .public) image=\(extracted.imageURL?.absoluteString ?? "nil", privacy: .public)")
+                return BookmarkEnrichmentPayload(
+                    title: extracted.title ?? htmlResult?.title,
+                    thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL
+                )
+            }
+        }
+
         return htmlResult
+    }
+
+    /// Check if a URL looks like a favicon (not a real og:image thumbnail).
+    private static func isFaviconURL(_ url: URL?) -> Bool {
+        guard let path = url?.path.lowercased() else { return false }
+        return path.contains("favicon") || path.contains("apple-touch-icon")
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
@@ -1371,21 +1395,27 @@ final class BookmarksStorage: ObservableObject {
 
         var request = URLRequest(url: pageURL)
         request.timeoutInterval = 10
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Cider/1.0",
-            forHTTPHeaderField: "User-Agent"
-        )
-        request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+        Self.applyBrowserHeaders(&request)
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
 
+        let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse,
                   (200..<400).contains(http.statusCode) else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                enrichLog.warning("HTML fetch failed for \(pageURL.host ?? "?", privacy: .public): HTTP \(code)")
                 return nil
             }
-            guard let html = decodeHTML(data: data) else { return nil }
-            return BookmarkMetadataParser.parse(html: html, pageURL: pageURL)
+            guard let html = decodeHTML(data: data) else {
+                enrichLog.warning("HTML decode failed for \(pageURL.host ?? "?", privacy: .public) (\(data.count) bytes)")
+                return nil
+            }
+            let result = BookmarkMetadataParser.parse(html: html, pageURL: pageURL)
+            enrichLog.info("Parsed \(pageURL.host ?? "?", privacy: .public): title=\(result?.title ?? "nil", privacy: .public) thumbnail=\(result?.thumbnailURL?.absoluteString ?? "nil", privacy: .public)")
+            return result
         } catch {
+            enrichLog.warning("HTML fetch error for \(pageURL.host ?? "?", privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -1396,6 +1426,16 @@ final class BookmarksStorage: ObservableObject {
         if let latin1 = String(data: data, encoding: .isoLatin1), !latin1.isEmpty { return latin1 }
         if let windows = String(data: data, encoding: .windowsCP1252), !windows.isEmpty { return windows }
         return nil
+    }
+
+    /// Apply browser-like headers to avoid bot detection on major sites.
+    private static func applyBrowserHeaders(_ request: inout URLRequest) {
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.setValue("gzip, deflate, br", forHTTPHeaderField: "Accept-Encoding")
     }
 
     private func normalizedURL(from rawValue: String) -> URL? {

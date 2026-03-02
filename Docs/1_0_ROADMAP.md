@@ -158,17 +158,21 @@ Make everything that shipped in beta feel finished.
 
 ---
 
-### R-07: AI Auto-Tag Quality
+### R-07: AI Auto-Tag Quality ✅
 > Improve semantic category matching and threshold tuning for auto-generated tags.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-03-01)
 **Priority:** Medium
 
-**Scope:**
-- Evaluate current NLPipeline tag quality on real bookmark corpus
-- Tune confidence thresholds
-- Improve category taxonomy
-- Consider user feedback loop (accept/reject suggested tags)
+**Scope (all resolved):**
+- ✅ Expanded taxonomy from 31 → 40 categories (cooking, travel, photography, sports, entertainment, business, real-estate, government, cryptocurrency)
+- ✅ Host keyword matching stage — checks hostname against taxonomy keywords (allrecipes.com → cooking, mlb.com → sports, imdb.com → entertainment)
+- ✅ Expanded taxonomy keywords with domain-specific terms (booking, airbnb, espn, netflix, etc.)
+- ✅ Tag limit increased from 3 → 4
+- ✅ 3-char ALL CAPS acronyms allowed through entity filtering (API, AWS, GCP)
+- ✅ Dismissed label tracking — removed AI labels won't be re-assigned on re-enrichment
+- ✅ "Re-run Auto-Tagging" button in Settings → Intelligence with throttled scheduling
+- ✅ Extended entity and URL path stopword lists
 
 ---
 
@@ -425,8 +429,8 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-03 | Code Health Fixes | 1 | ✅ Complete |
 | R-04 | Vault Directory Migration | 1 | ✅ Complete |
 | R-05 | Tag System Completion | 2 | ✅ Complete |
-| R-06 | Date Card Surfacing Completion | 2 | Complete |
-| R-07 | AI Auto-Tag Quality | 2 | Not Started |
+| R-06 | Date Card Surfacing Completion | 2 | ✅ Complete |
+| R-07 | AI Auto-Tag Quality | 2 | ✅ Complete |
 | R-08 | Keyboard Navigation | 2 | Not Started |
 | R-09 | Notes Editor Polish | 2 | Not Started |
 | R-10 | Custom Folder Icons | 2 | Not Started |
@@ -442,7 +446,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 3/21
+**Completed:** 5/21
 
 ---
 
