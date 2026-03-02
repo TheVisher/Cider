@@ -842,11 +842,18 @@ final class BookmarksStorage: ObservableObject {
             guard let self else { return }
             let payload = await Self.fetchEnrichmentPayload(for: url)
 
-            let imageAssets: BookmarkImageAssets?
+            var imageAssets: BookmarkImageAssets?
             if let thumbnailURL = payload?.thumbnailURL {
-                imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID)
-            } else {
-                imageAssets = nil
+                imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
+            }
+
+            // Screenshot fallback — if og:image download failed but we have a page screenshot
+            if imageAssets == nil, let screenshotData = payload?.screenshotData {
+                imageAssets = self.cacheImageAssets(
+                    from: screenshotData,
+                    for: bookmarkID,
+                    preferredFileExtension: "jpg"
+                )
             }
 
             await self.completeEnrichment(
@@ -1015,11 +1022,15 @@ final class BookmarksStorage: ObservableObject {
         removeImageIfPresent(relativePath: bookmark.originalImageRelativePath)
     }
 
-    private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID) async -> BookmarkImageAssets? {
+    private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         var request = URLRequest(url: remoteURL)
         request.timeoutInterval = 8
         Self.applyBrowserHeaders(&request)
+        request.setValue("image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        if let pageURL {
+            request.setValue(pageURL.absoluteString, forHTTPHeaderField: "Referer")
+        }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -1359,7 +1370,8 @@ final class BookmarksStorage: ObservableObject {
         if let oembedResult = await BookmarkMetadataParser.fetchOEmbedPayload(for: pageURL) {
             return BookmarkEnrichmentPayload(
                 title: htmlResult?.title ?? oembedResult.title,
-                thumbnailURL: oembedResult.thumbnailURL
+                thumbnailURL: oembedResult.thumbnailURL,
+                screenshotData: nil
             )
         }
 
@@ -1368,11 +1380,13 @@ final class BookmarksStorage: ObservableObject {
         if needsWebView {
             enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
-            if extracted.title != nil || extracted.imageURL != nil {
-                enrichLog.info("WebView result for \(pageURL.host ?? "?", privacy: .public): title=\(extracted.title ?? "nil", privacy: .public) image=\(extracted.imageURL?.absoluteString ?? "nil", privacy: .public)")
+            let hasResult = extracted.title != nil || extracted.imageURL != nil
+            if hasResult || extracted.screenshotData != nil {
+                enrichLog.info("WebView result for \(pageURL.host ?? "?", privacy: .public): title=\(extracted.title ?? "nil", privacy: .public) image=\(extracted.imageURL?.absoluteString ?? "nil", privacy: .public) screenshot=\(extracted.screenshotData != nil ? "\(extracted.screenshotData!.count) bytes" : "nil", privacy: .public)")
                 return BookmarkEnrichmentPayload(
                     title: extracted.title ?? htmlResult?.title,
-                    thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL
+                    thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL,
+                    screenshotData: extracted.screenshotData
                 )
             }
         }
@@ -1712,6 +1726,7 @@ final class BookmarksStorage: ObservableObject {
 private struct BookmarkEnrichmentPayload {
     let title: String?
     let thumbnailURL: URL?
+    let screenshotData: Data?
 }
 
 private enum EnrichmentRetryThresholds {
@@ -1801,7 +1816,7 @@ private enum BookmarkMetadataParser {
             .first(where: { isThumbnailCandidateAcceptable($0, for: pageURL) })
 
         guard title != nil || thumbnailURL != nil else { return nil }
-        return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL)
+        return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL, screenshotData: nil)
     }
 
     private static func titleTagContent(html: String) -> String? {
@@ -2227,14 +2242,42 @@ private enum BookmarkMetadataParser {
         return decoded
     }
 
-    private static func decodeHTMLEntities(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    fileprivate static let namedEntities: [String: String] = [
+        "&quot;": "\"", "&apos;": "'", "&#39;": "'",
+        "&gt;": ">", "&lt;": "<",
+        "&ndash;": "\u{2013}", "&mdash;": "\u{2014}",
+        "&lsquo;": "\u{2018}", "&rsquo;": "\u{2019}",
+        "&ldquo;": "\u{201C}", "&rdquo;": "\u{201D}",
+        "&nbsp;": " ", "&hellip;": "\u{2026}",
+        "&trade;": "\u{2122}", "&copy;": "\u{00A9}", "&reg;": "\u{00AE}",
+        "&bull;": "\u{2022}", "&middot;": "\u{00B7}",
+        "&laquo;": "\u{00AB}", "&raquo;": "\u{00BB}",
+        "&amp;": "&",  // must be last
+    ]
+    fileprivate static let numericEntityRegex = try? NSRegularExpression(pattern: "&#(x?)([0-9a-fA-F]+);")
+
+    fileprivate static func decodeHTMLEntities(_ value: String) -> String {
+        var result = value
+        for (entity, replacement) in namedEntities {
+            result = result.replacingOccurrences(of: entity, with: replacement)
+        }
+        // Decode numeric entities: &#123; and &#x1F4A9;
+        if let regex = numericEntityRegex {
+            let nsRange = NSRange(result.startIndex..<result.endIndex, in: result)
+            let matches = regex.matches(in: result, range: nsRange).reversed()
+            for match in matches {
+                guard let fullRange = Range(match.range, in: result),
+                      let hexRange = Range(match.range(at: 1), in: result),
+                      let numRange = Range(match.range(at: 2), in: result) else { continue }
+                let isHex = !result[hexRange].isEmpty
+                let numStr = String(result[numRange])
+                let codePoint = isHex ? UInt32(numStr, radix: 16) : UInt32(numStr, radix: 10)
+                if let cp = codePoint, let scalar = Unicode.Scalar(cp) {
+                    result.replaceSubrange(fullRange, with: String(scalar))
+                }
+            }
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - oEmbed fallback
@@ -2273,7 +2316,7 @@ private enum BookmarkMetadataParser {
             let thumbnailURL = thumbnailRaw.flatMap { URL(string: $0) }
 
             guard title != nil || thumbnailURL != nil else { return nil }
-            return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL)
+            return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL, screenshotData: nil)
         } catch {
             return nil
         }
@@ -2405,11 +2448,6 @@ enum NetscapeBookmarksCodec {
     }
 
     private static func decodeHTMLEntities(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&amp;", with: "&")
+        BookmarkMetadataParser.decodeHTMLEntities(value)
     }
 }
