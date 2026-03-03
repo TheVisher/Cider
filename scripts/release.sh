@@ -225,7 +225,61 @@ success "DMG created: $DMG_PATH"
 # Clean up staging
 rm -rf "$DMG_DIR"
 
-# --- Step 7: GitHub Release ---
+# --- Step 7: Generate Sparkle appcast ---
+step "Generating Sparkle appcast"
+
+APPCAST_DIR="$BUILD_DIR/appcast"
+RELEASES_DIR="$APPCAST_DIR/releases"
+mkdir -p "$RELEASES_DIR"
+
+# Copy the DMG to releases dir (generate_appcast scans this directory)
+cp "$DMG_PATH" "$RELEASES_DIR/"
+
+# If an existing appcast.xml exists in gh-pages, download it so generate_appcast
+# can append to it rather than starting fresh
+REPO_NAME=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "")
+if [ -n "$REPO_NAME" ]; then
+    EXISTING_APPCAST_URL="https://raw.githubusercontent.com/${REPO_NAME}/gh-pages/appcast.xml"
+    curl -sL -o "$APPCAST_DIR/appcast.xml" "$EXISTING_APPCAST_URL" 2>/dev/null || true
+    # If we got an HTML error page instead of XML, remove it
+    if [ -f "$APPCAST_DIR/appcast.xml" ] && ! head -1 "$APPCAST_DIR/appcast.xml" | grep -q "xml"; then
+        rm -f "$APPCAST_DIR/appcast.xml"
+    fi
+fi
+
+# Find Sparkle's generate_appcast tool
+GENERATE_APPCAST=""
+for candidate in \
+    "$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin/generate_appcast" \
+    "$ROOT_DIR/.build/checkouts/Sparkle/generate_appcast"; do
+    if [ -x "$candidate" ]; then
+        GENERATE_APPCAST="$candidate"
+        break
+    fi
+done
+
+if [ -z "$GENERATE_APPCAST" ]; then
+    warn "generate_appcast not found — skipping appcast generation"
+    warn "Run 'swift build' once to fetch Sparkle artifacts, then re-run"
+else
+    # Set the download URL prefix so appcast items point to GitHub Releases
+    DOWNLOAD_URL_PREFIX="https://github.com/${REPO_NAME}/releases/download/v${VERSION}"
+
+    "$GENERATE_APPCAST" \
+        --download-url-prefix "$DOWNLOAD_URL_PREFIX/" \
+        --link "https://github.com/${REPO_NAME}" \
+        -o "$APPCAST_DIR/appcast.xml" \
+        "$RELEASES_DIR" \
+        2>&1
+
+    if [ -f "$APPCAST_DIR/appcast.xml" ]; then
+        success "Appcast generated: $APPCAST_DIR/appcast.xml"
+    else
+        warn "Appcast generation produced no output"
+    fi
+fi
+
+# --- Step 8: GitHub Release ---
 if [ "$SKIP_GITHUB" = true ]; then
     warn "Skipping GitHub release (--skip-github)"
 else
@@ -254,6 +308,42 @@ Download **$DMG_NAME**, open it, and drag Cider to your Applications folder.
         --prerelease
 
     success "GitHub Release created: $TAG"
+
+    # --- Step 9: Publish appcast to gh-pages ---
+    if [ -f "$APPCAST_DIR/appcast.xml" ]; then
+        step "Publishing appcast to GitHub Pages"
+
+        GH_PAGES_DIR="$BUILD_DIR/gh-pages"
+        rm -rf "$GH_PAGES_DIR"
+
+        # Clone or create gh-pages branch
+        if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+            git clone --branch gh-pages --single-branch --depth 1 \
+                "$(git remote get-url origin)" "$GH_PAGES_DIR" 2>&1
+        else
+            mkdir -p "$GH_PAGES_DIR"
+            cd "$GH_PAGES_DIR"
+            git init
+            git checkout -b gh-pages
+            git remote add origin "$(cd "$ROOT_DIR" && git remote get-url origin)"
+            cd "$ROOT_DIR"
+        fi
+
+        # Copy appcast
+        cp "$APPCAST_DIR/appcast.xml" "$GH_PAGES_DIR/appcast.xml"
+
+        # Commit and push
+        cd "$GH_PAGES_DIR"
+        git add appcast.xml
+        git commit -m "Update appcast for $VERSION" 2>/dev/null || warn "No appcast changes to commit"
+        git push origin gh-pages 2>&1 || warn "Failed to push gh-pages — you may need to push manually"
+        cd "$ROOT_DIR"
+
+        success "Appcast published to gh-pages"
+        echo "  URL: https://thevisher.github.io/Cider/appcast.xml"
+
+        rm -rf "$GH_PAGES_DIR"
+    fi
 fi
 
 # --- Done ---
