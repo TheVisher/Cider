@@ -28,6 +28,7 @@ struct BookmarkCard: View {
     let onDelete: () -> Void
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var isSelected: Bool = false
+    var isFocused: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -109,7 +110,7 @@ struct BookmarkCard: View {
             }
         }
         .padding(Spacing.sm)
-        .cardContainer(isHovered: isHovered, isSelected: isSelected, isDropTargeted: isThumbnailDropTargeted)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused, isDropTargeted: isThumbnailDropTargeted)
         .overlay(alignment: .topLeading) {
             if isSelected {
                 SelectionCheckmark()

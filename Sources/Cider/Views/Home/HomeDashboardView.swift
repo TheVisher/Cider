@@ -23,6 +23,8 @@ struct HomeDashboardView: View {
     var activeLabelIDs: Set<UUID> = []
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
     var showComingUp: Bool = true
+    @Binding var scrollToItemID: String?
+    var focusedItemID: String? = nil
 
     @State private var config = CiderConfig.load()
 
@@ -113,11 +115,21 @@ struct HomeDashboardView: View {
                     comingUpSection
                 }
 
-                ScrollView {
-                    libraryFeed
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        libraryFeed
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: scrollToItemID) { _, id in
+                        if let id {
+                            withAnimation(reduceMotion ? .none : .snappy) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
+                            scrollToItemID = nil
+                        }
+                    }
                 }
-                .scrollIndicators(.hidden)
                 .padding(Spacing.xxs)
                 .padding(.horizontal, Spacing.md)
                 .padding(.top, Spacing.md)
@@ -135,6 +147,7 @@ struct HomeDashboardView: View {
             LazyVStack(spacing: Spacing.xxs) {
                 ForEach(libraryItems) { item in
                     libraryListRow(item)
+                        .id(item.id)
                 }
             }
 
@@ -143,6 +156,7 @@ struct HomeDashboardView: View {
             LazyVGrid(columns: columns, spacing: Spacing.md) {
                 ForEach(libraryItems) { item in
                     libraryCard(item, mode: .grid)
+                        .id(item.id)
                 }
             }
 
@@ -153,6 +167,7 @@ struct HomeDashboardView: View {
             ) {
                 ForEach(libraryItems) { item in
                     libraryCard(item, mode: .masonry)
+                        .id(item.id)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -226,6 +241,7 @@ struct HomeDashboardView: View {
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -238,6 +254,7 @@ struct HomeDashboardView: View {
                 folderName: folderName(for: note),
                 folders: bookmarksViewModel.folders,
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onOpen: { handleNormalAction { openNoteInPanel(note) } },
                 onRename: { newTitle in
                     NotesStorage.shared.rename(note: note, to: newTitle)
@@ -276,6 +293,7 @@ struct HomeDashboardView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -300,6 +318,7 @@ struct HomeDashboardView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -342,6 +361,7 @@ struct HomeDashboardView: View {
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -367,6 +387,7 @@ struct HomeDashboardView: View {
                 dragProvider: noteDragProvider(for: note),
                 dragPreviewOverride: multiDragPreview(for: item),
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -393,6 +414,7 @@ struct HomeDashboardView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -417,6 +439,7 @@ struct HomeDashboardView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk

@@ -19,6 +19,8 @@ struct TagDetailView: View {
     var onSelectTag: (UUID) -> Void = { _ in }
     var onBack: () -> Void = {}
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
+    @Binding var scrollToItemID: String?
+    var focusedItemID: String? = nil
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -339,7 +341,9 @@ struct TagDetailView: View {
                 onOpenDateCard: onOpenDateCard,
                 onOpenContact: onOpenContact,
                 activeLabelIDs: tagIDs,
-                onToggleLabelBulk: onToggleLabelBulk
+                onToggleLabelBulk: onToggleLabelBulk,
+                scrollToItemID: $scrollToItemID,
+                focusedItemID: focusedItemID
             )
         }
     }

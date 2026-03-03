@@ -18,6 +18,8 @@ struct FolderDetailView: View {
     var onOpenDateCard: ((DateCard) -> Void)?
     var onOpenContact: ((ContactCard) -> Void)?
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
+    @Binding var scrollToItemID: String?
+    var focusedItemID: String? = nil
 
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
@@ -87,31 +89,41 @@ struct FolderDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        if coverImage != nil {
-                            folderCoverBanner
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            if coverImage != nil {
+                                folderCoverBanner
+                            }
+
+                            folderHeaderSection
+
+                            if !folderItems.isEmpty {
+                                libraryFeed
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(Spacing.xxs)
+                                    .padding(.horizontal, Spacing.md)
+                                    .padding(.vertical, Spacing.md)
+                            } else {
+                                EmptyStateView(
+                                    icon: "tray",
+                                    title: "No items yet",
+                                    subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
+                                )
+                                .frame(minHeight: 200)
+                            }
                         }
-
-                        folderHeaderSection
-
-                        if !folderItems.isEmpty {
-                            libraryFeed
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(Spacing.xxs)
-                                .padding(.horizontal, Spacing.md)
-                                .padding(.vertical, Spacing.md)
-                        } else {
-                            EmptyStateView(
-                                icon: "tray",
-                                title: "No items yet",
-                                subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
-                            )
-                            .frame(minHeight: 200)
+                    }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: scrollToItemID) { _, id in
+                        if let id {
+                            withAnimation(reduceMotion ? .none : .snappy) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
+                            scrollToItemID = nil
                         }
                     }
                 }
-                .scrollIndicators(.hidden)
                 .padding(.bottom, Spacing.md)
             }
 
@@ -492,6 +504,7 @@ struct FolderDetailView: View {
             LazyVStack(spacing: Spacing.xxs) {
                 ForEach(folderItems) { item in
                     libraryListRow(item)
+                        .id(item.id)
                 }
             }
 
@@ -500,6 +513,7 @@ struct FolderDetailView: View {
             LazyVGrid(columns: columns, spacing: Spacing.md) {
                 ForEach(folderItems) { item in
                     libraryCard(item, mode: .grid)
+                        .id(item.id)
                 }
             }
 
@@ -510,6 +524,7 @@ struct FolderDetailView: View {
             ) {
                 ForEach(folderItems) { item in
                     libraryCard(item, mode: .masonry)
+                        .id(item.id)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -535,6 +550,7 @@ struct FolderDetailView: View {
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -547,6 +563,7 @@ struct FolderDetailView: View {
                 folderName: folderName(for: note),
                 folders: bookmarksViewModel.folders,
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onOpen: { handleNormalAction { openNoteInPanel(note) } },
                 onRename: { newTitle in
                     NotesStorage.shared.rename(note: note, to: newTitle)
@@ -585,6 +602,7 @@ struct FolderDetailView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -609,6 +627,7 @@ struct FolderDetailView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -637,6 +656,7 @@ struct FolderDetailView: View {
                 onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -662,6 +682,7 @@ struct FolderDetailView: View {
                 dragProvider: noteDragProvider(for: note),
                 dragPreviewOverride: multiDragPreview(for: item),
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -688,6 +709,7 @@ struct FolderDetailView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
@@ -712,6 +734,7 @@ struct FolderDetailView: View {
                     }
                 },
                 isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk

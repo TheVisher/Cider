@@ -8,6 +8,7 @@ struct NoteListRow: View {
     var folderName: String?
     let folders: [Folder]
     let isSelected: Bool
+    var isFocused: Bool = false
     let onOpen: () -> Void
     let onRename: (String) -> Void
     let onDelete: () -> Void
@@ -119,6 +120,10 @@ struct NoteListRow: View {
                             ? CiderColors.separatorMedium
                             : isHovered ? CiderColors.surfaceInput : Color.clear
                     )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: 1.5)
             )
             .contentShape(Rectangle())
         }

@@ -44,16 +44,19 @@ extension View {
 private struct CardContainerModifier: ViewModifier {
     var isHovered: Bool
     var isSelected: Bool
+    var isFocused: Bool
     var isDropTargeted: Bool
     var cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let borderColor: Color = isSelected
-            ? CiderColors.selectedBorder
+        let borderColor: Color = isFocused
+            ? CiderColors.controlAccent
+            : isSelected ? CiderColors.selectedBorder
             : isDropTargeted ? CiderColors.dropTargetBorderStrong
             : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle
-        let borderWidth: CGFloat = (isSelected || isDropTargeted) ? CiderBorder.innerStrokeWidth : 1
+        let borderWidth: CGFloat = isFocused ? 1.5
+            : (isSelected || isDropTargeted) ? CiderBorder.innerStrokeWidth : 1
         content
             .background(shape.fill(isHovered ? CiderColors.surfaceHover : CiderColors.surfaceElevated))
             .overlay(shape.stroke(borderColor, lineWidth: borderWidth))
@@ -67,9 +70,10 @@ extension View {
     func cardContainer(
         isHovered: Bool,
         isSelected: Bool = false,
+        isFocused: Bool = false,
         isDropTargeted: Bool = false,
         cornerRadius: CGFloat = BookmarksDesign.cardCornerRadius
     ) -> some View {
-        modifier(CardContainerModifier(isHovered: isHovered, isSelected: isSelected, isDropTargeted: isDropTargeted, cornerRadius: cornerRadius))
+        modifier(CardContainerModifier(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused, isDropTargeted: isDropTargeted, cornerRadius: cornerRadius))
     }
 }

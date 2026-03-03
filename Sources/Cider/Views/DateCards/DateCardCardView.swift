@@ -9,6 +9,7 @@ struct DateCardCardView: View {
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     var isSelected: Bool = false
+    var isFocused: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -151,7 +152,7 @@ struct DateCardCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .cardContainer(isHovered: isHovered, isSelected: isSelected)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused)
         .overlay(alignment: .topLeading) {
             if isSelected {
                 SelectionCheckmark()
@@ -234,6 +235,7 @@ struct DateCardListRow: View {
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     var isSelected: Bool = false
+    var isFocused: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -337,7 +339,10 @@ struct DateCardListRow: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(CiderColors.controlAccent, lineWidth: isSelected ? CiderBorder.innerStrokeWidth : 0)
+                    .strokeBorder(
+                        isFocused ? CiderColors.controlAccent : (isSelected ? CiderColors.controlAccent : Color.clear),
+                        lineWidth: isFocused ? 1.5 : (isSelected ? CiderBorder.innerStrokeWidth : 0)
+                    )
             )
         }
         .buttonStyle(.plain)

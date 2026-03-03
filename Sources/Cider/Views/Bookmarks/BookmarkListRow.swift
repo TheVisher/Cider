@@ -13,6 +13,7 @@ struct BookmarkListRow: View {
     let onDelete: () -> Void
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var isSelected: Bool = false
+    var isFocused: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -101,6 +102,10 @@ struct BookmarkListRow: View {
                         ? CiderColors.selectedFill
                         : isHovered ? CiderColors.surfaceInput : Color.clear
                 )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: 1.5)
         )
         .hoverState($isHovered, animation: .snappy)
         .bookmarkContextMenu(

@@ -14,6 +14,7 @@ struct NoteCardView: View {
     var dragProvider: (() -> NSItemProvider)? = nil
     var dragPreviewOverride: AnyView? = nil
     var isSelected: Bool = false
+    var isFocused: Bool = false
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -100,7 +101,7 @@ struct NoteCardView: View {
             .frame(minHeight: mode == .grid ? gridMinHeight : nil)
         }
         .buttonStyle(.plain)
-        .cardContainer(isHovered: isHovered, isSelected: isSelected)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused)
         .overlay(alignment: .topLeading) {
             if isSelected {
                 SelectionCheckmark()
