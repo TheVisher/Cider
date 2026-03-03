@@ -125,6 +125,7 @@ struct RelatedLink: Codable, Identifiable {
 - thumbnail source/local status (partial — hero preview, no separate indicator)
 3. ✅ Add actions:
 - replace/remove thumbnail (drag-and-drop on card)
+- set thumbnail from Reader/Browser view (right-click image → "Set as Bookmark Thumbnail")
 - ✅ copy URL
 - ✅ open in browser
 - ✅ open original image (if local original exists, else remote fallback)
@@ -523,3 +524,9 @@ Since Cider relies heavily on the clipboard for capturing bookmarks, images, and
 - Should clipboard auto-capture default to review mode or instant-save mode?
 - Should there be per-site metadata adapters for high-value domains?
 - What is the preferred UX for failed/blocked thumbnail fetches (badge vs details warning)?
+
+## Known Issues — Content Capture
+- **Opt+B hotkey only works in Chrome** — `ActiveBrowserCaptureService` AppleScript needs work for Safari, Arc, Firefox, Zen, and other browsers. Each browser has different AppleScript/JXA support for getting the frontmost tab URL.
+- **Reader view right-click thumbnail** — Allow right-clicking an image in the reader/browser view and setting it as the bookmark's thumbnail (noted above in detail panel actions).
+- **Reddit image CDN** — `external-preview.redd.it` returns HTTP 403 on direct download (hotlink protection). No known workaround — users can drag replacement thumbnails from the browser.
+- **Instagram oEmbed deprecated** — Meta deprecated `api.instagram.com/oembed` (2025). Falls through to WebView/screenshot, which captures login wall. Would need Graph API credentials for real support.
