@@ -1,1 +1,15 @@
-<?xml version="1.0" encoding="utf-8"?><rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><title>Cider Updates</title></channel></rss>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Cider Updates</title>
+        <item>
+            <title>0.1.0-beta.2</title>
+            <pubDate>Mon, 02 Mar 2026 19:31:28 -0800</pubDate>
+            <link>https://github.com/TheVisher/Cider</link>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>0.1.0-beta.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/TheVisher/Cider/releases/download/v0.1.0-beta.2/Cider-0.1.0-beta.2.dmg" length="8089808" type="application/octet-stream" sparkle:edSignature="quCye7Og5ouyMDb+HMYwqJTtCw1aiDC75d0avz7RnS1ayvoeta9YSq9n/EunTvpVLsWBKUXapsTVUqTJmkruDA=="/>
+        </item>
+    </channel>
+</rss>
