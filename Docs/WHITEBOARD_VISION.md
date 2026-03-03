@@ -335,12 +335,53 @@ Content flows between tabs:
 - **Notes → Whiteboard**: Could "send to whiteboard" to break a note apart for rethinking
 - **Todos → Whiteboard**: Brain-dump tasks onto the board before organizing them
 
+## Excalidraw as the Canvas Engine
+
+> **Key decision:** Excalidraw IS the whiteboard surface — not a separate drawing tool. All whiteboard interaction (blocks, connections, drawing, zoom/pan) happens on the Excalidraw canvas. This replaces the custom canvas/block rendering described in the sections above.
+
+Embed [Excalidraw](https://github.com/excalidraw/excalidraw) (MIT, React-based) in a WKWebView, same architecture as TipTap for the notes editor.
+
+**Why this replaces a custom canvas:**
+- Infinite canvas with zoom/pan — free
+- Shapes, arrows, text, freehand drawing — free
+- Connections between elements — free (Excalidraw's native connector tool)
+- Hit testing, selection, drag, resize, lasso — free
+- Hand-drawn aesthetic fits Cider's "brain dump" vibe perfectly
+- JSON-based `.excalidraw` file format — easy to persist in vault
+
+**Cider library items on the canvas:**
+- Drag a bookmark/note/date card from the library onto the whiteboard → creates a custom Excalidraw element rendering the card
+- Draw arrows between items, circle groups, annotate with freehand
+- Custom Excalidraw element type: `cider-library-item` with `libraryItemID` in metadata
+- On render, Swift bridge resolves the ID to current card data (title, thumbnail, etc.)
+
+**Integration approach:**
+- Bundle Excalidraw as a built JS app in `Resources/Excalidraw/` (like TipTap in `Resources/TipTapEditor/`)
+- Load in WKWebView with `allowingReadAccessTo: NSHomeDirectory()`
+- JS→Swift bridge: `sceneChanged` (JSON scene data), `itemDropped`, `exportRequested`
+- Swift→JS: `loadScene(json)`, `exportAsPNG()`, `setTheme(dark)`, `addLibraryItem(id, position, cardData)`
+- Store as `.excalidraw` JSON files in `~/CiderVault/Whiteboards/`
+- Card preview: render thumbnail via `exportAsPNG()` on save
+
+**What the custom data model above becomes:**
+- `WhiteboardCanvas` simplifies to: `id`, `name`, `excalidrawJSON: Data`, `createdAt`, `updatedAt`
+- `WhiteboardBlock`, `BlockContent`, `BlockStyle`, `WhiteboardConnection`, `ConnectionStyle` — all replaced by Excalidraw's native scene format
+- Only custom extension: `cider-library-item` elements with `libraryItemID` in Excalidraw's `customData` field
+
+**Bundle size:** ~2-3MB minified (acceptable for desktop app)
+
+**Open questions:**
+- Should each whiteboard folder get one canvas, or can users create multiple canvases?
+- Excalidraw's toolbar vs Cider's toolbar — hide Excalidraw's and build a Cider-native one, or style Excalidraw's to match?
+- Live card updates — when a bookmark title changes, does it auto-update on all whiteboards containing it?
+
 ## Inspiration
 
 - **Miro / FigJam** — infinite canvas with sticky notes and connections (but way heavier)
 - **Apple Freeform** — Apple's own freeform canvas app
 - **Milanote** — visual mood board / brainstorming tool
 - **Kinopio** — spatial thinking tool with cards and connections
+- **Excalidraw** — open-source virtual whiteboard with hand-drawn aesthetic
 - **Real cork boards** — the analog version: pushpins, string, photos at angles
 
 Cider's version is deliberately simpler and more personal. It's not a collaboration tool. It's your brain's overflow area, living inside the same floating panel as your bookmarks and notes.

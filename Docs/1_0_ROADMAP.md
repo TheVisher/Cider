@@ -176,18 +176,23 @@ Make everything that shipped in beta feel finished.
 
 ---
 
-### R-08: Keyboard Navigation
+### R-08: Keyboard Navigation ✅
 > Arrow keys, Enter, Delete — standard keyboard interaction for grid and masonry views.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-03-02)
 **Priority:** High
 
-**Scope:**
-- Arrow keys move selection in grid/masonry (spatial awareness)
-- Enter opens selected item
-- Delete/Backspace trashes selected items
-- Tab/Shift+Tab for sequential navigation
-- Works across all display modes (list, grid, masonry)
+**Scope (all resolved):**
+- ✅ Arrow keys move focus ring in grid/masonry (spatial, column-aware) and list (linear)
+- ✅ Enter opens focused item (bookmark detail, note editor, date card, contact)
+- ✅ Delete/Backspace trashes focused or selected items with undo
+- ✅ Tab/Shift+Tab for sequential linear navigation
+- ✅ Shift+Arrow for range selection
+- ✅ Space to toggle selection on focused item
+- ✅ Focus ring visual indicator (separate from selection highlight)
+- ✅ Auto-scroll to keep focused item visible (ScrollViewReader)
+- ✅ Arrow keys escape sidebar search field at text boundaries
+- ✅ NSEvent local monitor with text field safety (skips when typing in search/editor)
 
 ---
 
@@ -431,7 +436,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-05 | Tag System Completion | 2 | ✅ Complete |
 | R-06 | Date Card Surfacing Completion | 2 | ✅ Complete |
 | R-07 | AI Auto-Tag Quality | 2 | ✅ Complete |
-| R-08 | Keyboard Navigation | 2 | Not Started |
+| R-08 | Keyboard Navigation | 2 | ✅ Complete |
 | R-09 | Notes Editor Polish | 2 | Not Started |
 | R-10 | Custom Folder Icons | 2 | Not Started |
 | R-11 | Drag Out to External Apps | 2 | Not Started |
@@ -446,7 +451,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 5/21
+**Completed:** 6/21
 
 ---
 
@@ -514,6 +519,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Advanced image treatment | NOTES_VISION | Fanned/angled image stacks with click-to-cycle |
 | Interactive checkboxes on cards | NOTES_VISION | Toggle checkboxes without opening the editor |
 | Per-folder sort persistence | NOTES_VISION | Each folder remembers its own sort order/view mode |
+| Plain text note format (.txt) | NOTES_VISION | `.txt` alongside `.md`, plain text editor, default format setting, +New picker |
 
 ### Bookmarks
 | Item | Source | Notes |
@@ -561,6 +567,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Whiteboard: templates | WHITEBOARD_VISION | Brainstorming, planning layouts |
 | Whiteboard: export as image | WHITEBOARD_VISION | PNG/PDF export of canvas |
 | Whiteboard: clipboard capture flow | WHITEBOARD_VISION | Route text/images to whiteboard via toast |
+| Whiteboard: Excalidraw engine | WHITEBOARD_VISION | Embed Excalidraw in WKWebView as drawing engine, .excalidraw JSON persistence |
 
 ### Home & UX
 | Item | Source | Notes |
@@ -571,6 +578,14 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Pinned items section | HOME_VISION | Show pinned items at top |
 | Search shortcut / recent searches | HOME_VISION | Persist recent queries |
 | Continue section resurfacing | HOME_VISION | Mix 1-2 forgotten items into Continue alongside recents |
+
+### Code Health & Refactoring
+| Item | Source | Notes |
+|------|--------|-------|
+| Split BookmarksStorage (2,450 lines) | CODE_AUDIT 2026-03 | Extract BookmarkEnrichmentService (title/summary/favicon/color/image analysis) and BookmarkImageAssetManager (thumbnail/original/cover handling). Keep BookmarksStorage as persistence + CRUD facade. |
+| Split CiderPanelView (2,450 lines) | CODE_AUDIT 2026-03 | Extract DetailPanelManager (detail state), EditorManager (note editing state), TabNavigationManager (tab/folder/source selection). Keep CiderPanelView as root layout + composition. |
+| Split AppDelegate (1,400 lines) | CODE_AUDIT 2026-03 | Extract PanelManagerService (panels/positioning), HotkeyService (detector instances), ToastOrchestrationService (toast types + timers). Keep AppDelegate as lifecycle + init. |
+| Monitor growing files | CODE_AUDIT 2026-03 | SettingsView (1,230), SavedViewTabContent (1,207), FolderSidebarView (1,080), NotesViewModel (1,057), FolderDetailView (1,007) — watch for crossing 1,500 lines |
 
 ### Infrastructure
 | Item | Source | Notes |

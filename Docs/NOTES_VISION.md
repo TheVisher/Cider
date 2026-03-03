@@ -264,6 +264,22 @@ End of archived standalone panel sidebar section. -->
 
 ## Future Ideas (Not Yet Prioritized)
 
+### Plain Text Note Format (.txt)
+
+Support `.txt` files alongside `.md`. Some users prefer plain text — no formatting, universal, lightweight.
+
+**Design (planned):**
+- `NoteFormat` enum (`.markdown`, `.plainText`) derived from file extension — no new stored field
+- `NotesStorage` scans both `.md` and `.txt` files; `createNew(format:)` uses correct extension
+- Plain text editor: `NSTextView` wrapper (no TipTap) — no formatting toolbar, no image embeds
+- `InlineNoteEditorView` switches between TipTap and plain text editor based on `note.format`
+- `CiderConfig.notesDefaultFormat` setting with picker in Settings → Notes → Behavior
+- +New popover: segmented picker (Markdown / Plain Text), defaults from config
+- `strippedContent` skips markdown regex for plain text; `imageURLs` returns `[]`
+- Screen captures always create `.md` (embed `<img>` tags)
+- Rename preserves existing extension
+- Full plan: `.claude/plans/encapsulated-splashing-harbor.md`
+
 ### Drag Out to External Apps
 Drag a note card out of Cider onto Finder, a text editor, or a CLI and it drops the actual `.md` file. Currently drag providers only register internal Cider IDs — adding `public.file-url` with the note's resolved file path enables this. Full spec in `WORKSPACES_VISION.md` → "Drag Out to External Apps".
 
