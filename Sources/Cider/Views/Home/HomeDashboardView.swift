@@ -588,7 +588,7 @@ struct HomeDashboardView: View {
                 return CiderMultiDrag.makeProvider(
                     primaryType: BookmarkDragPayload.typeIdentifier,
                     primaryID: bookmark.id,
-                    allItemIDs: allItems
+                    allItemIDs: allItems,
                 )
             } else {
                 let provider = NSItemProvider(
@@ -617,7 +617,7 @@ struct HomeDashboardView: View {
                 return CiderMultiDrag.makeProvider(
                     primaryType: NoteDragPayload.typeIdentifier,
                     primaryID: note.id,
-                    allItemIDs: allItems
+                    allItemIDs: allItems,
                 )
             } else {
                 let provider = NSItemProvider(

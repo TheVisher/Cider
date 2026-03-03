@@ -228,14 +228,17 @@ Make everything that shipped in beta feel finished.
 ### R-11: Drag Out to External Apps
 > Drag bookmarks and notes out of Cider into other apps.
 
-**Status:** `Not Started`
+**Status:** `Testing`
 **Priority:** High
 
 **Scope:**
-- Bookmarks: register `public.url` drag provider (URL opens in browser)
-- Notes: register `public.file-url` drag provider (.md file)
-- Bookmarks with images: also offer `public.file-url` for the image
-- Works from cards in all display modes
+- ✅ Bookmarks: register `public.url` drag provider (URL opens in browser)
+- ✅ Notes: register `public.file-url` drag provider (.md file)
+- ✅ Bookmarks with images: also offer `public.file-url` + image data UTI
+- ✅ Multi-drag: primary item's external types registered for external app targets
+- ✅ Works from Home tab, Folder detail view, Continue section, all display modes
+
+**Known limitation:** Electron apps (Discord, Slack) may not pick up `public.url` — they prefer `public.utf8-plain-text` which carries the internal Cider ID. Fix deferred to post-1.0 (requires reworking internal drop detection to not depend on text payload).
 
 ---
 
@@ -439,7 +442,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-08 | Keyboard Navigation | 2 | ✅ Complete |
 | R-09 | Notes Editor Polish | 2 | Not Started |
 | R-10 | Custom Folder Icons | 2 | Not Started |
-| R-11 | Drag Out to External Apps | 2 | Not Started |
+| R-11 | Drag Out to External Apps | 2 | Testing |
 | R-12 | Clipboard Viewer | 2 | Not Started |
 | R-13 | Advanced Search | 2 | Not Started |
 | R-20 | Screen Capture Polish | 2 | Not Started |
@@ -482,7 +485,7 @@ These shipped in the beta launch and are maintained, not re-implemented:
 - Settings (7 categories)
 - Spotlight indexing
 - First-run onboarding
-- Distribution pipeline (code signing, notarization, .dmg, GitHub Releases)
+- Distribution pipeline (code signing, notarization confirmed 2026-03-02, .dmg, GitHub Releases)
 - Standard Edit key equivalents (Cmd+C/V/X/A/Z routed in non-activating panels)
 
 ---
@@ -568,6 +571,12 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Whiteboard: export as image | WHITEBOARD_VISION | PNG/PDF export of canvas |
 | Whiteboard: clipboard capture flow | WHITEBOARD_VISION | Route text/images to whiteboard via toast |
 | Whiteboard: Excalidraw engine | WHITEBOARD_VISION | Embed Excalidraw in WKWebView as drawing engine, .excalidraw JSON persistence |
+
+### Drag & Drop
+| Item | Source | Notes |
+|------|--------|-------|
+| Electron app drag-out (Discord, Slack) | R-11 | Rework internal drop detection so text payload can carry the URL instead of Cider ID |
+| SavedViewTabContent drag providers | R-11 | Wire drag providers into saved view tab cards (needs selection state first) |
 
 ### Home & UX
 | Item | Source | Notes |

@@ -714,9 +714,12 @@ struct FolderSidebarView: View {
         }
 
         // Text fallback for multi-drag or single bookmark/note IDs
+        // Use explicit UTF-8 plain text type — loadObject(ofClass: NSString.self)
+        // picks the "best" text-compatible type, which may resolve to public.url or
+        // public.file-url data instead of our internal Cider ID when those are registered.
         for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
-            provider.loadObject(ofClass: NSString.self) { item, _ in
-                guard let raw = item as? String else { return }
+            provider.loadDataRepresentation(forTypeIdentifier: "public.utf8-plain-text") { data, _ in
+                guard let data, let raw = String(data: data, encoding: .utf8) else { return }
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 if let items = MultiDragPayload.decodeFromText(trimmed) {

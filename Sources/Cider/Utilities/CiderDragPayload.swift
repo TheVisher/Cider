@@ -26,6 +26,38 @@ enum BookmarkDragPayload {
             return nil
         }
     }
+
+    /// Register image types for external app drag-out (Finder, image editors, etc.).
+    ///
+    /// **NOT CURRENTLY WIRED UP.** On macOS 26, registering `public.file-url` on an
+    /// NSItemProvider causes SwiftUI's `.onDrop` to deliver providers with empty
+    /// `registeredTypeIdentifiers`, breaking all internal drop handlers (folder sidebar,
+    /// sub-folder cards). Needs an alternative approach — possibly `NSFilePromiseProvider`
+    /// or image-data-only registration without `public.file-url`.
+    static func registerPublicImage(on provider: NSItemProvider, bookmark: Bookmark) {
+        // Prefer original image, fall back to thumbnail
+        guard let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL,
+              FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        // Register file URL so Finder/desktop gets the actual file
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
+        ) { completion in
+            completion(fileURL.dataRepresentation, nil)
+            return nil
+        }
+
+        // Register image data so image editors/chat apps get the image directly
+        if let data = try? Data(contentsOf: fileURL) {
+            let uti = UTType(filenameExtension: fileURL.pathExtension)?.identifier ?? UTType.png.identifier
+            provider.registerDataRepresentation(
+                forTypeIdentifier: uti, visibility: .all
+            ) { completion in
+                completion(data, nil)
+                return nil
+            }
+        }
+    }
 }
 
 // MARK: - Note Drag Payload
@@ -102,7 +134,9 @@ enum CiderMultiDrag {
     static func makeProvider(
         primaryType: String,
         primaryID: UUID,
-        allItemIDs: [(type: String, id: UUID)]
+        allItemIDs: [(type: String, id: UUID)],
+        primaryBookmark: Bookmark? = nil,
+        primaryNote: Note? = nil
     ) -> NSItemProvider {
         let items = allItemIDs.map { MultiDragPayload.Item(type: $0.type, id: $0.id) }
         let textPayload = MultiDragPayload.encodeToText(items: items) ?? ""
@@ -116,6 +150,14 @@ enum CiderMultiDrag {
                 completion(data, nil)
                 return nil
             }
+        }
+
+        // Register external types for the primary item so external apps get useful data
+        if let bookmark = primaryBookmark {
+            BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)
+            BookmarkDragPayload.registerPublicImage(on: provider, bookmark: bookmark)
+        } else if let note = primaryNote {
+            NoteDragPayload.registerPublicFileURL(on: provider, note: note)
         }
 
         return provider
