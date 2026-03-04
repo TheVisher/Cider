@@ -62,12 +62,13 @@ Must be solid before 1.0. Users need auto-updates and a proper install path.
 - ✅ AppDelegate calls `SparkleUpdaterService.shared.start()` at launch
 
 **Remaining (manual setup required):**
-- [ ] Add `SUFeedURL` to Info.plist (appcast URL, e.g., `https://thevisher.github.io/Cider/appcast.xml`)
-- [ ] Generate Ed25519 signing keys: `.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework/Resources/bin/generate_keys`
-- [ ] Add `SUPublicEDKey` to Info.plist with the generated public key
-- [ ] Set up appcast XML hosting (GitHub Pages or generate from Releases)
+- ✅ Add `SUFeedURL` to Info.plist (appcast URL: `https://thevisher.github.io/Cider/appcast.xml`)
+- ✅ Generate Ed25519 signing keys
+- ✅ Add `SUPublicEDKey` to Info.plist with the generated public key
+- ✅ Set up appcast XML hosting (GitHub Pages on `gh-pages` branch)
+- ✅ Release script generates appcast via `generate_appcast` and publishes to gh-pages
 - [ ] Add Sparkle framework to Xcode project (File > Add Package Dependencies > search "sparkle-project/Sparkle")
-- [ ] Test update flow with a test appcast
+- [ ] Test update flow with a real update (ship 0.1.0-beta.3, verify Sparkle prompts)
 
 ---
 
@@ -197,17 +198,19 @@ Make everything that shipped in beta feel finished.
 ---
 
 ### R-09: Notes Editor Polish
-> Missing formatting options and note pinning.
+> Compact Apple Notes-style formatting toolbar and note pinning.
 
-**Status:** `Not Started`
+**Status:** `Testing`
 **Priority:** Medium
 
 **Scope:**
-- **Block quotes:** Toolbar button (extension already exists, just needs button)
-- **Strikethrough:** Toolbar button + keyboard shortcut
-- **Highlight color:** Toolbar button with color options
-- **Horizontal rule:** Toolbar button for section dividers
-- **Note pinning:** Pin notes to top of view, persisted flag on Note model
+- ✅ **Compact toolbar:** Undo/Redo, Aa popover, Table, Link — in title bar, no title label (title comes from content)
+- ✅ **Aa text style popover:** Inline styles (B/I/U/S/highlight), alignment, paragraph styles (Title/Heading/Subheading/Body/Monostyled), lists, block elements — all with active state indicators
+- ✅ **New formatting:** Strikethrough, highlight, block quote, horizontal rule, heading levels, code block — via Aa popover
+- ✅ **TipTap highlight extension:** `@tiptap/extension-highlight` installed and wired
+- ✅ **Format state reporting:** JS→Swift bridge reports active marks/nodes on every selection change
+- ✅ **Note pinning:** Pin/unpin via context menu, pinned notes sort to top, persisted in index
+- ✅ **Old toolbar removed:** Flat scrollable toolbar strip replaced by compact title bar icons
 
 ---
 
@@ -422,7 +425,6 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | Similar items discovery | Cosine similarity suggestions in detail view |
 | Group-by | Group items by date, type, domain, tags with collapsible headers |
 | Web archival | .webarchive snapshots for offline access |
-| Compact notes formatting toolbar | Grouped dropdowns instead of flat icon strip |
 | Related links per bookmark | Multiple URLs for one entity (App Store + GitHub + docs) |
 | Quick-capture inline text field | Type and hit Enter to create note/bookmark from Home |
 
@@ -440,7 +442,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-06 | Date Card Surfacing Completion | 2 | ✅ Complete |
 | R-07 | AI Auto-Tag Quality | 2 | ✅ Complete |
 | R-08 | Keyboard Navigation | 2 | ✅ Complete |
-| R-09 | Notes Editor Polish | 2 | Not Started |
+| R-09 | Notes Editor Polish | 2 | Testing |
 | R-10 | Custom Folder Icons | 2 | Not Started |
 | R-11 | Drag Out to External Apps | 2 | Testing |
 | R-12 | Clipboard Viewer | 2 | Not Started |
@@ -522,6 +524,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Advanced image treatment | NOTES_VISION | Fanned/angled image stacks with click-to-cycle |
 | Interactive checkboxes on cards | NOTES_VISION | Toggle checkboxes without opening the editor |
 | Per-folder sort persistence | NOTES_VISION | Each folder remembers its own sort order/view mode |
+| Inline title (first H1 = display title) | R-09 | Apple Notes-style: first H1 in content becomes card title, filename stays decoupled (renameable via context menu) |
 | Plain text note format (.txt) | NOTES_VISION | `.txt` alongside `.md`, plain text editor, default format setting, +New picker |
 
 ### Bookmarks

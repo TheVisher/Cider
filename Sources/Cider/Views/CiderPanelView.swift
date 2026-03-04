@@ -1772,14 +1772,15 @@ struct CiderPanelView: View {
     }
 
     private var noteDetailPageView: some View {
-        let title = notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
-        return GenericItemDetailPanel(
-            title: title,
+        GenericItemDetailPanel(
+            title: "",
             detailViewMode: detailViewMode,
             showDragHandle: false,
+            showTitle: false,
             scrollsContent: false,
             onClose: closeNoteDetail,
-            onModeChange: changeDetailViewMode
+            onModeChange: changeDetailViewMode,
+            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) }
         ) {
             InlineNoteEditorView(viewModel: notesViewModel)
         }
@@ -1791,19 +1792,20 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var noteDetailSlideOutContainer: some View {
-        let title = notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
         GenericItemDetailPanel(
-            title: title,
+            title: "",
             detailViewMode: detailViewMode,
             width: min(detailSlideOutWidth, maxSlideOutWidth),
             maxWidth: maxSlideOutWidth,
+            showTitle: false,
             scrollsContent: false,
             onResize: { newWidth in
                 let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                 detailSlideOutWidth = clamped
             },
             onClose: closeNoteDetail,
-            onModeChange: changeDetailViewMode
+            onModeChange: changeDetailViewMode,
+            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) }
         ) {
             InlineNoteEditorView(viewModel: notesViewModel)
         }
@@ -1811,14 +1813,15 @@ struct CiderPanelView: View {
 
     @ViewBuilder
     private var noteDetailFullPanelOverlay: some View {
-        let title = notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
         GenericItemDetailPanel(
-            title: title,
+            title: "",
             detailViewMode: detailViewMode,
             showDragHandle: false,
+            showTitle: false,
             scrollsContent: false,
             onClose: closeNoteDetail,
-            onModeChange: changeDetailViewMode
+            onModeChange: changeDetailViewMode,
+            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) }
         ) {
             InlineNoteEditorView(viewModel: notesViewModel)
         }

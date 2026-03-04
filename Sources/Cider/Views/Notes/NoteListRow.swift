@@ -137,6 +137,9 @@ struct NoteListRow: View {
                 renamingTitle = note.title
                 isRenaming = true
             },
+            onTogglePin: {
+                NotesStorage.shared.togglePin(note.id)
+            },
             onMoveToFolder: onMoveToFolder,
             onDelete: onDelete,
             onToggleLabel: { labelID in

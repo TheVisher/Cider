@@ -5,13 +5,6 @@ struct InlineNoteEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.isFormattingToolbarPinned {
-                NotesFormattingToolbar(viewModel: viewModel)
-
-                Divider()
-                    .background(CiderColors.separator)
-            }
-
             if viewModel.selectedNote != nil, let state = viewModel.externalChangeState {
                 NotesExternalChangeBanner(
                     state: state,
@@ -40,88 +33,375 @@ struct InlineNoteEditorView: View {
     }
 }
 
-// MARK: - Formatting Toolbar
+// MARK: - Compact Formatting Toolbar (Title Bar)
 
-struct NotesFormattingToolbar: View {
+struct NotesCompactToolbar: View {
     @ObservedObject var viewModel: NotesViewModel
+    @State private var showTextStylePopover = false
+    @State private var showTablePopover = false
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Spacing.xs) {
-                    NotesToolbarButton(symbol: "arrow.uturn.backward", help: "Undo", action: viewModel.editorUndo)
-                    NotesToolbarButton(symbol: "arrow.uturn.forward", help: "Redo", action: viewModel.editorRedo)
-                    NotesToolbarDivider()
-                    NotesToolbarButton(symbol: "bold", help: "Bold", action: viewModel.editorToggleBold)
-                    NotesToolbarButton(symbol: "italic", help: "Italic", action: viewModel.editorToggleItalic)
-                    NotesToolbarButton(
-                        symbol: "underline",
-                        help: "Underline",
-                        action: viewModel.editorToggleUnderline
-                    )
-                    NotesToolbarDivider()
-                    NotesToolbarButton(
-                        symbol: "text.alignleft",
-                        help: "Align Left",
-                        action: viewModel.editorAlignLeft
-                    )
-                    NotesToolbarButton(
-                        symbol: "text.aligncenter",
-                        help: "Align Center",
-                        action: viewModel.editorAlignCenter
-                    )
-                    NotesToolbarButton(
-                        symbol: "text.alignright",
-                        help: "Align Right",
-                        action: viewModel.editorAlignRight
-                    )
-                    NotesToolbarDivider()
-                    NotesToolbarButton(
-                        symbol: "link.badge.plus",
-                        help: "Add Link",
-                        action: viewModel.editorPromptForLink
-                    )
-                    NotesToolbarButton(
-                        symbol: "link",
-                        help: "Remove Link",
-                        action: viewModel.editorRemoveLink
-                    )
-                    NotesToolbarDivider()
-                    NotesToolbarButton(
-                        symbol: "list.bullet",
-                        help: "Bullet List",
-                        action: viewModel.editorToggleBulletList
-                    )
-                    NotesToolbarButton(
-                        symbol: "list.number",
-                        help: "Numbered List",
-                        action: viewModel.editorToggleOrderedList
-                    )
-                    NotesToolbarButton(
-                        symbol: "checklist",
-                        help: "Task List",
-                        action: viewModel.editorToggleTaskList
-                    )
-                    NotesToolbarDivider()
-                    NotesToolbarButton(
-                        symbol: "tablecells",
-                        help: "Insert Table",
-                        action: viewModel.editorInsertTable
-                    )
+            NotesToolbarButton(symbol: "arrow.uturn.backward", help: "Undo", action: viewModel.editorUndo)
+            NotesToolbarButton(symbol: "arrow.uturn.forward", help: "Redo", action: viewModel.editorRedo)
+
+            NotesToolbarDivider()
+
+            Button {
+                showTextStylePopover.toggle()
+            } label: {
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(showTextStylePopover ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                    .overlay {
+                        Text("Aa")
+                            .font(.system(size: NotesDesign.toolbarIconSize + 1, weight: .semibold, design: .rounded))
+                            .foregroundColor(showTextStylePopover ? CiderColors.controlAccent : CiderColors.secondary)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help("Text Styles")
+            .popover(isPresented: $showTextStylePopover, arrowEdge: .bottom) {
+                NotesTextStylePopover(viewModel: viewModel)
+            }
+
+            NotesToolbarDivider()
+
+            Button {
+                showTablePopover.toggle()
+            } label: {
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(showTablePopover ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                    .overlay {
+                        Image(systemName: "tablecells")
+                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .foregroundColor(showTablePopover ? CiderColors.controlAccent : CiderColors.secondary)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help("Table")
+            .popover(isPresented: $showTablePopover, arrowEdge: .bottom) {
+                NotesTablePopover(viewModel: viewModel, isPresented: $showTablePopover)
+            }
+
+            NotesToolbarButton(symbol: "link.badge.plus", help: "Add Link", action: viewModel.editorPromptForLink)
+        }
+        .disabled(viewModel.selectedNote == nil && viewModel.activeExternalFile == nil)
+    }
+}
+
+// MARK: - Text Style Popover
+
+struct NotesTextStylePopover: View {
+    @ObservedObject var viewModel: NotesViewModel
+
+    private var fmt: EditorFormatState { viewModel.editorFormatState }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Section 1: Inline styles
+            HStack(spacing: Spacing.xs) {
+                inlineToggle("B", font: .system(size: 13, weight: .bold), active: fmt.bold, action: viewModel.editorToggleBold)
+                inlineToggle("I", font: .system(size: 13, weight: .regular, design: .serif).italic(), active: fmt.italic, action: viewModel.editorToggleItalic)
+                inlineToggle("U", font: .system(size: 13, weight: .medium), active: fmt.underline, action: viewModel.editorToggleUnderline, underlined: true)
+                inlineToggle("S", font: .system(size: 13, weight: .medium), active: fmt.strike, action: viewModel.editorToggleStrike, strikethrough: true)
+                inlineToggleIcon("highlighter", active: fmt.highlight, action: viewModel.editorToggleHighlight)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+
+            // Section 2: Text alignment
+            HStack(spacing: Spacing.xs) {
+                alignButton("text.alignleft", alignment: "left")
+                alignButton("text.aligncenter", alignment: "center")
+                alignButton("text.alignright", alignment: "right")
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.sm)
+
+            Divider().padding(.horizontal, Spacing.sm)
+
+            // Section 3: Paragraph styles
+            VStack(alignment: .leading, spacing: 0) {
+                paragraphRow("Title", active: fmt.heading == 1) { viewModel.editorSetHeading(1) }
+                paragraphRow("Heading", active: fmt.heading == 2) { viewModel.editorSetHeading(2) }
+                paragraphRow("Subheading", active: fmt.heading == 3) { viewModel.editorSetHeading(3) }
+                paragraphRow("Body", active: fmt.heading == 0 && !fmt.codeBlock) { viewModel.editorSetParagraph() }
+                paragraphRow("Monostyled", active: fmt.codeBlock) { viewModel.editorToggleCodeBlock() }
+            }
+            .padding(.vertical, Spacing.xs)
+
+            Divider().padding(.horizontal, Spacing.sm)
+
+            // Section 4: Lists
+            VStack(alignment: .leading, spacing: 0) {
+                listRow("list.bullet", title: "Bulleted List", active: fmt.bulletList, action: viewModel.editorToggleBulletList)
+                listRow("list.number", title: "Numbered List", active: fmt.orderedList, action: viewModel.editorToggleOrderedList)
+                listRow("checklist", title: "Task List", active: fmt.taskList, action: viewModel.editorToggleTaskList)
+            }
+            .padding(.vertical, Spacing.xs)
+
+            Divider().padding(.horizontal, Spacing.sm)
+
+            // Section 5: Block elements
+            VStack(alignment: .leading, spacing: 0) {
+                listRow("text.quote", title: "Block Quote", active: fmt.blockquote, action: viewModel.editorToggleBlockquote)
+                listRow("minus", title: "Horizontal Rule", active: false, action: viewModel.editorInsertHorizontalRule)
+            }
+            .padding(.vertical, Spacing.xs)
+        }
+        .frame(width: 200)
+    }
+
+    // MARK: - Inline toggle button
+
+    @ViewBuilder
+    private func inlineToggle(
+        _ label: String,
+        font: Font,
+        active: Bool,
+        action: @escaping () -> Void,
+        underlined: Bool = false,
+        strikethrough: Bool = false
+    ) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(font)
+                .underline(underlined)
+                .strikethrough(strikethrough)
+                .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(active ? CiderColors.accentSubtle : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func inlineToggleIcon(_ symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(active ? CiderColors.accentSubtle : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Alignment button
+
+    @ViewBuilder
+    private func alignButton(_ symbol: String, alignment: String) -> some View {
+        let active = fmt.textAlign == alignment
+        Button {
+            switch alignment {
+            case "left": viewModel.editorAlignLeft()
+            case "center": viewModel.editorAlignCenter()
+            case "right": viewModel.editorAlignRight()
+            default: break
+            }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(active ? CiderColors.accentSubtle : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Paragraph style row
+
+    @ViewBuilder
+    private func paragraphRow(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 16)
+                    .opacity(active ? 1 : 0)
+
+                Text(title)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs + 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - List / block row
+
+    @ViewBuilder
+    private func listRow(_ symbol: String, title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 16)
+                    .opacity(active ? 1 : 0)
+
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(width: 16)
+
+                Text(title)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs + 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Table Popover
+
+struct NotesTablePopover: View {
+    @ObservedObject var viewModel: NotesViewModel
+    @Binding var isPresented: Bool
+    @State private var hoveredRow = 0
+    @State private var hoveredCol = 0
+
+    private let gridSize = 5
+    private let cellSize: CGFloat = 18
+    private let cellSpacing: CGFloat = 2
+
+    private var fmt: EditorFormatState { viewModel.editorFormatState }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Grid picker
+            VStack(spacing: cellSpacing) {
+                ForEach(1...gridSize, id: \.self) { row in
+                    HStack(spacing: cellSpacing) {
+                        ForEach(1...gridSize, id: \.self) { col in
+                            let highlighted = hoveredRow > 0 && hoveredCol > 0 && row <= hoveredRow && col <= hoveredCol
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(highlighted ? CiderColors.controlAccent : CiderColors.separatorSubtle)
+                                .frame(width: cellSize, height: cellSize)
+                                .onHover { isHovered in
+                                    if isHovered {
+                                        hoveredRow = row
+                                        hoveredCol = col
+                                    }
+                                }
+                                .onTapGesture {
+                                    viewModel.editorInsertTable(rows: row, cols: col)
+                                    isPresented = false
+                                }
+                        }
+                    }
                 }
-                .padding(.horizontal, Spacing.md)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.top, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
+            .onHover { isHovered in
+                if !isHovered {
+                    hoveredRow = 0
+                    hoveredCol = 0
+                }
+            }
+
+            Text(hoveredRow > 0 && hoveredCol > 0 ? "\(hoveredCol) \u{00D7} \(hoveredRow)" : "Insert Table")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, Spacing.sm)
+
+            if fmt.inTable {
+                Divider().padding(.horizontal, Spacing.sm)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    tableRow("arrow.up", title: "Add Row Above", action: viewModel.editorAddRowBefore)
+                    tableRow("arrow.down", title: "Add Row Below", action: viewModel.editorAddRowAfter)
+                    tableRow("trash", title: "Delete Row", destructive: true, action: viewModel.editorDeleteRow)
+                }
+                .padding(.vertical, Spacing.xs)
+
+                Divider().padding(.horizontal, Spacing.sm)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    tableRow("arrow.left", title: "Add Column Left", action: viewModel.editorAddColumnBefore)
+                    tableRow("arrow.right", title: "Add Column Right", action: viewModel.editorAddColumnAfter)
+                    tableRow("trash", title: "Delete Column", destructive: true, action: viewModel.editorDeleteColumn)
+                }
+                .padding(.vertical, Spacing.xs)
+
+                Divider().padding(.horizontal, Spacing.sm)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    tableRow("rectangle.compress.vertical", title: "Merge Cells", action: viewModel.editorMergeCells)
+                    tableRow("rectangle.expand.vertical", title: "Split Cell", action: viewModel.editorSplitCell)
+                }
+                .padding(.vertical, Spacing.xs)
+
+                Divider().padding(.horizontal, Spacing.sm)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    tableRow("tablecells.badge.ellipsis", title: "Toggle Header Row", action: viewModel.editorToggleHeaderRow)
+                    tableRow("tablecells.badge.ellipsis", title: "Toggle Header Column", action: viewModel.editorToggleHeaderColumn)
+                }
+                .padding(.vertical, Spacing.xs)
+
+                Divider().padding(.horizontal, Spacing.sm)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    tableRow("trash", title: "Delete Table", destructive: true, action: viewModel.editorDeleteTable)
+                }
                 .padding(.vertical, Spacing.xs)
             }
-            .disabled(viewModel.selectedNote == nil)
-
-            NotesToolbarButton(
-                symbol: "pin.slash",
-                help: "Unpin Toolbar",
-                action: { viewModel.setFormattingToolbarPinned(false) }
-            )
-            .padding(.trailing, Spacing.md)
         }
-        .frame(height: NotesDesign.toolbarHeight)
+        .frame(width: 200)
+    }
+
+    @ViewBuilder
+    private func tableRow(
+        _ symbol: String,
+        title: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(destructive ? CiderColors.destructive : CiderColors.secondary)
+                    .frame(width: 16)
+
+                Text(title)
+                    .font(CiderFont.body)
+                    .foregroundColor(destructive ? CiderColors.destructive : CiderColors.primary)
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs + 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

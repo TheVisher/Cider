@@ -4,16 +4,18 @@ import SwiftUI
 /// Provides the same toolbar, drag handle, acrylic background, and view-mode switcher
 /// as DetailSlideOutView, but with a single scrollable content column instead of a
 /// hero + metadata sidebar split.
-struct GenericItemDetailPanel<Content: View>: View {
+struct GenericItemDetailPanel<Content: View, ToolbarExtra: View>: View {
     var title: String
     var detailViewMode: DetailViewMode
     var width: CGFloat = 0
     var maxWidth: CGFloat = 0
     var showDragHandle: Bool = true
+    var showTitle: Bool = true
     var scrollsContent: Bool = true
     var onResize: (CGFloat) -> Void = { _ in }
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
+    @ViewBuilder var toolbarExtra: () -> ToolbarExtra
     @ViewBuilder var content: () -> Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -71,40 +73,50 @@ struct GenericItemDetailPanel<Content: View>: View {
 
     @ViewBuilder
     private var toolbar: some View {
-        HStack(spacing: Spacing.sm) {
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+        ZStack {
+            // Center layer: toolbar extras or title
+            if showTitle {
+                Text(title)
+                    .font(CiderFont.labelMedium(scale: textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            } else {
+                toolbarExtra()
             }
-            .buttonStyle(.plain)
-            .help("Close")
 
-            Spacer(minLength: 0)
-
-            Text(title)
-                .font(CiderFont.labelMedium(scale: textScale))
-                .foregroundColor(CiderColors.tertiary)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-
-            ForEach(DetailViewMode.allCases, id: \.self) { mode in
+            // Edge layer: close button (left) + view modes (right)
+            HStack(spacing: Spacing.sm) {
                 Button {
-                    onModeChange(mode)
+                    onClose()
                 } label: {
-                    Image(systemName: modeIcon(mode))
-                        .font(CiderFont.label)
-                        .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
-                        .frame(width: 24, height: 24)
+                    Image(systemName: "xmark")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(mode.displayName)
+                .help("Close")
+
+                if showTitle {
+                    toolbarExtra()
+                }
+
+                Spacer(minLength: 0)
+
+                ForEach(DetailViewMode.allCases, id: \.self) { mode in
+                    Button {
+                        onModeChange(mode)
+                    } label: {
+                        Image(systemName: modeIcon(mode))
+                            .font(CiderFont.label)
+                            .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(mode.displayName)
+                }
             }
         }
     }
@@ -115,5 +127,36 @@ struct GenericItemDetailPanel<Content: View>: View {
         case .fullPanel: return "rectangle"
         case .page: return "rectangle.fill"
         }
+    }
+}
+
+// MARK: - Convenience initializer for callers without toolbar extras
+
+extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
+    init(
+        title: String,
+        detailViewMode: DetailViewMode,
+        width: CGFloat = 0,
+        maxWidth: CGFloat = 0,
+        showDragHandle: Bool = true,
+        showTitle: Bool = true,
+        scrollsContent: Bool = true,
+        onResize: @escaping (CGFloat) -> Void = { _ in },
+        onClose: @escaping () -> Void,
+        onModeChange: @escaping (DetailViewMode) -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.detailViewMode = detailViewMode
+        self.width = width
+        self.maxWidth = maxWidth
+        self.showDragHandle = showDragHandle
+        self.showTitle = showTitle
+        self.scrollsContent = scrollsContent
+        self.onResize = onResize
+        self.onClose = onClose
+        self.onModeChange = onModeChange
+        self.toolbarExtra = { EmptyView() }
+        self.content = content
     }
 }

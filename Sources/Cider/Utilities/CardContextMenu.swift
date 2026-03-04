@@ -172,6 +172,7 @@ extension View {
         folders: [Folder],
         onOpen: @escaping () -> Void,
         onRename: @escaping () -> Void,
+        onTogglePin: @escaping () -> Void,
         onMoveToFolder: @escaping (UUID?) -> Void,
         onDelete: @escaping () -> Void,
         onToggleLabel: ((UUID) -> Void)? = nil,
@@ -181,7 +182,8 @@ extension View {
         modifier(CardContextMenuModifier {
             var items: [CardMenuItem] = [
                 .action(title: "Open", callback: onOpen),
-                .action(title: "Rename", callback: onRename)
+                .action(title: "Rename", callback: onRename),
+                .action(title: note.isPinned ? "Unpin Note" : "Pin Note", callback: onTogglePin)
             ]
             if let onToggleLabel {
                 items += tagMenuItems(itemLabelIDs: note.labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)

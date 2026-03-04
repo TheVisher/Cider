@@ -42,15 +42,17 @@ final class NotesStorage: ObservableObject {
         var sourceURL: String?
         /// Filename under `{notesDir}/.attachments/` for an associated screenshot.
         var sourceImageFilename: String?
+        var isPinned: Bool?
 
         init(filename: String, folderID: UUID? = nil, labelIDs: [UUID]? = nil, createdAt: Date? = nil,
-             sourceURL: String? = nil, sourceImageFilename: String? = nil) {
+             sourceURL: String? = nil, sourceImageFilename: String? = nil, isPinned: Bool? = nil) {
             self.filename = filename
             self.folderID = folderID
             self.labelIDs = labelIDs
             self.createdAt = createdAt
             self.sourceURL = sourceURL
             self.sourceImageFilename = sourceImageFilename
+            self.isPinned = isPinned
         }
     }
 
@@ -182,8 +184,10 @@ final class NotesStorage: ObservableObject {
 
             let title = String(filename.dropLast(3)) // Remove .md
             let uuid = filenameToUUID[filename] ?? UUID()
-            let folderID = index[uuid]?.folderID
-            let labelIDs = index[uuid]?.labelIDs ?? []
+            let existingEntry = index[uuid]
+            let folderID = existingEntry?.folderID
+            let labelIDs = existingEntry?.labelIDs ?? []
+            let isPinned = existingEntry?.isPinned ?? false
 
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             let modDate = attrs?[.modificationDate] as? Date ?? Date()
@@ -191,12 +195,11 @@ final class NotesStorage: ObservableObject {
 
             // Use persisted createdAt from index (survives atomic file writes).
             // Fall back to filesystem creation date for legacy notes without it.
-            let existingEntry = index[uuid]
             let createDate = existingEntry?.createdAt ?? fsCreateDate
 
             // Register in index if new, or backfill createdAt if missing
             if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
-                index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate)
+                index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate, isPinned: isPinned ? true : nil)
             }
 
             // Lazy: don't load content during scan
@@ -208,20 +211,24 @@ final class NotesStorage: ObservableObject {
                 modifiedAt: modDate,
                 relativePath: filename,
                 labelIDs: labelIDs,
-                folderID: folderID
+                folderID: folderID,
+                isPinned: isPinned
             ))
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID, labelIDs, and createdAt from existing entries.
+        // cleaned up automatically. Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
         let previousIndex = index
         let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt))
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
         })
         index = rebuiltIndex
 
-        // Sort by newest created first
-        scannedNotes.sort { $0.createdAt > $1.createdAt }
+        // Sort: pinned first, then by newest created
+        scannedNotes.sort { a, b in
+            if a.isPinned != b.isPinned { return a.isPinned }
+            return a.createdAt > b.createdAt
+        }
         notes = scannedNotes
         if rebuiltIndex != previousIndex {
             saveIndex()
@@ -282,8 +289,10 @@ final class NotesStorage: ObservableObject {
 
             let title = String(filename.dropLast(3)) // Remove .md
             let uuid = filenameToUUID[filename] ?? UUID()
-            let folderID = workingIndex[uuid]?.folderID
-            let labelIDs = workingIndex[uuid]?.labelIDs ?? []
+            let existingEntry = workingIndex[uuid]
+            let folderID = existingEntry?.folderID
+            let labelIDs = existingEntry?.labelIDs ?? []
+            let isPinned = existingEntry?.isPinned ?? false
 
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             let modDate = attrs?[.modificationDate] as? Date ?? Date()
@@ -291,12 +300,11 @@ final class NotesStorage: ObservableObject {
 
             // Use persisted createdAt from index (survives atomic file writes).
             // Fall back to filesystem creation date for legacy notes without it.
-            let existingEntry = workingIndex[uuid]
             let createDate = existingEntry?.createdAt ?? fsCreateDate
 
             // Register in index if new, or backfill createdAt if missing
             if filenameToUUID[filename] == nil || existingEntry?.createdAt == nil {
-                workingIndex[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate)
+                workingIndex[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate, isPinned: isPinned ? true : nil)
             }
 
             // Lazy: don't load content during scan
@@ -308,18 +316,22 @@ final class NotesStorage: ObservableObject {
                 modifiedAt: modDate,
                 relativePath: filename,
                 labelIDs: labelIDs,
-                folderID: folderID
+                folderID: folderID,
+                isPinned: isPinned
             ))
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID, labelIDs, and createdAt from existing entries.
+        // cleaned up automatically. Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
         let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt))
+            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
         })
 
-        // Sort by newest created first
-        scannedNotes.sort { $0.createdAt > $1.createdAt }
+        // Sort: pinned first, then by newest created
+        scannedNotes.sort { a, b in
+            if a.isPinned != b.isPinned { return a.isPinned }
+            return a.createdAt > b.createdAt
+        }
 
         let needsSave = rebuiltIndex != loadedIndex
         return (index: rebuiltIndex, notes: scannedNotes, needsSave: needsSave)
@@ -503,6 +515,18 @@ final class NotesStorage: ObservableObject {
         } catch {
             NSLog("[NotesStorage] Rename failed: \(error)")
         }
+    }
+
+    @discardableResult
+    func togglePin(_ noteID: UUID) -> Bool {
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        notes[idx].isPinned.toggle()
+        if var entry = index[noteID] {
+            entry.isPinned = notes[idx].isPinned ? true : nil
+            index[noteID] = entry
+        }
+        saveIndex()
+        return true
     }
 
     @discardableResult

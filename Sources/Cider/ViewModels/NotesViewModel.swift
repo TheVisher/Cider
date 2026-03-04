@@ -3,6 +3,23 @@ import Combine
 import WebKit
 import AppKit
 
+struct EditorFormatState: Equatable {
+    var bold = false
+    var italic = false
+    var underline = false
+    var strike = false
+    var highlight = false
+    var link = false
+    var bulletList = false
+    var orderedList = false
+    var taskList = false
+    var blockquote = false
+    var codeBlock = false
+    var inTable = false
+    var heading: Int = 0       // 0=paragraph, 1=H1, 2=H2, 3=H3
+    var textAlign: String = "left"
+}
+
 struct NotesExternalChangeState: Equatable {
     let modifiedAt: Date
 }
@@ -32,14 +49,7 @@ final class NotesViewModel: ObservableObject {
     @Published var findMatchIndex: Int = 0
     @Published var findFocusToken = UUID()
     @Published private(set) var notesEditorTextSize: NotesEditorTextSize
-    @Published var isFormattingToolbarPinned: Bool {
-        didSet {
-            UserDefaults.standard.set(
-                isFormattingToolbarPinned,
-                forKey: Self.formattingToolbarPinnedStorageKey
-            )
-        }
-    }
+    @Published var editorFormatState = EditorFormatState()
 
     /// The singleton editor WebView, created on first access via `ensureEditorWebView()`.
     private(set) var editorWebView: WKWebView?
@@ -55,8 +65,6 @@ final class NotesViewModel: ObservableObject {
     private var isLoadingExternalFile = false
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
-    private static let formattingToolbarPinnedStorageKey = "cider.notes.formattingToolbarPinned"
-
     var notes: [Note] {
         NotesStorage.shared.notes
     }
@@ -64,6 +72,11 @@ final class NotesViewModel: ObservableObject {
     @discardableResult
     func assignNote(_ note: Note, toFolder folderID: UUID?) -> Bool {
         NotesStorage.shared.assignNote(note.id, toFolder: folderID)
+    }
+
+    @discardableResult
+    func toggleNotePinned(_ note: Note) -> Bool {
+        NotesStorage.shared.togglePin(note.id)
     }
 
     var filteredNotes: [Note] {
@@ -133,9 +146,6 @@ final class NotesViewModel: ObservableObject {
         self.displayMode = config.notesDefaultViewMode
         self.cardSizeScale = config.notesCardSizeScale ?? 1.0
         self.notesEditorTextSize = config.notesEditorTextSize
-        self.isFormattingToolbarPinned = UserDefaults.standard.bool(
-            forKey: Self.formattingToolbarPinnedStorageKey
-        )
 
         // Observe storage changes
         NotesStorage.shared.$notes
@@ -185,7 +195,7 @@ final class NotesViewModel: ObservableObject {
         contentController.add(coordinator, name: "imageDropped")
         contentController.add(coordinator, name: "slashCommandImage")
         contentController.add(coordinator, name: "slashPopupState")
-        contentController.add(coordinator, name: "floatingToolbarState")
+        contentController.add(coordinator, name: "editorFormatState")
         contentController.add(coordinator, name: "editorError")
         contentController.add(coordinator, name: "editorRequestClose")
         contentController.add(coordinator, name: "linkClicked")
@@ -502,6 +512,13 @@ final class NotesViewModel: ObservableObject {
         saveWorkItem = nil
 
         if let externalFile = activeExternalFile {
+            // Safety: don't save if the editor never confirmed loading the file.
+            // The round-trip contentChanged hasn't fired yet — editingContent may
+            // be stale or empty if JS crashed.
+            guard !isLoadingExternalFile else {
+                hasPendingSave = false
+                return
+            }
             let content = editingContent
             guard content != lastSyncedDiskContent else {
                 hasPendingSave = false
@@ -517,6 +534,14 @@ final class NotesViewModel: ObservableObject {
         }
 
         guard var note = selectedNote else { return }
+
+        // Safety: don't save if the editor never confirmed loading the note.
+        // isLoadingNote stays true until the first contentChanged round-trip
+        // completes. If JS crashes, this prevents overwriting disk content.
+        guard !isLoadingNote else {
+            hasPendingSave = false
+            return
+        }
 
         // Save the latest known content immediately.
         note.content = editingContent
@@ -804,8 +829,9 @@ final class NotesViewModel: ObservableObject {
         runEditorCommand("toggleTaskList")
     }
 
-    func editorInsertTable() {
-        runEditorCommand("insertTable")
+    func editorInsertTable(rows: Int = 3, cols: Int = 3) {
+        guard editorIsReady, let webView = editorWebView else { return }
+        webView.evaluateJavaScript("window.editorAPI.insertTable(\(rows), \(cols));")
     }
 
     func editorAddRowBefore() {
@@ -861,12 +887,51 @@ final class NotesViewModel: ObservableObject {
         runEditorCommand("unsetLink")
     }
 
-    func toggleFormattingToolbarPinned() {
-        isFormattingToolbarPinned.toggle()
+    func editorToggleStrike() {
+        runEditorCommand("toggleStrike")
     }
 
-    func setFormattingToolbarPinned(_ pinned: Bool) {
-        isFormattingToolbarPinned = pinned
+    func editorToggleBlockquote() {
+        runEditorCommand("toggleBlockquote")
+    }
+
+    func editorInsertHorizontalRule() {
+        runEditorCommand("setHorizontalRule")
+    }
+
+    func editorToggleHighlight() {
+        runEditorCommand("toggleHighlight")
+    }
+
+    func editorSetHeading(_ level: Int) {
+        runEditorCommand("setHeading", intArgument: level)
+    }
+
+    func editorSetParagraph() {
+        runEditorCommand("setParagraph")
+    }
+
+    func editorToggleCodeBlock() {
+        runEditorCommand("toggleCodeBlock")
+    }
+
+    func updateEditorFormatState(_ payload: [String: Any]) {
+        var state = EditorFormatState()
+        state.bold = payload["bold"] as? Bool ?? false
+        state.italic = payload["italic"] as? Bool ?? false
+        state.underline = payload["underline"] as? Bool ?? false
+        state.strike = payload["strike"] as? Bool ?? false
+        state.highlight = payload["highlight"] as? Bool ?? false
+        state.link = payload["link"] as? Bool ?? false
+        state.bulletList = payload["bulletList"] as? Bool ?? false
+        state.orderedList = payload["orderedList"] as? Bool ?? false
+        state.taskList = payload["taskList"] as? Bool ?? false
+        state.blockquote = payload["blockquote"] as? Bool ?? false
+        state.codeBlock = payload["codeBlock"] as? Bool ?? false
+        state.inTable = payload["inTable"] as? Bool ?? false
+        state.heading = payload["heading"] as? Int ?? 0
+        state.textAlign = payload["textAlign"] as? String ?? "left"
+        editorFormatState = state
     }
 
     @discardableResult
@@ -910,7 +975,7 @@ final class NotesViewModel: ObservableObject {
         return true
     }
 
-    private func runEditorCommand(_ command: String, stringArgument: String? = nil) {
+    private func runEditorCommand(_ command: String, stringArgument: String? = nil, intArgument: Int? = nil) {
         guard editorIsReady, let webView = editorWebView else { return }
 
         if let stringArgument {
@@ -918,6 +983,11 @@ final class NotesViewModel: ObservableObject {
                 withJSONObject: stringArgument, options: .fragmentsAllowed
             ), let argumentJSON = String(data: argumentData, encoding: .utf8) else { return }
             webView.evaluateJavaScript("window.editorAPI.\(command)(\(argumentJSON));")
+            return
+        }
+
+        if let intArgument {
+            webView.evaluateJavaScript("window.editorAPI.\(command)(\(intArgument));")
             return
         }
 

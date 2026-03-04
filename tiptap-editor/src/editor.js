@@ -8,6 +8,7 @@ import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Image from '@tiptap/extension-image';
 import Heading from '@tiptap/extension-heading';
+import Highlight from '@tiptap/extension-highlight';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import Paragraph from '@tiptap/extension-paragraph';
@@ -1203,377 +1204,31 @@ window._slashPopup = {
   updateUI: null,
 };
 
-const floatingToolbarActionGroups = {
-  text: [
-    {
-      id: 'text-bold',
-      label: 'B',
-      title: 'Bold',
-      run: currentEditor => currentEditor.chain().focus().toggleBold().run(),
-      isActive: currentEditor => currentEditor.isActive('bold'),
-    },
-    {
-      id: 'text-italic',
-      label: 'I',
-      title: 'Italic',
-      run: currentEditor => currentEditor.chain().focus().toggleItalic().run(),
-      isActive: currentEditor => currentEditor.isActive('italic'),
-    },
-    {
-      id: 'text-underline',
-      label: 'U',
-      title: 'Underline',
-      run: currentEditor => currentEditor.chain().focus().toggleUnderline().run(),
-      isActive: currentEditor => currentEditor.isActive('underline'),
-    },
-    {
-      id: 'text-bullets',
-      label: '•',
-      title: 'Bullet List',
-      run: currentEditor => currentEditor.chain().focus().toggleBulletList().run(),
-      isActive: currentEditor => currentEditor.isActive('bulletList'),
-    },
-    {
-      id: 'text-numbered',
-      label: '1.',
-      title: 'Numbered List',
-      run: currentEditor => currentEditor.chain().focus().toggleOrderedList().run(),
-      isActive: currentEditor => currentEditor.isActive('orderedList'),
-    },
-    {
-      id: 'text-task',
-      label: '☑',
-      title: 'Task List',
-      run: currentEditor => currentEditor.chain().focus().toggleTaskList().run(),
-      isActive: currentEditor => currentEditor.isActive('taskList'),
-    },
-  ],
-  table: [
-    {
-      id: 'table-row-before',
-      label: 'Row↑',
-      title: 'Add Row Above',
-      run: currentEditor => currentEditor.chain().focus().addRowBefore().run(),
-      isEnabled: currentEditor => currentEditor.can().addRowBefore(),
-    },
-    {
-      id: 'table-row-after',
-      label: 'Row↓',
-      title: 'Add Row Below',
-      run: currentEditor => currentEditor.chain().focus().addRowAfter().run(),
-      isEnabled: currentEditor => currentEditor.can().addRowAfter(),
-    },
-    {
-      id: 'table-row-delete',
-      label: '-Row',
-      title: 'Delete Row',
-      run: currentEditor => currentEditor.chain().focus().deleteRow().run(),
-      isEnabled: currentEditor => currentEditor.can().deleteRow(),
-    },
-    {
-      id: 'table-col-before',
-      label: 'Col←',
-      title: 'Add Column Left',
-      run: currentEditor => currentEditor.chain().focus().addColumnBefore().run(),
-      isEnabled: currentEditor => currentEditor.can().addColumnBefore(),
-    },
-    {
-      id: 'table-col-after',
-      label: 'Col→',
-      title: 'Add Column Right',
-      run: currentEditor => currentEditor.chain().focus().addColumnAfter().run(),
-      isEnabled: currentEditor => currentEditor.can().addColumnAfter(),
-    },
-    {
-      id: 'table-col-delete',
-      label: '-Col',
-      title: 'Delete Column',
-      run: currentEditor => currentEditor.chain().focus().deleteColumn().run(),
-      isEnabled: currentEditor => currentEditor.can().deleteColumn(),
-    },
-    {
-      id: 'table-merge',
-      label: 'Merge',
-      title: 'Merge Cells',
-      run: currentEditor => currentEditor.chain().focus().mergeCells().run(),
-      isEnabled: currentEditor => currentEditor.can().mergeCells(),
-    },
-    {
-      id: 'table-split',
-      label: 'Split',
-      title: 'Split Cell',
-      run: currentEditor => currentEditor.chain().focus().splitCell().run(),
-      isEnabled: currentEditor => currentEditor.can().splitCell(),
-    },
-    {
-      id: 'table-delete',
-      label: 'Del',
-      title: 'Delete Table',
-      run: currentEditor => currentEditor.chain().focus().deleteTable().run(),
-      isEnabled: currentEditor => currentEditor.can().deleteTable(),
-    },
-  ],
-};
-
-const floatingToolbarActionLookup = new Map(
-  Object.values(floatingToolbarActionGroups)
-    .flat()
-    .map(action => [action.id, action]),
-);
-
-function getFloatingToolbarActionState(action, currentEditor) {
-  const isEnabled = action.isEnabled ? Boolean(action.isEnabled(currentEditor)) : true;
-  const isActive = action.isActive ? Boolean(action.isActive(currentEditor)) : false;
-  return { isEnabled, isActive };
-}
-
-window._floatingToolbar = {
-  active: false,
-  popup: null,
-  context: null,
-  frame: null,
-  editor: null,
-  updateRaf: null,
-};
-
-function postFloatingToolbarStateToNative() {
-  const handler = window.webkit?.messageHandlers?.floatingToolbarState;
-  if (!handler) return;
-
-  const s = window._floatingToolbar;
-  if (!s.active || !s.popup) {
-    handler.postMessage({ active: false });
-    return;
-  }
-
-  const rect = s.popup.getBoundingClientRect();
-  handler.postMessage({
-    active: true,
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-  });
-}
-
-function resolveFloatingToolbarContext(currentEditor) {
-  if (!currentEditor?.isEditable || !currentEditor.isFocused) {
-    return null;
-  }
-
-  if (isSlashPopupActive()) {
-    return null;
-  }
-
-  if (currentEditor.isActive('table')) {
-    return 'table';
-  }
-
-  if (!currentEditor.state.selection.empty) {
-    return 'text';
-  }
-
-  return null;
-}
-
-function getFloatingToolbarAnchorRect(currentEditor) {
-  const { from, to, empty } = currentEditor.state.selection;
-  const start = currentEditor.view.coordsAtPos(from);
-  const end = empty ? start : currentEditor.view.coordsAtPos(to);
-
-  return {
-    left: Math.min(start.left, end.left),
-    right: Math.max(start.right, end.right),
-    top: Math.min(start.top, end.top),
-    bottom: Math.max(start.bottom, end.bottom),
+// Post current formatting state to Swift for compact toolbar active indicators
+function postEditorFormatState() {
+  if (!window.webkit?.messageHandlers?.editorFormatState) return;
+  const state = {
+    bold: editor.isActive('bold'),
+    italic: editor.isActive('italic'),
+    underline: editor.isActive('underline'),
+    strike: editor.isActive('strike'),
+    highlight: editor.isActive('highlight'),
+    link: editor.isActive('link'),
+    bulletList: editor.isActive('bulletList'),
+    orderedList: editor.isActive('orderedList'),
+    taskList: editor.isActive('taskList'),
+    blockquote: editor.isActive('blockquote'),
+    codeBlock: editor.isActive('codeBlock'),
+    inTable: editor.isActive('table'),
+    heading: editor.isActive('heading', { level: 1 }) ? 1
+           : editor.isActive('heading', { level: 2 }) ? 2
+           : editor.isActive('heading', { level: 3 }) ? 3
+           : 0,
+    textAlign: editor.isActive({ textAlign: 'center' }) ? 'center'
+             : editor.isActive({ textAlign: 'right' }) ? 'right'
+             : 'left',
   };
-}
-
-function createFloatingToolbarPopup() {
-  const popup = document.createElement('div');
-  popup.className = 'floating-editor-toolbar';
-  popup.addEventListener('mousedown', (event) => {
-    const button = event.target.closest('.floating-editor-toolbar-button');
-    if (!button) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const actionId = button.dataset.action;
-    if (typeof actionId === 'string') {
-      runFloatingToolbarAction(actionId);
-    }
-  });
-
-  document.body.appendChild(popup);
-  return popup;
-}
-
-function hideFloatingToolbar() {
-  const s = window._floatingToolbar;
-  if (s.popup) {
-    s.popup.style.display = 'none';
-  }
-  s.active = false;
-  s.frame = null;
-  postFloatingToolbarStateToNative();
-}
-
-function renderFloatingToolbar(context) {
-  const s = window._floatingToolbar;
-  if (!s.popup || !s.editor) return;
-
-  const actions = floatingToolbarActionGroups[context] ?? [];
-  s.popup.textContent = '';
-
-  actions.forEach(action => {
-    const { isEnabled, isActive } = getFloatingToolbarActionState(action, s.editor);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'floating-editor-toolbar-button';
-    if (isActive) {
-      button.classList.add('is-active');
-    }
-    if (!isEnabled) {
-      button.classList.add('is-disabled');
-      button.disabled = true;
-    }
-    button.dataset.action = action.id;
-    button.textContent = action.label;
-    button.title = action.title;
-    s.popup.appendChild(button);
-  });
-
-  s.context = context;
-}
-
-function positionFloatingToolbar(anchorRect) {
-  const s = window._floatingToolbar;
-  if (!s.popup) return;
-
-  const margin = 8;
-  const offset = 8;
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
-
-  const popupWidth = s.popup.offsetWidth;
-  const popupHeight = s.popup.offsetHeight;
-  const anchorMidX = anchorRect.left + ((anchorRect.right - anchorRect.left) / 2);
-
-  let left = anchorMidX - (popupWidth / 2);
-  let top = anchorRect.top - popupHeight - offset;
-
-  if (top < margin) {
-    top = anchorRect.bottom + offset;
-  }
-
-  left = Math.max(margin, Math.min(left, viewportWidth - popupWidth - margin));
-  top = Math.max(margin, Math.min(top, viewportHeight - popupHeight - margin));
-
-  s.popup.style.left = `${Math.round(left)}px`;
-  s.popup.style.top = `${Math.round(top)}px`;
-}
-
-function updateFloatingToolbar(forceRender = false) {
-  const s = window._floatingToolbar;
-  const currentEditor = s.editor;
-  if (!currentEditor) return;
-
-  const context = resolveFloatingToolbarContext(currentEditor);
-  if (!context) {
-    hideFloatingToolbar();
-    return;
-  }
-
-  if (!s.popup) {
-    s.popup = createFloatingToolbarPopup();
-  }
-
-  if (s.context !== context || forceRender) {
-    renderFloatingToolbar(context);
-  }
-
-  const anchorRect = getFloatingToolbarAnchorRect(currentEditor);
-  if (!anchorRect) {
-    hideFloatingToolbar();
-    return;
-  }
-
-  s.popup.style.display = 'flex';
-  positionFloatingToolbar(anchorRect);
-  s.active = true;
-  s.frame = anchorRect;
-  postFloatingToolbarStateToNative();
-}
-
-function requestFloatingToolbarUpdate(forceRender = false) {
-  const s = window._floatingToolbar;
-  if (s.updateRaf != null) {
-    cancelAnimationFrame(s.updateRaf);
-  }
-
-  s.updateRaf = requestAnimationFrame(() => {
-    s.updateRaf = null;
-    updateFloatingToolbar(forceRender);
-  });
-}
-
-function runFloatingToolbarAction(actionId) {
-  const s = window._floatingToolbar;
-  const currentEditor = s.editor;
-  if (!currentEditor) return false;
-
-  const action = floatingToolbarActionLookup.get(actionId);
-  if (!action) return false;
-
-  const { isEnabled } = getFloatingToolbarActionState(action, currentEditor);
-  if (!isEnabled) {
-    return false;
-  }
-
-  const didRun = action.run(currentEditor);
-  requestFloatingToolbarUpdate(true);
-  return Boolean(didRun);
-}
-
-function handleNativeFloatingToolbarClick(x, y) {
-  const s = window._floatingToolbar;
-  if (!s.active || !s.popup) {
-    return false;
-  }
-
-  const hoveredButton = s.popup.querySelector('.floating-editor-toolbar-button:hover');
-  if (hoveredButton) {
-    return runFloatingToolbarAction(hoveredButton.dataset.action);
-  }
-
-  if (Number.isFinite(x) && Number.isFinite(y)) {
-    const hit = document.elementFromPoint(x, y);
-    const button = hit?.closest('.floating-editor-toolbar-button');
-    if (button && s.popup.contains(button)) {
-      return runFloatingToolbarAction(button.dataset.action);
-    }
-  }
-
-  return false;
-}
-
-function initializeFloatingToolbar(currentEditor) {
-  const s = window._floatingToolbar;
-  s.editor = currentEditor;
-
-  const scrollHost = document.getElementById('editor');
-  if (scrollHost) {
-    scrollHost.addEventListener('scroll', () => requestFloatingToolbarUpdate());
-  }
-
-  window.addEventListener('resize', () => requestFloatingToolbarUpdate());
-
-  currentEditor.on('selectionUpdate', () => requestFloatingToolbarUpdate(true));
-  currentEditor.on('focus', () => requestFloatingToolbarUpdate(true));
-  currentEditor.on('blur', () => hideFloatingToolbar());
-
-  requestFloatingToolbarUpdate(true);
+  window.webkit.messageHandlers.editorFormatState.postMessage(state);
 }
 
 const noteFindHighlightPluginKey = new PluginKey('noteFindHighlight');
@@ -1995,6 +1650,7 @@ const editor = new Editor({
     TableCell,
     TableHeader,
     CiderImage.configure({ allowBase64: true, inline: true }),
+    Highlight.configure({ multicolor: false }),
     CodeBlockLowlight.configure({ lowlight }),
     Placeholder.configure({
       placeholder: 'Start writing, or type / for commands...',
@@ -2082,7 +1738,7 @@ const editor = new Editor({
     if (window.webkit?.messageHandlers?.contentChanged) {
       window.webkit.messageHandlers.contentChanged.postMessage(markdown);
     }
-    requestFloatingToolbarUpdate();
+    postEditorFormatState();
   },
   onCreate() {
     if (window.webkit?.messageHandlers?.editorReady) {
@@ -2093,7 +1749,8 @@ const editor = new Editor({
   },
 });
 
-initializeFloatingToolbar(editor);
+// Wire format state updates to editor events
+editor.on('selectionUpdate', () => { postEditorFormatState(); });
 
 // Toggle pointer cursor on links when Cmd key is held
 document.addEventListener('keydown', (e) => {
@@ -2117,8 +1774,8 @@ window.addEventListener('keydown', (event) => {
   // Let the image preview overlay handle its own Escape
   if (imagePreviewOverlay && imagePreviewOverlay.backdrop.style.display !== 'none') return;
 
-  // Slash popup and floating toolbar dismiss themselves
-  if (isSlashPopupActive() || window._floatingToolbar?.active) return;
+  // Slash popup dismisses itself
+  if (isSlashPopupActive()) return;
 
   if (window.webkit?.messageHandlers?.editorRequestClose) {
     event.preventDefault();
@@ -2332,8 +1989,10 @@ window.editorAPI = {
   toggleTaskList() {
     return editor.chain().focus().toggleTaskList().run();
   },
-  insertTable() {
-    return editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+  insertTable(rows, cols) {
+    rows = rows || 3;
+    cols = cols || 3;
+    return editor.chain().focus().insertTable({ rows, cols, withHeaderRow: false }).run();
   },
   addColumnBefore() {
     return editor.chain().focus().addColumnBefore().run();
@@ -2395,10 +2054,25 @@ window.editorAPI = {
   isSlashPopupActive() {
     return isSlashPopupActive();
   },
-  handleNativeFloatingToolbarClick(x, y) {
-    return handleNativeFloatingToolbarClick(x, y);
+  toggleStrike() {
+    return editor.chain().focus().toggleStrike().run();
   },
-  isFloatingToolbarActive() {
-    return Boolean(window._floatingToolbar?.active);
+  toggleBlockquote() {
+    return editor.chain().focus().toggleBlockquote().run();
+  },
+  setHorizontalRule() {
+    return editor.chain().focus().setHorizontalRule().run();
+  },
+  toggleHighlight() {
+    return editor.chain().focus().toggleHighlight().run();
+  },
+  setHeading(level) {
+    return editor.chain().focus().toggleHeading({ level }).run();
+  },
+  setParagraph() {
+    return editor.chain().focus().setParagraph().run();
+  },
+  toggleCodeBlock() {
+    return editor.chain().focus().toggleCodeBlock().run();
   },
 };
