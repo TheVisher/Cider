@@ -26,10 +26,19 @@ struct CiderPanelView: View {
     @State private var textScale: CGFloat = CiderConfig.load().textSize.scale
     // Detail view state (centralized)
     @State private var detailBookmarkID: UUID?
-    @State private var detailViewMode: DetailViewMode = CiderConfig.load().detailViewMode
+    @State private var bookmarkDetailViewMode: DetailViewMode = {
+        let config = CiderConfig.load()
+        return config.bookmarkDetailViewMode ?? config.detailViewMode
+    }()
+    @State private var noteDetailViewMode: DetailViewMode = {
+        let config = CiderConfig.load()
+        return config.noteDetailViewMode ?? config.detailViewMode
+    }()
     @State private var detailSlideOutWidth: CGFloat = CiderConfig.load().detailSlideOutWidth ?? 400
     @State private var detailsDraft: BookmarkDetailsDraft?
     @State private var detailsErrorMessage: String?
+    @State private var bookmarkHeroMode: BookmarkHeroMode = .thumbnail
+    @State private var bookmarkMetadataVisible: Bool = true
     @State private var detailWidthSaveTask: Task<Void, Never>?
     @State private var selectedDateCard: DateCard?
     @State private var selectedContact: ContactCard?
@@ -868,9 +877,15 @@ struct CiderPanelView: View {
     }
 
     private var isNoteDetailOpen: Bool { isEditorActive }
-    private var isNoteDetailSlideOut: Bool { isNoteDetailOpen && detailViewMode == .slideOut }
-    private var isNoteDetailFullPanel: Bool { isNoteDetailOpen && detailViewMode == .fullPanel }
-    private var isNoteDetailPageMode: Bool { isNoteDetailOpen && detailViewMode == .page }
+    private var isNoteDetailSlideOut: Bool { isNoteDetailOpen && noteDetailViewMode == .slideOut }
+    private var isNoteDetailFullPanel: Bool { isNoteDetailOpen && noteDetailViewMode == .fullPanel }
+    private var isNoteDetailPageMode: Bool { isNoteDetailOpen && noteDetailViewMode == .page }
+
+    /// Active detail view mode based on what's currently open
+    private var detailViewMode: DetailViewMode {
+        if isNoteDetailOpen { return noteDetailViewMode }
+        return bookmarkDetailViewMode
+    }
 
     private var contentArea: some View {
         ZStack {
@@ -1456,10 +1471,18 @@ struct CiderPanelView: View {
 
     private func changeDetailViewMode(_ mode: DetailViewMode) {
         withAnimation(reduceMotion ? .none : .snappy) {
-            detailViewMode = mode
+            if isNoteDetailOpen {
+                noteDetailViewMode = mode
+            } else {
+                bookmarkDetailViewMode = mode
+            }
         }
         var config = CiderConfig.load()
-        config.detailViewMode = mode
+        if isNoteDetailOpen {
+            config.noteDetailViewMode = mode
+        } else {
+            config.bookmarkDetailViewMode = mode
+        }
         config.save()
     }
 
@@ -1486,6 +1509,8 @@ struct CiderPanelView: View {
             width: min(detailSlideOutWidth, maxSlideOutWidth),
             maxWidth: maxSlideOutWidth,
             detailViewMode: detailViewMode,
+            isMetadataVisible: $bookmarkMetadataVisible,
+            heroMode: $bookmarkHeroMode,
             onResize: { newWidth in
                 let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                 detailSlideOutWidth = clamped
@@ -1518,6 +1543,8 @@ struct CiderPanelView: View {
                 errorMessage: detailsErrorMessage,
                 folders: bookmarksViewModel.folders,
                 detailViewMode: detailViewMode,
+                isMetadataVisible: $bookmarkMetadataVisible,
+                heroMode: $bookmarkHeroMode,
                 onDelete: deleteDetailBookmark,
                 onFolderChanged: assignDetailBookmarkToFolder,
                 onOpenURL: openDetailURL,
@@ -1664,6 +1691,20 @@ struct CiderPanelView: View {
 
         Spacer(minLength: Spacing.sm)
 
+        if isNoteDetailPageMode {
+            NotesCompactToolbar(viewModel: notesViewModel)
+            Spacer(minLength: Spacing.sm)
+            NotesInfoToggleButton(viewModel: notesViewModel)
+        }
+
+        if isDetailPageMode {
+            BookmarkPageToolbar(
+                hasURL: detailsDraft?.hasURL == true,
+                heroMode: $bookmarkHeroMode,
+                isMetadataVisible: $bookmarkMetadataVisible
+            )
+        }
+
         DetailViewModePicker(currentMode: detailViewMode, onChange: changeDetailViewMode)
     }
 
@@ -1695,6 +1736,8 @@ struct CiderPanelView: View {
             errorMessage: detailsErrorMessage,
             folders: bookmarksViewModel.folders,
             detailViewMode: detailViewMode,
+            isMetadataVisible: $bookmarkMetadataVisible,
+            heroMode: $bookmarkHeroMode,
             onDelete: deleteDetailBookmark,
             onFolderChanged: assignDetailBookmarkToFolder,
             onOpenURL: openDetailURL,
@@ -1752,21 +1795,9 @@ struct CiderPanelView: View {
     }
 
     private var noteDetailPageView: some View {
-        GenericItemDetailPanel(
-            title: "",
-            detailViewMode: detailViewMode,
-            showDragHandle: false,
-            showTitle: false,
-            scrollsContent: false,
-            onClose: closeNoteDetail,
-            onModeChange: changeDetailViewMode,
-            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
-            trailingExtra: { NotesInfoToggleButton(viewModel: notesViewModel) }
-        ) {
-            InlineNoteEditorView(viewModel: notesViewModel)
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.bottom, Spacing.md)
+        InlineNoteEditorView(viewModel: notesViewModel)
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
     }
 
     // MARK: - Note Detail Views

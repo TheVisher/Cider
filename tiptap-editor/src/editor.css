@@ -163,6 +163,13 @@ html, body {
   line-height: 1.5;
 }
 
+/* Highlight marks — dark-mode-friendly, semi-transparent */
+.tiptap-editor mark {
+  color: inherit;
+  border-radius: 2px;
+  padding: 1px 2px;
+}
+
 /* Syntax highlighting */
 .tiptap-editor pre .hljs-keyword { color: #ff7ab2; }
 .tiptap-editor pre .hljs-string { color: #ff8170; }

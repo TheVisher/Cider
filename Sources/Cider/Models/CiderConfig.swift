@@ -120,6 +120,8 @@ struct CiderConfig: Codable {
         case notesDefaultViewMode
         case notesCardSizeScale
         case detailViewMode
+        case bookmarkDetailViewMode
+        case noteDetailViewMode
         case detailSlideOutWidth
         case showContinueSection
         case continueSectionCollapsed
@@ -166,7 +168,9 @@ struct CiderConfig: Codable {
     var bookmarksCardSizeScale: Double?  // Continuous card size scale (0.0–3.0), overrides bookmarksCardSize
     var notesDefaultViewMode: NoteDisplayMode  // Default notes layout mode
     var notesCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for notes
-    var detailViewMode: DetailViewMode  // Three-mode detail view: slide-out, full panel, or page
+    var detailViewMode: DetailViewMode  // Legacy fallback for detail view mode
+    var bookmarkDetailViewMode: DetailViewMode?  // Per-type detail view mode for bookmarks
+    var noteDetailViewMode: DetailViewMode?  // Per-type detail view mode for notes
     var detailSlideOutWidth: CGFloat?  // Drag-resizable width of slide-out detail view (nil = 400)
     var showContinueSection: Bool  // Show the Continue section on the Home tab
     var continueSectionCollapsed: Bool  // Whether the Continue section is collapsed
@@ -215,6 +219,8 @@ struct CiderConfig: Codable {
             bookmarksCardSize: .comfortable,
             notesDefaultViewMode: .list,
             detailViewMode: .slideOut,
+            bookmarkDetailViewMode: nil,
+            noteDetailViewMode: nil,
             showContinueSection: true,
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
@@ -355,6 +361,8 @@ struct CiderConfig: Codable {
             let legacyMode = try legacyContainer.decodeIfPresent(String.self, forKey: .detailModalMode)
             detailViewMode = legacyMode == "expand" ? .fullPanel : .slideOut
         }
+        bookmarkDetailViewMode = try container.decodeIfPresent(DetailViewMode.self, forKey: .bookmarkDetailViewMode)
+        noteDetailViewMode = try container.decodeIfPresent(DetailViewMode.self, forKey: .noteDetailViewMode)
         detailSlideOutWidth = try container.decodeIfPresent(CGFloat.self, forKey: .detailSlideOutWidth)
         showContinueSection = try container.decodeIfPresent(
             Bool.self,
@@ -443,6 +451,8 @@ struct CiderConfig: Codable {
         notesDefaultViewMode: NoteDisplayMode = .list,
         notesCardSizeScale: Double? = nil,
         detailViewMode: DetailViewMode = .slideOut,
+        bookmarkDetailViewMode: DetailViewMode? = nil,
+        noteDetailViewMode: DetailViewMode? = nil,
         detailSlideOutWidth: CGFloat? = nil,
         showContinueSection: Bool = true,
         continueSectionCollapsed: Bool = false,
@@ -489,6 +499,8 @@ struct CiderConfig: Codable {
         self.notesDefaultViewMode = notesDefaultViewMode
         self.notesCardSizeScale = notesCardSizeScale
         self.detailViewMode = detailViewMode
+        self.bookmarkDetailViewMode = bookmarkDetailViewMode
+        self.noteDetailViewMode = noteDetailViewMode
         self.detailSlideOutWidth = detailSlideOutWidth
         self.showContinueSection = showContinueSection
         self.continueSectionCollapsed = continueSectionCollapsed

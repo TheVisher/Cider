@@ -727,6 +727,7 @@ struct BookmarkMetadataSidebar: View {
 struct BookmarkDetailsHeroPreview: View {
     let bookmark: Bookmark?
     let draft: BookmarkDetailsDraft
+    var isPageMode: Bool = false
 
     @Environment(\.textScale) private var textScale
     @State private var thumbnailImage: NSImage?
@@ -746,19 +747,28 @@ struct BookmarkDetailsHeroPreview: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .fill(stageBackground)
-            .overlay {
-                heroContent
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-            .task(id: thumbnailFingerprint) {
-                await loadThumbnailAsync()
-            }
+        if isPageMode {
+            heroContent
+                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .shadow(color: CiderColors.shadowMedium, radius: 12, x: 0, y: 4)
+                .task(id: thumbnailFingerprint) {
+                    await loadThumbnailAsync()
+                }
+        } else {
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(stageBackground)
+                .overlay {
+                    heroContent
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .task(id: thumbnailFingerprint) {
+                    await loadThumbnailAsync()
+                }
+        }
     }
 
     @ViewBuilder

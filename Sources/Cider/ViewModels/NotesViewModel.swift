@@ -12,6 +12,8 @@ struct EditorFormatState: Equatable {
     var underline = false
     var strike = false
     var highlight = false
+    var highlightColor: String? = nil
+    var code = false
     var link = false
     var bulletList = false
     var orderedList = false
@@ -326,18 +328,14 @@ final class NotesViewModel: ObservableObject {
     }
 
     func openImagePicker() {
+        NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.begin { [weak self] response in
-            Task { @MainActor [weak self] in
-                guard let self, response == .OK, let url = panel.url else { return }
-                if let data = try? Data(contentsOf: url) {
-                    self.handleImageDrop(data: data, filename: url.lastPathComponent)
-                }
-            }
-        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url) else { return }
+        handleImageDrop(data: data, filename: url.lastPathComponent)
     }
 
     // MARK: - Note Selection
@@ -929,8 +927,28 @@ final class NotesViewModel: ObservableObject {
         runEditorCommand("setHorizontalRule")
     }
 
-    func editorToggleHighlight() {
-        runEditorCommand("toggleHighlight")
+    func editorToggleHighlight(color: String? = nil) {
+        if let color {
+            runEditorCommand("toggleHighlight", stringArgument: color)
+        } else {
+            runEditorCommand("toggleHighlight")
+        }
+    }
+
+    func editorToggleCode() {
+        runEditorCommand("toggleCode")
+    }
+
+    func editorIndent() {
+        runEditorCommand("indent")
+    }
+
+    func editorOutdent() {
+        runEditorCommand("outdent")
+    }
+
+    func editorClearFormatting() {
+        runEditorCommand("clearFormatting")
     }
 
     func editorSetHeading(_ level: Int) {
@@ -952,6 +970,8 @@ final class NotesViewModel: ObservableObject {
         state.underline = payload["underline"] as? Bool ?? false
         state.strike = payload["strike"] as? Bool ?? false
         state.highlight = payload["highlight"] as? Bool ?? false
+        state.highlightColor = payload["highlightColor"] as? String
+        state.code = payload["code"] as? Bool ?? false
         state.link = payload["link"] as? Bool ?? false
         state.bulletList = payload["bulletList"] as? Bool ?? false
         state.orderedList = payload["orderedList"] as? Bool ?? false

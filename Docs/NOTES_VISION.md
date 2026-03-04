@@ -336,3 +336,43 @@ Now has its own vision doc: `Docs/TODOS_VISION.md`. The core idea remains: separ
 ### Phase 3
 - Add `tags: [String]` to `Note` model
 - Tag storage and indexing in `NotesStorage`
+
+---
+
+## Post-1.0 Editor Features
+
+### Toggle List (Collapsible Sections)
+- TipTap `Details` extension (`<details>/<summary>` HTML)
+- Toolbar button to insert a collapsible block
+- Useful for long notes with sections you want to collapse
+
+### Block Drag Handles
+- Notion-style drag handles on paragraph/block hover
+- Allows reordering blocks (paragraphs, headings, lists, code blocks) by dragging
+- "Paragraph" insert button creates a new block at cursor position
+
+### Comments / Annotations
+- Select text → add comment → text highlighted with distinct comment color
+- Comments listed in the info/metadata sidebar panel
+- Click a comment in sidebar → scrolls to highlighted text in editor
+- TipTap custom `Comment` mark with comment ID attribute
+- Comment storage: array of `{id, text, author, createdAt}` persisted with note metadata
+- Serialization: `<mark data-comment="id">text</mark>` in HTML
+
+### Editor Background Themes
+- Preset background colors for the editor in page view: dark (default), cream/sepia, paper white, soft gray
+- Applied as a CSS class on the TipTap editor body element
+- Persisted in CiderConfig (`noteEditorBackground: String`)
+- Toggle in the note toolbar or view options dropdown
+
+### Per-Type Detail View Mode
+- Each content type remembers its own preferred detail view mode (slideOut, fullPanel, page)
+- `CiderConfig.bookmarkDetailViewMode`, `noteDetailViewMode`, `dateCardDetailViewMode`, etc.
+- CiderPanelView reads the appropriate mode based on what's being opened
+- Mode picker updates only the relevant type's setting
+- Users who prefer notes full-page but bookmarks in slideout get exactly that
+
+### Columns Layout
+- Multi-column content layout within a note
+- Would need a custom TipTap node extension
+- Low priority — uncertain value in a notes app

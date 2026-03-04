@@ -438,6 +438,26 @@ const CiderFontSize = Mark.create({
 });
 
 const CiderParagraph = Paragraph.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      indent: {
+        default: 0,
+        parseHTML: element => {
+          const ml = element.style.marginLeft;
+          if (ml && ml.endsWith('px')) {
+            return Math.round(parseInt(ml, 10) / 24) || 0;
+          }
+          return 0;
+        },
+        renderHTML: attributes => {
+          if (!attributes.indent || attributes.indent <= 0) return {};
+          return { style: `margin-left: ${attributes.indent * 24}px` };
+        },
+      },
+    };
+  },
+
   addStorage() {
     const parentStorage = this.parent?.() ?? {};
 
@@ -449,11 +469,19 @@ const CiderParagraph = Paragraph.extend({
           const parentTypeName = parent?.type?.name ?? '';
           const allowsInlineParagraphHTML = parentTypeName === 'doc';
           const textAlign = node.attrs?.textAlign;
+          const indent = node.attrs?.indent || 0;
           const hasCustomAlignment = allowsInlineParagraphHTML && textAlign && textAlign !== 'left';
+          const hasCustomAttrs = hasCustomAlignment || indent > 0;
+
+          // Build style string
+          const styles = [];
+          if (hasCustomAlignment) styles.push(`text-align: ${escapeHtmlAttr(textAlign)}`);
+          if (indent > 0) styles.push(`margin-left: ${indent * 24}px`);
+          const styleAttr = styles.length ? ` style="${styles.join('; ')}"` : '';
 
           if (node.content.size === 0) {
-            if (allowsInlineParagraphHTML && hasCustomAlignment) {
-              state.write(`<p style="text-align: ${escapeHtmlAttr(textAlign)}"></p>`);
+            if (allowsInlineParagraphHTML && hasCustomAttrs) {
+              state.write(`<p${styleAttr}></p>`);
             } else if (allowsInlineParagraphHTML) {
               state.write('<p></p>');
             } else {
@@ -463,10 +491,8 @@ const CiderParagraph = Paragraph.extend({
             return;
           }
 
-          if (hasCustomAlignment) {
-            state.write(`<p style="text-align: ${escapeHtmlAttr(textAlign)}">`);
-            // Disable markdown escaping — content is inside an HTML block where
-            // backslash escapes are literal text, causing doubling each round-trip.
+          if (hasCustomAttrs && allowsInlineParagraphHTML) {
+            state.write(`<p${styleAttr}>`);
             const origEsc = state.esc;
             state.esc = (str) => str;
             try {
@@ -1213,6 +1239,8 @@ function postEditorFormatState() {
     underline: editor.isActive('underline'),
     strike: editor.isActive('strike'),
     highlight: editor.isActive('highlight'),
+    highlightColor: editor.getAttributes('highlight').color || null,
+    code: editor.isActive('code'),
     link: editor.isActive('link'),
     bulletList: editor.isActive('bulletList'),
     orderedList: editor.isActive('orderedList'),
@@ -1649,7 +1677,7 @@ const editor = new Editor({
     TableCell,
     TableHeader,
     CiderImage.configure({ allowBase64: true, inline: true }),
-    Highlight.configure({ multicolor: false }),
+    Highlight.configure({ multicolor: true }),
     CodeBlockLowlight.configure({ lowlight }),
     Placeholder.configure({
       placeholder: 'Start writing, or type / for commands...',
@@ -2073,7 +2101,10 @@ window.editorAPI = {
   setHorizontalRule() {
     return editor.chain().focus().setHorizontalRule().run();
   },
-  toggleHighlight() {
+  toggleHighlight(color) {
+    if (color) {
+      return editor.chain().focus().toggleHighlight({ color }).run();
+    }
     return editor.chain().focus().toggleHighlight().run();
   },
   setHeading(level) {
@@ -2084,5 +2115,36 @@ window.editorAPI = {
   },
   toggleCodeBlock() {
     return editor.chain().focus().toggleCodeBlock().run();
+  },
+  toggleCode() {
+    return editor.chain().focus().toggleCode().run();
+  },
+  indent() {
+    if (editor.can().sinkListItem('listItem')) {
+      return editor.chain().focus().sinkListItem('listItem').run();
+    }
+    if (editor.can().sinkListItem('taskItem')) {
+      return editor.chain().focus().sinkListItem('taskItem').run();
+    }
+    // Paragraph indent fallback
+    const { indent = 0 } = editor.getAttributes('paragraph');
+    return editor.chain().focus().updateAttributes('paragraph', { indent: Math.min(indent + 1, 10) }).run();
+  },
+  outdent() {
+    if (editor.can().liftListItem('listItem')) {
+      return editor.chain().focus().liftListItem('listItem').run();
+    }
+    if (editor.can().liftListItem('taskItem')) {
+      return editor.chain().focus().liftListItem('taskItem').run();
+    }
+    // Paragraph outdent fallback
+    const { indent = 0 } = editor.getAttributes('paragraph');
+    if (indent > 0) {
+      return editor.chain().focus().updateAttributes('paragraph', { indent: indent - 1 }).run();
+    }
+    return false;
+  },
+  clearFormatting() {
+    return editor.chain().focus().clearNodes().unsetAllMarks().run();
   },
 };

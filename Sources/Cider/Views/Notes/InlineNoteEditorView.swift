@@ -96,7 +96,15 @@ struct NotesCompactToolbar: View {
                 NotesTablePopover(viewModel: viewModel, isPresented: $showTablePopover)
             }
 
+            NotesToolbarDivider()
+
+            NotesToolbarButton(symbol: "increase.indent", help: "Indent", action: viewModel.editorIndent)
+            NotesToolbarButton(symbol: "decrease.indent", help: "Outdent", action: viewModel.editorOutdent)
+
+            NotesToolbarDivider()
+
             NotesToolbarButton(symbol: "link.badge.plus", help: "Add Link", action: viewModel.editorPromptForLink)
+            NotesToolbarButton(symbol: "photo", help: "Insert Image", action: viewModel.openImagePicker)
 
             NotesToolbarDivider()
 
@@ -128,6 +136,7 @@ struct NotesCompactToolbar: View {
 
 struct NotesTextStylePopover: View {
     @ObservedObject var viewModel: NotesViewModel
+    @State private var lastHighlightColor: String = "rgba(234, 179, 8, 0.35)"
 
     private var fmt: EditorFormatState { viewModel.editorFormatState }
 
@@ -139,7 +148,9 @@ struct NotesTextStylePopover: View {
                 inlineToggle("I", font: .system(size: 13, weight: .regular, design: .serif).italic(), active: fmt.italic, action: viewModel.editorToggleItalic)
                 inlineToggle("U", font: .system(size: 13, weight: .medium), active: fmt.underline, action: viewModel.editorToggleUnderline, underlined: true)
                 inlineToggle("S", font: .system(size: 13, weight: .medium), active: fmt.strike, action: viewModel.editorToggleStrike, strikethrough: true)
-                inlineToggleIcon("highlighter", active: fmt.highlight, action: viewModel.editorToggleHighlight)
+                inlineToggleIcon("chevron.left.forwardslash.chevron.right", active: fmt.code, action: viewModel.editorToggleCode)
+                highlightMenuButton
+                inlineToggleIcon("eraser", active: false, action: viewModel.editorClearFormatting)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
@@ -161,7 +172,7 @@ struct NotesTextStylePopover: View {
                 paragraphRow("Heading", active: fmt.heading == 2) { viewModel.editorSetHeading(2) }
                 paragraphRow("Subheading", active: fmt.heading == 3) { viewModel.editorSetHeading(3) }
                 paragraphRow("Body", active: fmt.heading == 0 && !fmt.codeBlock) { viewModel.editorSetParagraph() }
-                paragraphRow("Monostyled", active: fmt.codeBlock) { viewModel.editorToggleCodeBlock() }
+                paragraphRow("Code Block", active: fmt.codeBlock) { viewModel.editorToggleCodeBlock() }
             }
             .padding(.vertical, Spacing.xs)
 
@@ -184,7 +195,7 @@ struct NotesTextStylePopover: View {
             }
             .padding(.vertical, Spacing.xs)
         }
-        .frame(width: 200)
+        .frame(width: 248)
     }
 
     // MARK: - Inline toggle button
@@ -226,6 +237,60 @@ struct NotesTextStylePopover: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Highlight color menu
+
+    private static let highlightColors: [(name: String, css: String, swatch: Color)] = [
+        ("Yellow", "rgba(234, 179, 8, 0.35)", Color.yellow),
+        ("Green", "rgba(34, 197, 94, 0.3)", Color.green),
+        ("Blue", "rgba(59, 130, 246, 0.35)", Color.blue),
+        ("Pink", "rgba(236, 72, 153, 0.3)", Color.pink),
+        ("Orange", "rgba(249, 115, 22, 0.3)", Color.orange),
+        ("Purple", "rgba(168, 85, 247, 0.3)", Color.purple),
+    ]
+
+    private var lastHighlightSwatch: Color {
+        Self.highlightColors.first(where: { $0.css == lastHighlightColor })?.swatch ?? .yellow
+    }
+
+    @ViewBuilder
+    private var highlightMenuButton: some View {
+        Menu {
+            ForEach(Self.highlightColors, id: \.css) { color in
+                Button {
+                    lastHighlightColor = color.css
+                    viewModel.editorToggleHighlight(color: color.css)
+                } label: {
+                    HStack {
+                        Circle()
+                            .fill(color.swatch)
+                            .frame(width: 10, height: 10)
+                        Text(color.name)
+                    }
+                }
+            }
+        } label: {
+            ZStack(alignment: .bottom) {
+                Image(systemName: "highlighter")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(fmt.highlight ? CiderColors.controlAccent : CiderColors.secondary)
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(lastHighlightSwatch)
+                    .frame(width: 14, height: 3)
+                    .offset(y: 1)
+            }
+            .frame(width: 28, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(fmt.highlight ? CiderColors.accentSubtle : Color.clear)
+            )
+        } primaryAction: {
+            viewModel.editorToggleHighlight(color: lastHighlightColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     // MARK: - Alignment button
