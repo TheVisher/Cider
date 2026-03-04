@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 
-private enum HeroMode { case thumbnail, web, reader }
+enum BookmarkHeroMode { case thumbnail, web, reader }
 
 struct DetailSlideOutView: View {
     @Binding var draft: BookmarkDetailsDraft
@@ -12,6 +12,8 @@ struct DetailSlideOutView: View {
     var width: CGFloat = 0
     var maxWidth: CGFloat = 0
     var detailViewMode: DetailViewMode
+    @Binding var isMetadataVisible: Bool
+    @Binding var heroMode: BookmarkHeroMode
     var onResize: (CGFloat) -> Void = { _ in }
     var onDelete: () -> Void
     var onFolderChanged: (UUID?) -> Void
@@ -24,12 +26,10 @@ struct DetailSlideOutView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
-    @State private var isMetadataVisible: Bool = true
     // Sidebar's own move transition is suppressed on first appearance to prevent
     // it from compounding with the parent panel's slide-in transition. Enabled
     // after first render so the info-button toggle animates correctly.
     @State private var sidebarTransitionEnabled: Bool = false
-    @State private var heroMode: HeroMode = .thumbnail
     @State private var webViewActivated: Bool = false
     @State private var webViewIsLoading: Bool = false
     @State private var readerViewActivated: Bool = false
@@ -45,23 +45,48 @@ struct DetailSlideOutView: View {
 
             // Content column — toolbar + divider + hero/title + metadata
             VStack(spacing: 0) {
-                toolbar
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.xxs)
-                    .padding(.bottom, Spacing.xs + 1)
+                if detailViewMode != .page {
+                    toolbar
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.top, Spacing.xxs)
+                        .padding(.bottom, Spacing.xs + 1)
 
-                Divider()
-                    .background(CiderColors.separator)
-                    .padding(.leading, Spacing.md + Spacing.xxs)
-                    .padding(.trailing, isMetadataVisible ? 0 : Spacing.md + Spacing.xxs)
+                    Divider()
+                        .background(CiderColors.separator)
+                        .padding(.leading, Spacing.md + Spacing.xxs)
+                        .padding(.trailing, isMetadataVisible ? 0 : Spacing.md + Spacing.xxs)
+                }
 
                 // Content area — hero/title + metadata sidebar
                 HStack(alignment: .top, spacing: 0) {
-                    // Left column — hero fills height, title pinned at bottom
+                    // Left column — title header + hero fills remaining height
                     VStack(alignment: .leading, spacing: Spacing.md) {
+                        if detailViewMode != .page {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                Text(draft.title)
+                                    .font(CiderFont.heroTitle(scale: textScale))
+                                    .foregroundColor(CiderColors.primary)
+                                    .lineLimit(3)
+
+                                HStack(spacing: Spacing.xs) {
+                                    if draft.hasURL {
+                                        Text(draft.hostDisplay)
+                                            .font(CiderFont.labelMedium(scale: textScale))
+                                            .foregroundColor(CiderColors.secondary)
+                                        Text("\u{2022}")
+                                            .font(CiderFont.captionSemibold(scale: textScale))
+                                            .foregroundColor(CiderColors.tertiary)
+                                    }
+                                    Text(draft.updatedAt.formatted(.relative(presentation: .named)))
+                                        .font(CiderFont.label(scale: textScale))
+                                        .foregroundColor(CiderColors.tertiary)
+                                }
+                            }
+                        }
+
                         ZStack {
                             // Thumbnail layer
-                            BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
+                            BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft, isPageMode: detailViewMode == .page)
                                 .shadow(
                                     color: CiderColors.shadowMedium,
                                     radius: BookmarksDesign.detailsFloatingLiftBlur,
@@ -114,27 +139,6 @@ struct DetailSlideOutView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text(draft.title)
-                                .font(CiderFont.heroTitle(scale: textScale))
-                                .foregroundColor(CiderColors.primary)
-                                .lineLimit(3)
-
-                            HStack(spacing: Spacing.xs) {
-                                if draft.hasURL {
-                                    Text(draft.hostDisplay)
-                                        .font(CiderFont.labelMedium(scale: textScale))
-                                        .foregroundColor(CiderColors.secondary)
-                                    Text("\u{2022}")
-                                        .font(CiderFont.captionSemibold(scale: textScale))
-                                        .foregroundColor(CiderColors.tertiary)
-                                }
-                                Text(draft.updatedAt.formatted(.relative(presentation: .named)))
-                                    .font(CiderFont.label(scale: textScale))
-                                    .foregroundColor(CiderColors.tertiary)
-                            }
-                        }
                     }
                     .padding(Spacing.lg)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -184,18 +188,22 @@ struct DetailSlideOutView: View {
             // so it doesn't compound with the parent panel's slide-in animation.
             DispatchQueue.main.async { sidebarTransitionEnabled = true }
         }
-        .background(
-            ZStack {
-                VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
-                CiderColors.acrylicOverlayTint
-                CiderColors.surfaceSubtle
+        .background {
+            if detailViewMode != .page {
+                ZStack {
+                    VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
+                    CiderColors.acrylicOverlayTint
+                    CiderColors.surfaceSubtle
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             }
-            .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        )
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
-                .allowsHitTesting(false)
+            if detailViewMode != .page {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -295,6 +303,65 @@ struct DetailSlideOutView: View {
         }
     }
 
+}
+
+// MARK: - Bookmark Page Toolbar (Title Bar Controls)
+
+struct BookmarkPageToolbar: View {
+    var hasURL: Bool
+    @Binding var heroMode: BookmarkHeroMode
+    @Binding var isMetadataVisible: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            if hasURL {
+                toolbarButton("photo", active: heroMode == .thumbnail, help: "Preview") {
+                    withAnimation(reduceMotion ? .none : .snappy) { heroMode = .thumbnail }
+                }
+                toolbarButton("doc.richtext", active: heroMode == .reader, help: "Reader view") {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        heroMode = heroMode == .reader ? .thumbnail : .reader
+                    }
+                }
+                toolbarButton("globe", active: heroMode == .web, help: "View live page") {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        heroMode = heroMode == .web ? .thumbnail : .web
+                    }
+                }
+            }
+
+            Button {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    isMetadataVisible.toggle()
+                }
+            } label: {
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isMetadataVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                    .overlay {
+                        Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
+                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
+        }
+    }
+
+    @ViewBuilder
+    private func toolbarButton(_ symbol: String, active: Bool, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(CiderFont.label)
+                .foregroundColor(active ? CiderColors.controlAccent : CiderColors.tertiary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
 }
 
 // MARK: - Design Constants
