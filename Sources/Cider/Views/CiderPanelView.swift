@@ -1760,7 +1760,8 @@ struct CiderPanelView: View {
             scrollsContent: false,
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
-            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) }
+            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
+            trailingExtra: { NotesInfoToggleButton(viewModel: notesViewModel) }
         ) {
             InlineNoteEditorView(viewModel: notesViewModel)
         }
@@ -1785,7 +1786,8 @@ struct CiderPanelView: View {
             },
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
-            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) }
+            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
+            trailingExtra: { NotesInfoToggleButton(viewModel: notesViewModel) }
         ) {
             InlineNoteEditorView(viewModel: notesViewModel)
         }
@@ -1801,7 +1803,8 @@ struct CiderPanelView: View {
             scrollsContent: false,
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
-            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) }
+            toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
+            trailingExtra: { NotesInfoToggleButton(viewModel: notesViewModel) }
         ) {
             InlineNoteEditorView(viewModel: notesViewModel)
         }

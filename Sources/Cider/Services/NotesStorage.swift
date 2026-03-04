@@ -452,11 +452,11 @@ final class NotesStorage: ObservableObject {
         NotesMarkdownPathCodec.markdownForPersistence(markdown, notesDirectoryURL: directoryURL)
     }
 
-    func save(note: Note) {
+    func save(note: Note, createSnapshot: Bool = true) {
         let fileURL = directoryURL.appendingPathComponent(note.relativePath)
         let previousContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
 
-        if previousContent != note.content {
+        if createSnapshot, previousContent != note.content {
             saveSnapshot(content: previousContent, for: note)
         }
 

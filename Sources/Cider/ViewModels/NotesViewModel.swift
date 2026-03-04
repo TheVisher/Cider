@@ -986,7 +986,7 @@ final class NotesViewModel: ObservableObject {
 
         let persistedContent = NotesStorage.shared.markdownForPersistence(snapshotContent)
         current.content = persistedContent
-        NotesStorage.shared.save(note: current)
+        NotesStorage.shared.save(note: current, createSnapshot: false)
 
         if let updated = NotesStorage.shared.notes.first(where: { $0.id == current.id }) {
             applyDiskContent(loadPersistedContent(for: updated), from: updated)
@@ -1091,6 +1091,66 @@ final class NotesViewModel: ObservableObject {
     private func normalizeLinkURL(_ value: String) -> String {
         guard !value.contains("://") else { return value }
         return "https://\(value)"
+    }
+
+    // MARK: - Metadata Sidebar Actions
+
+    func updateNoteTitle(_ newTitle: String) {
+        guard let note = selectedNote, !newTitle.isEmpty else { return }
+        NotesStorage.shared.rename(note: note, to: newTitle)
+        if let updated = NotesStorage.shared.notes.first(where: { $0.id == note.id }) {
+            selectedNote = updated
+            editingTitle = updated.title
+        }
+    }
+
+    func updateNoteFolder(_ folderID: UUID?) {
+        guard let note = selectedNote else { return }
+        NotesStorage.shared.assignNote(note.id, toFolder: folderID)
+        if var updated = selectedNote {
+            updated.folderID = folderID
+            selectedNote = updated
+        }
+    }
+
+    func toggleNoteLabel(_ labelID: UUID) {
+        guard let note = selectedNote else { return }
+        if note.labelIDs.contains(labelID) {
+            NotesStorage.shared.removeLabel(note.id, labelID: labelID)
+        } else {
+            NotesStorage.shared.assignLabel(note.id, labelID: labelID)
+        }
+        if let updated = NotesStorage.shared.notes.first(where: { $0.id == note.id }) {
+            var refreshed = selectedNote ?? updated
+            refreshed.labelIDs = updated.labelIDs
+            selectedNote = refreshed
+        }
+    }
+
+    func toggleNotePin() {
+        guard let note = selectedNote else { return }
+        NotesStorage.shared.togglePin(note.id)
+        if var updated = selectedNote {
+            updated.isPinned.toggle()
+            selectedNote = updated
+        }
+    }
+
+    var extractedLinks: [URL] {
+        let content = editingContent
+        guard !content.isEmpty else { return [] }
+        var urls: [URL] = []
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let range = NSRange(content.startIndex..., in: content)
+        detector?.enumerateMatches(in: content, range: range) { result, _, _ in
+            guard let url = result?.url,
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else { return }
+            if !urls.contains(url) {
+                urls.append(url)
+            }
+        }
+        return urls
     }
 
     // MARK: - Display Options

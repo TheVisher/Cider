@@ -2,38 +2,42 @@ import SwiftUI
 
 struct InlineNoteEditorView: View {
     @ObservedObject var viewModel: NotesViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            if viewModel.selectedNote != nil, let state = viewModel.externalChangeState {
-                NotesExternalChangeBanner(
-                    state: state,
-                    onReload: { viewModel.reloadFromDiskAfterExternalChange() },
-                    onKeepMine: { viewModel.keepMineAfterExternalChange() }
-                )
-                Divider()
-                    .background(CiderColors.separator)
-            }
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                if viewModel.selectedNote != nil, let state = viewModel.externalChangeState {
+                    NotesExternalChangeBanner(
+                        state: state,
+                        onReload: { viewModel.reloadFromDiskAfterExternalChange() },
+                        onKeepMine: { viewModel.keepMineAfterExternalChange() }
+                    )
+                    Divider()
+                        .background(CiderColors.separator)
+                }
 
-            if viewModel.selectedNote != nil, viewModel.isFindBarVisible {
-                NotesFindBar(viewModel: viewModel)
+                if viewModel.selectedNote != nil, viewModel.isFindBarVisible {
+                    NotesFindBar(viewModel: viewModel)
 
-                Divider()
-                    .background(CiderColors.separator)
-            }
+                    Divider()
+                        .background(CiderColors.separator)
+                }
 
-            if viewModel.selectedNote != nil || viewModel.activeExternalFile != nil {
-                TipTapEditorView(viewModel: viewModel)
-            } else {
-                NotesEditorEmptyState(onCreateNew: { viewModel.createNewNote() })
+                if viewModel.selectedNote != nil || viewModel.activeExternalFile != nil {
+                    TipTapEditorView(viewModel: viewModel)
+                } else {
+                    NotesEditorEmptyState(onCreateNew: { viewModel.createNewNote() })
+                }
+
+                NotesStatusBar(viewModel: viewModel)
             }
+            .frame(maxWidth: .infinity)
 
             if viewModel.isMetadataPanelVisible, let note = viewModel.selectedNote {
-                Divider().background(CiderColors.separator)
-                NoteMetadataBar(note: note, viewModel: viewModel)
+                NoteMetadataSidebar(note: note, viewModel: viewModel)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
-
-            NotesStatusBar(viewModel: viewModel)
         }
     }
 }
@@ -42,6 +46,7 @@ struct InlineNoteEditorView: View {
 
 struct NotesCompactToolbar: View {
     @ObservedObject var viewModel: NotesViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showTextStylePopover = false
     @State private var showTablePopover = false
     @State private var showSnapshotPopover = false
@@ -114,20 +119,6 @@ struct NotesCompactToolbar: View {
                 NoteSnapshotPopover(viewModel: viewModel, isPresented: $showSnapshotPopover)
             }
 
-            Button {
-                viewModel.isMetadataPanelVisible.toggle()
-            } label: {
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(viewModel.isMetadataPanelVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
-                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
-                    .overlay {
-                        Image(systemName: viewModel.isMetadataPanelVisible ? "info.circle.fill" : "info.circle")
-                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
-                            .foregroundColor(viewModel.isMetadataPanelVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                    }
-            }
-            .buttonStyle(.plain)
-            .help(viewModel.isMetadataPanelVisible ? "Hide Info" : "Show Info")
         }
         .disabled(viewModel.selectedNote == nil && viewModel.activeExternalFile == nil)
     }
@@ -447,6 +438,33 @@ struct NotesTablePopover: View {
     }
 }
 
+// MARK: - Info Toggle Button (Trailing Toolbar)
+
+struct NotesInfoToggleButton: View {
+    @ObservedObject var viewModel: NotesViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                viewModel.isMetadataPanelVisible.toggle()
+            }
+        } label: {
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(viewModel.isMetadataPanelVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                .overlay {
+                    Image(systemName: viewModel.isMetadataPanelVisible ? "info.circle.fill" : "info.circle")
+                        .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                        .foregroundColor(viewModel.isMetadataPanelVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                }
+        }
+        .buttonStyle(.plain)
+        .help(viewModel.isMetadataPanelVisible ? "Hide Info" : "Show Info")
+        .disabled(viewModel.selectedNote == nil && viewModel.activeExternalFile == nil)
+    }
+}
+
 struct NotesToolbarButton: View {
     let symbol: String
     let help: String
@@ -757,54 +775,506 @@ struct NoteSnapshotPopover: View {
     }
 }
 
-// MARK: - Metadata Bar
+// MARK: - Metadata Sidebar
 
-struct NoteMetadataBar: View {
+struct NoteMetadataSidebar: View {
     let note: Note
     @ObservedObject var viewModel: NotesViewModel
 
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var labelStorage = CardLabelStorage.shared
+
+    @State private var isTitleExpanded = true
+    @State private var isFolderExpanded = true
+    @State private var isTagsExpanded = true
+    @State private var isSourcesExpanded = true
+    @State private var isHistoryExpanded = false
+    @State private var showAllSnapshots = false
+    @State private var isAIExpanded = true
+    @State private var isInfoExpanded = true
+    @State private var editingTitle: String = ""
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Spacing.sm) {
-                metadataChip(label: "Created", value: Self.dateFormatter.string(from: note.createdAt))
-                metadataChip(label: "Modified", value: Self.dateFormatter.string(from: note.modifiedAt))
-                metadataChip(label: "Characters", value: "\(viewModel.charCount)")
-                if let folderID = note.folderID,
-                   let folder = BookmarksStorage.shared.folders.first(where: { $0.id == folderID }) {
-                    metadataChip(label: "Folder", value: folder.name)
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    titleSection
+                        .padding(.bottom, Spacing.md)
+
+                    sectionDivider
+                    folderSection
+                        .padding(.vertical, Spacing.md)
+
+                    sectionDivider
+                    tagsSection
+                        .padding(.vertical, Spacing.md)
+
+                    sectionDivider
+                    sourcesSection
+                        .padding(.vertical, Spacing.md)
+
+                    sectionDivider
+                    historySection
+                        .padding(.vertical, Spacing.md)
+
+                    sectionDivider
+                    intelligenceSection
+                        .padding(.vertical, Spacing.md)
                 }
-                if note.isPinned {
-                    metadataChip(label: "Pinned", value: "Yes")
-                }
+                .padding(Spacing.md)
+                .background(
+                    HideScrollIndicatorsHelper()
+                        .frame(width: 0, height: 0)
+                )
             }
-            .padding(.horizontal, Spacing.md)
+            .scrollIndicators(.never)
+            .frame(maxHeight: .infinity)
+
+            footerSection
         }
-        .frame(height: 36)
+        .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+        .frame(maxHeight: .infinity)
+        .background(CiderColors.surfaceInput)
+        .overlay(alignment: .leading) {
+            CiderColors.separator
+                .frame(width: Spacing.hairline)
+        }
+        .onAppear { editingTitle = note.title }
+        .onChange(of: note.id) { _, _ in
+            editingTitle = note.title
+            showAllSnapshots = false
+        }
+        .onChange(of: note.title) { _, newTitle in
+            if editingTitle != newTitle { editingTitle = newTitle }
+        }
+    }
+
+    // MARK: - Section Header
+
+    private func sectionHeader(_ title: String, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Text(title)
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
+                    .foregroundColor(CiderColors.tertiary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : -90))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sectionDivider: some View {
+        Divider()
+            .background(CiderColors.separator)
+    }
+
+    // MARK: - Title
+
+    @ViewBuilder
+    private var titleSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Title", isExpanded: $isTitleExpanded)
+
+            if isTitleExpanded {
+                TextField("Title", text: $editingTitle, axis: .vertical)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                    .onChange(of: editingTitle) { _, newTitle in
+                        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty, trimmed != note.title else { return }
+                        viewModel.updateNoteTitle(trimmed)
+                    }
+            }
+        }
+    }
+
+    // MARK: - Folder
+
+    @ViewBuilder
+    private var folderSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Folder", isExpanded: $isFolderExpanded)
+
+            if isFolderExpanded {
+                let folders = BookmarksStorage.shared.folders
+                Menu {
+                    Button("No Folder") {
+                        viewModel.updateNoteFolder(nil)
+                    }
+                    if !folders.isEmpty { Divider() }
+                    ForEach(folders) { folder in
+                        Button(folder.name) {
+                            viewModel.updateNoteFolder(folder.id)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label(currentFolderName, systemImage: "folder")
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                }
+                .menuStyle(.borderlessButton)
+            }
+        }
+    }
+
+    private var currentFolderName: String {
+        guard let fid = note.folderID else { return "No Folder" }
+        return BookmarksStorage.shared.folders.first(where: { $0.id == fid })?.name ?? "No Folder"
+    }
+
+    // MARK: - Tags
+
+    private var assignedLabels: [CardLabel] {
+        note.labelIDs.compactMap { id in
+            labelStorage.labels.first(where: { $0.id == id })
+        }
+    }
+
+    private var unassignedLabels: [CardLabel] {
+        let assigned = Set(note.labelIDs)
+        return labelStorage.labels.filter { !assigned.contains($0.id) }
     }
 
     @ViewBuilder
-    private func metadataChip(label: String, value: String) -> some View {
-        HStack(spacing: Spacing.xs) {
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Tags", isExpanded: $isTagsExpanded)
+
+            if isTagsExpanded {
+                TagFlowLayout(spacing: Spacing.xs) {
+                    ForEach(assignedLabels) { label in
+                        TagPillView(
+                            label: label,
+                            onRemove: { viewModel.toggleNoteLabel(label.id) }
+                        )
+                    }
+
+                    Menu {
+                        if unassignedLabels.isEmpty && labelStorage.labels.isEmpty {
+                            Button("New Tag...") {
+                                let newLabel = CardLabelStorage.shared.createLabel(
+                                    name: "New Tag",
+                                    colorHex: CardLabelStorage.randomPresetColor()
+                                )
+                                viewModel.toggleNoteLabel(newLabel.id)
+                            }
+                        } else {
+                            ForEach(unassignedLabels) { label in
+                                Button {
+                                    viewModel.toggleNoteLabel(label.id)
+                                } label: {
+                                    HStack(spacing: Spacing.xs) {
+                                        Circle()
+                                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                                            .frame(width: 8, height: 8)
+                                        Text(label.name)
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            Button("New Tag...") {
+                                let newLabel = CardLabelStorage.shared.createLabel(
+                                    name: "New Tag",
+                                    colorHex: CardLabelStorage.randomPresetColor()
+                                )
+                                viewModel.toggleNoteLabel(newLabel.id)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
+                            Text("Add Tag")
+                                .font(CiderFont.caption)
+                        }
+                        .foregroundColor(CiderColors.controlAccent)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                .fill(CiderColors.accentSubtle)
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+            }
+        }
+    }
+
+    // MARK: - Sources (extracted links)
+
+    @ViewBuilder
+    private var sourcesSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Sources", isExpanded: $isSourcesExpanded)
+
+            if isSourcesExpanded {
+                let links = viewModel.extractedLinks
+                if links.isEmpty {
+                    Text("No links in this note")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ForEach(links, id: \.absoluteString) { url in
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                HStack(spacing: Spacing.xs) {
+                                    Image(systemName: "link")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .frame(width: 16)
+
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(url.host ?? url.absoluteString)
+                                            .font(CiderFont.bodyMedium)
+                                            .foregroundColor(CiderColors.controlAccent)
+                                            .lineLimit(1)
+
+                                        if url.path.count > 1 {
+                                            Text(url.path)
+                                                .font(CiderFont.caption)
+                                                .foregroundColor(CiderColors.tertiary)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                        }
+                                    }
+
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, Spacing.xxs)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - History (snapshots)
+
+    private var snapshotChoices: [NotesRecoverySnapshotChoice] {
+        showAllSnapshots ? viewModel.allRecoverySnapshotChoices : viewModel.recoverySnapshotChoices
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("History", isExpanded: $isHistoryExpanded)
+
+            if isHistoryExpanded {
+                let choices = snapshotChoices
+                if choices.isEmpty {
+                    Text("No snapshots yet")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(choices) { choice in
+                            Button {
+                                viewModel.restoreSnapshot(choice)
+                            } label: {
+                                HStack(spacing: Spacing.sm) {
+                                    Image(systemName: "clock")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .frame(width: 16)
+
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(choice.title)
+                                            .font(CiderFont.bodyMedium)
+                                            .foregroundColor(CiderColors.primary)
+
+                                        Text(choice.snapshotDate.formatted(date: .abbreviated, time: .shortened))
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.tertiary)
+                                    }
+
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, Spacing.xxs)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if viewModel.allRecoverySnapshotChoices.count > viewModel.recoverySnapshotChoices.count {
+                        Button(showAllSnapshots ? "Show Less" : "Show All") {
+                            showAllSnapshots.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .padding(.top, Spacing.xxs)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Intelligence
+
+    @ViewBuilder
+    private var intelligenceSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Intelligence", isExpanded: $isAIExpanded)
+
+            if isAIExpanded {
+                Button {
+                    // Future: AI summary
+                } label: {
+                    Label("Summarize", systemImage: "sparkles")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+                .disabled(true)
+                .help("Coming soon")
+            }
+        }
+    }
+
+    // MARK: - Footer (pinned)
+
+    @ViewBuilder
+    private var footerSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Divider()
+                .background(CiderColors.separator)
+
+            infoHeader
+
+            if isInfoExpanded {
+                infoGrid
+                    .padding(.bottom, Spacing.xxs)
+            }
+
+            Divider()
+                .background(CiderColors.separator)
+
+            Button("Delete") {
+                viewModel.deleteCurrentNote()
+            }
+            .buttonStyle(CiderDestructiveButtonStyle())
+            .frame(maxWidth: .infinity)
+        }
+        .padding(Spacing.md)
+    }
+
+    @ViewBuilder
+    private var infoHeader: some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isInfoExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Text("Info")
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
+                    .foregroundColor(CiderColors.tertiary)
+                    .rotationEffect(.degrees(isInfoExpanded ? 0 : -90))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var infoGrid: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            propertyRow("Created", value: note.createdAt.formatted(date: .abbreviated, time: .shortened))
+            propertyRow("Modified", value: note.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+            propertyRow("Type", value: "Note")
+            propertyRow("Characters", value: "\(viewModel.charCount)")
+        }
+    }
+
+    private func propertyRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
             Text(label)
-                .font(CiderFont.captionSemibold)
+                .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
+                .frame(width: 72, alignment: .leading)
             Text(value)
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, Spacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(CiderColors.surfaceSubtle)
-        )
+    }
+}
+
+// MARK: - Hide Scroll Indicators (AppKit level)
+
+/// SwiftUI's `showsIndicators: false` and `.scrollIndicators(.never)` are unreliable
+/// on macOS — overlay scrollbars still appear. Place this inside a ScrollView's content
+/// (via `.background()`) so walking up the superview chain finds the `NSScrollView`
+/// and disables its scrollers at the AppKit level.
+struct HideScrollIndicatorsHelper: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            disableScrollers(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            disableScrollers(from: nsView)
+        }
+    }
+
+    private func disableScrollers(from view: NSView) {
+        var current: NSView? = view
+        while let v = current {
+            if let scrollView = v as? NSScrollView {
+                scrollView.hasVerticalScroller = false
+                scrollView.hasHorizontalScroller = false
+                scrollView.verticalScroller = nil
+                scrollView.horizontalScroller = nil
+                return
+            }
+            current = v.superview
+        }
     }
 }
 

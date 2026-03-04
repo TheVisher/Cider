@@ -4,7 +4,7 @@ import SwiftUI
 /// Provides the same toolbar, drag handle, acrylic background, and view-mode switcher
 /// as DetailSlideOutView, but with a single scrollable content column instead of a
 /// hero + metadata sidebar split.
-struct GenericItemDetailPanel<Content: View, ToolbarExtra: View>: View {
+struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: View>: View {
     var title: String
     var detailViewMode: DetailViewMode
     var width: CGFloat = 0
@@ -16,6 +16,7 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View>: View {
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
     @ViewBuilder var toolbarExtra: () -> ToolbarExtra
+    @ViewBuilder var trailingExtra: () -> TrailingExtra
     @ViewBuilder var content: () -> Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -104,6 +105,8 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View>: View {
 
                 Spacer(minLength: 0)
 
+                trailingExtra()
+
                 DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
             }
         }
@@ -113,7 +116,7 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View>: View {
 
 // MARK: - Convenience initializer for callers without toolbar extras
 
-extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
+extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra == EmptyView {
     init(
         title: String,
         detailViewMode: DetailViewMode,
@@ -138,6 +141,38 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
         self.onClose = onClose
         self.onModeChange = onModeChange
         self.toolbarExtra = { EmptyView() }
+        self.trailingExtra = { EmptyView() }
+        self.content = content
+    }
+}
+
+extension GenericItemDetailPanel where TrailingExtra == EmptyView {
+    init(
+        title: String,
+        detailViewMode: DetailViewMode,
+        width: CGFloat = 0,
+        maxWidth: CGFloat = 0,
+        showDragHandle: Bool = true,
+        showTitle: Bool = true,
+        scrollsContent: Bool = true,
+        onResize: @escaping (CGFloat) -> Void = { _ in },
+        onClose: @escaping () -> Void,
+        onModeChange: @escaping (DetailViewMode) -> Void,
+        @ViewBuilder toolbarExtra: @escaping () -> ToolbarExtra,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.detailViewMode = detailViewMode
+        self.width = width
+        self.maxWidth = maxWidth
+        self.showDragHandle = showDragHandle
+        self.showTitle = showTitle
+        self.scrollsContent = scrollsContent
+        self.onResize = onResize
+        self.onClose = onClose
+        self.onModeChange = onModeChange
+        self.toolbarExtra = toolbarExtra
+        self.trailingExtra = { EmptyView() }
         self.content = content
     }
 }

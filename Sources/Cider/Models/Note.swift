@@ -104,6 +104,10 @@ struct Note: Identifiable, Hashable {
             .replacingOccurrences(of: #"!\[[^\]]*\]\([^\)]+\)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\[([^\]]*)\]\([^\)]+\)"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"[#*_~`>]+"#, with: "", options: .regularExpression)
+            // Strip markdown hard breaks (trailing backslash before newline)
+            .replacingOccurrences(of: #"\\\n"#, with: "\n", options: .regularExpression)
+            // Strip any remaining lone backslashes used as escapes
+            .replacingOccurrences(of: #"\\"#, with: "")
             // Collapse runs of 3+ newlines to a single blank line
             .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
             // Collapse inline whitespace (spaces/tabs) but leave newlines alone
@@ -177,6 +181,8 @@ struct NoteCardData: Equatable {
             .replacingOccurrences(of: #"!\[[^\]]*\]\([^\)]+\)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\[([^\]]*)\]\([^\)]+\)"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"[#*_~`>]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\\\n"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"\\"#, with: "")
             .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
             .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

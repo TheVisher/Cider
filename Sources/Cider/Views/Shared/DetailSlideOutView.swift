@@ -278,11 +278,14 @@ struct DetailSlideOutView: View {
                     isMetadataVisible.toggle()
                 }
             } label: {
-                Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
-                    .font(CiderFont.label)
-                    .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.tertiary)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isMetadataVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                    .overlay {
+                        Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
+                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                    }
             }
             .buttonStyle(.plain)
             .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
