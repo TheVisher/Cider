@@ -23,7 +23,7 @@ html, body {
 #editor {
   height: 100%;
   overflow-y: auto;
-  padding: 12px 16px;
+  padding: 12px 16px 12px 28px;
 }
 
 /* Scrollbar */
@@ -49,6 +49,8 @@ html, body {
   outline: none;
   min-height: 100%;
   font-size: var(--cider-editor-base-font-size);
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 .tiptap-editor > *:first-child {
@@ -313,6 +315,22 @@ html, body {
 .tiptap-editor table td,
 .tiptap-editor table th {
   position: relative;
+}
+
+/* Column resize handle */
+.tiptap-editor .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #6CB4EE;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.tiptap-editor.resize-cursor {
+  cursor: col-resize;
 }
 
 /* Images */

@@ -2,6 +2,9 @@ import SwiftUI
 import Combine
 import WebKit
 import AppKit
+import os
+
+private let logger = Logger(subsystem: "com.cider.app", category: "NotesViewModel")
 
 struct EditorFormatState: Equatable {
     var bold = false
@@ -50,6 +53,8 @@ final class NotesViewModel: ObservableObject {
     @Published var findFocusToken = UUID()
     @Published private(set) var notesEditorTextSize: NotesEditorTextSize
     @Published var editorFormatState = EditorFormatState()
+    @Published var isMetadataPanelVisible: Bool = false
+    @Published private(set) var hasSnapshots: Bool = false
 
     /// The singleton editor WebView, created on first access via `ensureEditorWebView()`.
     private(set) var editorWebView: WKWebView?
@@ -172,6 +177,19 @@ final class NotesViewModel: ObservableObject {
                 self.applyNotesEditorTextSize()
             }
             .store(in: &cancellables)
+
+        // Cache snapshot availability so toolbar .disabled() doesn't hit disk on every render
+        $selectedNote
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self else { return }
+                if let note {
+                    self.hasSnapshots = !NotesStorage.shared.snapshots(for: note).isEmpty
+                } else {
+                    self.hasSnapshots = false
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - WebView Lifecycle
@@ -233,6 +251,7 @@ final class NotesViewModel: ObservableObject {
         editorIsReady = true
         hasPendingSave = false
         applyNotesEditorTextSize()
+
         // If a note is already selected, push its content to the editor
         if let note = selectedNote {
             let content = loadPersistedContent(for: note)
@@ -249,14 +268,24 @@ final class NotesViewModel: ObservableObject {
 
     /// Push markdown content to the TipTap editor via JS.
     private func pushContentToEditor(_ markdown: String) {
-        guard editorIsReady, let webView = editorWebView else { return }
+        guard editorIsReady, let webView = editorWebView else {
+            logger.warning("pushContentToEditor: editor not ready or webView nil")
+            return
+        }
         let editorMarkdown = NotesStorage.shared.markdownForEditor(markdown)
         // Use JSON encoding for safe string transport — handles all special
         // characters (newlines, quotes, backslashes, unicode) correctly.
         guard let jsonData = try? JSONSerialization.data(
             withJSONObject: editorMarkdown, options: .fragmentsAllowed
-        ), let jsonString = String(data: jsonData, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))")
+        ), let jsonString = String(data: jsonData, encoding: .utf8) else {
+            logger.error("pushContentToEditor: JSON encoding failed")
+            return
+        }
+        webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))") { _, error in
+            if let error {
+                logger.error("pushContentToEditor JS failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// Focus the TipTap editor.
@@ -692,6 +721,7 @@ final class NotesViewModel: ObservableObject {
         externalChangeState = nil
         hasPendingSave = false
 
+        isLoadingNote = true
         pushContentToEditor(diskContent)
 
         if isFindBarVisible, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -969,6 +999,7 @@ final class NotesViewModel: ObservableObject {
             externalChangeState = nil
             selectedNote = current
             hasPendingSave = false
+            isLoadingNote = true
             pushContentToEditor(persistedContent)
         }
 

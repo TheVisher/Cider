@@ -28,6 +28,11 @@ struct InlineNoteEditorView: View {
                 NotesEditorEmptyState(onCreateNew: { viewModel.createNewNote() })
             }
 
+            if viewModel.isMetadataPanelVisible, let note = viewModel.selectedNote {
+                Divider().background(CiderColors.separator)
+                NoteMetadataBar(note: note, viewModel: viewModel)
+            }
+
             NotesStatusBar(viewModel: viewModel)
         }
     }
@@ -39,6 +44,7 @@ struct NotesCompactToolbar: View {
     @ObservedObject var viewModel: NotesViewModel
     @State private var showTextStylePopover = false
     @State private var showTablePopover = false
+    @State private var showSnapshotPopover = false
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -86,6 +92,42 @@ struct NotesCompactToolbar: View {
             }
 
             NotesToolbarButton(symbol: "link.badge.plus", help: "Add Link", action: viewModel.editorPromptForLink)
+
+            NotesToolbarDivider()
+
+            Button {
+                showSnapshotPopover.toggle()
+            } label: {
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(showSnapshotPopover ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                    .overlay {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .foregroundColor(showSnapshotPopover ? CiderColors.controlAccent : CiderColors.secondary)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help("Version History")
+            .disabled(viewModel.selectedNote == nil || !viewModel.hasSnapshots)
+            .popover(isPresented: $showSnapshotPopover, arrowEdge: .bottom) {
+                NoteSnapshotPopover(viewModel: viewModel, isPresented: $showSnapshotPopover)
+            }
+
+            Button {
+                viewModel.isMetadataPanelVisible.toggle()
+            } label: {
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(viewModel.isMetadataPanelVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                    .overlay {
+                        Image(systemName: viewModel.isMetadataPanelVisible ? "info.circle.fill" : "info.circle")
+                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .foregroundColor(viewModel.isMetadataPanelVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help(viewModel.isMetadataPanelVisible ? "Hide Info" : "Show Info")
         }
         .disabled(viewModel.selectedNote == nil && viewModel.activeExternalFile == nil)
     }
@@ -637,6 +679,132 @@ struct NotesFindTextField: NSViewRepresentable {
                 }
             }
         }
+    }
+}
+
+// MARK: - Snapshot Popover
+
+struct NoteSnapshotPopover: View {
+    @ObservedObject var viewModel: NotesViewModel
+    @Binding var isPresented: Bool
+    @State private var showAll = false
+
+    private var choices: [NotesRecoverySnapshotChoice] {
+        showAll ? viewModel.allRecoverySnapshotChoices : viewModel.recoverySnapshotChoices
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Version History")
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Spacer()
+
+                if viewModel.allRecoverySnapshotChoices.count > viewModel.recoverySnapshotChoices.count {
+                    Button(showAll ? "Show Less" : "Show All") {
+                        showAll.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.controlAccent)
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.top, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
+
+            Divider().padding(.horizontal, Spacing.sm)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(choices) { choice in
+                        Button {
+                            viewModel.restoreSnapshot(choice)
+                            isPresented = false
+                        } label: {
+                            HStack(spacing: Spacing.sm) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .frame(width: 16)
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(choice.title)
+                                        .font(CiderFont.bodyMedium)
+                                        .foregroundColor(CiderColors.primary)
+
+                                    Text(choice.snapshotDate.formatted(date: .abbreviated, time: .shortened))
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                }
+
+                                Spacer()
+                            }
+                            .padding(.horizontal, Spacing.md)
+                            .padding(.vertical, Spacing.xs + 1)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 300)
+        }
+        .frame(width: 260)
+        .padding(.bottom, Spacing.xs)
+    }
+}
+
+// MARK: - Metadata Bar
+
+struct NoteMetadataBar: View {
+    let note: Note
+    @ObservedObject var viewModel: NotesViewModel
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Spacing.sm) {
+                metadataChip(label: "Created", value: Self.dateFormatter.string(from: note.createdAt))
+                metadataChip(label: "Modified", value: Self.dateFormatter.string(from: note.modifiedAt))
+                metadataChip(label: "Characters", value: "\(viewModel.charCount)")
+                if let folderID = note.folderID,
+                   let folder = BookmarksStorage.shared.folders.first(where: { $0.id == folderID }) {
+                    metadataChip(label: "Folder", value: folder.name)
+                }
+                if note.isPinned {
+                    metadataChip(label: "Pinned", value: "Yes")
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+        }
+        .frame(height: 36)
+    }
+
+    @ViewBuilder
+    private func metadataChip(label: String, value: String) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Text(label)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+            Text(value)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+        )
     }
 }
 

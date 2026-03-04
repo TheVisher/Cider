@@ -197,13 +197,13 @@ Make everything that shipped in beta feel finished.
 
 ---
 
-### R-09: Notes Editor Polish
+### R-09: Notes Editor Polish ✅
 > Compact Apple Notes-style formatting toolbar and note pinning.
 
-**Status:** `Testing`
+**Status:** `Complete` (2026-03-03)
 **Priority:** Medium
 
-**Scope:**
+**Scope (all resolved):**
 - ✅ **Compact toolbar:** Undo/Redo, Aa popover, Table, Link — in title bar, no title label (title comes from content)
 - ✅ **Aa text style popover:** Inline styles (B/I/U/S/highlight), alignment, paragraph styles (Title/Heading/Subheading/Body/Monostyled), lists, block elements — all with active state indicators
 - ✅ **New formatting:** Strikethrough, highlight, block quote, horizontal rule, heading levels, code block — via Aa popover
@@ -211,6 +211,8 @@ Make everything that shipped in beta feel finished.
 - ✅ **Format state reporting:** JS→Swift bridge reports active marks/nodes on every selection change
 - ✅ **Note pinning:** Pin/unpin via context menu, pinned notes sort to top, persisted in index
 - ✅ **Old toolbar removed:** Flat scrollable toolbar strip replaced by compact title bar icons
+- ✅ **Floating toolbar removed:** Redundant JS floating toolbar replaced by table popover with 5×5 grid picker + contextual table operations
+- ✅ **Save protection:** flushSave guards against incomplete editor round-trips (isLoadingNote/isLoadingExternalFile)
 
 ---
 
@@ -442,7 +444,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-06 | Date Card Surfacing Completion | 2 | ✅ Complete |
 | R-07 | AI Auto-Tag Quality | 2 | ✅ Complete |
 | R-08 | Keyboard Navigation | 2 | ✅ Complete |
-| R-09 | Notes Editor Polish | 2 | Testing |
+| R-09 | Notes Editor Polish | 2 | ✅ Complete |
 | R-10 | Custom Folder Icons | 2 | Not Started |
 | R-11 | Drag Out to External Apps | 2 | Testing |
 | R-12 | Clipboard Viewer | 2 | Not Started |
@@ -456,7 +458,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 6/21
+**Completed:** 7/21
 
 ---
 

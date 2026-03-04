@@ -287,30 +287,11 @@ struct DetailSlideOutView: View {
             .buttonStyle(.plain)
             .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
 
-            // Mode toggle icons
-            ForEach(DetailViewMode.allCases, id: \.self) { mode in
-                Button {
-                    onModeChange(mode)
-                } label: {
-                    Image(systemName: modeIcon(mode))
-                        .font(CiderFont.label)
-                        .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(mode.displayName)
-            }
+            // Mode toggle
+            DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
         }
     }
 
-    private func modeIcon(_ mode: DetailViewMode) -> String {
-        switch mode {
-        case .slideOut: return "sidebar.trailing"
-        case .fullPanel: return "rectangle"
-        case .page: return "rectangle.fill"
-        }
-    }
 }
 
 // MARK: - Design Constants

@@ -104,30 +104,11 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View>: View {
 
                 Spacer(minLength: 0)
 
-                ForEach(DetailViewMode.allCases, id: \.self) { mode in
-                    Button {
-                        onModeChange(mode)
-                    } label: {
-                        Image(systemName: modeIcon(mode))
-                            .font(CiderFont.label)
-                            .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(mode.displayName)
-                }
+                DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
             }
         }
     }
 
-    private func modeIcon(_ mode: DetailViewMode) -> String {
-        switch mode {
-        case .slideOut: return "sidebar.trailing"
-        case .fullPanel: return "rectangle"
-        case .page: return "rectangle.fill"
-        }
-    }
 }
 
 // MARK: - Convenience initializer for callers without toolbar extras

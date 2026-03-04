@@ -1664,27 +1664,7 @@ struct CiderPanelView: View {
 
         Spacer(minLength: Spacing.sm)
 
-        ForEach(DetailViewMode.allCases, id: \.self) { mode in
-            Button {
-                changeDetailViewMode(mode)
-            } label: {
-                Image(systemName: detailModeIcon(mode))
-                    .font(CiderFont.label)
-                    .foregroundColor(detailViewMode == mode ? CiderColors.controlAccent : CiderColors.tertiary)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(mode.displayName)
-        }
-    }
-
-    private func detailModeIcon(_ mode: DetailViewMode) -> String {
-        switch mode {
-        case .slideOut: return "sidebar.trailing"
-        case .fullPanel: return "rectangle"
-        case .page: return "rectangle.fill"
-        }
+        DetailViewModePicker(currentMode: detailViewMode, onChange: changeDetailViewMode)
     }
 
     private var currentDetailPageTitle: String {

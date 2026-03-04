@@ -1482,7 +1482,6 @@ function selectNoteFindMatch(index) {
   state.currentIndex = index;
   setNoteFindDecorations(state.matches, state.currentIndex);
   scrollToNoteFindMatch(match);
-  requestFloatingToolbarUpdate(true);
   return true;
 }
 
@@ -1645,7 +1644,7 @@ const editor = new Editor({
     NoteFindHighlights,
     TaskList,
     TaskItem.configure({ nested: true }),
-    Table.configure({ resizable: false }),
+    Table.configure({ resizable: true }),
     TableRow,
     TableCell,
     TableHeader,
@@ -1879,20 +1878,33 @@ function replaceEditorContent(markdown) {
   resetPendingImageInsertions();
   const normalized = normalizeIncomingMarkdown(markdown);
 
-  editor.commands.setContent(normalized, false, {
-    preserveWhitespace: 'full',
-  });
+  try {
+    editor.commands.setContent(normalized, false, {
+      preserveWhitespace: 'full',
+    });
+  } catch (err) {
+    postEditorDiagnostic('setContent', 'error: ' + err.message + '\n' + err.stack);
+    // Retry without preserveWhitespace as fallback
+    try {
+      editor.commands.setContent(normalized, false);
+    } catch (retryErr) {
+      postEditorDiagnostic('setContent', 'retry also failed: ' + retryErr.message);
+    }
+  }
 
   repairTextAlignAfterParse(normalized);
   stripTaskItemLeadingSpaceArtifacts();
   resetEditorPluginState();
-  requestFloatingToolbarUpdate(true);
 }
 
 // Swift -> JS bridge API
 window.editorAPI = {
   setContent(markdown) {
-    replaceEditorContent(markdown);
+    try {
+      replaceEditorContent(markdown);
+    } catch (err) {
+      postEditorDiagnostic('setContent', 'API error: ' + err.message + '\n' + (err.stack || ''));
+    }
   },
   getContent() {
     return getNormalizedMarkdown();
@@ -1904,11 +1916,9 @@ window.editorAPI = {
   },
   focus() {
     editor.commands.focus();
-    requestFloatingToolbarUpdate(true);
   },
   blur() {
     editor.commands.blur();
-    hideFloatingToolbar();
   },
   clear() {
     replaceEditorContent('');
