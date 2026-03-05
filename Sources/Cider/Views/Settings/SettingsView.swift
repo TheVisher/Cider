@@ -64,6 +64,7 @@ struct SettingsView: View {
             case "data": selectedCategory = .data
             case "general": selectedCategory = .general
             case "appearance": selectedCategory = .appearance
+            case "clipboard": selectedCategory = .clipboard
             default: break
             }
         }
@@ -296,6 +297,37 @@ struct SettingsView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .clipboardBehavior:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Clipboard Monitor") {
+                    SettingsToggleRow(
+                        title: "Monitor clipboard history",
+                        subtitle: "Record copied items for the clipboard viewer",
+                        isOn: $viewModel.enableClipboardHistory
+                    )
+                    SettingsToggleRow(
+                        title: "Clipboard viewer hotkey (\u{2325}V)",
+                        subtitle: "Toggle the clipboard viewer with Option+V",
+                        isOn: $viewModel.enableClipboardHotkey
+                    )
+                }
+                SettingsSection(title: "Standalone Panel") {
+                    SettingsPickerRow(
+                        title: "Panel position",
+                        subtitle: "Where the clipboard panel appears when opened via hotkey",
+                        selection: $viewModel.clipboardPanelPosition,
+                        options: ClipboardPanelPosition.allCases,
+                        label: { $0.displayName }
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .clipboardStorage:
+            ClipboardStorageSettingsView()
+                .environmentObject(viewModel)
 
         case .advancedAccessibility:
             VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -794,6 +826,7 @@ private enum SettingsCategory: String, CaseIterable {
     case notes = "Notes"
     case bookmarks = "Bookmarks"
     case appearance = "Appearance"
+    case clipboard = "Clipboard"
     case data = "Data"
     case intelligence = "Intelligence"
     case advanced = "Advanced"
@@ -801,7 +834,7 @@ private enum SettingsCategory: String, CaseIterable {
     case account = "Account"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .notes, .bookmarks, .appearance, .intelligence, .data, .advanced, .about]
+        [.general, .notes, .bookmarks, .appearance, .clipboard, .intelligence, .data, .advanced, .about]
     }
 
     var icon: String {
@@ -814,6 +847,8 @@ private enum SettingsCategory: String, CaseIterable {
             "square.grid.2x2"
         case .appearance:
             "paintbrush"
+        case .clipboard:
+            "doc.on.clipboard"
         case .intelligence:
             "sparkles"
         case .data:
@@ -837,6 +872,8 @@ private enum SettingsCategory: String, CaseIterable {
             [.bookmarksBehavior]
         case .appearance:
             [.appearanceText, .appearanceMenuBar, .appearanceSounds]
+        case .clipboard:
+            [.clipboardBehavior, .clipboardStorage]
         case .intelligence:
             [.intelligenceFeatures]
         case .data:
@@ -862,6 +899,8 @@ private enum SettingsSubcategory: Hashable {
     case appearanceText
     case appearanceMenuBar
     case appearanceSounds
+    case clipboardBehavior
+    case clipboardStorage
     case dataDirectories
     case dataTrash
     case dataNotifications
@@ -894,6 +933,10 @@ private enum SettingsSubcategory: Hashable {
             "Menu Bar"
         case .appearanceSounds:
             "Sounds"
+        case .clipboardBehavior:
+            "Behavior"
+        case .clipboardStorage:
+            "Storage"
         case .dataDirectories:
             "Directories"
         case .dataTrash:
@@ -1232,5 +1275,144 @@ struct SettingsBackgroundView: View {
                     .stroke(CiderColors.separatorStrong, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
+    }
+}
+
+// MARK: - Clipboard Storage Settings
+
+private struct ClipboardStorageSettingsView: View {
+    @EnvironmentObject private var viewModel: SettingsViewModel
+    @State private var storageDisplay: String = ""
+    @State private var imageStorageDisplay: String = ""
+    @State private var showClearConfirmation = false
+    @State private var showPurgeConfirmation = false
+
+    private static let retentionOptions: [(label: String, days: Int)] = [
+        ("Forever", 0),
+        ("1 day", 1),
+        ("3 days", 3),
+        ("7 days", 7),
+        ("14 days", 14),
+        ("30 days", 30),
+        ("90 days", 90),
+    ]
+
+    private static let imageRetentionOptions: [(label: String, days: Int)] = [
+        ("1 day", 1),
+        ("3 days", 3),
+        ("7 days", 7),
+        ("14 days", 14),
+        ("30 days", 30),
+        ("90 days", 90),
+        ("Forever", 0),
+    ]
+
+    private static let storageLimitOptions: [(label: String, mb: Int)] = [
+        ("100 MB", 100),
+        ("250 MB", 250),
+        ("500 MB", 500),
+        ("1 GB", 1000),
+        ("2 GB", 2000),
+        ("Unlimited", 0),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            SettingsSection(title: "Text Retention") {
+                SettingsPickerRow(
+                    title: "Keep text items for",
+                    subtitle: "How long to keep URLs and text in clipboard history",
+                    selection: Binding(
+                        get: { viewModel.clipboardRetentionDays },
+                        set: { viewModel.clipboardRetentionDays = $0 }
+                    ),
+                    options: Self.retentionOptions.map(\.days),
+                    label: { days in Self.retentionOptions.first(where: { $0.days == days })?.label ?? "\(days)d" }
+                )
+            }
+
+            SettingsSection(title: "Image Retention") {
+                SettingsPickerRow(
+                    title: "Keep image items for",
+                    subtitle: "How long to keep copied images in clipboard history",
+                    selection: Binding(
+                        get: { viewModel.clipboardImageRetentionDays },
+                        set: { viewModel.clipboardImageRetentionDays = $0 }
+                    ),
+                    options: Self.imageRetentionOptions.map(\.days),
+                    label: { days in Self.imageRetentionOptions.first(where: { $0.days == days })?.label ?? "\(days)d" }
+                )
+
+                SettingsPickerRow(
+                    title: "Max image storage",
+                    subtitle: "Oldest images are removed when this limit is exceeded",
+                    selection: Binding(
+                        get: { viewModel.clipboardMaxImageStorageMB },
+                        set: { viewModel.clipboardMaxImageStorageMB = $0 }
+                    ),
+                    options: Self.storageLimitOptions.map(\.mb),
+                    label: { mb in Self.storageLimitOptions.first(where: { $0.mb == mb })?.label ?? "\(mb) MB" }
+                )
+            }
+
+            SettingsSection(title: "Storage Usage") {
+                HStack(spacing: Spacing.md) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Total: \(storageDisplay)")
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.primary)
+                        Text("Images: \(imageStorageDisplay)")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Purge Saved") {
+                        showPurgeConfirmation = true
+                    }
+                    .controlSize(.small)
+                    .help("Remove all items marked as saved")
+
+                    Button("Clear All") {
+                        showClearConfirmation = true
+                    }
+                    .controlSize(.small)
+                    .help("Delete all clipboard history")
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { refreshStorageDisplay() }
+        .onReceive(ClipboardStorage.shared.$items) { _ in
+            refreshStorageDisplay()
+        }
+        .alert("Clear Clipboard History", isPresented: $showClearConfirmation) {
+            Button("Clear All", role: .destructive) {
+                ClipboardStorage.shared.clearAll()
+                refreshStorageDisplay()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently remove all clipboard history items. This cannot be undone.")
+        }
+        .alert("Purge Saved Items", isPresented: $showPurgeConfirmation) {
+            Button("Purge", role: .destructive) {
+                ClipboardStorage.shared.purgeSavedItems()
+                refreshStorageDisplay()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove all items that have been saved as bookmarks or notes from clipboard history.")
+        }
+    }
+
+    private func refreshStorageDisplay() {
+        let total = ClipboardStorage.shared.totalStorageBytes()
+        let images = ClipboardStorage.shared.imageStorageBytes()
+        storageDisplay = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+        imageStorageDisplay = ByteCountFormatter.string(fromByteCount: images, countStyle: .file)
     }
 }

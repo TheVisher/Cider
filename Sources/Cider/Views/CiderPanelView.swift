@@ -430,6 +430,16 @@ struct CiderPanelView: View {
             }
             .help("Capture screen region (⌥⌘2)")
 
+        Image(systemName: "clipboard")
+            .font(CiderFont.bodySemibold)
+            .foregroundColor(CiderColors.secondary)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                NotificationCenter.default.post(name: .toggleClipboardViewer, object: nil)
+            }
+            .help("Clipboard history (\u{2325}V)")
+
         if selectedFolderID != nil && folderHasSubFolders {
             SectionCollapseToggle(
                 label: "Folders",

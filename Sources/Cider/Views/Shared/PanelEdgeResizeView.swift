@@ -183,8 +183,8 @@ final class PanelEdgeResizeNSView: NSView {
         initial: NSRect,
         frame: inout NSRect
     ) {
-        let minW = CiderPanelDesign.panelMinWidth
-        let minH = CiderPanelDesign.panelMinHeight
+        let minW = window?.minSize.width ?? CiderPanelDesign.panelMinWidth
+        let minH = window?.minSize.height ?? CiderPanelDesign.panelMinHeight
 
         switch zone {
         case .none:

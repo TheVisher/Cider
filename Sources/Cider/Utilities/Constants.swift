@@ -46,6 +46,8 @@ extension Notification.Name {
     static let openNewItemPopover = Notification.Name("cider.openNewItemPopover")
     static let showOnboarding = Notification.Name("cider.showOnboarding")
     static let openDateCardFromNotification = Notification.Name("cider.openDateCardFromNotification")
+    static let toggleClipboardViewer = Notification.Name("cider.toggleClipboardViewer")
+    static let dismissClipboardPanel = Notification.Name("cider.dismissClipboardPanel")
 }
 
 // MARK: - Snap Target
@@ -279,6 +281,14 @@ enum CiderPanelDesign {
     static let sidebarCompactThreshold: CGFloat = 680
     static let sidebarBackgroundOpacity: CGFloat = 0.04
     static let sidebarDividerOpacity: CGFloat = 0.2
+}
+
+enum ClipboardPanelDesign {
+    static let minWidth: CGFloat = 340
+    static let minHeight: CGFloat = 300
+    static let defaultWidth: CGFloat = 360
+    static let defaultHeight: CGFloat = 500
+    static let cornerRadius: CGFloat = Radius.lg
 }
 
 enum CiderColors {

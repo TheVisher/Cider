@@ -242,6 +242,7 @@ enum ActiveBrowserCaptureService {
         }
 
         BookmarksClipboardMonitor.shared.suspendFor(seconds: 3.0)
+        ClipboardHistoryService.shared.suspendFor(seconds: 3.0)
         let pasteboard = NSPasteboard.general
         let snapshot = snapshotPasteboard(pasteboard)
         let previouslyFrontmost = NSWorkspace.shared.frontmostApplication

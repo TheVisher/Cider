@@ -88,6 +88,20 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
 }
 
 
+enum ClipboardPanelPosition: String, Codable, CaseIterable {
+    case followMouse
+    case leftEdge
+    case rightEdge
+
+    var displayName: String {
+        switch self {
+        case .followMouse: return "Follow mouse"
+        case .leftEdge: return "Left edge"
+        case .rightEdge: return "Right edge"
+        }
+    }
+}
+
 struct CiderConfig: Codable {
     // Legacy keys for migration from old config format
     private enum LegacyCodingKeys: String, CodingKey {
@@ -149,6 +163,12 @@ struct CiderConfig: Codable {
         case dateCardDefaultNotificationMinutes
         case hasCompletedOnboarding
         case showDragModeHints
+        case enableClipboardHistory
+        case enableClipboardHotkey
+        case clipboardRetentionDays
+        case clipboardImageRetentionDays
+        case clipboardMaxImageStorageMB
+        case clipboardPanelPosition
     }
 
     var showMenuBarIcon: Bool
@@ -199,6 +219,12 @@ struct CiderConfig: Codable {
     var dateCardDefaultNotificationMinutes: Int  // Default notification lead time in minutes (15, 30, 60, 120, 1440)
     var hasCompletedOnboarding: Bool  // Whether the user has dismissed the first-run onboarding tab
     var showDragModeHints: Bool  // Show overlay hints when dragging bookmarks that have both image+URL
+    var enableClipboardHistory: Bool  // Record clipboard history for the clipboard viewer
+    var enableClipboardHotkey: Bool  // Enable Option+V to toggle clipboard viewer
+    var clipboardRetentionDays: Int  // 0 = infinite, days to keep text clipboard items
+    var clipboardImageRetentionDays: Int  // Days to keep image clipboard items (default 7)
+    var clipboardMaxImageStorageMB: Int  // Max total image storage in MB (default 500)
+    var clipboardPanelPosition: ClipboardPanelPosition  // Where standalone clipboard panel appears
 
     static let storageKey = "CiderConfig"
 
@@ -247,7 +273,13 @@ struct CiderConfig: Codable {
             enableDateCardNotifications: false,
             dateCardDefaultNotificationMinutes: 30,
             hasCompletedOnboarding: false,
-            showDragModeHints: true
+            showDragModeHints: true,
+            enableClipboardHistory: true,
+            enableClipboardHotkey: true,
+            clipboardRetentionDays: 0,
+            clipboardImageRetentionDays: 7,
+            clipboardMaxImageStorageMB: 500,
+            clipboardPanelPosition: .followMouse
         )
     }
 
@@ -433,6 +465,12 @@ struct CiderConfig: Codable {
         dateCardDefaultNotificationMinutes = try container.decodeIfPresent(Int.self, forKey: .dateCardDefaultNotificationMinutes) ?? 30
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         showDragModeHints = try container.decodeIfPresent(Bool.self, forKey: .showDragModeHints) ?? true
+        enableClipboardHistory = try container.decodeIfPresent(Bool.self, forKey: .enableClipboardHistory) ?? true
+        enableClipboardHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableClipboardHotkey) ?? true
+        clipboardRetentionDays = try container.decodeIfPresent(Int.self, forKey: .clipboardRetentionDays) ?? 0
+        clipboardImageRetentionDays = try container.decodeIfPresent(Int.self, forKey: .clipboardImageRetentionDays) ?? 7
+        clipboardMaxImageStorageMB = try container.decodeIfPresent(Int.self, forKey: .clipboardMaxImageStorageMB) ?? 500
+        clipboardPanelPosition = try container.decodeIfPresent(ClipboardPanelPosition.self, forKey: .clipboardPanelPosition) ?? .followMouse
     }
 
     init(
@@ -483,7 +521,13 @@ struct CiderConfig: Codable {
         enableDateCardNotifications: Bool = false,
         dateCardDefaultNotificationMinutes: Int = 30,
         hasCompletedOnboarding: Bool = false,
-        showDragModeHints: Bool = true
+        showDragModeHints: Bool = true,
+        enableClipboardHistory: Bool = true,
+        enableClipboardHotkey: Bool = true,
+        clipboardRetentionDays: Int = 0,
+        clipboardImageRetentionDays: Int = 7,
+        clipboardMaxImageStorageMB: Int = 500,
+        clipboardPanelPosition: ClipboardPanelPosition = .followMouse
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -533,5 +577,11 @@ struct CiderConfig: Codable {
         self.dateCardDefaultNotificationMinutes = dateCardDefaultNotificationMinutes
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.showDragModeHints = showDragModeHints
+        self.enableClipboardHistory = enableClipboardHistory
+        self.enableClipboardHotkey = enableClipboardHotkey
+        self.clipboardRetentionDays = clipboardRetentionDays
+        self.clipboardImageRetentionDays = clipboardImageRetentionDays
+        self.clipboardMaxImageStorageMB = clipboardMaxImageStorageMB
+        self.clipboardPanelPosition = clipboardPanelPosition
     }
 }

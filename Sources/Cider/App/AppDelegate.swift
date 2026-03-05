@@ -51,6 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenCaptureToastLastTick: Date?
     private var screenCaptureWasVisible = false
 
+    // Clipboard
+    private var clipboardHotkeyDetector: ClipboardHotkeyDetector?
+    private var clipboardPanel: ClipboardPanel?
+    private var clipboardShadowPanel: CiderShadowPanel?
+    private var clipboardPanelFrameObservation: NSKeyValueObservation?
+
     // Services
     private var servicesProvider: CiderServicesProvider?
 
@@ -86,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeSourcesNotifications()
         startScreenCaptureHotkeyDetection()
         observeScreenCaptureNotifications()
+        startClipboardHotkeyDetection()
+        configureClipboardHistory()
+        configureClipboardPanel()
+        observeClipboardViewerNotifications()
 
         // Start Spotlight indexing.
         // Note: Core Spotlight requires a proper .app bundle to surface results in
@@ -111,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if config.trashRetentionDays > 0 {
                 TrashStorage.shared.purgeExpired(olderThan: config.trashRetentionDays)
             }
+            ClipboardStorage.shared.purgeExpired(config: config)
             // Load persisted embeddings so similarity search works immediately,
             // then backfill any bookmarks that have no vector yet.
             EmbeddingStore.shared.load()
@@ -146,6 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         undoToastPanel?.orderOut(nil)
         stopScreenCaptureToastTimer()
         screenCaptureToastPanel?.orderOut(nil)
+        clipboardShadowPanel?.orderOut(nil)
+        clipboardPanel?.orderOut(nil)
     }
 
     func applicationWillResignActive(_ notification: Notification) {
@@ -297,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CardStackStorage.shared.reload()
         SavedViewStorage.shared.reload()
         ExternalSourceStorage.shared.reload()
+        ClipboardStorage.shared.reload()
 
         // Toggle automatic bookmark capture from copied URLs/images
         BookmarksClipboardMonitor.shared.setEnabled(config.autoCaptureCopiedURLs || config.autoCaptureCopiedImages)
@@ -318,6 +332,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             DateCardNotificationService.shared.rescheduleAll() // clears all when disabled
+        }
+
+        // Toggle clipboard history
+        ClipboardHistoryService.shared.setEnabled(config.enableClipboardHistory)
+
+        // Toggle clipboard hotkey
+        if config.enableClipboardHotkey {
+            if clipboardHotkeyDetector == nil {
+                startClipboardHotkeyDetection()
+            } else {
+                clipboardHotkeyDetector?.setEnabled(true)
+            }
+        } else {
+            clipboardHotkeyDetector?.setEnabled(false)
         }
     }
 
@@ -1399,6 +1427,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopScreenCaptureToastTimer()
         screenCaptureToastPanel?.orderOut(nil)
         screenCaptureWasVisible = false
+    }
+
+    // MARK: - Clipboard Viewer
+
+    private func startClipboardHotkeyDetection() {
+        let config = CiderConfig.load()
+        guard config.enableClipboardHotkey else { return }
+        clipboardHotkeyDetector = ClipboardHotkeyDetector()
+        clipboardHotkeyDetector?.start()
+    }
+
+    private func configureClipboardHistory() {
+        let config = CiderConfig.load()
+        ClipboardHistoryService.shared.setEnabled(config.enableClipboardHistory)
+    }
+
+    private func configureClipboardPanel() {
+        let panel = ClipboardPanel()
+        self.clipboardPanel = panel
+
+        let shadowPanel = CiderShadowPanel()
+        self.clipboardShadowPanel = shadowPanel
+
+        clipboardPanelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
+            guard let frame = change.newValue else { return }
+            DispatchQueue.main.async {
+                self?.clipboardShadowPanel?.updateFrame(for: frame)
+            }
+        }
+
+        let panelView = ClipboardPanelView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        let hostingView = CiderPanelHostingView(rootView: panelView)
+        panel.contentView = hostingView
+    }
+
+    private func observeClipboardViewerNotifications() {
+        NotificationCenter.default.publisher(for: .toggleClipboardViewer)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, let panel = self.clipboardPanel else { return }
+                if panel.isVisible {
+                    self.hideClipboardPanel()
+                } else {
+                    self.showClipboardPanel()
+                }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .dismissClipboardPanel)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.hideClipboardPanel()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func showClipboardPanel() {
+        guard let panel = clipboardPanel else { return }
+
+        let config = CiderConfig.load()
+        let width = panel.frame.width > 0 ? panel.frame.width : ClipboardPanelDesign.defaultWidth
+        let height = panel.frame.height > 0 ? panel.frame.height : ClipboardPanelDesign.defaultHeight
+
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+                ?? NSScreen.main else { return }
+
+        let frame: NSRect
+        switch config.clipboardPanelPosition {
+        case .followMouse:
+            let x = max(screen.visibleFrame.minX, min(mouseLocation.x - width / 2, screen.visibleFrame.maxX - width))
+            let y = max(screen.visibleFrame.minY, min(mouseLocation.y - height / 2, screen.visibleFrame.maxY - height))
+            frame = NSRect(x: x, y: y, width: width, height: height)
+        case .leftEdge:
+            let x = screen.visibleFrame.minX + Spacing.md
+            let y = screen.visibleFrame.midY - height / 2
+            frame = NSRect(x: x, y: y, width: width, height: height)
+        case .rightEdge:
+            let x = screen.visibleFrame.maxX - width - Spacing.md
+            let y = screen.visibleFrame.midY - height / 2
+            frame = NSRect(x: x, y: y, width: width, height: height)
+        }
+
+        panel.setFrame(frame, display: true)
+        // Order main panel first, then shadow behind it — avoids flash of shadow-only
+        panel.makeKeyAndOrderFront(nil)
+        clipboardShadowPanel?.updateFrame(for: panel.frame)
+        clipboardShadowPanel?.order(.below, relativeTo: panel.windowNumber)
+    }
+
+    private func hideClipboardPanel() {
+        // Order both out together to prevent ghost shadow
+        clipboardPanel?.orderOut(nil)
+        clipboardShadowPanel?.orderOut(nil)
     }
 
     // MARK: - Debug Logging

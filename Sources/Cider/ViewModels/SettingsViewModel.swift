@@ -118,6 +118,26 @@ final class SettingsViewModel: ObservableObject {
         didSet { saveConfig() }
     }
 
+    // Clipboard
+    @Published var enableClipboardHistory: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var enableClipboardHotkey: Bool {
+        didSet { saveConfig() }
+    }
+    @Published var clipboardRetentionDays: Int {
+        didSet { saveConfig() }
+    }
+    @Published var clipboardImageRetentionDays: Int {
+        didSet { saveConfig() }
+    }
+    @Published var clipboardMaxImageStorageMB: Int {
+        didSet { saveConfig() }
+    }
+    @Published var clipboardPanelPosition: ClipboardPanelPosition {
+        didSet { saveConfig() }
+    }
+
     private var config: CiderConfig
 
     init() {
@@ -153,6 +173,12 @@ final class SettingsViewModel: ObservableObject {
         self.enableOCRIndexing = config.enableOCRIndexing
         self.enableColorExtraction = config.enableColorExtraction
         self.showDragModeHints = config.showDragModeHints
+        self.enableClipboardHistory = config.enableClipboardHistory
+        self.enableClipboardHotkey = config.enableClipboardHotkey
+        self.clipboardRetentionDays = config.clipboardRetentionDays
+        self.clipboardImageRetentionDays = config.clipboardImageRetentionDays
+        self.clipboardMaxImageStorageMB = config.clipboardMaxImageStorageMB
+        self.clipboardPanelPosition = config.clipboardPanelPosition
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -229,6 +255,12 @@ final class SettingsViewModel: ObservableObject {
         config.enableOCRIndexing = enableOCRIndexing
         config.enableColorExtraction = enableColorExtraction
         config.showDragModeHints = showDragModeHints
+        config.enableClipboardHistory = enableClipboardHistory
+        config.enableClipboardHotkey = enableClipboardHotkey
+        config.clipboardRetentionDays = clipboardRetentionDays
+        config.clipboardImageRetentionDays = clipboardImageRetentionDays
+        config.clipboardMaxImageStorageMB = clipboardMaxImageStorageMB
+        config.clipboardPanelPosition = clipboardPanelPosition
         config.save()
 
         // Post notification so AppDelegate can respond
