@@ -233,17 +233,23 @@ Make everything that shipped in beta feel finished.
 ### R-11: Drag Out to External Apps
 > Drag bookmarks and notes out of Cider into other apps.
 
-**Status:** `Testing`
+**Status:** `Complete` (2026-03-04)
 **Priority:** High
 
 **Scope:**
 - ✅ Bookmarks: register `public.url` drag provider (URL opens in browser)
 - ✅ Notes: register `public.file-url` drag provider (.md file)
-- ✅ Bookmarks with images: also offer `public.file-url` + image data UTI
+- ✅ Bookmarks with images: Option+drag exports image via `NSItemProvider(contentsOf:)`
 - ✅ Multi-drag: primary item's external types registered for external app targets
 - ✅ Works from Home tab, Folder detail view, Continue section, all display modes
+- ✅ Option+drag mode switching with drag preview hint ("⌥ for image")
+- ✅ showDragModeHints setting toggle
+- ✅ Bulk multi-drag undo (single undo action for all moved items)
+- ✅ Panel drag area restricted to title bar + sidebar (no accidental panel moves)
+- ✅ Tested: Finder, iMessage, Facebook, Discord desktop app — all working
+- ✅ Image drag uses file URL provider (no text leakage into text fields)
 
-**Known limitation:** Electron apps (Discord, Slack) may not pick up `public.url` — they prefer `public.utf8-plain-text` which carries the internal Cider ID. Fix deferred to post-1.0 (requires reworking internal drop detection to not depend on text payload).
+**Known limitation:** Discord web app doesn't accept native file drags (browser sandbox limitation, not fixable from our side).
 
 ---
 
@@ -446,7 +452,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-08 | Keyboard Navigation | 2 | ✅ Complete |
 | R-09 | Notes Editor Polish | 2 | ✅ Complete |
 | R-10 | Custom Folder Icons | 2 | Not Started |
-| R-11 | Drag Out to External Apps | 2 | Testing |
+| R-11 | Drag Out to External Apps | 2 | ✅ Complete |
 | R-12 | Clipboard Viewer | 2 | Not Started |
 | R-13 | Advanced Search | 2 | Not Started |
 | R-20 | Screen Capture Polish | 2 | Not Started |
@@ -458,7 +464,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 7/21
+**Completed:** 8/21
 
 ---
 

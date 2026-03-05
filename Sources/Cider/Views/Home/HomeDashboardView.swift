@@ -586,15 +586,18 @@ struct HomeDashboardView: View {
             let isOptionHeld = NSEvent.modifierFlags.contains(.option)
             let hasImage = bookmark.originalImageFileURL != nil || bookmark.thumbnailFileURL != nil
 
-            // Option+drag = export image to external apps (Finder, Discord, etc.)
-            // Must use NSItemProvider(object: NSString) — empty init doesn't work with Finder.
-            // Internal folder drops won't work (image type strips text in .onDrop proxy) — expected.
+            // Option+drag = export image to external apps (Finder, iMessage, etc.)
+            // Use NSItemProvider(contentsOf:) so the provider carries the image file
+            // without text — prevents text fields (Facebook) from receiving the title.
             if isOptionHeld && hasImage {
-                let provider = NSItemProvider(object: bookmark.title as NSString)
-                BookmarkDragPayload.registerPublicImage(on: provider, bookmark: bookmark)
-                if let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL {
+                let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL
+                if let fileURL, let provider = NSItemProvider(contentsOf: fileURL) {
                     provider.suggestedName = bookmark.title + "." + fileURL.pathExtension
+                    return provider
                 }
+                // Fallback: raw image data
+                let provider = NSItemProvider()
+                BookmarkDragPayload.registerPublicImage(on: provider, bookmark: bookmark)
                 return provider
             }
 
