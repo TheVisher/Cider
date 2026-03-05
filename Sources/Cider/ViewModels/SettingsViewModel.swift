@@ -114,6 +114,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var enableColorExtraction: Bool {
         didSet { saveConfig() }
     }
+    @Published var showDragModeHints: Bool {
+        didSet { saveConfig() }
+    }
 
     private var config: CiderConfig
 
@@ -149,6 +152,7 @@ final class SettingsViewModel: ObservableObject {
         self.enablePageSummaries = config.enablePageSummaries
         self.enableOCRIndexing = config.enableOCRIndexing
         self.enableColorExtraction = config.enableColorExtraction
+        self.showDragModeHints = config.showDragModeHints
 
         // Check current launch at login status
         if #available(macOS 13.0, *) {
@@ -224,6 +228,7 @@ final class SettingsViewModel: ObservableObject {
         config.enablePageSummaries = enablePageSummaries
         config.enableOCRIndexing = enableOCRIndexing
         config.enableColorExtraction = enableColorExtraction
+        config.showDragModeHints = showDragModeHints
         config.save()
 
         // Post notification so AppDelegate can respond

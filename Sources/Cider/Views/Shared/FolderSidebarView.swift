@@ -64,6 +64,10 @@ struct FolderSidebarView: View {
             UTType.text.identifier,
             UTType.plainText.identifier,
             UTType.utf8PlainText.identifier,
+            // NOTE: Do NOT add image types here. .onDrop proxies providers and
+            // exposes only one matching type — if image types are accepted,
+            // public.png wins over public.utf8-plain-text, stripping the text
+            // payload that carries the internal bookmark/note ID.
         ]
     }
 
@@ -660,27 +664,20 @@ struct FolderSidebarView: View {
         for provider in providers where provider.registeredTypeIdentifiers.contains(Self.multiDragTypeIdentifier) {
             provider.loadDataRepresentation(forTypeIdentifier: Self.multiDragTypeIdentifier) { data, _ in
                 guard let data, let items = MultiDragPayload.decode(from: data) else { return }
-                DispatchQueue.main.async {
-                    for item in items {
-                        if item.type == "bookmark",
-                           let bookmark = bookmarks.first(where: { $0.id == item.id }) {
-                            _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
-                        } else if item.type == "note",
-                                  let note = notes.first(where: { $0.id == item.id }) {
-                            _ = onAssignNoteToFolder?(note, targetFolderID)
-                        } else if item.type == "datecard" {
-                            DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID)
-                        } else if item.type == "contact" {
-                            ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID)
-                        }
-                    }
+                let localBookmarks = bookmarks
+                let localNotes = notes
+                let localFolders = folders
+                Task { @MainActor in
+                    performBulkMove(items: items, targetFolderID: targetFolderID, bookmarks: localBookmarks, notes: localNotes, folders: localFolders)
                 }
             }
             return true
         }
 
-        // Check for bookmark drag payload
-        for provider in providers where provider.hasItemConformingToTypeIdentifier(Self.bookmarkDragTypeIdentifier) {
+        // Check for bookmark drag payload — use registeredTypeIdentifiers.contains (not
+        // hasItemConformingToTypeIdentifier) because custom UTIs aren't in the system conformance
+        // tree. This matches the pattern used for multi-drag above.
+        for provider in providers where provider.registeredTypeIdentifiers.contains(Self.bookmarkDragTypeIdentifier) {
             provider.loadDataRepresentation(forTypeIdentifier: Self.bookmarkDragTypeIdentifier) { data, _ in
                 guard let data,
                       let rawID = String(data: data, encoding: .utf8),
@@ -696,8 +693,8 @@ struct FolderSidebarView: View {
             return true
         }
 
-        // Check for note drag payload
-        for provider in providers where provider.hasItemConformingToTypeIdentifier(Self.noteDragTypeIdentifier) {
+        // Check for note drag payload — same pattern as bookmark above.
+        for provider in providers where provider.registeredTypeIdentifiers.contains(Self.noteDragTypeIdentifier) {
             provider.loadDataRepresentation(forTypeIdentifier: Self.noteDragTypeIdentifier) { data, _ in
                 guard let data,
                       let rawID = String(data: data, encoding: .utf8),
@@ -714,29 +711,20 @@ struct FolderSidebarView: View {
         }
 
         // Text fallback for multi-drag or single bookmark/note IDs
-        // Use explicit UTF-8 plain text type — loadObject(ofClass: NSString.self)
-        // picks the "best" text-compatible type, which may resolve to public.url or
-        // public.file-url data instead of our internal Cider ID when those are registered.
-        for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
+        // Use hasItemConformingToTypeIdentifier instead of canLoadObject(ofClass: NSString.self)
+        // because canLoadObject only returns true for object-mode registrations (NSItemProvider(object:)),
+        // not for registerDataRepresentation-based registrations used by bookmark drag providers.
+        for provider in providers where provider.hasItemConformingToTypeIdentifier("public.utf8-plain-text") {
             provider.loadDataRepresentation(forTypeIdentifier: "public.utf8-plain-text") { data, _ in
                 guard let data, let raw = String(data: data, encoding: .utf8) else { return }
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 if let items = MultiDragPayload.decodeFromText(trimmed) {
-                    DispatchQueue.main.async {
-                        for item in items {
-                            if item.type == "bookmark",
-                               let bookmark = bookmarks.first(where: { $0.id == item.id }) {
-                                _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
-                            } else if item.type == "note",
-                                      let note = notes.first(where: { $0.id == item.id }) {
-                                _ = onAssignNoteToFolder?(note, targetFolderID)
-                            } else if item.type == "datecard" {
-                                DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID)
-                            } else if item.type == "contact" {
-                                ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID)
-                            }
-                        }
+                    let localBookmarks = bookmarks
+                    let localNotes = notes
+                    let localFolders = folders
+                    Task { @MainActor in
+                        performBulkMove(items: items, targetFolderID: targetFolderID, bookmarks: localBookmarks, notes: localNotes, folders: localFolders)
                     }
                     return
                 }
@@ -759,6 +747,70 @@ struct FolderSidebarView: View {
         }
 
         return false
+    }
+
+    /// Moves all multi-drag items to targetFolderID and records a single bulkMoved undo action.
+    @MainActor
+    private func performBulkMove(
+        items: [MultiDragPayload.Item],
+        targetFolderID: UUID?,
+        bookmarks: [Bookmark],
+        notes: [Note],
+        folders: [Folder]
+    ) {
+        var bulkMoveItems: [BulkMoveItem] = []
+        let folderName = folders.first(where: { $0.id == targetFolderID })?.name ?? "Unfiled"
+
+        for item in items {
+            switch item.type {
+            case "bookmark":
+                if let bookmark = bookmarks.first(where: { $0.id == item.id }) {
+                    bulkMoveItems.append(BulkMoveItem(
+                        itemID: bookmark.id,
+                        itemType: .bookmark,
+                        title: bookmark.title,
+                        fromFolderID: bookmark.folderID
+                    ))
+                    BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: targetFolderID)
+                }
+            case "note":
+                if let note = notes.first(where: { $0.id == item.id }) {
+                    bulkMoveItems.append(BulkMoveItem(
+                        itemID: note.id,
+                        itemType: .note,
+                        title: note.title,
+                        fromFolderID: note.folderID
+                    ))
+                    NotesStorage.shared.assignNote(note.id, toFolder: targetFolderID)
+                }
+            case "datecard":
+                if let dateCard = DateCardStorage.shared.dateCard(for: item.id) {
+                    bulkMoveItems.append(BulkMoveItem(
+                        itemID: dateCard.id,
+                        itemType: .dateCard,
+                        title: dateCard.title,
+                        fromFolderID: dateCard.folderID
+                    ))
+                    DateCardStorage.shared.assignDateCard(item.id, toFolder: targetFolderID)
+                }
+            case "contact":
+                if let contact = ContactStorage.shared.contact(for: item.id) {
+                    bulkMoveItems.append(BulkMoveItem(
+                        itemID: contact.id,
+                        itemType: .contact,
+                        title: contact.displayName,
+                        fromFolderID: contact.folderID
+                    ))
+                    ContactStorage.shared.assignContact(item.id, toFolder: targetFolderID)
+                }
+            default:
+                break
+            }
+        }
+
+        if !bulkMoveItems.isEmpty {
+            CiderUndoManager.shared.record(.bulkMoved(bulkMoveItems, toFolderID: targetFolderID, folderName: folderName))
+        }
     }
 }
 

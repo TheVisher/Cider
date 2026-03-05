@@ -15,6 +15,9 @@ final class CiderPanel: NSPanel {
     private var dragStartMouse: NSPoint?
     private var isDragging = false
 
+    /// Updated by CiderPanelShell when sidebar visibility changes.
+    var isSidebarCurrentlyVisible = true
+
     init() {
         let initialFrame = NSRect(
             x: 0,
@@ -148,18 +151,6 @@ final class CiderPanel: NSPanel {
         guard let contentView = contentView else { return false }
         let bounds = contentView.bounds
 
-        // Allow dragging from anywhere within the visible content area
-        let hPad = CiderPanelDesign.shadowPadding
-        let topPad = CiderPanelDesign.topPadding
-        let bottomPad = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
-
-        guard locationInWindow.x >= hPad && locationInWindow.x <= bounds.width - hPad else {
-            return false
-        }
-        guard locationInWindow.y >= bottomPad && locationInWindow.y <= bounds.height - topPad else {
-            return false
-        }
-
         // Check if the hit view is an interactive control or our resize view
         if let hitView = contentView.hitTest(locationInWindow) {
             var view: NSView? = hitView
@@ -171,7 +162,23 @@ final class CiderPanel: NSPanel {
             }
         }
 
-        return true
+        // Title bar region: top strip across full width
+        // Right column has Spacing.sm - 1 (7pt) top padding + titleBarHeight (40pt)
+        let titleBarMinY = bounds.height - CiderPanelDesign.titleBarHeight - (Spacing.sm - 1)
+        if locationInWindow.y >= titleBarMinY {
+            return true
+        }
+
+        // Sidebar region: left column when visible
+        // folderSidebarWidth (224pt) + leading padding (12pt) + vertical padding (12pt) + container insets
+        if isSidebarCurrentlyVisible {
+            let sidebarMaxX = BookmarksDesign.folderSidebarWidth + Spacing.md * 2 + Spacing.sm
+            if locationInWindow.x <= sidebarMaxX {
+                return true
+            }
+        }
+
+        return false
     }
 
     var persistableFrame: NSRect {

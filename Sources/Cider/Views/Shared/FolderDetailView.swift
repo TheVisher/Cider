@@ -818,6 +818,21 @@ struct FolderDetailView: View {
         return {
             let bookmarkItemID = itemID(for: .bookmark(bookmark))
 
+            let isOptionHeld = NSEvent.modifierFlags.contains(.option)
+            let hasImage = bookmark.originalImageFileURL != nil || bookmark.thumbnailFileURL != nil
+
+            // Option+drag = export image to external apps (Finder, Discord, etc.)
+            // Must use NSItemProvider(object: NSString) — empty init doesn't work with Finder.
+            // Internal folder drops won't work (image type strips text in .onDrop proxy) — expected.
+            if isOptionHeld && hasImage {
+                let provider = NSItemProvider(object: bookmark.title as NSString)
+                BookmarkDragPayload.registerPublicImage(on: provider, bookmark: bookmark)
+                if let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL {
+                    provider.suggestedName = bookmark.title + "." + fileURL.pathExtension
+                }
+                return provider
+            }
+
             if selectedItemIDs.contains(bookmarkItemID) && selectedItemIDs.count > 1 {
                 let allItems = CiderMultiDrag.parseSelectedItemIDs(selectedItemIDs)
                 return CiderMultiDrag.makeProvider(
@@ -826,6 +841,7 @@ struct FolderDetailView: View {
                     allItemIDs: allItems,
                 )
             } else {
+                // Normal drag: text (bookmark ID) + URL for internal folders + external link sharing
                 let provider = NSItemProvider(
                     object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
                 )
@@ -838,6 +854,7 @@ struct FolderDetailView: View {
                     return nil
                 }
                 BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)
+
                 return provider
             }
         }
@@ -866,7 +883,9 @@ struct FolderDetailView: View {
                     completion(payload, nil)
                     return nil
                 }
-                NoteDragPayload.registerPublicFileURL(on: provider, note: note)
+                // NOTE: Do NOT call NoteDragPayload.registerPublicFileURL here.
+                // Registering public.file-url breaks SwiftUI's .onDrop, causing
+                // providers to arrive with empty registeredTypeIdentifiers.
                 return provider
             }
         }

@@ -148,6 +148,7 @@ struct CiderConfig: Codable {
         case enableDateCardNotifications
         case dateCardDefaultNotificationMinutes
         case hasCompletedOnboarding
+        case showDragModeHints
     }
 
     var showMenuBarIcon: Bool
@@ -197,6 +198,7 @@ struct CiderConfig: Codable {
     var enableDateCardNotifications: Bool  // Send system notifications for approaching date cards
     var dateCardDefaultNotificationMinutes: Int  // Default notification lead time in minutes (15, 30, 60, 120, 1440)
     var hasCompletedOnboarding: Bool  // Whether the user has dismissed the first-run onboarding tab
+    var showDragModeHints: Bool  // Show overlay hints when dragging bookmarks that have both image+URL
 
     static let storageKey = "CiderConfig"
 
@@ -244,7 +246,8 @@ struct CiderConfig: Codable {
             dateCardSurfacingDays: 7,
             enableDateCardNotifications: false,
             dateCardDefaultNotificationMinutes: 30,
-            hasCompletedOnboarding: false
+            hasCompletedOnboarding: false,
+            showDragModeHints: true
         )
     }
 
@@ -429,6 +432,7 @@ struct CiderConfig: Codable {
         enableDateCardNotifications = try container.decodeIfPresent(Bool.self, forKey: .enableDateCardNotifications) ?? false
         dateCardDefaultNotificationMinutes = try container.decodeIfPresent(Int.self, forKey: .dateCardDefaultNotificationMinutes) ?? 30
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        showDragModeHints = try container.decodeIfPresent(Bool.self, forKey: .showDragModeHints) ?? true
     }
 
     init(
@@ -478,7 +482,8 @@ struct CiderConfig: Codable {
         dateCardSurfacingDays: Int = 7,
         enableDateCardNotifications: Bool = false,
         dateCardDefaultNotificationMinutes: Int = 30,
-        hasCompletedOnboarding: Bool = false
+        hasCompletedOnboarding: Bool = false,
+        showDragModeHints: Bool = true
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -527,5 +532,6 @@ struct CiderConfig: Codable {
         self.enableDateCardNotifications = enableDateCardNotifications
         self.dateCardDefaultNotificationMinutes = dateCardDefaultNotificationMinutes
         self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.showDragModeHints = showDragModeHints
     }
 }

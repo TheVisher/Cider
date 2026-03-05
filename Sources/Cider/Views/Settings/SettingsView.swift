@@ -241,6 +241,12 @@ struct SettingsView: View {
                         options: BookmarkCardSize.allCases,
                         label: { $0.displayName }
                     )
+
+                    SettingsToggleRow(
+                        title: "Show drag mode hints",
+                        subtitle: "Show overlay hints when dragging bookmarks with both image and URL",
+                        isOn: $viewModel.showDragModeHints
+                    )
                 }
                 Spacer(minLength: 0)
             }

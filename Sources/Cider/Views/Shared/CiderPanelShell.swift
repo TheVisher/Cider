@@ -152,6 +152,11 @@ struct CiderPanelShell<
         }
         .animation(reduceMotion ? .none : .snappy, value: isSidebarVisible)
         .onChange(of: isSidebarVisible) { _, visible in
+            // Sync sidebar visibility to the panel for drag area calculation
+            if let panel = NSApp.windows.compactMap({ $0 as? CiderPanel }).first {
+                panel.isSidebarCurrentlyVisible = visible
+            }
+
             toggleAppearTask?.cancel()
             if !visible {
                 // Sidebar closing — after a short delay, show title bar toggle
