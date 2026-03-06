@@ -87,6 +87,7 @@ struct ClipboardViewerView: View {
     @ObservedObject private var bookmarksStorage = BookmarksStorage.shared
     @ObservedObject private var notesStorage = NotesStorage.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("cider.clipboardWideMode") private var isWideMode = false
     @State private var collapsedSections: Set<ClipboardDateGroup> = []
     @State private var copiedItemID: UUID?
     @State private var savedItemID: UUID?
@@ -95,6 +96,11 @@ struct ClipboardViewerView: View {
     var isStandalone: Bool = false
     var onClose: (() -> Void)?
     var onExpand: (() -> Void)?
+
+    private static let wideColumns = [
+        GridItem(.flexible(), spacing: Spacing.sm),
+        GridItem(.flexible(), spacing: Spacing.sm),
+    ]
 
     /// Grouped items for the history sections, excluding the current (first) item.
     private var groupedItems: [(group: ClipboardDateGroup, items: [ClipboardItem])] {
@@ -105,99 +111,103 @@ struct ClipboardViewerView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            viewerHeader
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
+        GeometryReader { proxy in
+            let isWide = proxy.size.width > 500
 
-            Divider()
-                .opacity(CiderColors.dividerSecondaryOpacity)
+            VStack(spacing: 0) {
+                viewerHeader
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
 
-            if clipboardStorage.items.isEmpty {
-                emptyState
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        // Current clipboard item (first item = most recent copy)
-                        if let current = clipboardStorage.items.first {
-                            Section {
-                                ClipboardItemRow(
-                                    item: current,
-                                    isCopied: copiedItemID == current.id,
-                                    isSavedFlash: savedItemID == current.id,
-                                    onCopy: { copyItem(current) },
-                                    onSave: { saveItem(current) },
-                                    onDismiss: {
-                                        withAnimation(reduceMotion ? .none : .snappy) {
-                                            clipboardStorage.dismiss(current)
+                Divider()
+                    .opacity(CiderColors.dividerSecondaryOpacity)
+
+                if clipboardStorage.items.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            // Current clipboard item (first item = most recent copy)
+                            if let current = clipboardStorage.items.first {
+                                Section {
+                                    if isWide {
+                                        LazyVGrid(columns: Self.wideColumns, spacing: Spacing.sm) {
+                                            clipboardItemCard(for: current)
                                         }
+                                        .padding(.horizontal, Spacing.md)
+                                        .padding(.top, Spacing.sm)
+                                        .padding(.bottom, Spacing.xs)
+                                    } else {
+                                        clipboardItemCard(for: current)
+                                            .padding(.horizontal, Spacing.md)
+                                            .padding(.top, Spacing.sm)
+                                            .padding(.bottom, Spacing.xs)
                                     }
-                                )
-                                .padding(.horizontal, Spacing.md)
-                                .padding(.vertical, Spacing.xxs)
-                            } header: {
-                                HStack(spacing: Spacing.xs) {
-                                    Image(systemName: "arrow.right.doc.on.clipboard")
-                                        .font(CiderFont.micro)
-                                        .foregroundColor(CiderColors.controlAccent)
-                                    Text("Current")
-                                        .font(CiderFont.captionMedium)
-                                        .foregroundColor(CiderColors.controlAccent)
-                                    Spacer()
+                                } header: {
+                                    HStack(spacing: Spacing.xs) {
+                                        Image(systemName: "arrow.right.doc.on.clipboard")
+                                            .font(CiderFont.micro)
+                                            .foregroundColor(CiderColors.controlAccent)
+                                        Text("Current")
+                                            .font(CiderFont.captionMedium)
+                                            .foregroundColor(CiderColors.controlAccent)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, Spacing.md)
+                                    .padding(.vertical, Spacing.xs)
+                                    .background(CiderColors.accentSubtle)
                                 }
-                                .padding(.horizontal, Spacing.md)
-                                .padding(.vertical, Spacing.xs)
-                                .background(CiderColors.accentSubtle)
                             }
-                        }
 
-                        ForEach(groupedItems, id: \.group) { group, items in
-                            Section {
-                                if !collapsedSections.contains(group) {
-                                    ForEach(items) { item in
-                                        ClipboardItemRow(
-                                            item: item,
-                                            isCopied: copiedItemID == item.id,
-                                            isSavedFlash: savedItemID == item.id,
-                                            onCopy: { copyItem(item) },
-                                            onSave: { saveItem(item) },
-                                            onDismiss: {
-                                                withAnimation(reduceMotion ? .none : .snappy) {
-                                                    clipboardStorage.dismiss(item)
+                            ForEach(groupedItems, id: \.group) { group, items in
+                                Section {
+                                    if !collapsedSections.contains(group) {
+                                        if isWide {
+                                            LazyVGrid(columns: Self.wideColumns, spacing: Spacing.sm) {
+                                                ForEach(items) { item in
+                                                    clipboardItemCard(for: item)
                                                 }
                                             }
-                                        )
-                                        .padding(.horizontal, Spacing.md)
-                                        .padding(.vertical, Spacing.xxs)
-                                    }
-                                }
-                            } header: {
-                                ClipboardSectionHeader(
-                                    group: group,
-                                    itemCount: items.count,
-                                    isCollapsed: collapsedSections.contains(group),
-                                    onToggle: {
-                                        withAnimation(reduceMotion ? .none : .snappy) {
-                                            if collapsedSections.contains(group) {
-                                                collapsedSections.remove(group)
-                                            } else {
-                                                collapsedSections.insert(group)
+                                            .padding(.horizontal, Spacing.md)
+                                            .padding(.top, Spacing.sm)
+                                            .padding(.bottom, Spacing.xs)
+                                        } else {
+                                            ForEach(items) { item in
+                                                clipboardItemCard(for: item)
+                                                    .padding(.horizontal, Spacing.md)
+                                                    .padding(.vertical, Spacing.xs)
                                             }
                                         }
-                                    },
-                                    onDeleteSection: {
-                                        withAnimation(reduceMotion ? .none : .snappy) {
-                                            let ids = Set(items.map(\.id))
-                                            clipboardStorage.dismissAll(ids: ids)
-                                        }
                                     }
-                                )
+                                } header: {
+                                    ClipboardSectionHeader(
+                                        group: group,
+                                        itemCount: items.count,
+                                        isCollapsed: collapsedSections.contains(group),
+                                        onToggle: {
+                                            withAnimation(reduceMotion ? .none : .snappy) {
+                                                if collapsedSections.contains(group) {
+                                                    collapsedSections.remove(group)
+                                                } else {
+                                                    collapsedSections.insert(group)
+                                                }
+                                            }
+                                        },
+                                        onDeleteSection: {
+                                            withAnimation(reduceMotion ? .none : .snappy) {
+                                                let ids = Set(items.map(\.id))
+                                                clipboardStorage.dismissAll(ids: ids)
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
+                        .padding(.vertical, Spacing.sm)
                     }
-                    .padding(.vertical, Spacing.sm)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: bookmarksStorage.bookmarks.map(\.id)) { _, _ in
             reconcileSavedState()
@@ -225,6 +235,23 @@ struct ClipboardViewerView: View {
         } message: {
             Text("This will remove all items that have been saved as bookmarks or notes from clipboard history.")
         }
+    }
+
+    // MARK: - Item Card
+
+    private func clipboardItemCard(for item: ClipboardItem) -> some View {
+        ClipboardItemRow(
+            item: item,
+            isCopied: copiedItemID == item.id,
+            isSavedFlash: savedItemID == item.id,
+            onCopy: { copyItem(item) },
+            onSave: { saveItem(item) },
+            onDismiss: {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    clipboardStorage.dismiss(item)
+                }
+            }
+        )
     }
 
     // MARK: - Header
@@ -267,6 +294,19 @@ struct ClipboardViewerView: View {
                 .help("Clear all clipboard history")
             }
 
+            if isStandalone {
+                Button {
+                    isWideMode.toggle()
+                    NotificationCenter.default.post(name: .toggleClipboardPanelWidth, object: nil)
+                } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(isWideMode ? "Narrow view" : "Wide view")
+            }
+
             if isStandalone, let onExpand {
                 Button(action: onExpand) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -299,6 +339,9 @@ struct ClipboardViewerView: View {
     // MARK: - Copy
 
     private func copyItem(_ item: ClipboardItem) {
+        // Move item to top of history (becomes "Current")
+        clipboardStorage.moveToTop(item.id)
+
         switch item.type {
         case .url, .text, .richText:
             let pasteboard = NSPasteboard.general
@@ -485,6 +528,7 @@ private struct ClipboardSectionHeader: View {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .background(CiderColors.surfaceSubtle)
+        .padding(.top, Spacing.sm)
         .hoverState($isHovered, animation: .snappy)
     }
 }

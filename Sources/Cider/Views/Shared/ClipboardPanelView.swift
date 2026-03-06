@@ -26,7 +26,7 @@ struct ClipboardPanelView: View {
             .clipShape(RoundedRectangle(cornerRadius: ClipboardPanelDesign.cornerRadius, style: .continuous))
         }
         .overlay {
-            PanelEdgeResizeView()
+            PanelEdgeResizeView(horizontalResizeEnabled: false)
         }
         .background {
             Button("") {

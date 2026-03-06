@@ -2,14 +2,21 @@ import SwiftUI
 import AppKit
 
 struct PanelEdgeResizeView: NSViewRepresentable {
+    var horizontalResizeEnabled: Bool = true
+
     func makeNSView(context: Context) -> PanelEdgeResizeNSView {
-        PanelEdgeResizeNSView()
+        let view = PanelEdgeResizeNSView()
+        view.horizontalResizeEnabled = horizontalResizeEnabled
+        return view
     }
 
-    func updateNSView(_ nsView: PanelEdgeResizeNSView, context: Context) {}
+    func updateNSView(_ nsView: PanelEdgeResizeNSView, context: Context) {
+        nsView.horizontalResizeEnabled = horizontalResizeEnabled
+    }
 }
 
 final class PanelEdgeResizeNSView: NSView {
+    var horizontalResizeEnabled: Bool = true
     private var trackingArea: NSTrackingArea?
     private var currentZone: ResizeZone = .none
 
@@ -107,6 +114,22 @@ final class PanelEdgeResizeNSView: NSView {
     // MARK: - Zone Resolution
 
     private func resolveZone(at point: NSPoint) -> ResizeZone {
+        let rawZone = resolveRawZone(at: point)
+
+        // Suppress horizontal resize zones when horizontal resize is disabled
+        if !horizontalResizeEnabled {
+            switch rawZone {
+            case .left, .right: return .none
+            case .topLeft, .topRight: return .top
+            case .bottomLeft, .bottomRight: return .bottom
+            default: return rawZone
+            }
+        }
+
+        return rawZone
+    }
+
+    private func resolveRawZone(at point: NSPoint) -> ResizeZone {
         let hPad = CiderPanelDesign.shadowPadding
         let topPad = CiderPanelDesign.topPadding
         let bottomPad = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
@@ -185,16 +208,17 @@ final class PanelEdgeResizeNSView: NSView {
     ) {
         let minW = window?.minSize.width ?? CiderPanelDesign.panelMinWidth
         let minH = window?.minSize.height ?? CiderPanelDesign.panelMinHeight
+        let maxW = window?.maxSize.width ?? CGFloat.greatestFiniteMagnitude
 
         switch zone {
         case .none:
             break
 
         case .right:
-            frame.size.width = max(minW, initial.width + dx)
+            frame.size.width = min(maxW, max(minW, initial.width + dx))
 
         case .left:
-            let newW = max(minW, initial.width - dx)
+            let newW = min(maxW, max(minW, initial.width - dx))
             frame.origin.x = initial.maxX - newW
             frame.size.width = newW
 
@@ -208,13 +232,13 @@ final class PanelEdgeResizeNSView: NSView {
             frame.size.height = max(minH, initial.height + dy)
 
         case .bottomRight:
-            frame.size.width = max(minW, initial.width + dx)
+            frame.size.width = min(maxW, max(minW, initial.width + dx))
             let newH = max(minH, initial.height - dy)
             frame.origin.y = initial.maxY - newH
             frame.size.height = newH
 
         case .bottomLeft:
-            let newW = max(minW, initial.width - dx)
+            let newW = min(maxW, max(minW, initial.width - dx))
             frame.origin.x = initial.maxX - newW
             frame.size.width = newW
             let newH = max(minH, initial.height - dy)
@@ -222,11 +246,11 @@ final class PanelEdgeResizeNSView: NSView {
             frame.size.height = newH
 
         case .topRight:
-            frame.size.width = max(minW, initial.width + dx)
+            frame.size.width = min(maxW, max(minW, initial.width + dx))
             frame.size.height = max(minH, initial.height + dy)
 
         case .topLeft:
-            let newW = max(minW, initial.width - dx)
+            let newW = min(maxW, max(minW, initial.width - dx))
             frame.origin.x = initial.maxX - newW
             frame.size.width = newW
             frame.size.height = max(minH, initial.height + dy)

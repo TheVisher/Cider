@@ -1482,13 +1482,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hideClipboardPanel()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .toggleClipboardPanelWidth)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.toggleClipboardPanelWidth()
+            }
+            .store(in: &cancellables)
     }
 
     private func showClipboardPanel() {
         guard let panel = clipboardPanel else { return }
 
         let config = CiderConfig.load()
-        let width = panel.frame.width > 0 ? panel.frame.width : ClipboardPanelDesign.defaultWidth
+        let isWide = UserDefaults.standard.bool(forKey: "cider.clipboardWideMode")
+        let targetWidth = isWide ? ClipboardPanelDesign.wideWidth : ClipboardPanelDesign.narrowWidth
+
+        // Lock width constraints for current mode
+        panel.minSize = NSSize(width: targetWidth, height: ClipboardPanelDesign.minHeight)
+        panel.maxSize = NSSize(width: targetWidth, height: .greatestFiniteMagnitude)
+
+        let width = targetWidth
         let height = panel.frame.height > 0 ? panel.frame.height : ClipboardPanelDesign.defaultHeight
 
         let mouseLocation = NSEvent.mouseLocation
@@ -1522,6 +1536,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Order both out together to prevent ghost shadow
         clipboardPanel?.orderOut(nil)
         clipboardShadowPanel?.orderOut(nil)
+    }
+
+    private func toggleClipboardPanelWidth() {
+        guard let panel = clipboardPanel else { return }
+
+        let isWide = UserDefaults.standard.bool(forKey: "cider.clipboardWideMode")
+        let targetWidth = isWide ? ClipboardPanelDesign.wideWidth : ClipboardPanelDesign.narrowWidth
+
+        // Temporarily relax constraints so animation can interpolate
+        let flexMin = min(ClipboardPanelDesign.narrowWidth, ClipboardPanelDesign.wideWidth)
+        let flexMax = max(ClipboardPanelDesign.narrowWidth, ClipboardPanelDesign.wideWidth)
+        panel.minSize = NSSize(width: flexMin, height: ClipboardPanelDesign.minHeight)
+        panel.maxSize = NSSize(width: flexMax, height: .greatestFiniteMagnitude)
+
+        // Calculate new frame
+        var newFrame = panel.frame
+        let isExpanding = targetWidth > panel.frame.width
+
+        if let screen = panel.screen ?? NSScreen.main {
+            if isExpanding {
+                let widthDelta = targetWidth - panel.frame.width
+                if panel.frame.maxX + widthDelta <= screen.visibleFrame.maxX {
+                    // Room to expand right — keep left edge
+                    newFrame.size.width = targetWidth
+                } else {
+                    // Expand left — keep right edge
+                    newFrame.origin.x = max(screen.visibleFrame.minX, panel.frame.maxX - targetWidth)
+                    newFrame.size.width = targetWidth
+                }
+            } else {
+                // Collapsing — anchor to whichever screen edge is closer
+                let distToRight = screen.visibleFrame.maxX - panel.frame.maxX
+                let distToLeft = panel.frame.minX - screen.visibleFrame.minX
+
+                if distToRight < distToLeft {
+                    // Closer to right edge — keep right edge fixed
+                    newFrame.origin.x = panel.frame.maxX - targetWidth
+                }
+                // Else: closer to left — keep left edge (origin stays)
+                newFrame.size.width = targetWidth
+            }
+        } else {
+            newFrame.size.width = targetWidth
+        }
+
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if reduceMotion {
+            panel.setFrame(newFrame, display: true)
+            panel.minSize = NSSize(width: targetWidth, height: ClipboardPanelDesign.minHeight)
+            panel.maxSize = NSSize(width: targetWidth, height: .greatestFiniteMagnitude)
+        } else {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.25
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                panel.animator().setFrame(newFrame, display: true)
+            }, completionHandler: {
+                DispatchQueue.main.async { [weak panel] in
+                    guard let panel else { return }
+                    panel.minSize = NSSize(width: targetWidth, height: ClipboardPanelDesign.minHeight)
+                    panel.maxSize = NSSize(width: targetWidth, height: .greatestFiniteMagnitude)
+                }
+            })
+        }
     }
 
     // MARK: - Debug Logging

@@ -83,6 +83,14 @@ final class ClipboardStorage: ObservableObject {
         persist()
     }
 
+    /// Move an existing item to the top of the history (e.g. when re-copying).
+    func moveToTop(_ itemID: UUID) {
+        guard let idx = items.firstIndex(where: { $0.id == itemID }), idx != 0 else { return }
+        let item = items.remove(at: idx)
+        items.insert(item, at: 0)
+        persist()
+    }
+
     // MARK: - Dismiss / Delete
 
     func dismiss(_ item: ClipboardItem) {

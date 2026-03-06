@@ -11,13 +11,13 @@ final class ClipboardPanel: NSPanel {
         let initialFrame = NSRect(
             x: 0,
             y: 0,
-            width: ClipboardPanelDesign.defaultWidth,
+            width: ClipboardPanelDesign.narrowWidth,
             height: ClipboardPanelDesign.defaultHeight
         )
 
         super.init(
             contentRect: initialFrame,
-            styleMask: [.borderless, .resizable, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -34,9 +34,14 @@ final class ClipboardPanel: NSPanel {
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
 
+        let targetWidth = ClipboardPanelDesign.narrowWidth
         self.minSize = NSSize(
-            width: ClipboardPanelDesign.minWidth,
+            width: targetWidth,
             height: ClipboardPanelDesign.minHeight
+        )
+        self.maxSize = NSSize(
+            width: targetWidth,
+            height: .greatestFiniteMagnitude
         )
 
         contentView?.wantsLayer = true
@@ -47,15 +52,9 @@ final class ClipboardPanel: NSPanel {
 
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         var rect = frameRect
-        rect.size.width = max(ClipboardPanelDesign.minWidth, rect.size.width)
-        rect.size.height = max(ClipboardPanelDesign.minHeight, rect.size.height)
+        rect.size.width = max(minSize.width, rect.size.width)
+        rect.size.height = max(minSize.height, rect.size.height)
         return rect
-    }
-
-    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
-        var r = frameRect
-        r.size.width = max(ClipboardPanelDesign.minWidth, r.size.width)
-        super.setFrame(r, display: flag)
     }
 
     // MARK: - Window Dragging

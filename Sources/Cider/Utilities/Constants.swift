@@ -48,6 +48,7 @@ extension Notification.Name {
     static let openDateCardFromNotification = Notification.Name("cider.openDateCardFromNotification")
     static let toggleClipboardViewer = Notification.Name("cider.toggleClipboardViewer")
     static let dismissClipboardPanel = Notification.Name("cider.dismissClipboardPanel")
+    static let toggleClipboardPanelWidth = Notification.Name("cider.toggleClipboardPanelWidth")
 }
 
 // MARK: - Snap Target
@@ -284,9 +285,9 @@ enum CiderPanelDesign {
 }
 
 enum ClipboardPanelDesign {
-    static let minWidth: CGFloat = 340
+    static let narrowWidth: CGFloat = 360
+    static let wideWidth: CGFloat = 720
     static let minHeight: CGFloat = 300
-    static let defaultWidth: CGFloat = 360
     static let defaultHeight: CGFloat = 500
     static let cornerRadius: CGFloat = Radius.lg
 }
