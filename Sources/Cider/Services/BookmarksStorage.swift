@@ -321,6 +321,15 @@ final class BookmarksStorage: ObservableObject {
     }
 
     @discardableResult
+    func setFolderIcon(_ folderID: UUID, icon: String?) -> Bool {
+        guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return false }
+        folders[index].icon = icon
+        folders[index].updatedAt = Date()
+        persist()
+        return true
+    }
+
+    @discardableResult
     func deleteFolder(_ folderID: UUID) -> Bool {
         guard folders.contains(where: { $0.id == folderID }) else { return false }
 

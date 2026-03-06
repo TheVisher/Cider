@@ -11,6 +11,7 @@ struct FolderSidebarView: View {
     var onAssignBookmarkToFolder: ((Bookmark, UUID?) -> Bool)?
     var onAssignNoteToFolder: ((Note, UUID?) -> Bool)?
     var onRenameFolder: ((UUID, String) -> Void)?
+    var onSetFolderIcon: ((UUID, String?) -> Void)?
     var onDeleteFolder: ((UUID) -> Void)?
     var onSelectSubFolder: ((UUID) -> Void)?
     var searchText: Binding<String> = .constant("")
@@ -391,6 +392,8 @@ struct FolderSidebarView: View {
         return VStack(alignment: .leading, spacing: 0) {
             RootFolderHeaderRow(
                 title: folder.name,
+                folderIcon: folder.icon,
+                folderIconIsEmoji: folder.iconIsEmoji,
                 itemCount: itemsInFolder(folder.id),
                 isExpanded: isExpanded,
                 isSelected: selectedFolderID == folder.id,
@@ -429,6 +432,7 @@ struct FolderSidebarView: View {
                 },
                 onCommitRename: { commitFolderRename() },
                 onCancelRename: { renamingFolderID = nil },
+                onSetIcon: { icon in onSetFolderIcon?(folder.id, icon) },
                 onDelete: { onDeleteFolder?(folder.id) },
                 onAddSubFolder: {
                     subFolderParentID = folder.id
@@ -463,6 +467,8 @@ struct FolderSidebarView: View {
         return AnyView(VStack(alignment: .leading, spacing: Spacing.xs) {
             SubFolderRow(
                 title: folder.name,
+                folderIcon: folder.icon,
+                folderIconIsEmoji: folder.iconIsEmoji,
                 itemCount: itemsInFolder(folder.id),
                 hasChildren: hasChildrenOrSubCreation,
                 isExpanded: isExpanded || subFolderParentID == folder.id,
@@ -504,6 +510,7 @@ struct FolderSidebarView: View {
                 },
                 onCommitRename: { commitFolderRename() },
                 onCancelRename: { renamingFolderID = nil },
+                onSetIcon: { icon in onSetFolderIcon?(folder.id, icon) },
                 onDelete: { onDeleteFolder?(folder.id) },
                 onAddSubFolder: {
                     subFolderParentID = folder.id
@@ -818,6 +825,8 @@ struct FolderSidebarView: View {
 
 struct RootFolderHeaderRow: View {
     let title: String
+    let folderIcon: String?
+    let folderIconIsEmoji: Bool
     let itemCount: Int
     let isExpanded: Bool
     let isSelected: Bool
@@ -831,6 +840,7 @@ struct RootFolderHeaderRow: View {
     var onRename: (() -> Void)?
     var onCommitRename: (() -> Void)?
     var onCancelRename: (() -> Void)?
+    var onSetIcon: ((String?) -> Void)?
     var onDelete: (() -> Void)?
     var onAddSubFolder: (() -> Void)?
 
@@ -846,9 +856,7 @@ struct RootFolderHeaderRow: View {
         HStack(spacing: Spacing.xs) {
             // Icon area: click here to toggle collapse
             ZStack {
-                Image(systemName: "folder.fill")
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(iconColor)
+                folderIconView
                     .opacity(shouldShowChevron ? 0 : 1)
 
                 Image(systemName: "chevron.down")
@@ -922,10 +930,15 @@ struct RootFolderHeaderRow: View {
         .onChange(of: isDropTargeted) { _, targeted in
             onDropTargetChanged(targeted)
         }
-        .modifier(CardContextMenuModifier { [onRename, onAddSubFolder, onDelete] in
+        .modifier(CardContextMenuModifier { [onRename, onSetIcon, onAddSubFolder, onDelete, folderIcon] in
             var items: [CardMenuItem] = []
             if let onRename {
                 items.append(.action(title: "Rename", callback: onRename))
+            }
+            if let onSetIcon {
+                items.append(.submenu(title: "Icon", children: FolderIconMenuItems.build(
+                    currentIcon: folderIcon, onSetIcon: onSetIcon
+                )))
             }
             if let onAddSubFolder {
                 items.append(.action(title: "Add Sub Folder", callback: onAddSubFolder))
@@ -953,6 +966,22 @@ struct RootFolderHeaderRow: View {
         }
         chevronRevertTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: task)
+    }
+
+    @ViewBuilder
+    private var folderIconView: some View {
+        if let icon = folderIcon, folderIconIsEmoji {
+            Text(icon)
+                .font(.system(size: 14))
+        } else if let icon = folderIcon {
+            Image(systemName: icon)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(iconColor)
+        } else {
+            Image(systemName: "folder.fill")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(iconColor)
+        }
     }
 
     private var iconColor: Color {
@@ -990,6 +1019,8 @@ struct RootFolderHeaderRow: View {
 
 struct SubFolderRow: View {
     let title: String
+    let folderIcon: String?
+    let folderIconIsEmoji: Bool
     let itemCount: Int
     let hasChildren: Bool
     let isExpanded: Bool
@@ -1004,6 +1035,7 @@ struct SubFolderRow: View {
     var onRename: (() -> Void)?
     var onCommitRename: (() -> Void)?
     var onCancelRename: (() -> Void)?
+    var onSetIcon: ((String?) -> Void)?
     var onDelete: (() -> Void)?
     var onAddSubFolder: (() -> Void)?
 
@@ -1028,9 +1060,7 @@ struct SubFolderRow: View {
                     .frame(width: 14, height: 14)
             }
 
-            Image(systemName: "folder")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(iconColor)
+            subFolderIconView
 
             if isRenaming {
                 TextField("Folder name", text: $renamingName)
@@ -1087,10 +1117,15 @@ struct SubFolderRow: View {
         .onChange(of: isDropTargeted) { _, targeted in
             onDropTargetChanged(targeted)
         }
-        .modifier(CardContextMenuModifier { [onRename, onAddSubFolder, onDelete] in
+        .modifier(CardContextMenuModifier { [onRename, onSetIcon, onAddSubFolder, onDelete, folderIcon] in
             var items: [CardMenuItem] = []
             if let onRename {
                 items.append(.action(title: "Rename", callback: onRename))
+            }
+            if let onSetIcon {
+                items.append(.submenu(title: "Icon", children: FolderIconMenuItems.build(
+                    currentIcon: folderIcon, onSetIcon: onSetIcon
+                )))
             }
             if let onAddSubFolder {
                 items.append(.action(title: "Add Sub Folder", callback: onAddSubFolder))
@@ -1101,6 +1136,22 @@ struct SubFolderRow: View {
             }
             return items
         })
+    }
+
+    @ViewBuilder
+    private var subFolderIconView: some View {
+        if let icon = folderIcon, folderIconIsEmoji {
+            Text(icon)
+                .font(.system(size: 13))
+        } else if let icon = folderIcon {
+            Image(systemName: icon)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(iconColor)
+        } else {
+            Image(systemName: "folder")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(iconColor)
+        }
     }
 
     private var iconColor: Color {
@@ -1131,5 +1182,68 @@ struct SubFolderRow: View {
             return CiderColors.selectedBorder
         }
         return CiderColors.borderDefault
+    }
+}
+
+// MARK: - Folder Icon Menu Items
+
+enum FolderIconMenuItems {
+    private static let sfSymbols: [(name: String, label: String)] = [
+        ("star.fill", "Star"),
+        ("heart.fill", "Heart"),
+        ("bolt.fill", "Bolt"),
+        ("flame.fill", "Flame"),
+        ("leaf.fill", "Leaf"),
+        ("book.fill", "Book"),
+        ("briefcase.fill", "Briefcase"),
+        ("hammer.fill", "Tools"),
+        ("paintbrush.fill", "Design"),
+        ("music.note", "Music"),
+        ("film", "Film"),
+        ("gamecontroller.fill", "Games"),
+        ("cart.fill", "Shopping"),
+        ("airplane", "Travel"),
+        ("graduationcap.fill", "Education"),
+        ("stethoscope", "Health"),
+        ("banknote.fill", "Finance"),
+        ("house.fill", "Home"),
+        ("person.2.fill", "People"),
+        ("globe", "Web"),
+        ("lock.fill", "Private"),
+        ("archivebox.fill", "Archive"),
+    ]
+
+    private static let emojis: [(emoji: String, label: String)] = [
+        ("🎨", "Art"), ("🎵", "Music"), ("📚", "Books"), ("💡", "Ideas"),
+        ("🔥", "Fire"), ("⭐", "Star"), ("💎", "Gem"), ("🎯", "Target"),
+        ("🚀", "Rocket"), ("🌈", "Rainbow"), ("🍕", "Food"), ("☕", "Coffee"),
+        ("🏠", "Home"), ("✈️", "Travel"), ("🎬", "Film"), ("📷", "Photo"),
+    ]
+
+    private static func sfSymbolImage(_ name: String) -> NSImage? {
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        img?.isTemplate = true
+        return img
+    }
+
+    static func build(currentIcon: String?, onSetIcon: @escaping (String?) -> Void) -> [CardMenuItem] {
+        var items: [CardMenuItem] = []
+
+        items.append(.submenu(title: "Symbol", children: sfSymbols.map { symbol in
+            let title = symbol.name == currentIcon ? "\(symbol.label) ✓" : symbol.label
+            return .action(title: title, image: sfSymbolImage(symbol.name)) { onSetIcon(symbol.name) }
+        }))
+
+        items.append(.submenu(title: "Emoji", children: emojis.map { item in
+            let title = item.emoji == currentIcon ? "\(item.emoji)  \(item.label) ✓" : "\(item.emoji)  \(item.label)"
+            return .action(title: title) { onSetIcon(item.emoji) }
+        }))
+
+        if currentIcon != nil {
+            items.append(.separator)
+            items.append(.action(title: "Remove Icon") { onSetIcon(nil) })
+        }
+
+        return items
     }
 }

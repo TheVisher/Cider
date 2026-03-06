@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Describes a single item in a card context menu.
 enum CardMenuItem {
-    case action(title: String, callback: () -> Void)
+    case action(title: String, image: NSImage? = nil, callback: () -> Void)
     case submenu(title: String, children: [CardMenuItem])
     case separator
     case destructive(title: String, callback: () -> Void)
@@ -50,10 +50,11 @@ private struct CardContextMenuHelper: NSViewRepresentable {
 
     private func menuItem(from item: CardMenuItem) -> NSMenuItem {
         switch item {
-        case .action(let title, let callback):
+        case .action(let title, let image, let callback):
             let mi = NSMenuItem(title: title, action: #selector(MenuActionTarget.runAction), keyEquivalent: "")
             mi.representedObject = callback
             mi.target = MenuActionTarget.shared
+            mi.image = image
             return mi
 
         case .submenu(let title, let children):

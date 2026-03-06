@@ -181,6 +181,16 @@ struct FolderDetailView: View {
 
             // Folder name + sub-folder toggle
             HStack(alignment: .lastTextBaseline) {
+                if let icon = folder?.icon {
+                    if folder?.iconIsEmoji == true {
+                        Text(icon)
+                            .font(.system(size: 20))
+                    } else {
+                        Image(systemName: icon)
+                            .font(CiderFont.titleMedium)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                }
                 Text(folder?.name ?? "Folder")
                     .font(CiderFont.titleMedium)
                     .foregroundColor(CiderColors.primary)

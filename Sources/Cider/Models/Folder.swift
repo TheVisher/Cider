@@ -8,6 +8,7 @@ struct Folder: Identifiable, Hashable, Codable {
     var updatedAt: Date
     var coverImagePath: String?
     var coverImageOffsetY: Double?
+    var icon: String?  // SF Symbol name (e.g. "star") or emoji (e.g. "🎨")
 
     init(
         id: UUID = UUID(),
@@ -16,7 +17,8 @@ struct Folder: Identifiable, Hashable, Codable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         coverImagePath: String? = nil,
-        coverImageOffsetY: Double? = nil
+        coverImageOffsetY: Double? = nil,
+        icon: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -25,5 +27,12 @@ struct Folder: Identifiable, Hashable, Codable {
         self.updatedAt = updatedAt
         self.coverImagePath = coverImagePath
         self.coverImageOffsetY = coverImageOffsetY
+        self.icon = icon
+    }
+
+    /// Whether the icon is an emoji (vs SF Symbol name).
+    var iconIsEmoji: Bool {
+        guard let icon, let scalar = icon.unicodeScalars.first else { return false }
+        return scalar.value > 127
     }
 }

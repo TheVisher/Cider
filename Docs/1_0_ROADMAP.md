@@ -216,17 +216,21 @@ Make everything that shipped in beta feel finished.
 
 ---
 
-### R-10: Custom Folder Icons
+### R-10: Custom Folder Icons ✅
 > Let users pick SF Symbols or emoji for folder icons.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-03-06)
 **Priority:** Low
 
 **Scope:**
-- `icon: String?` on Folder model (SF Symbol name or emoji)
-- Icon picker in folder edit/context menu
-- Display in sidebar and folder headers
-- Default icon when none set (current folder icon)
+- ✅ `icon: String?` on Folder model (SF Symbol name or emoji, auto-detects type)
+- ✅ Icon picker via right-click context menu → Icon submenu (Symbol + Emoji submenus)
+- ✅ 22 SF Symbol presets + 16 emoji presets, with checkmark on current selection
+- ✅ "Remove Icon" option when icon is set
+- ✅ Display in sidebar (root + sub-folder rows) and FolderDetailView header
+- ✅ Default folder/folder.fill icon when none set (unchanged behavior)
+- ✅ `BookmarksStorage.setFolderIcon()` for persistence
+- ✅ Backward compatible — existing folders deserialize with `icon: nil`
 
 ---
 
@@ -253,17 +257,25 @@ Make everything that shipped in beta feel finished.
 
 ---
 
-### R-12: Clipboard Viewer
+### R-12: Clipboard Viewer ✅
 > Show recent clipboard items with action buttons.
 
-**Status:** `Not Started`
+**Status:** `Complete` (2026-03-05)
 **Priority:** Medium
 
-**Scope:**
-- Last N clipboard items (URLs, images, text snippets)
-- Action buttons per item: Save as Bookmark, Save as Note, Dismiss
-- Accessible from panel (tab? section? popover?)
-- Builds on existing clipboard monitor infrastructure
+**Scope (all resolved):**
+- ✅ Standalone `ClipboardPanel` — dedicated NSPanel, opens/closes via Opt+V
+- ✅ `ClipboardHistoryService` monitors pasteboard changes, routes to `ClipboardStorage`
+- ✅ Clipboard items: URLs, images, text, rich text — with source app detection
+- ✅ Action buttons per item: Copy, Save as Bookmark/Note, Dismiss
+- ✅ Date-grouped sections (Today, Yesterday, weekdays, weeks, months) with collapse/expand
+- ✅ Current item section (most recent copy highlighted)
+- ✅ Two-width mode toggle (single column / 2-column grid)
+- ✅ Saved state tracking — items marked when saved as bookmark/note, reconciled on deletion
+- ✅ Purge saved items, clear all, per-section delete
+- ✅ Image retention and storage cap settings
+- ✅ Favicon + domain display for URL cards (multi-source: DuckDuckGo, Google, direct)
+- ✅ Configurable retention (text and image separately), auto-purge on launch
 
 ---
 
@@ -451,9 +463,9 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-07 | AI Auto-Tag Quality | 2 | ✅ Complete |
 | R-08 | Keyboard Navigation | 2 | ✅ Complete |
 | R-09 | Notes Editor Polish | 2 | ✅ Complete |
-| R-10 | Custom Folder Icons | 2 | Not Started |
+| R-10 | Custom Folder Icons | 2 | ✅ Complete |
 | R-11 | Drag Out to External Apps | 2 | ✅ Complete |
-| R-12 | Clipboard Viewer | 2 | Not Started |
+| R-12 | Clipboard Viewer | 2 | ✅ Complete |
 | R-13 | Advanced Search | 2 | Not Started |
 | R-20 | Screen Capture Polish | 2 | Not Started |
 | R-21 | Keyboard Shortcuts Reference | 2 | Not Started |
@@ -464,7 +476,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 8/21
+**Completed:** 10/21
 
 ---
 
