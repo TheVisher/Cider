@@ -102,9 +102,15 @@ struct ClipboardViewerView: View {
         GridItem(.flexible(), spacing: Spacing.sm),
     ]
 
-    /// Grouped items for the history sections, excluding the current (first) item.
+    /// The item currently on the system pasteboard (nil if dismissed or empty).
+    private var currentItem: ClipboardItem? {
+        guard let id = clipboardStorage.currentItemID else { return nil }
+        return clipboardStorage.items.first { $0.id == id }
+    }
+
+    /// Grouped items for the history sections, excluding the current item.
     private var groupedItems: [(group: ClipboardDateGroup, items: [ClipboardItem])] {
-        let currentID = clipboardStorage.items.first?.id
+        let currentID = clipboardStorage.currentItemID
         let historyItems = clipboardStorage.items.filter { $0.id != currentID }
         let grouped = Dictionary(grouping: historyItems) { ClipboardDateGroup.group(for: $0.timestamp) }
         return grouped.sorted { $0.key < $1.key }.map { (group: $0.key, items: $0.value) }
@@ -127,9 +133,9 @@ struct ClipboardViewerView: View {
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            // Current clipboard item (first item = most recent copy)
-                            if let current = clipboardStorage.items.first {
-                                Section {
+                            // Current clipboard item (what's actually on the pasteboard)
+                            Section {
+                                if let current = currentItem {
                                     if isWide {
                                         LazyVGrid(columns: Self.wideColumns, spacing: Spacing.sm) {
                                             clipboardItemCard(for: current)
@@ -143,20 +149,31 @@ struct ClipboardViewerView: View {
                                             .padding(.top, Spacing.sm)
                                             .padding(.bottom, Spacing.xs)
                                     }
-                                } header: {
+                                } else {
                                     HStack(spacing: Spacing.xs) {
-                                        Image(systemName: "arrow.right.doc.on.clipboard")
-                                            .font(CiderFont.micro)
-                                            .foregroundColor(CiderColors.controlAccent)
-                                        Text("Current")
-                                            .font(CiderFont.captionMedium)
-                                            .foregroundColor(CiderColors.controlAccent)
-                                        Spacer()
+                                        Image(systemName: "clipboard")
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.quaternary)
+                                        Text("Clipboard empty — copy something to see it here")
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.quaternary)
                                     }
                                     .padding(.horizontal, Spacing.md)
-                                    .padding(.vertical, Spacing.xs)
-                                    .background(CiderColors.accentSubtle)
+                                    .padding(.vertical, Spacing.md)
                                 }
+                            } header: {
+                                HStack(spacing: Spacing.xs) {
+                                    Image(systemName: "arrow.right.doc.on.clipboard")
+                                        .font(CiderFont.micro)
+                                        .foregroundColor(CiderColors.controlAccent)
+                                    Text("Current")
+                                        .font(CiderFont.captionMedium)
+                                        .foregroundColor(CiderColors.controlAccent)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, Spacing.md)
+                                .padding(.vertical, Spacing.xs)
+                                .background(CiderColors.accentSubtle)
                             }
 
                             ForEach(groupedItems, id: \.group) { group, items in

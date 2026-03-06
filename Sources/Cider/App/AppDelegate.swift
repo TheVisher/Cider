@@ -1503,11 +1503,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.maxSize = NSSize(width: targetWidth, height: .greatestFiniteMagnitude)
 
         let width = targetWidth
-        let height = panel.frame.height > 0 ? panel.frame.height : ClipboardPanelDesign.defaultHeight
+        let savedHeight = UserDefaults.standard.double(forKey: "cider.clipboardPanelHeight")
+        let preferredHeight = savedHeight >= ClipboardPanelDesign.minHeight ? savedHeight : ClipboardPanelDesign.defaultHeight
 
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
                 ?? NSScreen.main else { return }
+
+        // Clamp height to fit the target screen (with padding)
+        let height = min(preferredHeight, screen.visibleFrame.height - Spacing.lg * 2)
 
         let frame: NSRect
         switch config.clipboardPanelPosition {
@@ -1533,6 +1537,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideClipboardPanel() {
+        if let panel = clipboardPanel, panel.frame.height >= ClipboardPanelDesign.minHeight {
+            // Save the larger of current frame and previously saved height,
+            // so clamping on a smaller screen doesn't shrink the preference.
+            let previousSaved = UserDefaults.standard.double(forKey: "cider.clipboardPanelHeight")
+            let toSave = max(panel.frame.height, previousSaved)
+            UserDefaults.standard.set(toSave, forKey: "cider.clipboardPanelHeight")
+        }
         // Order both out together to prevent ghost shadow
         clipboardPanel?.orderOut(nil)
         clipboardShadowPanel?.orderOut(nil)

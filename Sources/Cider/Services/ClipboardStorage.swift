@@ -7,6 +7,8 @@ final class ClipboardStorage: ObservableObject {
     static let shared = ClipboardStorage()
 
     @Published private(set) var items: [ClipboardItem] = []
+    /// ID of the item currently on the system pasteboard. Nil when clipboard is empty or current was dismissed.
+    @Published private(set) var currentItemID: UUID?
 
     private let fileName = "_cider_clipboard_history.json"
     private let imagesDirName = "images"
@@ -89,6 +91,7 @@ final class ClipboardStorage: ObservableObject {
         }
 
         items.insert(newItem, at: 0)
+        currentItemID = newItem.id
         persist()
 
         if newItem.type == .url {
@@ -99,21 +102,27 @@ final class ClipboardStorage: ObservableObject {
 
     /// Move an existing item to the top of the history (e.g. when re-copying).
     func moveToTop(_ itemID: UUID) {
-        guard let idx = items.firstIndex(where: { $0.id == itemID }), idx != 0 else { return }
+        guard let idx = items.firstIndex(where: { $0.id == itemID }), idx != 0 else {
+            currentItemID = itemID
+            return
+        }
         let item = items.remove(at: idx)
         items.insert(item, at: 0)
+        currentItemID = itemID
         persist()
     }
 
     // MARK: - Dismiss / Delete
 
     func dismiss(_ item: ClipboardItem) {
+        if item.id == currentItemID { currentItemID = nil }
         deleteImageFile(for: item)
         items.removeAll { $0.id == item.id }
         persist()
     }
 
     func dismissAll(ids: Set<UUID>) {
+        if let currentItemID, ids.contains(currentItemID) { self.currentItemID = nil }
         let toRemove = items.filter { ids.contains($0.id) }
         for item in toRemove {
             deleteImageFile(for: item)
@@ -123,6 +132,7 @@ final class ClipboardStorage: ObservableObject {
     }
 
     func clearAll() {
+        currentItemID = nil
         for item in items {
             deleteImageFile(for: item)
         }
@@ -170,6 +180,7 @@ final class ClipboardStorage: ObservableObject {
 
     func purgeSavedItems() {
         let saved = items.filter { $0.isSaved }
+        if saved.contains(where: { $0.id == currentItemID }) { currentItemID = nil }
         for item in saved {
             deleteImageFile(for: item)
         }
