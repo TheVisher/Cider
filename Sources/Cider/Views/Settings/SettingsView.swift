@@ -192,6 +192,9 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .shortcuts:
+            KeyboardShortcutsReferenceView()
+
         case .bookmarksBehavior:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Bookmarks") {
@@ -865,7 +868,7 @@ private enum SettingsCategory: String, CaseIterable {
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation, .panelBehavior, .features]
+            [.startup, .activation, .panelBehavior, .features, .shortcuts]
         case .notes:
             [.notesBehavior, .notesEditor]
         case .bookmarks:
@@ -906,6 +909,7 @@ private enum SettingsSubcategory: Hashable {
     case dataNotifications
     case dataImportExport
     case intelligenceFeatures
+    case shortcuts
     case advancedAccessibility
     case advancedReset
     case aboutOverview
@@ -921,6 +925,8 @@ private enum SettingsSubcategory: Hashable {
             "Panel"
         case .features:
             "Features"
+        case .shortcuts:
+            "Shortcuts"
         case .notesBehavior:
             "Behavior"
         case .notesEditor:
@@ -1414,5 +1420,76 @@ private struct ClipboardStorageSettingsView: View {
         let images = ClipboardStorage.shared.imageStorageBytes()
         storageDisplay = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
         imageStorageDisplay = ByteCountFormatter.string(fromByteCount: images, countStyle: .file)
+    }
+}
+
+// MARK: - Keyboard Shortcuts Reference
+
+private struct KeyboardShortcutsReferenceView: View {
+    private struct ShortcutEntry: Identifiable {
+        let id = UUID()
+        let keys: String
+        let description: String
+    }
+
+    private struct ShortcutGroup: Identifiable {
+        let id = UUID()
+        let title: String
+        let shortcuts: [ShortcutEntry]
+    }
+
+    private let groups: [ShortcutGroup] = [
+        ShortcutGroup(title: "Panel", shortcuts: [
+            ShortcutEntry(keys: "Option ⌥  double-tap", description: "Toggle Cider panel"),
+            ShortcutEntry(keys: "Escape", description: "Clear search → close editor → clear selection → dismiss panel"),
+        ]),
+        ShortcutGroup(title: "Capture", shortcuts: [
+            ShortcutEntry(keys: "⌥B", description: "Capture bookmark from active browser"),
+            ShortcutEntry(keys: "⌥⇧B", description: "Quick-save active browser tab"),
+            ShortcutEntry(keys: "⌥N", description: "Quick-capture note"),
+            ShortcutEntry(keys: "⌥V", description: "Toggle clipboard panel"),
+            ShortcutEntry(keys: "⌥⌘2", description: "Screen capture with OCR"),
+        ]),
+        ShortcutGroup(title: "Navigation", shortcuts: [
+            ShortcutEntry(keys: "⌘K", description: "Quick actions palette"),
+            ShortcutEntry(keys: "↑ ↓ ← →", description: "Move focus in grid / list"),
+            ShortcutEntry(keys: "⇧ + Arrow", description: "Extend selection"),
+            ShortcutEntry(keys: "Tab / ⇧Tab", description: "Next / previous item"),
+            ShortcutEntry(keys: "Return", description: "Open focused item"),
+            ShortcutEntry(keys: "Space", description: "Toggle selection on focused item"),
+        ]),
+        ShortcutGroup(title: "Editing", shortcuts: [
+            ShortcutEntry(keys: "⌘A", description: "Select all items"),
+            ShortcutEntry(keys: "⌘C", description: "Copy"),
+            ShortcutEntry(keys: "⌘V", description: "Paste"),
+            ShortcutEntry(keys: "⌘X", description: "Cut"),
+            ShortcutEntry(keys: "⌘Z", description: "Undo"),
+            ShortcutEntry(keys: "Delete", description: "Trash focused or selected items"),
+        ]),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            ForEach(groups) { group in
+                SettingsSection(title: group.title) {
+                    ForEach(group.shortcuts) { shortcut in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(shortcut.keys)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundColor(CiderColors.controlAccent)
+                                .frame(width: 170, alignment: .leading)
+
+                            Text(shortcut.description)
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.primary)
+
+                            Spacer()
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
