@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import os
 
 @MainActor
@@ -9,6 +10,7 @@ final class ClipboardStorage: ObservableObject {
 
     private let fileName = "_cider_clipboard_history.json"
     private let imagesDirName = "images"
+    private let faviconsDirName = "favicons"
     private let logger = Logger(subsystem: "com.cider.app", category: "ClipboardStorage")
 
     private var fileURL: URL {
@@ -20,6 +22,13 @@ final class ClipboardStorage: ObservableObject {
     private var imagesDirectory: URL {
         let dir = StoragePaths.directoryURL(for: .clipboard)
             .appendingPathComponent(imagesDirName)
+        StoragePaths.ensureDirectory(dir)
+        return dir
+    }
+
+    private var faviconsDirectory: URL {
+        let dir = StoragePaths.directoryURL(for: .clipboard)
+            .appendingPathComponent(faviconsDirName)
         StoragePaths.ensureDirectory(dir)
         return dir
     }
@@ -81,6 +90,11 @@ final class ClipboardStorage: ObservableObject {
 
         items.insert(newItem, at: 0)
         persist()
+
+        if newItem.type == .url {
+            let itemCopy = newItem
+            Task { await fetchFavicon(for: itemCopy) }
+        }
     }
 
     /// Move an existing item to the top of the history (e.g. when re-copying).
@@ -264,6 +278,59 @@ final class ClipboardStorage: ObservableObject {
             }
         }
         return total
+    }
+
+    // MARK: - Favicons
+
+    func faviconFileURL(for domain: String) -> URL {
+        faviconsDirectory.appendingPathComponent("\(domain).png")
+    }
+
+    func cachedFaviconURL(for item: ClipboardItem) -> URL? {
+        guard item.type == .url,
+              let urlString = item.textContent,
+              let host = URL(string: urlString)?.host else { return nil }
+        let domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        let fileURL = faviconFileURL(for: domain)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return fileURL
+    }
+
+    func fetchFavicon(for item: ClipboardItem) async {
+        guard item.type == .url,
+              let urlString = item.textContent,
+              let host = URL(string: urlString)?.host else { return }
+        let domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        let fileURL = faviconFileURL(for: domain)
+
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        // Try multiple sources — first valid image wins.
+        // DuckDuckGo first (real favicons, clean 404 for unknown domains).
+        // Google S2 second (reliable but returns default globe for unknown domains).
+        // Direct from site last (slow, may not exist).
+        let sources = [
+            "https://icons.duckduckgo.com/ip3/\(domain).ico",
+            "https://www.google.com/s2/favicons?domain=\(domain)&sz=64",
+            "https://\(domain)/favicon.ico",
+        ]
+
+        for source in sources {
+            guard let fetchURL = URL(string: source) else { continue }
+            do {
+                let (data, response) = try await URLSession.shared.data(from: fetchURL)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      httpResponse.statusCode == 200,
+                      data.count > 100,
+                      CGImageSourceCreateWithData(data as CFData, nil) != nil else { continue }
+                try data.write(to: fileURL, options: .atomic)
+                objectWillChange.send()
+                return
+            } catch {
+                continue
+            }
+        }
+        logger.info("No favicon found for \(domain, privacy: .public) from any source")
     }
 
     // MARK: - Private

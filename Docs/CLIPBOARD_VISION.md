@@ -6,6 +6,10 @@ Standalone `ClipboardPanel` — a dedicated NSPanel that opens/closes independen
 
 ## Future Enhancements
 
+### Full Page Thumbnails
+
+Rich preview cards for URLs with page screenshot, title, and description. Currently URL cards show favicon + domain name (fetched from Google's favicon API, cached to disk). The next step is full page thumbnails — requires hidden WKWebView rendering or an external screenshot API. Post-1.0 enhancement.
+
 ### Toast-to-Clipboard Morphing
 
 When something is copied, the capture toast shows a preview of the item. Hovering the toast expands/transitions it into the full clipboard panel with that item at the top. The toast becomes a gateway into clipboard history rather than just a notification.

@@ -626,11 +626,23 @@ struct ClipboardItemRow: View {
     private var contentPreview: some View {
         switch item.type {
         case .url:
-            if let url = item.textContent {
-                Text(url)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.controlAccent)
-                    .lineLimit(2)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.xs) {
+                    AsyncFavicon(item: item)
+                        .frame(width: 16, height: 16)
+                    if let domain = Self.domain(from: item.textContent) {
+                        Text(domain)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(1)
+                    }
+                }
+                if let url = item.textContent {
+                    Text(url)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .lineLimit(2)
+                }
             }
         case .image:
             clipboardImagePreview
@@ -722,6 +734,40 @@ struct ClipboardItemRow: View {
         case .url: return "Bookmark"
         case .image: return "Bookmark"
         case .text, .richText: return "Note"
+        }
+    }
+
+    nonisolated static func domain(from urlString: String?) -> String? {
+        guard let urlString, let host = URL(string: urlString)?.host else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+}
+
+// MARK: - Async Favicon
+
+private struct AsyncFavicon: View {
+    let item: ClipboardItem
+    @ObservedObject private var storage = ClipboardStorage.shared
+
+    var body: some View {
+        Group {
+            if let url = storage.cachedFaviconURL(for: item),
+               let nsImage = NSImage(contentsOf: url) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "globe")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+        }
+        .task(id: item.id) {
+            // Trigger on-demand fetch for items without cached favicons
+            if storage.cachedFaviconURL(for: item) == nil {
+                await storage.fetchFavicon(for: item)
+            }
         }
     }
 }
