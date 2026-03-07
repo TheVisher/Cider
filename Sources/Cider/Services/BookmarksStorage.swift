@@ -263,7 +263,7 @@ final class BookmarksStorage: ObservableObject {
         // prevents web edits from wiping desktop-generated AI data
         if let aiSummary { bookmarks[index].aiSummary = aiSummary }
         if let dominantColors { bookmarks[index].dominantColors = dominantColors }
-        if let folderID { bookmarks[index].folderID = folderID }
+        bookmarks[index].folderID = folderID
         bookmarks[index].updatedAt = remoteUpdatedAt
         persist()
     }
