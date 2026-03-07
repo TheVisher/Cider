@@ -222,6 +222,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var ocrText: String?             // Vision OCR text from thumbnail (for search)
     var dominantColors: [String]?    // Hex color strings extracted from thumbnail
     var mediaType: BookmarkMediaType?  // nil or .image for standard images, .gif for animated GIFs, .video for video clips
+    var carouselImagePaths: [String]? // relative paths into .originals/ for multi-image bookmarks
     var readerUnavailable: Bool?      // true when Readability.js fails to extract content
     var preferredHeroMode: String?    // "thumbnail", "reader", or "web" — last used hero mode
 
@@ -244,6 +245,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case ocrText
         case dominantColors
         case mediaType
+        case carouselImagePaths
         case readerUnavailable
         case preferredHeroMode
     }
@@ -268,6 +270,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         ocrText: String? = nil,
         dominantColors: [String]? = nil,
         mediaType: BookmarkMediaType? = nil,
+        carouselImagePaths: [String]? = nil,
         readerUnavailable: Bool? = nil,
         preferredHeroMode: String? = nil
     ) {
@@ -290,6 +293,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.ocrText = ocrText
         self.dominantColors = dominantColors
         self.mediaType = mediaType
+        self.carouselImagePaths = carouselImagePaths
         self.readerUnavailable = readerUnavailable
         self.preferredHeroMode = preferredHeroMode
     }
@@ -314,6 +318,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         ocrText = try container.decodeIfPresent(String.self, forKey: .ocrText)
         dominantColors = try container.decodeIfPresent([String].self, forKey: .dominantColors)
         mediaType = try container.decodeIfPresent(BookmarkMediaType.self, forKey: .mediaType)
+        carouselImagePaths = try container.decodeIfPresent([String].self, forKey: .carouselImagePaths)
         readerUnavailable = try container.decodeIfPresent(Bool.self, forKey: .readerUnavailable)
         preferredHeroMode = try container.decodeIfPresent(String.self, forKey: .preferredHeroMode)
     }
@@ -363,5 +368,23 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var animatedImageFileURL: URL? {
         guard isAnimatedImage else { return nil }
         return originalImageFileURL
+    }
+
+    /// Whether this bookmark has multiple images (carousel).
+    var isCarousel: Bool {
+        guard let paths = carouselImagePaths else { return false }
+        return paths.count >= 2
+    }
+
+    /// Number of images in the carousel (1 for single-image bookmarks with a thumbnail).
+    var imageCount: Int {
+        carouselImagePaths?.count ?? (thumbnailRelativePath != nil ? 1 : 0)
+    }
+
+    /// Resolved file URLs for all carousel images.
+    var carouselImageFileURLs: [URL] {
+        guard let paths = carouselImagePaths else { return [] }
+        let base = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+        return paths.map { base.appendingPathComponent($0) }
     }
 }

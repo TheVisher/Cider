@@ -679,6 +679,7 @@ struct BookmarkMetadataSidebar: View {
     // MARK: - Helpers
 
     private var itemType: String {
+        if bookmark?.isCarousel == true { return "Carousel (\(bookmark?.imageCount ?? 0))" }
         if bookmark?.isAnimatedImage == true { return "GIF" }
         if !draft.hasURL { return "Image" }
         if draft.originalURLString.lowercased().hasPrefix("file:") { return "File" }
@@ -772,9 +773,13 @@ struct BookmarkDetailsHeroPreview: View {
         }
     }
 
+    @State private var carouselPage = 0
+
     @ViewBuilder
     private var heroContent: some View {
-        if let gifURL = bookmark?.animatedImageFileURL {
+        if let bookmark, bookmark.isCarousel {
+            CarouselHeroView(bookmark: bookmark, currentPage: $carouselPage)
+        } else if let gifURL = bookmark?.animatedImageFileURL {
             AnimatedGIFView(url: gifURL, contentMode: .fit)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(Spacing.md)
@@ -848,5 +853,105 @@ struct BookmarkDetailsHeroPreview: View {
 
         guard !Task.isCancelled else { return }
         thumbnailImage = image
+    }
+}
+
+// MARK: - Carousel Hero View
+
+struct CarouselHeroView: View {
+    let bookmark: Bookmark
+    @Binding var currentPage: Int
+
+    @State private var scrolledPage: Int?
+    @State private var isHovered = false
+
+    private var urls: [URL] { bookmark.carouselImageFileURLs }
+
+    var body: some View {
+        ZStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(urls.enumerated()), id: \.offset) { index, _ in
+                        CarouselPageImage(url: urls[index], fillMode: .fit)
+                            .containerRelativeFrame(.horizontal)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $scrolledPage)
+            .onChange(of: scrolledPage) { _, newValue in
+                if let newValue { currentPage = newValue }
+            }
+            .overlay {
+                CarouselScrollWheelOverlay { delta in
+                    navigatePage(delta: delta)
+                }
+            }
+
+            // Navigation arrows on hover
+            if isHovered, urls.count > 1 {
+                HStack {
+                    if currentPage > 0 {
+                        carouselArrow(systemName: "chevron.left") {
+                            navigatePage(delta: -1)
+                        }
+                    }
+                    Spacer()
+                    if currentPage < urls.count - 1 {
+                        carouselArrow(systemName: "chevron.right") {
+                            navigatePage(delta: 1)
+                        }
+                    }
+                }
+                .padding(.horizontal, Spacing.sm)
+            }
+
+            // Page dots
+            if urls.count > 1 {
+                VStack {
+                    Spacer()
+                    HStack(spacing: Spacing.xs) {
+                        ForEach(0..<urls.count, id: \.self) { index in
+                            Circle()
+                                .fill(index == currentPage ? CiderColors.textOnColor : CiderColors.textOnColor.opacity(0.4))
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    .padding(.vertical, Spacing.xs)
+                    .padding(.horizontal, Spacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.45))
+                    )
+                    .padding(.bottom, Spacing.sm)
+                }
+            }
+        }
+        .focusable()
+        .onKeyPress(.leftArrow) { navigatePage(delta: -1); return .handled }
+        .onKeyPress(.rightArrow) { navigatePage(delta: 1); return .handled }
+        .onHover { isHovered = $0 }
+        .onAppear { scrolledPage = currentPage }
+    }
+
+    private func navigatePage(delta: Int) {
+        let target = max(0, min(currentPage + delta, urls.count - 1))
+        guard target != currentPage else { return }
+        withAnimation(.snappy) {
+            currentPage = target
+            scrolledPage = target
+        }
+    }
+
+    private func carouselArrow(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(CiderColors.textOnColor)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.black.opacity(0.55)))
+        }
+        .buttonStyle(.plain)
     }
 }

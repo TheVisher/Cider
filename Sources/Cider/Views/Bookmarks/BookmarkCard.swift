@@ -191,8 +191,14 @@ struct BookmarkCard: View {
         return false
     }
 
+    /// Whether dropped images should append to carousel instead of replacing the thumbnail.
+    private var shouldAddToCarousel: Bool {
+        bookmark.thumbnailRelativePath != nil
+    }
+
     private func loadThumbnailDrop(from provider: NSItemProvider) -> Bool {
         let bookmarkID = bookmark.id
+        let addToCarousel = shouldAddToCarousel
 
         // Check for GIF-specific type identifier first (preserves animation)
         let gifIdentifier = provider.registeredTypeIdentifiers.first { identifier in
@@ -203,8 +209,13 @@ struct BookmarkCard: View {
             provider.loadDataRepresentation(forTypeIdentifier: gifIdentifier) { data, _ in
                 guard let data else { return }
                 Task { @MainActor in
-                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
-                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                    if addToCarousel {
+                        let saved = BookmarksStorage.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
+                        Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
+                    } else {
+                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                    }
                 }
             }
             return true
@@ -221,12 +232,19 @@ struct BookmarkCard: View {
                 guard let data else { return }
                 let ext = Self.preferredImageFileExtension(for: identifier)
                 Task { @MainActor in
-                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
-                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                    if addToCarousel {
+                        let saved = BookmarksStorage.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+                        Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
+                    } else {
+                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                    }
                 }
             }
             // Also try to load the source URL — if it's a .gif, upgrade the static TIFF to animated GIF
-            Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
+            if !addToCarousel {
+                Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
+            }
             return true
         }
 
@@ -235,8 +253,13 @@ struct BookmarkCard: View {
                 guard let image = item as? NSImage,
                       let data = image.pngRepresentation else { return }
                 Task { @MainActor in
-                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
-                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                    if addToCarousel {
+                        let saved = BookmarksStorage.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "png")
+                        Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
+                    } else {
+                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
+                        Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                    }
                 }
             }
             return true

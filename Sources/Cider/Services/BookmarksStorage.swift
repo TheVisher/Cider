@@ -1119,6 +1119,11 @@ final class BookmarksStorage: ObservableObject {
     private func removeBookmarkImageAssetsIfPresent(for bookmark: Bookmark) {
         removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
         removeImageIfPresent(relativePath: bookmark.originalImageRelativePath)
+        if let carouselPaths = bookmark.carouselImagePaths {
+            for path in carouselPaths {
+                removeImageIfPresent(relativePath: path)
+            }
+        }
     }
 
     private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
@@ -1497,6 +1502,20 @@ final class BookmarksStorage: ObservableObject {
 
             try? fm.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? fm.copyItem(at: sourceURL, to: destinationURL)
+        }
+
+        // Copy carousel image files
+        for bookmark in bookmarks {
+            guard let carouselPaths = bookmark.carouselImagePaths else { continue }
+            for relativePath in carouselPaths where !relativePath.isEmpty {
+                let sourceURL = previousDirectoryURL.appendingPathComponent(relativePath)
+                let destinationURL = directoryURL.appendingPathComponent(relativePath)
+                guard fm.fileExists(atPath: sourceURL.path) else { continue }
+                guard !fm.fileExists(atPath: destinationURL.path) else { continue }
+
+                try? fm.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? fm.copyItem(at: sourceURL, to: destinationURL)
+            }
         }
     }
 
@@ -1886,6 +1905,169 @@ final class BookmarksStorage: ObservableObject {
         guard bookmarks[index].mediaType != mediaType else { return }
         bookmarks[index].mediaType = mediaType
         persist()
+    }
+
+    // MARK: - Carousel Image Management
+
+    private static let maxCarouselImages = 10
+
+    /// Add an image to a bookmark's carousel. If the bookmark currently has a single image,
+    /// it is promoted to a carousel with the existing image as index 0.
+    @discardableResult
+    func addCarouselImage(for bookmarkID: UUID, imageData: Data, preferredFileExtension: String? = nil) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        guard imageData.count > 128, imageData.count < 12_000_000 else { return false }
+        guard NSImage(data: imageData) != nil else { return false }
+
+        var bookmark = bookmarks[index]
+        var paths = bookmark.carouselImagePaths ?? []
+
+        // Promote existing single image to carousel index 0
+        if paths.isEmpty, let existingOriginal = bookmark.originalImageRelativePath, !existingOriginal.isEmpty {
+            let fm = FileManager.default
+            let existingURL = directoryURL.appendingPathComponent(existingOriginal)
+            if fm.fileExists(atPath: existingURL.path) {
+                let ext = existingURL.pathExtension
+                let newName = "\(originalImagesDirectoryName)/\(bookmarkID.uuidString)_0.\(ext)"
+                let newURL = directoryURL.appendingPathComponent(newName)
+                if existingURL.path != newURL.path {
+                    try? fm.moveItem(at: existingURL, to: newURL)
+                }
+                bookmark.originalImageRelativePath = newName
+                paths.append(newName)
+            }
+        }
+
+        guard paths.count < Self.maxCarouselImages else { return false }
+
+        let nextIndex = paths.count
+        let ext = normalizedImageFileExtension(preferredFileExtension)
+        let relativePath = "\(originalImagesDirectoryName)/\(bookmarkID.uuidString)_\(nextIndex).\(ext)"
+        let fileURL = directoryURL.appendingPathComponent(relativePath)
+
+        do {
+            try FileManager.default.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
+            try imageData.write(to: fileURL, options: .atomic)
+        } catch {
+            return false
+        }
+
+        paths.append(relativePath)
+        bookmark.carouselImagePaths = paths
+        bookmark.updatedAt = Date()
+        bookmarks[index] = bookmark
+        persist()
+        return true
+    }
+
+    /// Remove a carousel image at the given index. If only one image remains, demote back to single-image.
+    @discardableResult
+    func removeCarouselImage(for bookmarkID: UUID, at imageIndex: Int) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        var bookmark = bookmarks[index]
+        guard var paths = bookmark.carouselImagePaths, paths.indices.contains(imageIndex) else { return false }
+
+        let removedPath = paths.remove(at: imageIndex)
+        removeImageIfPresent(relativePath: removedPath)
+
+        if paths.count <= 1 {
+            // Demote to single-image bookmark
+            bookmark.carouselImagePaths = nil
+            if let remaining = paths.first {
+                bookmark.originalImageRelativePath = remaining
+            }
+            // Regenerate thumbnail from the remaining image
+            if let remaining = paths.first {
+                regenerateThumbnail(for: bookmarkID, fromOriginalRelativePath: remaining)
+            }
+        } else {
+            bookmark.carouselImagePaths = paths
+            // If we removed the first image, regenerate thumbnail from new first
+            if imageIndex == 0 {
+                regenerateThumbnail(for: bookmarkID, fromOriginalRelativePath: paths[0])
+            }
+        }
+
+        bookmark.updatedAt = Date()
+        bookmarks[index] = bookmark
+        persist()
+        return true
+    }
+
+    /// Reorder carousel images by moving an image from one index to another.
+    @discardableResult
+    func reorderCarouselImages(for bookmarkID: UUID, fromIndex: Int, toIndex: Int) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        var bookmark = bookmarks[index]
+        guard var paths = bookmark.carouselImagePaths,
+              paths.indices.contains(fromIndex),
+              toIndex >= 0, toIndex < paths.count,
+              fromIndex != toIndex else { return false }
+
+        let moved = paths.remove(at: fromIndex)
+        paths.insert(moved, at: toIndex)
+        bookmark.carouselImagePaths = paths
+
+        // If the first image changed, regenerate thumbnail
+        let firstChanged = fromIndex == 0 || toIndex == 0
+        if firstChanged {
+            regenerateThumbnail(for: bookmarkID, fromOriginalRelativePath: paths[0])
+        }
+
+        bookmark.updatedAt = Date()
+        bookmarks[index] = bookmark
+        persist()
+        return true
+    }
+
+    /// Add a carousel image from a remote or local URL string.
+    func addCarouselImage(for bookmarkID: UUID, fromDroppedString rawValue: String) async -> Bool {
+        guard let candidate = extractedURLCandidate(from: rawValue) else { return false }
+        let sourceURL: URL
+        if let direct = URL(string: candidate), direct.scheme != nil {
+            sourceURL = direct
+        } else if candidate.hasPrefix("/") {
+            sourceURL = URL(fileURLWithPath: candidate)
+        } else if let withHTTPS = URL(string: "https://\(candidate)") {
+            sourceURL = withHTTPS
+        } else {
+            return false
+        }
+
+        if sourceURL.isFileURL {
+            guard let data = try? Data(contentsOf: sourceURL) else { return false }
+            return addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: sourceURL.pathExtension)
+        }
+
+        guard let scheme = sourceURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return false }
+
+        var request = URLRequest(url: sourceURL)
+        request.timeoutInterval = 8
+        Self.applyBrowserHeaders(&request)
+        request.setValue("image/gif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<400).contains(http.statusCode) else { return false }
+
+        let ext = inferredImageFileExtension(response: response, remoteURL: sourceURL)
+        return addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+    }
+
+    private func regenerateThumbnail(for bookmarkID: UUID, fromOriginalRelativePath relativePath: String) {
+        let fileURL = directoryURL.appendingPathComponent(relativePath)
+        guard let sourceData = try? Data(contentsOf: fileURL),
+              let thumbnailData = Self.downsampledThumbnailData(from: sourceData, maxDimension: thumbnailMaxPixelDimension) else {
+            return
+        }
+
+        let thumbnailRelativePath = "\(thumbnailsDirectoryName)/\(bookmarkID.uuidString).png"
+        let thumbnailFileURL = directoryURL.appendingPathComponent(thumbnailRelativePath)
+        try? thumbnailData.write(to: thumbnailFileURL, options: .atomic)
+
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        bookmarks[index].thumbnailRelativePath = thumbnailRelativePath
     }
 }
 

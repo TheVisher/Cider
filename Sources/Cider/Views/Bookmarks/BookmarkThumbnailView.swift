@@ -35,18 +35,41 @@ struct BookmarkThumbnailView: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-            .fill(Color.clear)
-            .overlay(content: thumbnailContent)
-            .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                if bookmark.isAnimatedImage, thumbnailImage != nil {
-                    gifBadge
+        if bookmark.isCarousel, mode != .list {
+            CarouselThumbnailView(
+                bookmark: bookmark,
+                mode: mode,
+                isHovered: isHovered
+            )
+        } else {
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Color.clear)
+                .overlay(content: thumbnailContent)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                .overlay(alignment: .topLeading) {
+                    if bookmark.isAnimatedImage, thumbnailImage != nil {
+                        gifBadge
+                    } else if bookmark.isCarousel, mode == .list {
+                        imageCountBadge
+                    }
                 }
-            }
-            .task(id: thumbnailFingerprint) {
-                await loadThumbnailAsync()
-            }
+                .task(id: thumbnailFingerprint) {
+                    await loadThumbnailAsync()
+                }
+        }
+    }
+
+    private var imageCountBadge: some View {
+        Text("\(bookmark.imageCount)")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundColor(CiderColors.textOnColor)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.55))
+            )
+            .padding(Spacing.xs)
     }
 
     @ViewBuilder
@@ -221,6 +244,209 @@ struct BookmarkThumbnailView: View {
             remoteFingerprint.hasSuffix(".ico")
 
         return hasIconURLHint || isTinySquareAsset
+    }
+}
+
+// MARK: - Carousel Thumbnail View
+
+struct CarouselThumbnailView: View {
+    let bookmark: Bookmark
+    let mode: BookmarkThumbnailView.ThumbnailMode
+    var isHovered: Bool = false
+
+    @State private var currentPage: Int? = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var urls: [URL] { bookmark.carouselImageFileURLs }
+    private var page: Int { currentPage ?? 0 }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(urls.enumerated()), id: \.offset) { index, _ in
+                        CarouselPageImage(
+                            url: urls[index],
+                            fillMode: mode == .masonry ? .fit : .fill
+                        )
+                        .containerRelativeFrame(.horizontal)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $currentPage)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .overlay {
+                CarouselScrollWheelOverlay { delta in
+                    navigatePage(delta: delta)
+                }
+            }
+
+            // Navigation arrows on hover
+            if isHovered, urls.count > 1 {
+                HStack {
+                    if page > 0 {
+                        carouselArrowButton(systemName: "chevron.left", size: 10) {
+                            navigatePage(delta: -1)
+                        }
+                    }
+                    Spacer()
+                    if page < urls.count - 1 {
+                        carouselArrowButton(systemName: "chevron.right", size: 10) {
+                            navigatePage(delta: 1)
+                        }
+                    }
+                }
+                .padding(.horizontal, Spacing.xs)
+            }
+
+            // Page dots
+            if urls.count > 1 {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(0..<urls.count, id: \.self) { index in
+                        Circle()
+                            .fill(index == page ? CiderColors.textOnColor : CiderColors.textOnColor.opacity(0.4))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                .padding(.vertical, Spacing.xs)
+                .padding(.horizontal, Spacing.sm)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.45))
+                )
+                .padding(.bottom, Spacing.sm)
+            }
+
+            // Image count badge
+            VStack {
+                HStack {
+                    Text("\(page + 1)/\(urls.count)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundColor(CiderColors.textOnColor)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(
+                            Capsule()
+                                .fill(Color.black.opacity(0.55))
+                        )
+                        .padding(Spacing.sm)
+                    Spacer()
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func navigatePage(delta: Int) {
+        let target = max(0, min(page + delta, urls.count - 1))
+        guard target != page else { return }
+        withAnimation(.snappy) { currentPage = target }
+    }
+
+    private func carouselArrowButton(systemName: String, size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: size, weight: .bold))
+                .foregroundColor(CiderColors.textOnColor)
+                .frame(width: size + 12, height: size + 12)
+                .background(Circle().fill(Color.black.opacity(0.55)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct CarouselPageImage: View {
+    let url: URL
+    var fillMode: ContentMode = .fill
+
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: fillMode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: url) {
+            image = await loadImage()
+        }
+    }
+
+    private func loadImage() async -> NSImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            let w = CGFloat(cgImage.width)
+            let h = CGFloat(cgImage.height)
+            guard w > 0, h > 0 else { return nil }
+            return NSImage(cgImage: cgImage, size: NSSize(width: w, height: h))
+        }.value
+    }
+}
+
+// MARK: - Carousel Scroll Wheel Overlay
+
+/// Intercepts scroll wheel events and converts horizontal/vertical scroll into page navigation.
+struct CarouselScrollWheelOverlay: NSViewRepresentable {
+    let onPageDelta: (Int) -> Void
+
+    func makeNSView(context: Context) -> CarouselScrollWheelNSView {
+        CarouselScrollWheelNSView(onPageDelta: onPageDelta)
+    }
+
+    func updateNSView(_ nsView: CarouselScrollWheelNSView, context: Context) {
+        nsView.onPageDelta = onPageDelta
+    }
+}
+
+final class CarouselScrollWheelNSView: NSView {
+    var onPageDelta: (Int) -> Void
+    private var accumulatedDelta: CGFloat = 0
+    private let threshold: CGFloat = 30
+
+    init(onPageDelta: @escaping (Int) -> Void) {
+        self.onPageDelta = onPageDelta
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Use scrollingDeltaX for horizontal scroll, deltaY for vertical
+        let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+            ? event.scrollingDeltaX
+            : -event.scrollingDeltaY
+
+        if event.phase == .began {
+            accumulatedDelta = 0
+        }
+
+        accumulatedDelta += delta
+
+        if accumulatedDelta > threshold {
+            accumulatedDelta = 0
+            onPageDelta(1)
+        } else if accumulatedDelta < -threshold {
+            accumulatedDelta = 0
+            onPageDelta(-1)
+        }
+
+        // Reset on end/cancelled
+        if event.phase == .ended || event.phase == .cancelled {
+            accumulatedDelta = 0
+        }
     }
 }
 
