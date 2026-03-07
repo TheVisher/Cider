@@ -240,6 +240,7 @@ final class BookmarksStorage: ObservableObject {
     }
 
     /// Update an existing local bookmark with data from the web.
+    /// Preserves local enrichment fields (aiSummary, dominantColors) if remote doesn't have them.
     func updateFromSync(
         bookmarkID: UUID,
         title: String,
@@ -257,9 +258,11 @@ final class BookmarksStorage: ObservableObject {
         bookmarks[index].notes = notes
         bookmarks[index].tags = tags
         bookmarks[index].thumbnailRemoteURLString = thumbnailRemoteURLString
-        bookmarks[index].aiSummary = aiSummary
-        bookmarks[index].dominantColors = dominantColors
-        bookmarks[index].folderID = folderID
+        // Only overwrite enrichment fields if remote actually has them —
+        // prevents web edits from wiping desktop-generated AI data
+        if let aiSummary { bookmarks[index].aiSummary = aiSummary }
+        if let dominantColors { bookmarks[index].dominantColors = dominantColors }
+        if let folderID { bookmarks[index].folderID = folderID }
         bookmarks[index].updatedAt = Date()
         persist()
     }
