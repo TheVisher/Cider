@@ -8,7 +8,7 @@ struct NewItemPopover: View {
     var onCreateNote: (String, String) -> Void
     var onCreateEvent: (String, Date, Bool) -> Void
     var onCreateContact: (String, String) -> Void
-    var onCreateTodo: (String) -> Void
+    var onCreateTodo: (TodoCard) -> Void
     var onCreateFolder: (String, UUID?) -> Void
     var onCreateTab: (String, Set<LibraryEntityType>) -> Void
     var onCreateTag: (String, String) -> Void
@@ -56,8 +56,8 @@ struct NewItemPopover: View {
             case .todo:
                 TodoCreationForm(
                     onBack: back,
-                    onCreate: { title in
-                        onCreateTodo(title)
+                    onCreate: { card in
+                        onCreateTodo(card)
                         onDismiss()
                     }
                 )
@@ -583,15 +583,103 @@ private struct ContactCreationForm: View {
 
 private struct TodoCreationForm: View {
     let onBack: () -> Void
-    let onCreate: (String) -> Void
+    let onCreate: (TodoCard) -> Void
 
+    private enum TodoMode {
+        case picker, single, multi
+    }
+
+    @State private var mode: TodoMode = .picker
     @State private var title = ""
+    @State private var items: [String] = [""]
     @State private var errorMessage = ""
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
-            FormHeader(title: "New Todo", onBack: onBack)
+            FormHeader(title: mode == .picker ? "New Todo" : (mode == .single ? "Single Todo" : "Todo List"), onBack: {
+                if mode == .picker {
+                    onBack()
+                } else {
+                    mode = .picker
+                    errorMessage = ""
+                }
+            })
 
+            switch mode {
+            case .picker:
+                todoModePicker
+            case .single:
+                singleTodoForm
+            case .multi:
+                multiTodoForm
+            }
+        }
+    }
+
+    // MARK: - Mode Picker
+
+    private var todoModePicker: some View {
+        VStack(spacing: Spacing.xs) {
+            Button {
+                mode = .single
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "circle")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: Spacing.hairline) {
+                        Text("Single Todo")
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(CiderColors.primary)
+                        Text("One task to check off")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                mode = .multi
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "checklist")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: Spacing.hairline) {
+                        Text("Todo List")
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(CiderColors.primary)
+                        Text("Multiple items (e.g. bills)")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.bottom, Spacing.md)
+    }
+
+    // MARK: - Single Todo
+
+    private var singleTodoForm: some View {
+        VStack(spacing: Spacing.sm) {
             TextField("What needs to be done?", text: $title)
                 .textFieldStyle(.plain)
                 .font(CiderFont.body)
@@ -601,7 +689,7 @@ private struct TodoCreationForm: View {
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(CiderColors.surfaceInput)
                 )
-                .onSubmit(commit)
+                .onSubmit(commitSingle)
                 .padding(.horizontal, Spacing.md)
 
             if !errorMessage.isEmpty {
@@ -612,19 +700,110 @@ private struct TodoCreationForm: View {
                     .padding(.horizontal, Spacing.md)
             }
 
-            AddButton(label: "Create Todo", action: commit)
+            AddButton(label: "Create Todo", action: commitSingle)
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
         }
     }
 
-    private func commit() {
+    private func commitSingle() {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             errorMessage = "Title is required"
             return
         }
-        onCreate(trimmed)
+        onCreate(TodoCard(title: trimmed))
+    }
+
+    // MARK: - Multi-Item Todo
+
+    private var multiTodoForm: some View {
+        VStack(spacing: Spacing.sm) {
+            VStack(spacing: Spacing.xs) {
+                TextField("List name (e.g. Bills)", text: $title)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.body)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+
+                ForEach(items.indices, id: \.self) { i in
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "circle")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.quaternary)
+                        TextField("Item \(i + 1)", text: $items[i])
+                            .textFieldStyle(.plain)
+                            .font(CiderFont.body)
+                            .onSubmit {
+                                if !items[i].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    items.append("")
+                                }
+                            }
+                        if items.count > 1 {
+                            Button {
+                                items.remove(at: i)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(CiderFont.micro)
+                                    .foregroundColor(CiderColors.quaternary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                }
+
+                Button {
+                    items.append("")
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "plus")
+                            .font(CiderFont.captionMedium)
+                        Text("Add item")
+                            .font(CiderFont.caption)
+                    }
+                    .foregroundColor(CiderColors.quaternary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, Spacing.md)
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+            }
+
+            AddButton(label: "Create Todo List", action: commitMulti)
+                .padding(.horizontal, Spacing.md)
+                .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private func commitMulti() {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            errorMessage = "List name is required"
+            return
+        }
+        let validItems = items
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let checklist = validItems.enumerated().map { i, itemTitle in
+            TodoChecklistItem(title: itemTitle, sortOrder: i)
+        }
+        onCreate(TodoCard(title: trimmedTitle, checklist: checklist))
     }
 }
 

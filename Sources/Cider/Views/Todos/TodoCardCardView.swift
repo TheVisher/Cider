@@ -73,30 +73,58 @@ struct TodoCardCardView: View {
                         .lineLimit(3)
                 }
 
-                // Checklist items
+                // Todo items
                 if !todoCard.checklist.isEmpty {
                     let preview = todoCard.checklist.prefix(4)
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
                         ForEach(Array(preview)) { item in
-                            HStack(spacing: Spacing.xs) {
-                                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                                    .font(CiderFont.body)
-                                    .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
-                                Text(item.title)
-                                    .font(CiderFont.body)
-                                    .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.primary)
-                                    .strikethrough(item.isCompleted)
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
-                                if let amount = item.amount {
-                                    Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
-                                        .font(CiderFont.body)
-                                        .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                // Main item row — full todo
+                                HStack(spacing: Spacing.xs) {
+                                    Button {
+                                        TodoCardStorage.shared.toggleChecklistItem(todoCard.id, checklistItemID: item.id)
+                                    } label: {
+                                        Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                            .font(CiderFont.bodyMedium)
+                                            .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Text(item.title)
+                                        .font(CiderFont.bodyMedium)
+                                        .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.primary)
+                                        .strikethrough(item.isCompleted)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    if let amount = item.amount {
+                                        Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
+                                            .font(CiderFont.body)
+                                            .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
+                                    }
+                                    if let itemDue = item.dueDate, !item.isCompleted {
+                                        Text(itemDue.formatted(.dateTime.month(.abbreviated).day()))
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(itemDueDateColor(itemDue))
+                                    }
                                 }
-                                if let itemDue = item.dueDate, !item.isCompleted {
-                                    Text(itemDue.formatted(.dateTime.month(.abbreviated).day()))
-                                        .font(CiderFont.caption)
-                                        .foregroundColor(itemDueDateColor(itemDue))
+
+                                // Subtasks — indented, square checkboxes
+                                if !item.subtasks.isEmpty {
+                                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                        ForEach(item.subtasks) { subtask in
+                                            HStack(spacing: Spacing.xs) {
+                                                Image(systemName: subtask.isCompleted ? "checkmark.square.fill" : "square")
+                                                    .font(CiderFont.captionMedium)
+                                                    .foregroundColor(subtask.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                                                Text(subtask.title)
+                                                    .font(CiderFont.caption)
+                                                    .foregroundColor(subtask.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
+                                                    .strikethrough(subtask.isCompleted)
+                                                    .lineLimit(1)
+                                            }
+                                        }
+                                    }
+                                    .padding(.leading, Spacing.lg + Spacing.xs)
                                 }
                             }
                         }

@@ -256,6 +256,54 @@ struct TodoEditorSheet: View {
                 }
             }
             .padding(.leading, Spacing.lg + Spacing.xs)
+
+            // Subtasks
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                ForEach(Array(checklist[index].subtasks.enumerated()), id: \.element.id) { subIdx, subtask in
+                    HStack(spacing: Spacing.xs) {
+                        Button {
+                            checklist[index].subtasks[subIdx].isCompleted.toggle()
+                            checklist[index].subtasks[subIdx].completedAt = checklist[index].subtasks[subIdx].isCompleted ? Date() : nil
+                        } label: {
+                            Image(systemName: subtask.isCompleted ? "checkmark.square.fill" : "square")
+                                .font(CiderFont.captionMedium)
+                                .foregroundColor(subtask.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                        }
+                        .buttonStyle(.plain)
+
+                        TextField("Sub-task", text: Binding(
+                            get: { checklist[index].subtasks[subIdx].title },
+                            set: { checklist[index].subtasks[subIdx].title = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .font(CiderFont.caption)
+                        .controlSize(.small)
+
+                        Button {
+                            checklist[index].subtasks.remove(at: subIdx)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(CiderFont.micro)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Button {
+                    checklist[index].subtasks.append(TodoSubtask(title: ""))
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "plus")
+                            .font(CiderFont.captionMedium)
+                        Text("Add sub-task")
+                            .font(CiderFont.caption)
+                    }
+                    .foregroundColor(CiderColors.quaternary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, Spacing.lg + Spacing.xs)
         }
     }
 

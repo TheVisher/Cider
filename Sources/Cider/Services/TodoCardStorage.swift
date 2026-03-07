@@ -42,6 +42,14 @@ final class TodoCardStorage: ObservableObject {
     }
 
     @discardableResult
+    func addTodoCard(_ card: TodoCard) -> TodoCard {
+        todoCards.append(card)
+        sortCards()
+        persist()
+        return card
+    }
+
+    @discardableResult
     func updateTodoCard(_ updated: TodoCard) -> Bool {
         guard let idx = todoCards.firstIndex(where: { $0.id == updated.id }) else { return false }
         var copy = updated

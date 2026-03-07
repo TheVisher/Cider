@@ -804,8 +804,8 @@ struct CiderPanelView: View {
                     contactContextSetter.wrappedValue = ContactEditorContext(existingContact: contact)
                 }
             },
-            onCreateTodo: { title in
-                TodoCardStorage.shared.createTodoCard(title: title)
+            onCreateTodo: { card in
+                TodoCardStorage.shared.addTodoCard(card)
             },
             onCreateFolder: { name, parentID in
                 bvm.createFolder(name: name, parentID: parentID)

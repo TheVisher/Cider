@@ -472,6 +472,7 @@ enum SearchService {
         todos.compactMap { todo in
             var fields = [todo.title, todo.details]
             fields.append(contentsOf: todo.checklist.map(\.title))
+            fields.append(contentsOf: todo.checklist.flatMap { $0.subtasks.map(\.title) })
             guard matchesAllTokens(tokens, in: fields) else { return nil }
 
             let headerMatch = fieldsMatch(tokens, in: [todo.title])

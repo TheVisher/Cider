@@ -22,6 +22,33 @@ enum TodoPriority: String, Codable, CaseIterable, Hashable {
     }
 }
 
+struct TodoSubtask: Identifiable, Codable, Hashable {
+    let id: UUID
+    var title: String
+    var isCompleted: Bool
+    var completedAt: Date?
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        isCompleted: Bool = false,
+        completedAt: Date? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.isCompleted = isCompleted
+        self.completedAt = completedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        isCompleted = (try c.decodeIfPresent(Bool.self, forKey: .isCompleted)) ?? false
+        completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+    }
+}
+
 struct TodoChecklistItem: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
@@ -31,6 +58,7 @@ struct TodoChecklistItem: Identifiable, Codable, Hashable {
     var dueDate: Date?
     var amount: Double?
     var urlString: String?
+    var subtasks: [TodoSubtask]
 
     init(
         id: UUID = UUID(),
@@ -40,7 +68,8 @@ struct TodoChecklistItem: Identifiable, Codable, Hashable {
         sortOrder: Int = 0,
         dueDate: Date? = nil,
         amount: Double? = nil,
-        urlString: String? = nil
+        urlString: String? = nil,
+        subtasks: [TodoSubtask] = []
     ) {
         self.id = id
         self.title = title
@@ -50,6 +79,7 @@ struct TodoChecklistItem: Identifiable, Codable, Hashable {
         self.dueDate = dueDate
         self.amount = amount
         self.urlString = urlString
+        self.subtasks = subtasks
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +92,7 @@ struct TodoChecklistItem: Identifiable, Codable, Hashable {
         dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate)
         amount = try c.decodeIfPresent(Double.self, forKey: .amount)
         urlString = try c.decodeIfPresent(String.self, forKey: .urlString)
+        subtasks = (try c.decodeIfPresent([TodoSubtask].self, forKey: .subtasks)) ?? []
     }
 }
 
