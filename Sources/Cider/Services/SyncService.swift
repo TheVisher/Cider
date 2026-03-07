@@ -63,6 +63,13 @@ final class SyncService: ObservableObject {
         UserDefaults.standard.set(pendingDeletions, forKey: pendingDeletionsKey)
     }
 
+    /// Called when a bookmark is restored from trash — cancel any pending deletion.
+    func cancelDeletion(of bookmarkID: UUID) {
+        let syncId = bookmarkID.uuidString.lowercased()
+        pendingDeletions.removeAll { $0 == syncId }
+        UserDefaults.standard.set(pendingDeletions, forKey: pendingDeletionsKey)
+    }
+
     // MARK: - Manual trigger
 
     func syncNow() {
@@ -109,6 +116,7 @@ final class SyncService: ObservableObject {
                 "tags": bookmark.tags,
                 "createdAt": bookmark.createdAt.timeIntervalSince1970 * 1000,
                 "updatedAt": bookmark.updatedAt.timeIntervalSince1970 * 1000,
+                "deleted": false,
             ]
             if !bookmark.notes.isEmpty {
                 dict["notes"] = bookmark.notes
@@ -188,7 +196,8 @@ final class SyncService: ObservableObject {
                 let local = storage.bookmarks[localIndex]
 
                 if isDeleted {
-                    storage.removeSynced(local)
+                    // Move to desktop trash so the user can restore if needed
+                    storage.trashFromSync(local)
                     continue
                 }
 
