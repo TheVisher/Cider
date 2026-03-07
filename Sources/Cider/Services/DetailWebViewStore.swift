@@ -64,6 +64,7 @@ final class DetailWebViewStore: ObservableObject {
             return
         }
         let config = WKWebViewConfiguration()
+        config.mediaTypesRequiringUserActionForPlayback = .all
         let wv = WKWebView(frame: .zero, configuration: config)
         let delegate = WebLoadDelegate { [weak self] in
             self?.webViewReady = true
@@ -85,6 +86,7 @@ final class DetailWebViewStore: ObservableObject {
         }
         // Fallback — shouldn't happen if preload was called
         let config = WKWebViewConfiguration()
+        config.mediaTypesRequiringUserActionForPlayback = .all
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.navigationDelegate = delegate
         wv.setValue(false, forKey: "drawsBackground")
