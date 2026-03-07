@@ -332,14 +332,21 @@ Richer content display and media type support.
 ### R-14: Bookmark Detail View V2
 > Redesigned detail view with multiple view modes and rich metadata.
 
-**Status:** `Not Started`
+**Status:** `Complete`
 **Priority:** High
 
 **Scope:**
-- Three view modes: Slide-out panel, Full panel, Page view
-- Metadata panel with collapsible sections (Title, Folders, Tags, Notes, Source, Colors, Properties)
-- Content tabs for URL bookmarks: Preview / Reader / Web mode switching
-- Replaces current detail popover
+- ✅ Three view modes: Slide-out panel, Full panel, Page view — with persistent config + switcher popover
+- ✅ Metadata panel with 8 collapsible sections (Title, Source, Folder, Tags, Keywords, Notes, Intelligence, Info)
+- ✅ Content tabs: Preview (thumbnail) / Reader (Readability.js) / Web (live WKWebView)
+- ✅ Eager preload: web page + reader extraction start on card open, content ready instantly
+- ✅ Reader extraction in background — no raw HTML flash, cached article displayed directly
+- ✅ Reader unavailability persisted per bookmark — button pre-disabled, no click needed to discover
+- ✅ Per-bookmark hero mode persistence — each card remembers its last view across sessions
+- ✅ Persistent WKWebView across mode switches — videos keep playing through transitions
+- ✅ Autoplay prevention on preloaded web views
+- ✅ Toolbar spinners while loading, greyed icons when unavailable
+- ✅ Replaces current detail popover
 
 ---
 
@@ -465,14 +472,14 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-13 | Advanced Search | 2 | ✅ Complete |
 | R-20 | Screen Capture Polish | 2 | Not Started |
 | R-21 | Keyboard Shortcuts Reference | 2 | ✅ Complete |
-| R-14 | Bookmark Detail View V2 | 3 | Not Started |
+| R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
 | R-15 | GIF/Video/Carousel Bookmarks | 3 | Not Started |
 | R-16 | Books Card Type | 4 | Not Started |
 | R-17 | Todos Card Type | 4 | Not Started |
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
-**Completed:** 11/21
+**Completed:** 14/21
 
 ---
 
