@@ -302,12 +302,15 @@ Make everything that shipped in beta feel finished.
 **Priority:** Medium
 
 **Scope:**
-- ✅ **Fix Date Card OCR routing:** OCR detected dates + suggested title now passed through notification → NewItemPopover → EventCreationForm pre-fill
-- ✅ **Fix Contact OCR routing:** OCR detected emails/phones + suggested title now passed through notification → NewItemPopover → ContactCreationForm pre-fill
+- ✅ **Fix Date Card OCR routing:** Screen capture → full DateCardEditorSheet with pre-filled title, date/time, location, OCR text in details
+- ✅ **Fix Contact OCR routing:** Screen capture → full ContactEditorSheet with pre-filled name, email, phone in correct fields
 - ✅ **Notes routing works:** Verified functional (OCR text → new note) — was already working
 - ✅ **Image preview in capture toast:** Capture thumbnail shown in toast header (replaces camera icon)
-- ✅ **Direct step navigation:** Screen capture toast buttons skip the item picker and go directly to the Event/Contact form
-- **General UX polish:** Review the full capture flow end-to-end, fix any rough edges
+- ✅ **Direct editor routing:** Screen capture buttons bypass +New popover, open full editor sheets directly
+- ✅ **OCR time merging:** When NSDataDetector defaults to 12PM, scan text for explicit time patterns and merge
+- ✅ **OCR noise filtering:** Skip PROMOTED, SPONSORED, tickets, etc. when extracting title
+- ✅ **OCR location extraction:** Detect venue names from lines after the title
+- **Known limitation:** OCR quality depends on screenshot clarity; garbled text produces garbled titles
 
 ---
 
