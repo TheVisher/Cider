@@ -50,14 +50,44 @@ final class LibraryViewModel: ObservableObject {
 
         let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let filtered = items.filter { item in
-            guard filterSpec.entityTypes.contains(item.entityType) else { return false }
+        // Parse scope modifiers from the search query
+        let scope = query.isEmpty ? nil : SearchService.parseScope(from: query)
+        let cleanQuery = scope?.cleanQuery ?? query
 
-            if let folderID = filterSpec.folderID, item.folderID != folderID {
+        let filtered = items.filter { item in
+            // Apply scope entity type filter (narrower than filterSpec)
+            if let scopeTypes = scope?.entityTypes {
+                let entityMatch: Bool
+                switch item {
+                case .bookmark:     entityMatch = scopeTypes.contains(.bookmark)
+                case .note:         entityMatch = scopeTypes.contains(.note)
+                case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
+                case .contact:      entityMatch = scopeTypes.contains(.contact)
+                case .externalFile: entityMatch = false
+                }
+                guard entityMatch else { return false }
+            } else {
+                guard filterSpec.entityTypes.contains(item.entityType) else { return false }
+            }
+
+            // Apply scope folder filter
+            if let s = scope, !s.folderIDs.isEmpty {
+                guard let fID = item.folderID, s.folderIDs.contains(fID) else { return false }
+            } else if let s = scope, s.showAllFolders {
+                guard item.folderID != nil else { return false }
+            } else if let folderID = filterSpec.folderID, item.folderID != folderID {
                 return false
             }
 
-            if filterSpec.onlyUnassigned, item.folderID != nil {
+            // Apply scope tag filter
+            if let scopeLabelID = scope?.labelID {
+                guard item.labelIDs.contains(scopeLabelID) else { return false }
+            } else if !filterSpec.labelIDs.isEmpty, item.labelIDs.isDisjoint(with: filterSpec.labelIDs) {
+                return false
+            }
+
+            // Skip onlyUnassigned when scope explicitly targets folders
+            if scope?.hasFolderScope != true, filterSpec.onlyUnassigned, item.folderID != nil {
                 return false
             }
 
@@ -65,11 +95,7 @@ final class LibraryViewModel: ObservableObject {
                 return false
             }
 
-            if !filterSpec.labelIDs.isEmpty, item.labelIDs.isDisjoint(with: filterSpec.labelIDs) {
-                return false
-            }
-
-            if !query.isEmpty, !Self.matchesTextQuery(query, in: item) {
+            if !cleanQuery.isEmpty, !Self.matchesTextQuery(cleanQuery, in: item) {
                 return false
             }
 

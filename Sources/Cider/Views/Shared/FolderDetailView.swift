@@ -57,7 +57,24 @@ struct FolderDetailView: View {
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
-            all = all.filter { LibraryViewModel.matchesTextQuery(query, in: $0) }
+            let scope = SearchService.parseScope(from: query)
+            if let scopeTypes = scope.entityTypes {
+                all = all.filter { item in
+                    switch item {
+                    case .bookmark:     return scopeTypes.contains(.bookmark)
+                    case .note:         return scopeTypes.contains(.note)
+                    case .dateCard:     return scopeTypes.contains(.dateCard)
+                    case .contact:      return scopeTypes.contains(.contact)
+                    case .externalFile: return false
+                    }
+                }
+            }
+            if let labelID = scope.labelID {
+                all = all.filter { $0.labelIDs.contains(labelID) }
+            }
+            if !scope.cleanQuery.isEmpty {
+                all = all.filter { LibraryViewModel.matchesTextQuery(scope.cleanQuery, in: $0) }
+            }
         }
 
         return all

@@ -90,6 +90,7 @@ struct SearchPaletteView: View {
     @State private var results: [SearchResult] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedIndex: Int = -1
+    @State private var activeScope = SearchScope(cleanQuery: "")
     @FocusState private var isSearchFieldFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -173,6 +174,10 @@ struct SearchPaletteView: View {
             VStack(spacing: 0) {
                 searchField
 
+                if activeScope.hasActiveScopes {
+                    scopePillsBar
+                }
+
                 Divider()
                     .background(CiderColors.separator)
 
@@ -229,6 +234,7 @@ struct SearchPaletteView: View {
             selectedIndex = -1
             searchTask?.cancel()
             let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            activeScope = SearchService.parseScope(from: trimmed)
             guard !trimmed.isEmpty else { results = []; return }
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(100))
@@ -299,7 +305,7 @@ struct SearchPaletteView: View {
                 .font(CiderFont.titleMedium)
                 .foregroundColor(CiderColors.tertiary)
 
-            TextField("Search everything\u{2026}", text: $query)
+            TextField("Search everything\u{2026}  @bookmarks @notes @folder:Name", text: $query)
                 .textFieldStyle(.plain)
                 .font(CiderFont.title)
                 .foregroundColor(CiderColors.primary)
@@ -331,6 +337,146 @@ struct SearchPaletteView: View {
         }
         .padding(.horizontal, Spacing.lg)
         .frame(height: SearchPaletteDesign.searchFieldHeight)
+    }
+
+    // MARK: - Scope Pills
+
+    private var scopePillsBar: some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach(activeScope.activeScopeDescriptions, id: \.self) { desc in
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: scopeIcon(for: desc))
+                        .font(CiderFont.caption)
+                    Text(desc)
+                        .font(CiderFont.captionMedium)
+                }
+                .foregroundColor(CiderColors.controlAccent)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.controlAccent.opacity(0.12))
+                )
+            }
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.xs)
+    }
+
+    private func scopeIcon(for description: String) -> String {
+        let lower = description.lowercased()
+        if lower == "bookmarks" { return "bookmark" }
+        if lower == "notes" { return "note.text" }
+        if lower == "events" { return "calendar" }
+        if lower == "contacts" { return "person" }
+        if lower.hasPrefix("folder:") { return "folder" }
+        if lower.hasPrefix("tag:") { return "tag" }
+        return "scope"
+    }
+
+    // MARK: - Folder Grouped Results
+
+    /// Groups results by folder, showing a folder header + divider for each.
+    private var folderGroupedResults: some View {
+        let allFolders = BookmarksStorage.shared.folders
+        // Determine which folders to show
+        let targetFolderIDs: Set<UUID>
+        if activeScope.showAllFolders {
+            // All root folders that have items
+            let folderIDsWithItems = Set(results.compactMap { resultFolderID($0) })
+            targetFolderIDs = folderIDsWithItems
+        } else {
+            targetFolderIDs = activeScope.folderIDs
+        }
+
+        // Group results by folder
+        let grouped: [(folder: Folder, items: [SearchResult])] = allFolders
+            .filter { targetFolderIDs.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .compactMap { folder in
+                let folderResults = results.filter { resultFolderID($0) == folder.id }
+                guard !folderResults.isEmpty else { return nil }
+                return (folder, folderResults)
+            }
+
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            if grouped.isEmpty && !results.isEmpty {
+                // Results exist but none have folder assignments (shouldn't happen with folder scope)
+                ForEach(results) { result in
+                    searchResultRow(result)
+                }
+            } else {
+                ForEach(grouped, id: \.folder.id) { group in
+                    folderSection(folder: group.folder, items: group.items, allFolders: allFolders)
+                }
+            }
+        }
+    }
+
+    private func folderSection(folder: Folder, items: [SearchResult], allFolders: [Folder]) -> some View {
+        let subFolders = allFolders.filter { $0.parentID == folder.id }
+
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            // Folder header
+            HStack(spacing: Spacing.sm) {
+                if let icon = folder.icon {
+                    if folder.iconIsEmoji {
+                        Text(icon)
+                            .font(CiderFont.subheadingMedium)
+                    } else {
+                        Image(systemName: icon)
+                            .font(CiderFont.subheadingMedium)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                } else {
+                    Image(systemName: "folder.fill")
+                        .font(CiderFont.subheadingMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                }
+
+                Text(folder.name)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                if !subFolders.isEmpty {
+                    HStack(spacing: Spacing.xxs) {
+                        ForEach(subFolders.prefix(3)) { sub in
+                            Text(sub.name)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                        if subFolders.count > 3 {
+                            Text("+\(subFolders.count - 3)")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Text("\(items.count)")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+
+            Divider()
+                .background(CiderColors.separator)
+
+            // Items in this folder
+            ForEach(items) { result in
+                searchResultRow(result)
+            }
+        }
+    }
+
+    private func resultFolderID(_ result: SearchResult) -> UUID? {
+        if let bookmark = result.bookmark { return bookmark.folderID }
+        if let note = result.note { return note.folderID }
+        if let dateCard = result.dateCard { return dateCard.folderID }
+        if let contact = result.contact { return contact.folderID }
+        return nil
     }
 
     // MARK: - Default Content (no query)
@@ -380,7 +526,9 @@ struct SearchPaletteView: View {
                         tagsSection(tags: tags)
                     }
 
-                    if showResults {
+                    if activeScope.hasFolderScope {
+                        folderGroupedResults
+                    } else if showResults {
                         if !bookmarkResults.isEmpty {
                             resultsSection(title: "Bookmarks", icon: "bookmark", results: bookmarkResults)
                         }
@@ -395,7 +543,7 @@ struct SearchPaletteView: View {
                         }
                     }
 
-                    if showNoResults {
+                    if showNoResults && !activeScope.hasFolderScope {
                         noResultsRow
                     }
                 }
