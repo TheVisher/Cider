@@ -169,6 +169,10 @@ struct CiderConfig: Codable {
         case clipboardImageRetentionDays
         case clipboardMaxImageStorageMB
         case clipboardPanelPosition
+        case syncEnabled
+        case syncURL
+        case syncToken
+        case lastSyncTimestamp
     }
 
     var showMenuBarIcon: Bool
@@ -226,6 +230,12 @@ struct CiderConfig: Codable {
     var clipboardMaxImageStorageMB: Int  // Max total image storage in MB (default 500)
     var clipboardPanelPosition: ClipboardPanelPosition  // Where standalone clipboard panel appears
 
+    // Cider Web sync
+    var syncEnabled: Bool  // Whether sync with Cider Web is active
+    var syncURL: String  // Convex deployment HTTP URL (e.g. https://foo-123.convex.site)
+    var syncToken: String  // Bearer token for authenticating with Cider Web
+    var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
+
     static let storageKey = "CiderConfig"
 
     static var `default`: CiderConfig {
@@ -279,7 +289,11 @@ struct CiderConfig: Codable {
             clipboardRetentionDays: 0,
             clipboardImageRetentionDays: 7,
             clipboardMaxImageStorageMB: 500,
-            clipboardPanelPosition: .followMouse
+            clipboardPanelPosition: .followMouse,
+            syncEnabled: false,
+            syncURL: "",
+            syncToken: "",
+            lastSyncTimestamp: 0
         )
     }
 
@@ -471,6 +485,10 @@ struct CiderConfig: Codable {
         clipboardImageRetentionDays = try container.decodeIfPresent(Int.self, forKey: .clipboardImageRetentionDays) ?? 7
         clipboardMaxImageStorageMB = try container.decodeIfPresent(Int.self, forKey: .clipboardMaxImageStorageMB) ?? 500
         clipboardPanelPosition = try container.decodeIfPresent(ClipboardPanelPosition.self, forKey: .clipboardPanelPosition) ?? .followMouse
+        syncEnabled = try container.decodeIfPresent(Bool.self, forKey: .syncEnabled) ?? false
+        syncURL = try container.decodeIfPresent(String.self, forKey: .syncURL) ?? ""
+        syncToken = try container.decodeIfPresent(String.self, forKey: .syncToken) ?? ""
+        lastSyncTimestamp = try container.decodeIfPresent(Double.self, forKey: .lastSyncTimestamp) ?? 0
     }
 
     init(
@@ -527,7 +545,11 @@ struct CiderConfig: Codable {
         clipboardRetentionDays: Int = 0,
         clipboardImageRetentionDays: Int = 7,
         clipboardMaxImageStorageMB: Int = 500,
-        clipboardPanelPosition: ClipboardPanelPosition = .followMouse
+        clipboardPanelPosition: ClipboardPanelPosition = .followMouse,
+        syncEnabled: Bool = false,
+        syncURL: String = "",
+        syncToken: String = "",
+        lastSyncTimestamp: Double = 0
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -583,5 +605,9 @@ struct CiderConfig: Codable {
         self.clipboardImageRetentionDays = clipboardImageRetentionDays
         self.clipboardMaxImageStorageMB = clipboardMaxImageStorageMB
         self.clipboardPanelPosition = clipboardPanelPosition
+        self.syncEnabled = syncEnabled
+        self.syncURL = syncURL
+        self.syncToken = syncToken
+        self.lastSyncTimestamp = lastSyncTimestamp
     }
 }

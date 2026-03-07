@@ -571,6 +571,10 @@ struct SettingsView: View {
             AboutSettingsView()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+        case .syncSettings:
+            SyncSettingsView()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
         case .accountOverview:
             SettingsAccountOverviewView()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -880,7 +884,7 @@ private enum SettingsCategory: String, CaseIterable {
         case .intelligence:
             [.intelligenceFeatures]
         case .data:
-            [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport]
+            [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport, .syncSettings]
         case .advanced:
             [.advancedAccessibility, .advancedReset]
         case .about:
@@ -912,6 +916,7 @@ private enum SettingsSubcategory: Hashable {
     case shortcuts
     case advancedAccessibility
     case advancedReset
+    case syncSettings
     case aboutOverview
     case accountOverview
 
@@ -953,6 +958,8 @@ private enum SettingsSubcategory: Hashable {
             "Import & Export"
         case .intelligenceFeatures:
             "Features"
+        case .syncSettings:
+            "Cider Web Sync"
         case .advancedAccessibility:
             "Accessibility"
         case .advancedReset:

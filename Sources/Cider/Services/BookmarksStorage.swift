@@ -170,6 +170,7 @@ final class BookmarksStorage: ObservableObject {
     @discardableResult
     func remove(_ bookmark: Bookmark) -> TrashItem {
         cancelEnrichment(for: bookmark.id)
+        SyncService.shared.trackDeletion(of: bookmark.id)
         let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()
@@ -181,6 +182,7 @@ final class BookmarksStorage: ObservableObject {
         var trashItems: [TrashItem] = []
         for bookmark in bookmarksToDelete {
             cancelEnrichment(for: bookmark.id)
+            SyncService.shared.trackDeletion(of: bookmark.id)
             let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
             trashItems.append(item)
         }
@@ -195,6 +197,71 @@ final class BookmarksStorage: ObservableObject {
         var restored = bookmark
         restored.isEnriching = false
         bookmarks.insert(restored, at: 0)
+        persist()
+    }
+
+    // MARK: - Sync helpers (called by SyncService)
+
+    /// Add a bookmark received from the web, using the provided UUID so it stays in sync.
+    func addFromSync(
+        id: UUID,
+        title: String,
+        urlString: String,
+        notes: String,
+        tags: [String],
+        thumbnailRemoteURLString: String?,
+        aiSummary: String?,
+        dominantColors: [String]?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        guard !bookmarks.contains(where: { $0.id == id }) else { return }
+
+        let bookmark = Bookmark(
+            id: id,
+            title: title,
+            urlString: urlString,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            notes: notes,
+            tags: tags,
+            thumbnailRemoteURLString: thumbnailRemoteURLString,
+            aiSummary: aiSummary,
+            dominantColors: dominantColors
+        )
+        bookmarks.insert(bookmark, at: 0)
+        bookmarks.sort { $0.createdAt > $1.createdAt }
+        persist()
+        startEnrichmentIfNeeded(for: id)
+    }
+
+    /// Update an existing local bookmark with data from the web.
+    func updateFromSync(
+        bookmarkID: UUID,
+        title: String,
+        urlString: String,
+        notes: String,
+        tags: [String],
+        thumbnailRemoteURLString: String?,
+        aiSummary: String?,
+        dominantColors: [String]?
+    ) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        bookmarks[index].title = title
+        bookmarks[index].urlString = urlString
+        bookmarks[index].notes = notes
+        bookmarks[index].tags = tags
+        bookmarks[index].thumbnailRemoteURLString = thumbnailRemoteURLString
+        bookmarks[index].aiSummary = aiSummary
+        bookmarks[index].dominantColors = dominantColors
+        bookmarks[index].updatedAt = Date()
+        persist()
+    }
+
+    /// Remove a bookmark that was deleted on the web, without trashing it locally.
+    func removeSynced(_ bookmark: Bookmark) {
+        cancelEnrichment(for: bookmark.id)
+        bookmarks.removeAll { $0.id == bookmark.id }
         persist()
     }
 

@@ -97,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureClipboardPanel()
         observeClipboardViewerNotifications()
 
+        // Start Cider Web sync if configured
+        SyncService.shared.startIfEnabled()
+
         // Start Spotlight indexing.
         // Note: Core Spotlight requires a proper .app bundle to surface results in
         // Spotlight/Raycast. During development (bare SPM executable), items are indexed
@@ -347,6 +350,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             clipboardHotkeyDetector?.setEnabled(false)
         }
+
+        // Toggle Cider Web sync
+        SyncService.shared.startIfEnabled()
     }
 
     private func observeWorkspaceApplicationActivation() {
