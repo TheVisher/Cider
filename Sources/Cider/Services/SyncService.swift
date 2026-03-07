@@ -20,10 +20,15 @@ final class SyncService: ObservableObject {
     /// Bookmarks deleted locally that need to be pushed as deletions to the web.
     private var pendingDeletions: [String] = [] // lowercased UUID strings
 
+    /// Folders deleted locally that need to be pushed as deletions to the web.
+    private var pendingFolderDeletions: [String] = [] // lowercased UUID strings
+
     private let pendingDeletionsKey = "CiderSyncPendingDeletions"
+    private let pendingFolderDeletionsKey = "CiderSyncPendingFolderDeletions"
 
     private init() {
         pendingDeletions = UserDefaults.standard.stringArray(forKey: pendingDeletionsKey) ?? []
+        pendingFolderDeletions = UserDefaults.standard.stringArray(forKey: pendingFolderDeletionsKey) ?? []
     }
 
     // MARK: - Lifecycle
@@ -70,6 +75,16 @@ final class SyncService: ObservableObject {
         UserDefaults.standard.set(pendingDeletions, forKey: pendingDeletionsKey)
     }
 
+    // MARK: - Folder deletion tracking
+
+    /// Called by BookmarksStorage when a folder is deleted while sync is enabled.
+    func trackFolderDeletion(of folderID: UUID) {
+        let syncId = folderID.uuidString.lowercased()
+        guard !pendingFolderDeletions.contains(syncId) else { return }
+        pendingFolderDeletions.append(syncId)
+        UserDefaults.standard.set(pendingFolderDeletions, forKey: pendingFolderDeletionsKey)
+    }
+
     // MARK: - Manual trigger
 
     func syncNow() {
@@ -102,13 +117,32 @@ final class SyncService: ObservableObject {
         }
     }
 
-    // MARK: - Push local bookmarks to web
+    // MARK: - Push local bookmarks + folders to web
 
     private func push(config: CiderConfig) async throws {
-        let bookmarks = BookmarksStorage.shared.bookmarks
-        guard !bookmarks.isEmpty else { return }
+        let storage = BookmarksStorage.shared
+        let bookmarks = storage.bookmarks
+        let folders = storage.folders
 
-        let payload = bookmarks.map { bookmark -> [String: Any] in
+        // Build folder payload
+        let folderPayload = folders.map { folder -> [String: Any] in
+            var dict: [String: Any] = [
+                "ciderSyncId": folder.id.uuidString.lowercased(),
+                "name": folder.name,
+                "createdAt": folder.createdAt.timeIntervalSince1970 * 1000,
+                "updatedAt": folder.updatedAt.timeIntervalSince1970 * 1000,
+            ]
+            if let parentID = folder.parentID {
+                dict["parentSyncId"] = parentID.uuidString.lowercased()
+            }
+            if let icon = folder.icon {
+                dict["icon"] = icon
+            }
+            return dict
+        }
+
+        // Build bookmark payload (now includes folderID reference)
+        let bookmarkPayload = bookmarks.map { bookmark -> [String: Any] in
             var dict: [String: Any] = [
                 "ciderSyncId": bookmark.id.uuidString.lowercased(),
                 "title": bookmark.title,
@@ -130,20 +164,29 @@ final class SyncService: ObservableObject {
             if let colors = bookmark.dominantColors {
                 dict["dominantColors"] = colors
             }
+            if let folderID = bookmark.folderID {
+                dict["folderSyncId"] = folderID.uuidString.lowercased()
+            }
             return dict
         }
 
-        let body = try JSONSerialization.data(withJSONObject: ["bookmarks": payload])
+        var pushBody: [String: Any] = ["bookmarks": bookmarkPayload]
+        if !folderPayload.isEmpty {
+            pushBody["folders"] = folderPayload
+        }
+
+        let body = try JSONSerialization.data(withJSONObject: pushBody)
         let _ = try await syncRequest(config: config, path: "/api/sync/push", body: body)
     }
 
     // MARK: - Push deletions to web
 
     private func pushDeletions(config: CiderConfig) async throws {
-        guard !pendingDeletions.isEmpty else { return }
+        guard !pendingDeletions.isEmpty || !pendingFolderDeletions.isEmpty else { return }
 
         let now = Date().timeIntervalSince1970 * 1000
-        let payload = pendingDeletions.map { syncId -> [String: Any] in
+
+        let bookmarkPayload = pendingDeletions.map { syncId -> [String: Any] in
             [
                 "ciderSyncId": syncId,
                 "title": "",
@@ -156,12 +199,30 @@ final class SyncService: ObservableObject {
             ]
         }
 
-        let body = try JSONSerialization.data(withJSONObject: ["bookmarks": payload])
+        let folderPayload = pendingFolderDeletions.map { syncId -> [String: Any] in
+            [
+                "ciderSyncId": syncId,
+                "name": "",
+                "createdAt": now,
+                "updatedAt": now,
+                "deleted": true,
+                "deletedAt": now,
+            ]
+        }
+
+        var pushBody: [String: Any] = ["bookmarks": bookmarkPayload]
+        if !folderPayload.isEmpty {
+            pushBody["folders"] = folderPayload
+        }
+
+        let body = try JSONSerialization.data(withJSONObject: pushBody)
         let _ = try await syncRequest(config: config, path: "/api/sync/push", body: body)
 
         // Clear pending deletions after successful push
         pendingDeletions.removeAll()
         UserDefaults.standard.set(pendingDeletions, forKey: pendingDeletionsKey)
+        pendingFolderDeletions.removeAll()
+        UserDefaults.standard.set(pendingFolderDeletions, forKey: pendingFolderDeletionsKey)
     }
 
     // MARK: - Pull web bookmarks to local
@@ -179,6 +240,61 @@ final class SyncService: ObservableObject {
 
         let storage = BookmarksStorage.shared
 
+        // --- Pull folders first (bookmarks may reference them) ---
+        if let folderDicts = json["folders"] as? [[String: Any]] {
+            for dict in folderDicts {
+                guard let syncId = dict["ciderSyncId"] as? String,
+                      let name = dict["name"] as? String,
+                      let updatedAtMs = dict["updatedAt"] as? Double else {
+                    continue
+                }
+
+                let syncIdLower = syncId.lowercased()
+                let remoteUpdatedAt = Date(timeIntervalSince1970: updatedAtMs / 1000)
+                let isDeleted = dict["deleted"] as? Bool ?? false
+                let icon = dict["icon"] as? String
+                let parentSyncId = (dict["parentSyncId"] as? String)?.lowercased()
+
+                // Resolve parentSyncId to local UUID
+                let parentID: UUID? = if let parentSyncId {
+                    storage.folders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id
+                } else {
+                    nil
+                }
+
+                if let localIndex = storage.folders.firstIndex(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
+                    let local = storage.folders[localIndex]
+
+                    if isDeleted {
+                        storage.deleteFolderFromSync(local.id)
+                        continue
+                    }
+
+                    if remoteUpdatedAt > local.updatedAt {
+                        storage.updateFolderFromSync(
+                            folderID: local.id,
+                            name: name,
+                            icon: icon,
+                            parentID: parentID
+                        )
+                    }
+                } else if !isDeleted {
+                    if let uuid = UUID(uuidString: syncId) {
+                        let createdAtMs = dict["createdAt"] as? Double ?? updatedAtMs
+                        storage.addFolderFromSync(
+                            id: uuid,
+                            name: name,
+                            icon: icon,
+                            parentID: parentID,
+                            createdAt: Date(timeIntervalSince1970: createdAtMs / 1000),
+                            updatedAt: remoteUpdatedAt
+                        )
+                    }
+                }
+            }
+        }
+
+        // --- Pull bookmarks ---
         for dict in bookmarkDicts {
             guard let syncId = dict["ciderSyncId"] as? String,
                   let title = dict["title"] as? String,
@@ -190,6 +306,13 @@ final class SyncService: ObservableObject {
             let syncIdLower = syncId.lowercased()
             let remoteUpdatedAt = Date(timeIntervalSince1970: updatedAtMs / 1000)
             let isDeleted = dict["deleted"] as? Bool ?? false
+
+            // Resolve folderSyncId to local folder UUID
+            let folderID: UUID? = if let folderSyncId = (dict["folderSyncId"] as? String)?.lowercased() {
+                storage.folders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
+            } else {
+                nil
+            }
 
             // Check if we already have this bookmark locally (case-insensitive UUID match)
             if let localIndex = storage.bookmarks.firstIndex(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
@@ -211,7 +334,8 @@ final class SyncService: ObservableObject {
                         tags: dict["tags"] as? [String] ?? [],
                         thumbnailRemoteURLString: dict["thumbnailRemoteUrl"] as? String,
                         aiSummary: dict["aiSummary"] as? String,
-                        dominantColors: dict["dominantColors"] as? [String]
+                        dominantColors: dict["dominantColors"] as? [String],
+                        folderID: folderID
                     )
                 }
             } else if !isDeleted {
@@ -228,7 +352,8 @@ final class SyncService: ObservableObject {
                         aiSummary: dict["aiSummary"] as? String,
                         dominantColors: dict["dominantColors"] as? [String],
                         createdAt: Date(timeIntervalSince1970: createdAtMs / 1000),
-                        updatedAt: remoteUpdatedAt
+                        updatedAt: remoteUpdatedAt,
+                        folderID: folderID
                     )
                 }
             }

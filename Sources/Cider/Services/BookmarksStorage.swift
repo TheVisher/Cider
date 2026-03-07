@@ -215,11 +215,12 @@ final class BookmarksStorage: ObservableObject {
         aiSummary: String?,
         dominantColors: [String]?,
         createdAt: Date,
-        updatedAt: Date
+        updatedAt: Date,
+        folderID: UUID? = nil
     ) {
         guard !bookmarks.contains(where: { $0.id == id }) else { return }
 
-        let bookmark = Bookmark(
+        var bookmark = Bookmark(
             id: id,
             title: title,
             urlString: urlString,
@@ -231,6 +232,7 @@ final class BookmarksStorage: ObservableObject {
             aiSummary: aiSummary,
             dominantColors: dominantColors
         )
+        bookmark.folderID = folderID
         bookmarks.insert(bookmark, at: 0)
         bookmarks.sort { $0.createdAt > $1.createdAt }
         persist()
@@ -246,7 +248,8 @@ final class BookmarksStorage: ObservableObject {
         tags: [String],
         thumbnailRemoteURLString: String?,
         aiSummary: String?,
-        dominantColors: [String]?
+        dominantColors: [String]?,
+        folderID: UUID? = nil
     ) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         bookmarks[index].title = title
@@ -256,6 +259,7 @@ final class BookmarksStorage: ObservableObject {
         bookmarks[index].thumbnailRemoteURLString = thumbnailRemoteURLString
         bookmarks[index].aiSummary = aiSummary
         bookmarks[index].dominantColors = dominantColors
+        bookmarks[index].folderID = folderID
         bookmarks[index].updatedAt = Date()
         persist()
     }
@@ -272,6 +276,63 @@ final class BookmarksStorage: ObservableObject {
         cancelEnrichment(for: bookmark.id)
         TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
         bookmarks.removeAll { $0.id == bookmark.id }
+        persist()
+    }
+
+    // MARK: - Folder sync helpers (called by SyncService)
+
+    /// Add a folder received from the web, using the provided UUID so it stays in sync.
+    func addFolderFromSync(
+        id: UUID,
+        name: String,
+        icon: String?,
+        parentID: UUID?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        guard !folders.contains(where: { $0.id == id }) else { return }
+
+        let folder = Folder(
+            id: id,
+            name: name,
+            parentID: parentID,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            icon: icon
+        )
+        folders.append(folder)
+        folders.sort(by: folderSortOrder)
+        persist()
+    }
+
+    /// Update an existing local folder with data from the web.
+    func updateFolderFromSync(
+        folderID: UUID,
+        name: String,
+        icon: String?,
+        parentID: UUID?
+    ) {
+        guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        folders[index].name = name
+        folders[index].icon = icon
+        folders[index].parentID = parentID
+        folders[index].updatedAt = Date()
+        folders.sort(by: folderSortOrder)
+        persist()
+    }
+
+    /// Delete a folder received from the web (soft delete — unassigns bookmarks, removes subtree).
+    func deleteFolderFromSync(_ folderID: UUID) {
+        guard folders.contains(where: { $0.id == folderID }) else { return }
+        let subtree = folderSubtreeIDs(rootID: folderID)
+        folders.removeAll { subtree.contains($0.id) }
+        for index in bookmarks.indices {
+            guard let assignedFolderID = bookmarks[index].folderID,
+                  subtree.contains(assignedFolderID) else {
+                continue
+            }
+            bookmarks[index].folderID = nil
+        }
         persist()
     }
 
@@ -412,6 +473,11 @@ final class BookmarksStorage: ObservableObject {
 
         let subtree = folderSubtreeIDs(rootID: folderID)
         guard !subtree.isEmpty else { return false }
+
+        // Track deletions for sync (all folders in subtree)
+        for id in subtree {
+            SyncService.shared.trackFolderDeletion(of: id)
+        }
 
         folders.removeAll { subtree.contains($0.id) }
         for index in bookmarks.indices {
