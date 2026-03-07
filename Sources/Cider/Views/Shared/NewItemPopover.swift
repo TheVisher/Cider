@@ -8,6 +8,7 @@ struct NewItemPopover: View {
     var onCreateNote: (String, String) -> Void
     var onCreateEvent: (String, Date, Bool) -> Void
     var onCreateContact: (String, String) -> Void
+    var onCreateTodo: (String) -> Void
     var onCreateFolder: (String, UUID?) -> Void
     var onCreateTab: (String, Set<LibraryEntityType>) -> Void
     var onCreateTag: (String, String) -> Void
@@ -49,6 +50,14 @@ struct NewItemPopover: View {
                     onBack: back,
                     onCreate: { name, relationship in
                         onCreateContact(name, relationship)
+                        onDismiss()
+                    }
+                )
+            case .todo:
+                TodoCreationForm(
+                    onBack: back,
+                    onCreate: { title in
+                        onCreateTodo(title)
                         onDismiss()
                     }
                 )
@@ -106,6 +115,7 @@ struct NewItemPopover: View {
                 typeCard(.note)
                 typeCard(.event)
                 typeCard(.contact)
+                typeCard(.todo)
                 typeCard(.folder)
                 typeCard(.tab)
                 typeCard(.tag)
@@ -145,6 +155,7 @@ struct NewItemPopover: View {
         case .note:     step = .note
         case .event:    step = .event
         case .contact:  step = .contact
+        case .todo:     step = .todo
         case .folder:   step = .folder
         case .tab:      step = .tab
         case .tag:      step = .tag
@@ -155,13 +166,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, folder, tab, tag
+    case picker, bookmark, note, event, contact, todo, folder, tab, tag
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, folder, tab, tag
+    case bookmark, note, event, contact, todo, folder, tab, tag
 
     var id: String { rawValue }
 
@@ -171,6 +182,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .note:     "Note"
         case .event:    "Event"
         case .contact:  "Contact"
+        case .todo:     "Todo"
         case .folder:   "Folder"
         case .tab:      "Tab"
         case .tag:      "Tag"
@@ -183,6 +195,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .note:     "note.text"
         case .event:    "calendar.badge.plus"
         case .contact:  "person.badge.plus"
+        case .todo:     "checklist"
         case .folder:   "folder.badge.plus"
         case .tab:      "rectangle.badge.plus"
         case .tag:      "tag"
@@ -566,6 +579,55 @@ private struct ContactCreationForm: View {
     }
 }
 
+// MARK: - Todo Form
+
+private struct TodoCreationForm: View {
+    let onBack: () -> Void
+    let onCreate: (String) -> Void
+
+    @State private var title = ""
+    @State private var errorMessage = ""
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            FormHeader(title: "New Todo", onBack: onBack)
+
+            TextField("What needs to be done?", text: $title)
+                .textFieldStyle(.plain)
+                .font(CiderFont.body)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .onSubmit(commit)
+                .padding(.horizontal, Spacing.md)
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+            }
+
+            AddButton(label: "Create Todo", action: commit)
+                .padding(.horizontal, Spacing.md)
+                .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private func commit() {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            errorMessage = "Title is required"
+            return
+        }
+        onCreate(trimmed)
+    }
+}
+
 // MARK: - Folder Form
 
 private struct FolderCreationForm: View {
@@ -653,7 +715,7 @@ private struct TabCreationForm: View {
     @State private var errorMessage = ""
 
     // Entity types shown as content filter pills (excludes externalFile — edge case)
-    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact]
+    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact, .todo]
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -727,6 +789,7 @@ private struct TabCreationForm: View {
         case .note:         return "Notes"
         case .dateCard:     return "Events"
         case .contact:      return "Contacts"
+        case .todo:         return "Todos"
         case .externalFile: return "Files"
         }
     }

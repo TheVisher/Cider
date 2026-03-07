@@ -133,6 +133,7 @@ extension LibraryItemV2 {
         case .note: "note.text"
         case .dateCard(let dc): dc.isCompleted ? "checkmark.circle.fill" : "calendar"
         case .contact: "person.crop.circle"
+        case .todo(let tc): tc.isCompleted ? "checkmark.circle.fill" : "checklist"
         case .externalFile: "folder.badge.gear"
         }
     }
@@ -142,6 +143,7 @@ extension LibraryItemV2 {
         case .bookmark, .note, .externalFile: CiderColors.tertiary
         case .dateCard(let dc): dc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
         case .contact: CiderColors.controlAccent
+        case .todo(let tc): tc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
         }
     }
 

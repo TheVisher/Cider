@@ -357,6 +357,7 @@ private struct EntityFilterChip: View {
         case .note: "Notes"
         case .dateCard: "Events"
         case .contact: "Contacts"
+        case .todo: "Todos"
         case .externalFile: "Sources"
         }
     }
@@ -367,6 +368,7 @@ private struct EntityFilterChip: View {
         case .note: "note.text"
         case .dateCard: "calendar"
         case .contact: "person.crop.circle"
+        case .todo: "checklist"
         case .externalFile: "folder.badge.gear"
         }
     }

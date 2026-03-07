@@ -17,6 +17,7 @@ struct FolderDetailView: View {
     var onEditContact: ((ContactCard) -> Void)?
     var onOpenDateCard: ((DateCard) -> Void)?
     var onOpenContact: ((ContactCard) -> Void)?
+    var onOpenTodo: ((TodoCard) -> Void)?
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
     @Binding var scrollToItemID: String?
     var focusedItemID: String? = nil
@@ -65,6 +66,7 @@ struct FolderDetailView: View {
                     case .note:         return scopeTypes.contains(.note)
                     case .dateCard:     return scopeTypes.contains(.dateCard)
                     case .contact:      return scopeTypes.contains(.contact)
+                    case .todo:         return scopeTypes.contains(.todo)
                     case .externalFile: return false
                     }
                 }
@@ -659,6 +661,32 @@ struct FolderDetailView: View {
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
+        case .todo(let todoCard):
+            TodoListRow(
+                todoCard: todoCard,
+                onOpen: { onOpenTodo?(todoCard) },
+                onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = todoCard.folderID
+                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
+            )
         case .externalFile:
             EmptyView()
         }
@@ -758,6 +786,32 @@ struct FolderDetailView: View {
                 onDelete: {
                     if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
                         CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
+            )
+        case .todo(let todoCard):
+            TodoCardCardView(
+                todoCard: todoCard,
+                onOpen: { onOpenTodo?(todoCard) },
+                onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = todoCard.folderID
+                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
                     }
                 },
                 isSelected: isItemSelected(item),
@@ -942,7 +996,7 @@ struct FolderDetailView: View {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
-        case .dateCard, .contact, .externalFile: return nil
+        case .dateCard, .contact, .todo, .externalFile: return nil
         }
     }
 }

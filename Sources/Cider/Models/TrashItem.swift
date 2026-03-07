@@ -6,6 +6,7 @@ enum TrashItemType: String, Codable {
     case folder
     case dateCard
     case contact
+    case todo
 }
 
 /// Payload stored alongside a trashed bookmark, containing the full bookmark data
@@ -28,6 +29,11 @@ struct NoteTrashPayload: Codable {
 /// Payload stored alongside a trashed date card.
 struct DateCardTrashPayload: Codable {
     let dateCard: DateCard
+}
+
+/// Payload stored alongside a trashed todo card.
+struct TodoCardTrashPayload: Codable {
+    let todoCard: TodoCard
 }
 
 /// Payload stored alongside a trashed contact.
@@ -60,6 +66,9 @@ struct TrashItem: Codable, Identifiable {
     // Date card-specific
     var dateCardPayload: DateCardTrashPayload?
 
+    // Todo-specific
+    var todoCardPayload: TodoCardTrashPayload?
+
     // Contact-specific
     var contactPayload: ContactTrashPayload?
 
@@ -74,6 +83,7 @@ struct TrashItem: Codable, Identifiable {
         notePayload: NoteTrashPayload? = nil,
         folderContents: [TrashItem]? = nil,
         dateCardPayload: DateCardTrashPayload? = nil,
+        todoCardPayload: TodoCardTrashPayload? = nil,
         contactPayload: ContactTrashPayload? = nil
     ) {
         self.id = id
@@ -86,6 +96,7 @@ struct TrashItem: Codable, Identifiable {
         self.notePayload = notePayload
         self.folderContents = folderContents
         self.dateCardPayload = dateCardPayload
+        self.todoCardPayload = todoCardPayload
         self.contactPayload = contactPayload
     }
 }

@@ -775,6 +775,9 @@ struct CiderPanelView: View {
                     contactContextSetter.wrappedValue = ContactEditorContext(existingContact: contact)
                 }
             },
+            onCreateTodo: { title in
+                TodoCardStorage.shared.createTodoCard(title: title)
+            },
             onCreateFolder: { name, parentID in
                 bvm.createFolder(name: name, parentID: parentID)
             },
@@ -2392,6 +2395,7 @@ struct CiderPanelView: View {
                         case .note:         return scopeTypes.contains(.note)
                         case .dateCard:     return scopeTypes.contains(.dateCard)
                         case .contact:      return scopeTypes.contains(.contact)
+                        case .todo:         return scopeTypes.contains(.todo)
                         case .externalFile: return false
                         }
                     }

@@ -1,0 +1,349 @@
+import SwiftUI
+
+struct TodoCardCardView: View {
+    let todoCard: TodoCard
+    var onOpen: (() -> Void)? = nil
+    var onToggleComplete: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    var isSelected: Bool = false
+    var isFocused: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
+
+    @State private var isHovered = false
+
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
+    private var priorityColor: Color {
+        switch todoCard.priority {
+        case .high: CiderColors.destructive
+        case .medium: CiderColors.warning
+        case .low: CiderColors.controlAccent
+        case nil: CiderColors.tertiary
+        }
+    }
+
+    var body: some View {
+        Button {
+            handleClick { onOpen?() }
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                // Header: completion toggle + title + priority
+                HStack(alignment: .top, spacing: Spacing.xs) {
+                    Button {
+                        onToggleComplete?()
+                    } label: {
+                        Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                    }
+                    .buttonStyle(.plain)
+
+                    Text(todoCard.title)
+                        .font(CiderFont.subheadingSemibold)
+                        .foregroundColor(todoCard.isCompleted ? CiderColors.tertiary : CiderColors.primary)
+                        .strikethrough(todoCard.isCompleted)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let priority = todoCard.priority {
+                        Image(systemName: priority.icon)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(priorityColor)
+                    }
+                }
+
+                // Details
+                if !todoCard.details.isEmpty {
+                    Text(todoCard.details)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                        .lineLimit(3)
+                }
+
+                // Checklist preview (first 4 items)
+                if !todoCard.checklist.isEmpty {
+                    let preview = todoCard.checklist.prefix(4)
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ForEach(Array(preview)) { item in
+                            HStack(spacing: Spacing.xs) {
+                                Image(systemName: item.isCompleted ? "checkmark.square.fill" : "square")
+                                    .font(CiderFont.captionMedium)
+                                    .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                                Text(item.title)
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
+                                    .strikethrough(item.isCompleted)
+                                    .lineLimit(1)
+                            }
+                        }
+                        if todoCard.checklist.count > 4 {
+                            Text("+\(todoCard.checklist.count - 4) more")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                    }
+                }
+
+                // Bottom row: due date + progress
+                HStack(spacing: Spacing.sm) {
+                    if let dueDate = todoCard.dueDate {
+                        dueDateBadge(dueDate)
+                    }
+
+                    if !todoCard.checklist.isEmpty {
+                        Text("\(todoCard.completedCount)/\(todoCard.totalCount)")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                if !todoCard.labelIDs.isEmpty {
+                    TagPillRow(
+                        labelIDs: todoCard.labelIDs,
+                        labels: CardLabelStorage.shared.labels
+                    )
+                }
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused)
+        .overlay(alignment: .topLeading) {
+            if isSelected {
+                SelectionCheckmark()
+                    .padding(Spacing.sm)
+            }
+        }
+        .hoverState($isHovered, animation: .snappy)
+        .todoCardContextMenu(
+            onOpen: { onOpen?() },
+            onToggleComplete: { onToggleComplete?() },
+            isCompleted: todoCard.isCompleted,
+            labelIDs: todoCard.labelIDs,
+            folders: folders,
+            onMoveToFolder: { onMoveToFolder?($0) },
+            onDelete: { onDelete?() },
+            onToggleLabel: { labelID in
+                var updated = todoCard
+                if updated.labelIDs.contains(labelID) {
+                    updated.labelIDs.removeAll { $0 == labelID }
+                } else {
+                    updated.labelIDs.append(labelID)
+                }
+                _ = TodoCardStorage.shared.updateTodoCard(updated)
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
+        )
+    }
+
+    @ViewBuilder
+    private func dueDateBadge(_ date: Date) -> some View {
+        let (text, fgColor, bgColor) = dueDateStyle(date)
+        Text(text)
+            .font(CiderFont.captionSemibold)
+            .foregroundColor(fgColor)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule()
+                    .fill(bgColor)
+            )
+    }
+
+    private func dueDateStyle(_ date: Date) -> (String, Color, Color) {
+        if todoCard.isCompleted {
+            return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+        }
+        if todoCard.isOverdue {
+            return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
+        }
+        if todoCard.isDueToday {
+            return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+        }
+        return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+    }
+}
+
+// MARK: - TodoListRow
+
+struct TodoListRow: View {
+    let todoCard: TodoCard
+    var onOpen: (() -> Void)? = nil
+    var onToggleComplete: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    var isSelected: Bool = false
+    var isFocused: Bool = false
+    var onSelect: (() -> Void)? = nil
+    var onShiftSelect: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
+
+    private func handleClick(normalAction: () -> Void) {
+        let flags = NSEvent.modifierFlags
+        if let onSelect, flags.contains(.command) {
+            onSelect()
+        } else if let onShiftSelect, flags.contains(.shift) {
+            onShiftSelect()
+        } else {
+            normalAction()
+        }
+    }
+
+    var body: some View {
+        Button {
+            handleClick { onOpen?() }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                if isSelected {
+                    SelectionCheckmark()
+                }
+
+                Button {
+                    onToggleComplete?()
+                } label: {
+                    Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                }
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(todoCard.title)
+                        .font(CiderFont.subheadingMedium)
+                        .foregroundColor(todoCard.isCompleted ? CiderColors.tertiary : CiderColors.primary)
+                        .strikethrough(todoCard.isCompleted)
+                        .lineLimit(1)
+
+                    HStack(spacing: Spacing.xs) {
+                        if !todoCard.checklist.isEmpty {
+                            Text("\(todoCard.completedCount)/\(todoCard.totalCount)")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+
+                        if let priority = todoCard.priority {
+                            if !todoCard.checklist.isEmpty {
+                                Text("\u{00B7}")
+                                    .font(CiderFont.body)
+                                    .foregroundColor(CiderColors.quaternary)
+                            }
+                            HStack(spacing: Spacing.xxs) {
+                                Image(systemName: priority.icon)
+                                    .font(CiderFont.captionMedium)
+                                Text(priority.displayName)
+                                    .font(CiderFont.body)
+                            }
+                            .foregroundColor(priorityColor)
+                        }
+
+                        if !todoCard.details.isEmpty {
+                            if !todoCard.checklist.isEmpty || todoCard.priority != nil {
+                                Text("\u{00B7}")
+                                    .font(CiderFont.body)
+                                    .foregroundColor(CiderColors.quaternary)
+                            }
+                            Text(todoCard.details)
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                Spacer(minLength: Spacing.sm)
+
+                if let dueDate = todoCard.dueDate {
+                    listDueDateBadge(dueDate)
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceSubtle)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(
+                        isFocused ? CiderColors.controlAccent : (isSelected ? CiderColors.controlAccent : Color.clear),
+                        lineWidth: isFocused ? 1.5 : (isSelected ? CiderBorder.innerStrokeWidth : 0)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .todoCardContextMenu(
+            onOpen: { onOpen?() },
+            onToggleComplete: { onToggleComplete?() },
+            isCompleted: todoCard.isCompleted,
+            labelIDs: todoCard.labelIDs,
+            folders: folders,
+            onMoveToFolder: { onMoveToFolder?($0) },
+            onDelete: { onDelete?() },
+            onToggleLabel: { labelID in
+                var updated = todoCard
+                if updated.labelIDs.contains(labelID) {
+                    updated.labelIDs.removeAll { $0 == labelID }
+                } else {
+                    updated.labelIDs.append(labelID)
+                }
+                _ = TodoCardStorage.shared.updateTodoCard(updated)
+            },
+            isSelected: isSelected,
+            onToggleLabelBulk: onToggleLabelBulk
+        )
+    }
+
+    private var priorityColor: Color {
+        switch todoCard.priority {
+        case .high: CiderColors.destructive
+        case .medium: CiderColors.warning
+        case .low: CiderColors.controlAccent
+        case nil: CiderColors.tertiary
+        }
+    }
+
+    @ViewBuilder
+    private func listDueDateBadge(_ date: Date) -> some View {
+        if todoCard.isCompleted {
+            Text(date.formatted(.dateTime.month(.abbreviated).day()))
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.quaternary)
+        } else if todoCard.isOverdue {
+            Text("Overdue")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.destructive)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(Capsule().fill(CiderColors.destructiveSubtle))
+        } else if todoCard.isDueToday {
+            Text("Today")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.warning)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(Capsule().fill(CiderColors.warning.opacity(0.08)))
+        } else {
+            Text(date.formatted(.dateTime.month(.abbreviated).day()))
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.quaternary)
+        }
+    }
+}

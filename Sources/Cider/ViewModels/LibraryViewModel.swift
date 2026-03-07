@@ -31,9 +31,10 @@ final class LibraryViewModel: ObservableObject {
         let noteItems = NotesStorage.shared.notes.map { LibraryItemV2.note($0) }
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
+        let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }
         let externalFileItems = ExternalSourceRegistry.shared.libraryFiles.map { LibraryItemV2.externalFile($0) }
 
-        let all = bookmarkItems + noteItems + dateCardItems + contactItems + externalFileItems
+        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + externalFileItems
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
@@ -63,6 +64,7 @@ final class LibraryViewModel: ObservableObject {
                 case .note:         entityMatch = scopeTypes.contains(.note)
                 case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
                 case .contact:      entityMatch = scopeTypes.contains(.contact)
+                case .todo:         entityMatch = scopeTypes.contains(.todo)
                 case .externalFile: entityMatch = false
                 }
                 guard entityMatch else { return false }
@@ -176,6 +178,11 @@ final class LibraryViewModel: ObservableObject {
             .sink { [weak self] _ in self?.rebuildItems() }
             .store(in: &cancellables)
 
+        TodoCardStorage.shared.$todoCards
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildItems() }
+            .store(in: &cancellables)
+
         ExternalSourceRegistry.shared.$libraryFiles
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildItems() }
@@ -201,6 +208,10 @@ final class LibraryViewModel: ObservableObject {
             fields = [dateCard.title, dateCard.details, dateCard.location]
         case .contact(let contact):
             fields = [contact.displayName, contact.relationshipLabel, contact.notes]
+        case .todo(let todo):
+            var tFields = [todo.title, todo.details]
+            tFields.append(contentsOf: todo.checklist.map(\.title))
+            fields = tFields
         case .externalFile(let file):
             let content: String
             if let cached = externalFileContentCache[file.id] {
@@ -353,6 +364,8 @@ final class LibraryViewModel: ObservableObject {
             dateCard.id.uuidString
         case .contact(let contact):
             contact.id.uuidString
+        case .todo(let todo):
+            todo.id.uuidString
         case .externalFile(let file):
             file.id.uuidString
         }

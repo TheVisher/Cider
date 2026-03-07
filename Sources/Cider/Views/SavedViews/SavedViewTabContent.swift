@@ -13,6 +13,7 @@ struct SavedViewTabContent: View {
     var onMoveNoteToFolder: ((Note, UUID?) -> Void)? = nil
     var onOpenDateCard: ((DateCard) -> Void)? = nil
     var onOpenContact: ((ContactCard) -> Void)? = nil
+    var onOpenTodo: ((TodoCard) -> Void)? = nil
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
     @ObservedObject private var labelStorage = CardLabelStorage.shared
@@ -728,6 +729,32 @@ struct SavedViewTabContent: View {
                 )
             }
             return AnyView(genericRow(item))
+        case .todo:
+            if case .todo(let todoCard) = item {
+                return AnyView(
+                    TodoListRow(
+                        todoCard: todoCard,
+                        onOpen: { onOpenTodo?(todoCard) },
+                        onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                        folders: folders,
+                        onMoveToFolder: { folderID in
+                            let oldFolderID = todoCard.folderID
+                            TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                            let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                            CiderUndoManager.shared.record(.movedToFolder(
+                                itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                                fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                            ))
+                        },
+                        onDelete: {
+                            if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                                CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                            }
+                        }
+                    )
+                )
+            }
+            return AnyView(genericRow(item))
         case .externalFile(let file):
             return AnyView(
                 SourceCardView(
@@ -899,6 +926,31 @@ struct SavedViewTabContent: View {
             } else {
                 GenericLibraryItemCard(item: item)
             }
+        case .todo:
+            if case .todo(let todoCard) = item {
+                TodoCardCardView(
+                    todoCard: todoCard,
+                    onOpen: { onOpenTodo?(todoCard) },
+                    onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                    folders: folders,
+                    onMoveToFolder: { folderID in
+                        let oldFolderID = todoCard.folderID
+                        TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                        let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                        CiderUndoManager.shared.record(.movedToFolder(
+                            itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                            fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                        ))
+                    },
+                    onDelete: {
+                        if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                        }
+                    }
+                )
+            } else {
+                GenericLibraryItemCard(item: item)
+            }
         case .externalFile(let file):
             SourceCardView(
                 file: file,
@@ -984,6 +1036,9 @@ struct SavedViewTabContent: View {
                 }
             }
             return [.submenu(title: "Link Date Card", children: children)]
+        case .todo:
+            // Todos can link to contacts and date cards — placeholder for now
+            return []
         case .bookmark, .note, .externalFile:
             return []
         }
@@ -1008,6 +1063,8 @@ struct SavedViewTabContent: View {
             return dateCard.linkedEntities
         case .contact(let contact):
             return contact.linkedEntities
+        case .todo(let todoCard):
+            return todoCard.linkedEntities
         case .bookmark, .note, .externalFile:
             return []
         }
@@ -1023,6 +1080,8 @@ struct SavedViewTabContent: View {
             return dateCardStorage.dateCard(for: ref.entityID)?.title
         case .contact:
             return contactStorage.contact(for: ref.entityID)?.displayName
+        case .todo:
+            return TodoCardStorage.shared.todoCard(for: ref.entityID)?.title
         case .externalFile:
             return nil
         }
@@ -1046,6 +1105,8 @@ struct SavedViewTabContent: View {
             if let contact = contactStorage.contact(for: ref.entityID) {
                 contactEditorContext = ContactEditorContext(existingContact: contact)
             }
+        case .todo:
+            break // TODO: open todo detail
         case .externalFile:
             break
         }
@@ -1086,6 +1147,8 @@ struct SavedViewTabContent: View {
             return LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
         case .contact(let contact):
             return LibraryEntityRef(type: .contact, entityID: contact.id)
+        case .todo(let todoCard):
+            return LibraryEntityRef(type: .todo, entityID: todoCard.id)
         case .externalFile(let file):
             return LibraryEntityRef(type: .externalFile, entityID: file.id)
         }
@@ -1101,6 +1164,8 @@ struct SavedViewTabContent: View {
             return "calendar"
         case .contact:
             return "person.crop.circle"
+        case .todo:
+            return "checklist"
         case .externalFile:
             return "folder.badge.gear"
         }
@@ -1116,6 +1181,8 @@ struct SavedViewTabContent: View {
             return dateCard.location.isEmpty ? "Date Card" : dateCard.location
         case .contact(let contact):
             return contact.relationshipLabel.isEmpty ? "Contact" : contact.relationshipLabel
+        case .todo(let todoCard):
+            return todoCard.isCompleted ? "Completed" : "Todo"
         case .externalFile(let file):
             return file.sourceName
         }
@@ -1185,6 +1252,7 @@ private struct GenericLibraryItemCard: View {
         case .note: "note.text"
         case .dateCard: "calendar"
         case .contact: "person.crop.circle"
+        case .todo: "checklist"
         case .externalFile: "folder.badge.gear"
         }
     }
@@ -1199,6 +1267,8 @@ private struct GenericLibraryItemCard: View {
             dateCard.location.isEmpty ? "Date Card" : dateCard.location
         case .contact(let contact):
             contact.relationshipLabel.isEmpty ? "Contact" : contact.relationshipLabel
+        case .todo(let todoCard):
+            todoCard.isCompleted ? "Completed" : "Todo"
         case .externalFile(let file):
             file.sourceName
         }

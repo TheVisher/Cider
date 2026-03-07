@@ -73,6 +73,7 @@ final class CardLabelStorage: ObservableObject {
         NotesStorage.shared.removeLabelsFromAll(labelID: id)
         DateCardStorage.shared.removeLabelsFromAll(labelID: id)
         ContactStorage.shared.removeLabelsFromAll(labelID: id)
+        TodoCardStorage.shared.removeLabelsFromAll(labelID: id)
         return true
     }
 
@@ -127,6 +128,13 @@ final class CardLabelStorage: ObservableObject {
             updated.labelIDs.removeAll { $0 == sourceID }
             if !updated.labelIDs.contains(targetID) { updated.labelIDs.append(targetID) }
             ContactStorage.shared.updateContact(updated)
+        }
+        // Todos
+        for todo in TodoCardStorage.shared.todoCards where todo.labelIDs.contains(sourceID) {
+            var updated = todo
+            updated.labelIDs.removeAll { $0 == sourceID }
+            if !updated.labelIDs.contains(targetID) { updated.labelIDs.append(targetID) }
+            TodoCardStorage.shared.updateTodoCard(updated)
         }
     }
 

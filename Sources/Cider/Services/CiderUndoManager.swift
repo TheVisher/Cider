@@ -95,6 +95,8 @@ final class CiderUndoManager {
                 DateCardStorage.shared.assignDateCard(itemID, toFolder: fromFolderID)
             case .contact:
                 ContactStorage.shared.assignContact(itemID, toFolder: fromFolderID)
+            case .todo:
+                TodoCardStorage.shared.assignTodoCard(itemID, toFolder: fromFolderID)
             case .folder:
                 break
             }
@@ -110,6 +112,8 @@ final class CiderUndoManager {
                     DateCardStorage.shared.assignDateCard(item.itemID, toFolder: item.fromFolderID)
                 case .contact:
                     ContactStorage.shared.assignContact(item.itemID, toFolder: item.fromFolderID)
+                case .todo:
+                    TodoCardStorage.shared.assignTodoCard(item.itemID, toFolder: item.fromFolderID)
                 case .folder:
                     break
                 }
@@ -139,6 +143,11 @@ final class CiderUndoManager {
                 if var contact = ContactStorage.shared.contact(for: itemID) {
                     contact.displayName = oldTitle
                     _ = ContactStorage.shared.updateContact(contact)
+                }
+            case .todo:
+                if var todoCard = TodoCardStorage.shared.todoCard(for: itemID) {
+                    todoCard.title = oldTitle
+                    _ = TodoCardStorage.shared.updateTodoCard(todoCard)
                 }
             case .folder:
                 break

@@ -398,19 +398,45 @@ Expand Cider beyond bookmarks and notes.
 ---
 
 ### R-17: Todos Card Type
-> Task cards that live in the library alongside everything else.
+> Task cards that live in the library alongside everything else, with rich checklist items, due date surfacing, and recurring support.
 
-**Status:** `Not Started`
+**Status:** `Implementing`
 **Priority:** Medium
 
 **Scope:**
-- `TodoCard` model as new `LibraryItemV2` case
-- Fields: title, checklist items (title + done), due date (optional), priority (optional)
-- `TodoStorage` in vault (`~/CiderVault/Todos/`)
-- Card view showing checklist with interactive checkboxes
-- Quick-add from +New popover
-- Shows in library feed, folders, search, tags
-- Full todo system (daily lists, templates, recurring, views) deferred to post-1.0
+
+**Phase A — Core infrastructure (done):**
+- ✅ `TodoCard` model — title, details, checklist items, due date, priority, completion state, labels, folders, linked entities
+- ✅ `TodoChecklistItem` sub-model — individual checklist items with completion tracking
+- ✅ `TodoPriority` enum — low/medium/high with display names and icons
+- ✅ `TodoCardStorage` — JSON snapshot persistence, CRUD, completion toggle, checklist item toggle, folder assignment, label management
+- ✅ `LibraryItemV2.todo` case — integrated into all computed properties (id, title, dates, folderID, labelIDs, dateAnchor, isCompleted)
+- ✅ `LibraryEntityType.todo` — registered for saved views, entity filters, scope modifiers
+- ✅ `StorageType.todos` — vault directory at `~/CiderVault/Todos/`
+- ✅ Trash integration — `TodoCardTrashPayload`, trash/restore/permanent-delete in TrashStorage
+- ✅ LibraryViewModel binding — auto-rebuilds on todo changes, text search across title/details/checklist
+- ✅ +New popover — "Todo" type card with creation form
+- ✅ Search — `@todos` / `@tasks` scope modifier
+- ✅ Label cascade — delete/merge labels propagates to todos
+- ✅ All exhaustive switches updated across all view files
+
+**Phase B — Card views (done):**
+- ✅ `TodoCardCardView` — card with completion toggle, title, priority indicator, checklist preview (first 4 items), due date badge (Overdue/Today/date), progress counter, tag pills
+- ✅ `TodoListRow` — compact list row with completion toggle, title, checklist count, priority, due date badge
+- ✅ `todoCardContextMenu` — Open, Mark Complete/Incomplete, Tags, Move to Folder, Delete
+- ✅ Wired into HomeDashboardView, FolderDetailView, SavedViewTabContent with full callbacks (selection, hover, focus, undo, trash)
+
+**Phase C — Enriched checklist items & surfacing (in progress):**
+- [ ] Enrich `TodoChecklistItem` with optional `dueDate`, `amount`, `urlString` fields
+- [ ] Surface todos in Coming Up section alongside events (due date approaching/overdue)
+- [ ] Todo editor sheet — edit title, details, priority, due date, add/remove/reorder checklist items, set per-item due dates and amounts
+- [ ] Running total of amounts displayed on card (bills use case)
+- [ ] Interactive checklist checkboxes on card views (toggle without opening editor)
+
+**Phase D — Recurring (post-1.0):**
+- [ ] Recurring schedule on TodoCard (daily/weekly/monthly/yearly)
+- [ ] On completion: auto-reset checklist items and un-complete for next cycle (or spawn fresh copy)
+- [ ] Kanban display mode in dedicated Todos tab (columns by status/priority/label)
 
 ---
 
@@ -488,7 +514,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
 | R-15 | GIF/Video/Carousel Bookmarks | 3 | Testing |
 | R-16 | Books Card Type | 4 | Not Started |
-| R-17 | Todos Card Type | 4 | Not Started |
+| R-17 | Todos Card Type | 4 | Implementing |
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Whiteboard Folder Theme | 4 | Not Started |
 
@@ -595,8 +621,9 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Books: highlight extraction | BOOKS_VISION | Kindle/Apple Books highlights |
 | Books: statistics | BOOKS_VISION | Books/year, genre distribution |
 | Books: shelf display mode | BOOKS_VISION | Books spine-out visual layout |
+| Todos: recurring tasks | R-17 Phase D | Auto-reset or clone on completion, daily/weekly/monthly/yearly |
+| Todos: kanban display mode | R-17 Phase D | Columns by status/priority/label in dedicated Todos tab |
 | Todos: daily lists | TODOS_VISION | Named lists, auto-archive, templates |
-| Todos: recurring tasks | TODOS_VISION | Recurring structures |
 | Todos: views (Today/Upcoming/All) | TODOS_VISION | Dedicated task views |
 | Todos: note integration | TODOS_VISION | Pull checkboxes from notes into unified view |
 | Todos: global hotkey capture | TODOS_VISION | Add todo without opening panel |

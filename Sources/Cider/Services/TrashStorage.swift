@@ -206,6 +206,35 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
+    // MARK: - Todo Card Trash
+
+    func trashTodoCard(_ todoCard: TodoCard, todoCardsDir: URL) -> TrashItem {
+        let trashDir = todoCardsDir.appendingPathComponent(trashDirName)
+        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        let payload = TodoCardTrashPayload(todoCard: todoCard)
+        let trashItem = TrashItem(
+            itemID: todoCard.id,
+            itemType: .todo,
+            title: todoCard.title,
+            originalFolderID: nil,
+            todoCardPayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        return trashItem
+    }
+
+    func restoreTodoCard(_ trashItem: TrashItem) {
+        guard let payload = trashItem.todoCardPayload else { return }
+
+        let todoCardsDir = StoragePaths.directoryURL(for: .todos)
+        let trashDir = todoCardsDir.appendingPathComponent(trashDirName)
+
+        TodoCardStorage.shared.restoreFromTrash(payload.todoCard)
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+    }
+
     // MARK: - Contact Trash
 
     func trashContact(_ contact: ContactCard, contactsDir: URL) -> TrashItem {
@@ -301,6 +330,8 @@ final class TrashStorage {
             }
         case .dateCard:
             restoreDateCard(trashItem)
+        case .todo:
+            restoreTodoCard(trashItem)
         case .contact:
             restoreContact(trashItem)
         }
@@ -326,7 +357,7 @@ final class TrashStorage {
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .contacts]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts]
         for type in trashTypes {
             purgeExpired(
                 olderThan: cutoff,
@@ -366,6 +397,9 @@ final class TrashStorage {
         case .dateCard:
             let trashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+        case .todo:
+            let trashDir = StoragePaths.directoryURL(for: .todos).appendingPathComponent(trashDirName)
+            removeFromManifest(trashItem.id, trashDir: trashDir)
         case .contact:
             let trashDir = StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
@@ -384,7 +418,7 @@ final class TrashStorage {
     }
 
     func emptyTrash() {
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .contacts]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts]
         for type in trashTypes {
             let trashDir = StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
             let items = loadManifest(trashDir: trashDir)
@@ -416,6 +450,8 @@ final class TrashStorage {
                 deleteFilesForItem(content, trashDir: trashDir)
             }
         case .dateCard:
+            break // No files to delete — data is in the manifest payload
+        case .todo:
             break // No files to delete — data is in the manifest payload
         case .contact:
             if let payload = trashItem.contactPayload, let avatarRelPath = payload.trashAvatarRelativePath {

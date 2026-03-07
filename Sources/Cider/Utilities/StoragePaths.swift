@@ -12,6 +12,7 @@ enum StorageType: String, CaseIterable {
     case labels = "Labels"
     case savedViews = "SavedViews"
     case sources = "Sources"
+    case todos = "Todos"
     case clipboard = "Clipboard"
 }
 

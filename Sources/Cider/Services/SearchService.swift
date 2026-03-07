@@ -5,6 +5,7 @@ enum SearchResultType {
     case note
     case dateCard
     case contact
+    case todo
 }
 
 struct SearchSnippet {
@@ -48,6 +49,7 @@ struct SearchScope: Equatable {
                 case .note:      return "Notes"
                 case .dateCard:  return "Events"
                 case .contact:   return "Contacts"
+                case .todo:      return "Todos"
                 }
             }.sorted()
             descs.append(contentsOf: names)
@@ -102,6 +104,7 @@ enum SearchService {
             (["notes", "note"], .note),
             (["events", "event", "datecards", "datecard"], .dateCard),
             (["contacts", "contact"], .contact),
+            (["todos", "todo", "tasks", "task"], .todo),
         ]
 
         var i = 0

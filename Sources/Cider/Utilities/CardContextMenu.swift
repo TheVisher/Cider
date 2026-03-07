@@ -246,6 +246,33 @@ extension View {
         })
     }
 
+    /// Context menu for todo cards — Open, Mark Complete, Tags, Move to Folder, Delete.
+    func todoCardContextMenu(
+        onOpen: @escaping () -> Void,
+        onToggleComplete: @escaping () -> Void,
+        isCompleted: Bool,
+        labelIDs: [UUID] = [],
+        folders: [Folder],
+        onMoveToFolder: @escaping (UUID?) -> Void,
+        onDelete: @escaping () -> Void,
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        isSelected: Bool = false,
+        onToggleLabelBulk: ((UUID) -> Void)? = nil
+    ) -> some View {
+        modifier(CardContextMenuModifier {
+            var items: [CardMenuItem] = [
+                .action(title: "Open", callback: onOpen),
+                .action(title: isCompleted ? "Mark Incomplete" : "Mark Complete", callback: onToggleComplete)
+            ]
+            if let onToggleLabel {
+                items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
+            }
+            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += [.separator, .destructive(title: "Delete", callback: onDelete)]
+            return items
+        })
+    }
+
     /// Context menu for bookmark cards — Open in Browser, Show Details, Refetch Metadata, Tags, Move to Folder, Delete.
     func bookmarkContextMenu(
         bookmark: Bookmark,

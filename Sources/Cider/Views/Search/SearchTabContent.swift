@@ -118,6 +118,8 @@ struct SearchTabContent: View {
                 if let contact = result.contact {
                     onOpenContact?(contact)
                 }
+            case .todo:
+                break // TODO: open todo detail
             }
         } label: {
             HStack(spacing: Spacing.sm) {
@@ -167,6 +169,7 @@ struct SearchTabContent: View {
         case .note:      return "note.text"
         case .dateCard:  return "calendar"
         case .contact:   return "person"
+        case .todo:      return "checklist"
         }
     }
 

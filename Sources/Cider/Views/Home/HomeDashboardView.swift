@@ -19,6 +19,7 @@ struct HomeDashboardView: View {
     var onEditContact: (ContactCard) -> Void = { _ in }
     var onOpenDateCard: (DateCard) -> Void = { _ in }
     var onOpenContact: (ContactCard) -> Void = { _ in }
+    var onOpenTodo: (TodoCard) -> Void = { _ in }
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -323,6 +324,32 @@ struct HomeDashboardView: View {
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
+        case .todo(let todoCard):
+            TodoListRow(
+                todoCard: todoCard,
+                onOpen: { handleNormalAction { presentTodoDetail(todoCard) } },
+                onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = todoCard.folderID
+                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
+            )
         case .externalFile(let file):
             SourceCardView(
                 file: file,
@@ -444,6 +471,32 @@ struct HomeDashboardView: View {
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
+        case .todo(let todoCard):
+            TodoCardCardView(
+                todoCard: todoCard,
+                onOpen: { handleNormalAction { presentTodoDetail(todoCard) } },
+                onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = todoCard.folderID
+                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
+            )
         case .externalFile(let file):
             SourceCardView(
                 file: file,
@@ -554,6 +607,10 @@ struct HomeDashboardView: View {
         onOpenContact(contact)
     }
 
+    private func presentTodoDetail(_ todoCard: TodoCard) {
+        onOpenTodo(todoCard)
+    }
+
     // MARK: - Drag Providers
 
     private func handleContinueOpen(_ item: LibraryItemV2) {
@@ -562,6 +619,7 @@ struct HomeDashboardView: View {
         case .note(let note): openNoteInPanel(note)
         case .dateCard(let dateCard): presentDateCardDetail(dateCard)
         case .contact(let contact): presentContactDetail(contact)
+        case .todo(let todoCard): presentTodoDetail(todoCard)
         case .externalFile(let file):
             NotificationCenter.default.post(
                 name: .openExternalFile,
@@ -575,7 +633,7 @@ struct HomeDashboardView: View {
         switch item {
         case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
         case .note(let note): return noteDragProvider(for: note)
-        case .dateCard, .contact, .externalFile: return nil
+        case .dateCard, .contact, .todo, .externalFile: return nil
         }
     }
 
