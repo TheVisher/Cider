@@ -18,8 +18,6 @@ struct CiderPanelView: View {
     @State private var dynamicTabs: [CiderTab] = []
     @State private var isHomeViewOptionsVisible = false
     @State private var showNewItemPicker = false
-    @State private var newItemInitialStep: String?
-    @State private var newItemOCRData: [String: Any] = [:]
     @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
     @State private var homeSort: LibrarySortMode = CiderConfig.load().homeSort
@@ -295,13 +293,31 @@ struct CiderPanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
             let ui = notification.userInfo
-            newItemInitialStep = ui?["initialStep"] as? String
-            var ocrDict: [String: Any] = [:]
-            if let title = ui?["suggestedTitle"] as? String { ocrDict["suggestedTitle"] = title }
-            if let dates = ui?["detectedDates"] as? [Date] { ocrDict["detectedDates"] = dates }
-            if let emails = ui?["detectedEmails"] as? [String] { ocrDict["detectedEmails"] = emails }
-            if let phones = ui?["detectedPhones"] as? [String] { ocrDict["detectedPhones"] = phones }
-            newItemOCRData = ocrDict
+            let step = ui?["initialStep"] as? String
+
+            // Screen capture routes bypass the +New popover and open full editor sheets
+            if step == "event" {
+                let title = ui?["suggestedTitle"] as? String ?? ""
+                let date = (ui?["detectedDates"] as? [Date])?.first ?? Date()
+                let ocrText = ui?["ocrText"] as? String ?? ""
+                var card = DateCardStorage.shared.createDateCard(title: title, startAt: date, allDay: false)
+                if !ocrText.isEmpty { card.details = ocrText }
+                _ = DateCardStorage.shared.updateDateCard(card)
+                newEventEditorContext = DateCardEditorContext(existingCard: card, defaultDate: date)
+                return
+            }
+            if step == "contact" {
+                let name = ui?["suggestedTitle"] as? String ?? ""
+                let email = (ui?["detectedEmails"] as? [String])?.first ?? ""
+                let phone = (ui?["detectedPhones"] as? [String])?.first ?? ""
+                var contact = ContactStorage.shared.createContact(displayName: name)
+                if !email.isEmpty { contact.email = email }
+                if !phone.isEmpty { contact.phone = phone }
+                _ = ContactStorage.shared.updateContact(contact)
+                newContactEditorContext = ContactEditorContext(existingContact: contact)
+                return
+            }
+
             showNewItemPicker = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
@@ -726,12 +742,8 @@ struct CiderPanelView: View {
         let bvm = bookmarksViewModel
         let eventContextSetter = _newEventEditorContext
         let contactContextSetter = _newContactEditorContext
-        let initialStep = newItemInitialStep
-        let ocrData = newItemOCRData
         return NewItemPopover(
             folders: bvm.folders,
-            initialStep: initialStep,
-            ocrData: ocrData,
             onCreateBookmark: { urlString, title in
                 _ = bvm.addBookmark(urlString: urlString, title: title)
             },
@@ -776,8 +788,6 @@ struct CiderPanelView: View {
             },
             onDismiss: { [self] in
                 showNewItemPicker = false
-                newItemInitialStep = nil
-                newItemOCRData = [:]
             }
         )
     }

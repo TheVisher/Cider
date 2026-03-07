@@ -4,8 +4,6 @@ import SwiftUI
 
 struct NewItemPopover: View {
     let folders: [Folder]
-    var initialStep: String?
-    var ocrData: [String: Any] = [:]
     var onCreateBookmark: (String, String?) -> Void
     var onCreateNote: (String, String) -> Void
     var onCreateEvent: (String, Date, Bool) -> Void
@@ -40,8 +38,6 @@ struct NewItemPopover: View {
                 )
             case .event:
                 EventCreationForm(
-                    prefillTitle: ocrData["suggestedTitle"] as? String,
-                    prefillDate: (ocrData["detectedDates"] as? [Date])?.first,
                     onBack: back,
                     onCreate: { title, date, allDay in
                         onCreateEvent(title, date, allDay)
@@ -50,9 +46,6 @@ struct NewItemPopover: View {
                 )
             case .contact:
                 ContactCreationForm(
-                    prefillName: ocrData["suggestedTitle"] as? String,
-                    prefillEmail: (ocrData["detectedEmails"] as? [String])?.first,
-                    prefillPhone: (ocrData["detectedPhones"] as? [String])?.first,
                     onBack: back,
                     onCreate: { name, relationship in
                         onCreateContact(name, relationship)
@@ -89,17 +82,6 @@ struct NewItemPopover: View {
         // No animation on step changes: animating popover content size via ViewBridge
         // (RemoteViewService XPC) causes crashes in non-activating NSPanel popovers.
         .frame(width: 264)
-        .onAppear {
-            if let initialStep {
-                switch initialStep {
-                case "event": step = .event
-                case "contact": step = .contact
-                case "bookmark": step = .bookmark
-                case "note": step = .note
-                default: break
-                }
-            }
-        }
     }
 
     private func back() {
@@ -409,27 +391,17 @@ private struct EventCreationForm: View {
     let onBack: () -> Void
     let onCreate: (String, Date, Bool) -> Void
 
-    @State private var title: String
-    @State private var dateText: String
-    @State private var timeText: String
+    @State private var title = ""
+    @State private var dateText: String = {
+        let f = DateFormatter(); f.dateFormat = "MMM d, yyyy"
+        return f.string(from: Date())
+    }()
+    @State private var timeText: String = {
+        let f = DateFormatter(); f.dateFormat = "h:mm a"
+        return f.string(from: Date())
+    }()
     @State private var allDay = false
     @State private var errorMessage = ""
-
-    init(
-        prefillTitle: String? = nil,
-        prefillDate: Date? = nil,
-        onBack: @escaping () -> Void,
-        onCreate: @escaping (String, Date, Bool) -> Void
-    ) {
-        self.onBack = onBack
-        self.onCreate = onCreate
-        let df = DateFormatter(); df.dateFormat = "MMM d, yyyy"
-        let tf = DateFormatter(); tf.dateFormat = "h:mm a"
-        let baseDate = prefillDate ?? Date()
-        _title = State(initialValue: prefillTitle ?? "")
-        _dateText = State(initialValue: df.string(from: baseDate))
-        _timeText = State(initialValue: tf.string(from: baseDate))
-    }
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -537,22 +509,9 @@ private struct ContactCreationForm: View {
     let onBack: () -> Void
     let onCreate: (String, String) -> Void
 
-    @State private var name: String
-    @State private var relationship: String
+    @State private var name = ""
+    @State private var relationship = ""
     @State private var errorMessage = ""
-
-    init(
-        prefillName: String? = nil,
-        prefillEmail: String? = nil,
-        prefillPhone: String? = nil,
-        onBack: @escaping () -> Void,
-        onCreate: @escaping (String, String) -> Void
-    ) {
-        self.onBack = onBack
-        self.onCreate = onCreate
-        _name = State(initialValue: prefillName ?? "")
-        _relationship = State(initialValue: prefillEmail ?? prefillPhone ?? "")
-    }
 
     var body: some View {
         VStack(spacing: Spacing.sm) {

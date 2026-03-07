@@ -83,13 +83,32 @@ enum ScreenCaptureOCRRouter {
         return .note
     }
 
-    /// Extract a meaningful title from the first non-trivial line of OCR text.
+    /// Extract a meaningful title from OCR text.
+    /// Skips lines that look like dates/times or are too short.
     private static func extractTitle(from text: String) -> String {
         let lines = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.count >= 3 && !$0.allSatisfy { $0.isNumber || $0.isPunctuation || $0 == " " } }
+            .filter { line in
+                guard line.count >= 3 else { return false }
+                // Skip lines that are purely numeric/punctuation/whitespace
+                if line.allSatisfy({ $0.isNumber || $0.isPunctuation || $0 == " " }) { return false }
+                // Skip lines that look like dates (e.g., "Fri, Mar 13", "March 20 - 7:00 pm")
+                if looksLikeDate(line) { return false }
+                return true
+            }
         guard let first = lines.first else { return "Screen Capture" }
-        return String(first.prefix(60)).capitalized
+        // Preserve original casing — don't use .capitalized which garbles names
+        return String(first.prefix(60))
+    }
+
+    /// Heuristic: a line looks like a date if NSDataDetector finds a date covering most of it.
+    private static func looksLikeDate(_ line: String) -> Bool {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return false }
+        let range = NSRange(line.startIndex..., in: line)
+        let matches = detector.matches(in: line, options: [], range: range)
+        let coveredLength = matches.reduce(0) { $0 + $1.range.length }
+        // If date patterns cover more than half the line, it's a date line
+        return coveredLength > line.count / 2
     }
 }
