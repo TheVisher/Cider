@@ -173,6 +173,7 @@ struct CiderConfig: Codable {
         case syncURL
         case syncToken
         case lastSyncTimestamp
+        case lastSuccessfulPushAt
     }
 
     var showMenuBarIcon: Bool
@@ -235,6 +236,7 @@ struct CiderConfig: Codable {
     var syncURL: String  // Convex deployment HTTP URL (e.g. https://foo-123.convex.site)
     var syncToken: String  // Bearer token for authenticating with Cider Web
     var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
+    var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)
 
     static let storageKey = "CiderConfig"
 
@@ -293,7 +295,8 @@ struct CiderConfig: Codable {
             syncEnabled: false,
             syncURL: "",
             syncToken: "",
-            lastSyncTimestamp: 0
+            lastSyncTimestamp: 0,
+            lastSuccessfulPushAt: 0
         )
     }
 
@@ -489,6 +492,7 @@ struct CiderConfig: Codable {
         syncURL = try container.decodeIfPresent(String.self, forKey: .syncURL) ?? ""
         syncToken = try container.decodeIfPresent(String.self, forKey: .syncToken) ?? ""
         lastSyncTimestamp = try container.decodeIfPresent(Double.self, forKey: .lastSyncTimestamp) ?? 0
+        lastSuccessfulPushAt = try container.decodeIfPresent(Double.self, forKey: .lastSuccessfulPushAt) ?? 0
     }
 
     init(
@@ -549,7 +553,8 @@ struct CiderConfig: Codable {
         syncEnabled: Bool = false,
         syncURL: String = "",
         syncToken: String = "",
-        lastSyncTimestamp: Double = 0
+        lastSyncTimestamp: Double = 0,
+        lastSuccessfulPushAt: Double = 0
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -609,5 +614,6 @@ struct CiderConfig: Codable {
         self.syncURL = syncURL
         self.syncToken = syncToken
         self.lastSyncTimestamp = lastSyncTimestamp
+        self.lastSuccessfulPushAt = lastSuccessfulPushAt
     }
 }

@@ -1,6 +1,98 @@
 import Foundation
 import os
 
+// MARK: - Codable push structs (only fields Convex accepts)
+
+/// Maps a local Bookmark to only the fields the Convex sync.ts push endpoint accepts.
+private struct SyncPushBookmark: Encodable {
+    let ciderSyncId: String
+    let title: String
+    let urlString: String
+    let notes: String?
+    let tags: [String]
+    let thumbnailRemoteUrl: String?
+    let aiSummary: String?
+    let dominantColors: [String]?
+    let createdAt: Double
+    let updatedAt: Double
+    let deleted: Bool
+    let deletedAt: Double?
+    let folderSyncId: String?
+
+    init(from bookmark: Bookmark) {
+        ciderSyncId = bookmark.id.uuidString.lowercased()
+        title = bookmark.title
+        urlString = bookmark.urlString
+        notes = bookmark.notes.isEmpty ? nil : bookmark.notes
+        tags = bookmark.tags
+        thumbnailRemoteUrl = bookmark.thumbnailRemoteURLString
+        aiSummary = bookmark.aiSummary
+        dominantColors = bookmark.dominantColors
+        createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
+        updatedAt = bookmark.updatedAt.timeIntervalSince1970 * 1000
+        deleted = false
+        deletedAt = nil
+        folderSyncId = bookmark.folderID?.uuidString.lowercased()
+    }
+
+    /// Tombstone for a deleted bookmark.
+    init(deletedSyncId: String, nowMs: Double) {
+        ciderSyncId = deletedSyncId
+        title = ""
+        urlString = ""
+        notes = nil
+        tags = []
+        thumbnailRemoteUrl = nil
+        aiSummary = nil
+        dominantColors = nil
+        createdAt = nowMs
+        updatedAt = nowMs
+        deleted = true
+        deletedAt = nowMs
+        folderSyncId = nil
+    }
+}
+
+/// Maps a local Folder to only the fields the Convex sync.ts push endpoint accepts.
+private struct SyncPushFolder: Encodable {
+    let ciderSyncId: String
+    let name: String
+    let icon: String?
+    let parentSyncId: String?
+    let createdAt: Double
+    let updatedAt: Double
+    let deleted: Bool
+    let deletedAt: Double?
+
+    init(from folder: Folder) {
+        ciderSyncId = folder.id.uuidString.lowercased()
+        name = folder.name
+        icon = folder.icon
+        parentSyncId = folder.parentID?.uuidString.lowercased()
+        createdAt = folder.createdAt.timeIntervalSince1970 * 1000
+        updatedAt = folder.updatedAt.timeIntervalSince1970 * 1000
+        deleted = false
+        deletedAt = nil
+    }
+
+    /// Tombstone for a deleted folder.
+    init(deletedSyncId: String, nowMs: Double) {
+        ciderSyncId = deletedSyncId
+        name = ""
+        icon = nil
+        parentSyncId = nil
+        createdAt = nowMs
+        updatedAt = nowMs
+        deleted = true
+        deletedAt = nowMs
+    }
+}
+
+private struct SyncPushBody: Encodable {
+    let bookmarks: [SyncPushBookmark]
+    let folders: [SyncPushFolder]?
+}
+
 /// Handles bidirectional sync between local Cider bookmarks and Cider Web (Convex).
 /// Entirely optional — only runs when the user has configured a sync token.
 @MainActor
@@ -16,6 +108,9 @@ final class SyncService: ObservableObject {
 
     /// How often to auto-sync (seconds).
     private let syncInterval: TimeInterval = 5
+
+    /// Consecutive failure count for backoff.
+    private var consecutiveFailures = 0
 
     /// Bookmarks deleted locally that need to be pushed as deletions to the web.
     private var pendingDeletions: [String] = [] // lowercased UUID strings
@@ -42,6 +137,7 @@ final class SyncService: ObservableObject {
 
         logger.info("Sync enabled, starting periodic sync")
         lastError = nil
+        consecutiveFailures = 0
         performSync()
 
         timer?.invalidate()
@@ -96,6 +192,12 @@ final class SyncService: ObservableObject {
     private func performSync() {
         guard !isSyncing else { return }
 
+        // Back off after repeated failures: pause sync after 3+ consecutive errors
+        if consecutiveFailures >= 3 {
+            logger.warning("Sync paused after \(self.consecutiveFailures) consecutive failures")
+            return
+        }
+
         let config = CiderConfig.load()
         guard config.syncEnabled, !config.syncToken.isEmpty, !config.syncURL.isEmpty else { return }
 
@@ -109,7 +211,23 @@ final class SyncService: ObservableObject {
                 try await pull(config: config)
                 lastSyncedAt = Date()
                 lastError = nil
+                consecutiveFailures = 0
+            } catch let error as SyncError {
+                consecutiveFailures += 1
+                lastError = error.localizedDescription
+                switch error {
+                case .unauthorized:
+                    logger.error("Sync auth failed — stopping sync. Check your sync token.")
+                    stop()
+                case .validationError(let body):
+                    logger.error("Sync validation error (400): \(body)")
+                case .serverError(let code):
+                    logger.error("Sync server error (\(code)), failure #\(self.consecutiveFailures)")
+                default:
+                    logger.error("Sync failed: \(error.localizedDescription)")
+                }
             } catch {
+                consecutiveFailures += 1
                 lastError = error.localizedDescription
                 logger.error("Sync failed: \(error.localizedDescription)")
             }
@@ -117,66 +235,34 @@ final class SyncService: ObservableObject {
         }
     }
 
-    // MARK: - Push local bookmarks + folders to web
+    // MARK: - Push local bookmarks + folders to web (dirty-only)
 
     private func push(config: CiderConfig) async throws {
         let storage = BookmarksStorage.shared
-        let bookmarks = storage.bookmarks
-        let folders = storage.folders
+        let lastPushDate = Date(timeIntervalSince1970: config.lastSuccessfulPushAt)
 
-        // Build folder payload
-        let folderPayload = folders.map { folder -> [String: Any] in
-            var dict: [String: Any] = [
-                "ciderSyncId": folder.id.uuidString.lowercased(),
-                "name": folder.name,
-                "createdAt": folder.createdAt.timeIntervalSince1970 * 1000,
-                "updatedAt": folder.updatedAt.timeIntervalSince1970 * 1000,
-            ]
-            if let parentID = folder.parentID {
-                dict["parentSyncId"] = parentID.uuidString.lowercased()
-            }
-            if let icon = folder.icon {
-                dict["icon"] = icon
-            }
-            return dict
+        // Only push bookmarks modified since last successful push
+        let dirtyBookmarks = storage.bookmarks.filter { $0.updatedAt > lastPushDate }
+        let dirtyFolders = storage.folders.filter { $0.updatedAt > lastPushDate }
+
+        guard !dirtyBookmarks.isEmpty || !dirtyFolders.isEmpty else {
+            logger.debug("Push: 0 dirty bookmarks, 0 dirty folders — skipping")
+            return
         }
 
-        // Build bookmark payload (now includes folderID reference)
-        let bookmarkPayload = bookmarks.map { bookmark -> [String: Any] in
-            var dict: [String: Any] = [
-                "ciderSyncId": bookmark.id.uuidString.lowercased(),
-                "title": bookmark.title,
-                "urlString": bookmark.urlString,
-                "tags": bookmark.tags,
-                "createdAt": bookmark.createdAt.timeIntervalSince1970 * 1000,
-                "updatedAt": bookmark.updatedAt.timeIntervalSince1970 * 1000,
-                "deleted": false,
-            ]
-            if !bookmark.notes.isEmpty {
-                dict["notes"] = bookmark.notes
-            }
-            if let url = bookmark.thumbnailRemoteURLString {
-                dict["thumbnailRemoteUrl"] = url
-            }
-            if let summary = bookmark.aiSummary {
-                dict["aiSummary"] = summary
-            }
-            if let colors = bookmark.dominantColors {
-                dict["dominantColors"] = colors
-            }
-            if let folderID = bookmark.folderID {
-                dict["folderSyncId"] = folderID.uuidString.lowercased()
-            }
-            return dict
-        }
+        logger.info("Push: \(dirtyBookmarks.count) bookmark(s), \(dirtyFolders.count) folder(s)")
 
-        var pushBody: [String: Any] = ["bookmarks": bookmarkPayload]
-        if !folderPayload.isEmpty {
-            pushBody["folders"] = folderPayload
-        }
+        let bookmarkPayload = dirtyBookmarks.map { SyncPushBookmark(from: $0) }
+        let folderPayload = dirtyFolders.isEmpty ? nil : dirtyFolders.map { SyncPushFolder(from: $0) }
 
-        let body = try JSONSerialization.data(withJSONObject: pushBody)
+        let pushBody = SyncPushBody(bookmarks: bookmarkPayload, folders: folderPayload)
+        let body = try JSONEncoder().encode(pushBody)
         let _ = try await syncRequest(config: config, path: "/api/sync/push", body: body)
+
+        // Update lastSuccessfulPushAt after successful push
+        var updatedConfig = CiderConfig.load()
+        updatedConfig.lastSuccessfulPushAt = Date().timeIntervalSince1970
+        updatedConfig.save()
     }
 
     // MARK: - Push deletions to web
@@ -186,36 +272,13 @@ final class SyncService: ObservableObject {
 
         let now = Date().timeIntervalSince1970 * 1000
 
-        let bookmarkPayload = pendingDeletions.map { syncId -> [String: Any] in
-            [
-                "ciderSyncId": syncId,
-                "title": "",
-                "urlString": "",
-                "tags": [String](),
-                "createdAt": now,
-                "updatedAt": now,
-                "deleted": true,
-                "deletedAt": now,
-            ]
-        }
+        let bookmarkPayload = pendingDeletions.map { SyncPushBookmark(deletedSyncId: $0, nowMs: now) }
+        let folderPayload = pendingFolderDeletions.isEmpty
+            ? nil
+            : pendingFolderDeletions.map { SyncPushFolder(deletedSyncId: $0, nowMs: now) }
 
-        let folderPayload = pendingFolderDeletions.map { syncId -> [String: Any] in
-            [
-                "ciderSyncId": syncId,
-                "name": "",
-                "createdAt": now,
-                "updatedAt": now,
-                "deleted": true,
-                "deletedAt": now,
-            ]
-        }
-
-        var pushBody: [String: Any] = ["bookmarks": bookmarkPayload]
-        if !folderPayload.isEmpty {
-            pushBody["folders"] = folderPayload
-        }
-
-        let body = try JSONSerialization.data(withJSONObject: pushBody)
+        let pushBody = SyncPushBody(bookmarks: bookmarkPayload, folders: folderPayload)
+        let body = try JSONEncoder().encode(pushBody)
         let _ = try await syncRequest(config: config, path: "/api/sync/push", body: body)
 
         // Clear pending deletions after successful push
@@ -275,7 +338,8 @@ final class SyncService: ObservableObject {
                             folderID: local.id,
                             name: name,
                             icon: icon,
-                            parentID: parentID
+                            parentID: parentID,
+                            remoteUpdatedAt: remoteUpdatedAt
                         )
                     }
                 } else if !isDeleted {
@@ -335,7 +399,8 @@ final class SyncService: ObservableObject {
                         thumbnailRemoteURLString: dict["thumbnailRemoteUrl"] as? String,
                         aiSummary: dict["aiSummary"] as? String,
                         dominantColors: dict["dominantColors"] as? [String],
-                        folderID: folderID
+                        folderID: folderID,
+                        remoteUpdatedAt: remoteUpdatedAt
                     )
                 }
             } else if !isDeleted {
@@ -385,15 +450,17 @@ final class SyncService: ObservableObject {
             throw SyncError.invalidResponse
         }
 
-        if httpResponse.statusCode == 401 {
+        switch httpResponse.statusCode {
+        case 200...299:
+            return data
+        case 401:
             throw SyncError.unauthorized
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
+        case 400:
+            let responseBody = String(data: data, encoding: .utf8) ?? "<unreadable>"
+            throw SyncError.validationError(responseBody)
+        default:
             throw SyncError.serverError(httpResponse.statusCode)
         }
-
-        return data
     }
 }
 
@@ -401,6 +468,7 @@ enum SyncError: LocalizedError {
     case invalidURL
     case invalidResponse
     case unauthorized
+    case validationError(String)
     case serverError(Int)
 
     var errorDescription: String? {
@@ -411,6 +479,8 @@ enum SyncError: LocalizedError {
             "Invalid server response"
         case .unauthorized:
             "Sync token is invalid or revoked"
+        case .validationError:
+            "Server rejected the request (400)"
         case .serverError(let code):
             "Server error (\(code))"
         }

@@ -250,7 +250,8 @@ final class BookmarksStorage: ObservableObject {
         thumbnailRemoteURLString: String?,
         aiSummary: String?,
         dominantColors: [String]?,
-        folderID: UUID? = nil
+        folderID: UUID? = nil,
+        remoteUpdatedAt: Date
     ) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         bookmarks[index].title = title
@@ -263,7 +264,7 @@ final class BookmarksStorage: ObservableObject {
         if let aiSummary { bookmarks[index].aiSummary = aiSummary }
         if let dominantColors { bookmarks[index].dominantColors = dominantColors }
         if let folderID { bookmarks[index].folderID = folderID }
-        bookmarks[index].updatedAt = Date()
+        bookmarks[index].updatedAt = remoteUpdatedAt
         persist()
     }
 
@@ -313,13 +314,14 @@ final class BookmarksStorage: ObservableObject {
         folderID: UUID,
         name: String,
         icon: String?,
-        parentID: UUID?
+        parentID: UUID?,
+        remoteUpdatedAt: Date
     ) {
         guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return }
         folders[index].name = name
         folders[index].icon = icon
         folders[index].parentID = parentID
-        folders[index].updatedAt = Date()
+        folders[index].updatedAt = remoteUpdatedAt
         folders.sort(by: folderSortOrder)
         persist()
     }
