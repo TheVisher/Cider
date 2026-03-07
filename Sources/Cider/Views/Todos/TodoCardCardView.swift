@@ -87,6 +87,17 @@ struct TodoCardCardView: View {
                                     .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
                                     .strikethrough(item.isCompleted)
                                     .lineLimit(1)
+                                Spacer(minLength: 0)
+                                if let amount = item.amount {
+                                    Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                }
+                                if let itemDue = item.dueDate, !item.isCompleted {
+                                    Text(itemDue.formatted(.dateTime.month(.abbreviated).day()))
+                                        .font(CiderFont.micro)
+                                        .foregroundColor(itemDueDateColor(itemDue))
+                                }
                             }
                         }
                         if todoCard.checklist.count > 4 {
@@ -97,7 +108,7 @@ struct TodoCardCardView: View {
                     }
                 }
 
-                // Bottom row: due date + progress
+                // Bottom row: due date + progress + total amount
                 HStack(spacing: Spacing.sm) {
                     if let dueDate = todoCard.dueDate {
                         dueDateBadge(dueDate)
@@ -110,6 +121,15 @@ struct TodoCardCardView: View {
                     }
 
                     Spacer(minLength: 0)
+
+                    if let total = todoCard.totalAmount {
+                        let unpaid = todoCard.unpaidAmount ?? 0
+                        let unpaidStr = Self.currencyFormatter.string(from: NSNumber(value: unpaid)) ?? String(format: "%.2f", unpaid)
+                        let totalStr = Self.currencyFormatter.string(from: NSNumber(value: total)) ?? String(format: "%.2f", total)
+                        Text("\(unpaidStr) / \(totalStr)")
+                            .font(CiderFont.caption)
+                            .foregroundColor(unpaid > 0 ? CiderColors.primary : CiderColors.tertiary)
+                    }
                 }
 
                 if !todoCard.labelIDs.isEmpty {
@@ -179,6 +199,21 @@ struct TodoCardCardView: View {
         }
         return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
     }
+
+    private func itemDueDateColor(_ date: Date) -> Color {
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: Date()), to: calendar.startOfDay(for: date)).day ?? 0
+        if days < 0 { return CiderColors.destructive }
+        if days == 0 { return CiderColors.warning }
+        return CiderColors.tertiary
+    }
+
+    private static let currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
 }
 
 // MARK: - TodoListRow

@@ -1106,7 +1106,9 @@ struct SavedViewTabContent: View {
                 contactEditorContext = ContactEditorContext(existingContact: contact)
             }
         case .todo:
-            break // TODO: open todo detail
+            if let todoCard = TodoCardStorage.shared.todoCard(for: ref.entityID) {
+                onOpenTodo?(todoCard)
+            }
         case .externalFile:
             break
         }

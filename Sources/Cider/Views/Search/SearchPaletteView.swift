@@ -81,6 +81,7 @@ struct SearchPaletteView: View {
     let onOpenNote: (Note) -> Void
     var onOpenDateCard: ((DateCard) -> Void)? = nil
     var onOpenContact: ((ContactCard) -> Void)? = nil
+    var onOpenTodo: ((TodoCard) -> Void)? = nil
     let onSpawnSearchTab: ((String) -> Void)?
     let onDismiss: () -> Void
     var onAction: ((QuickAction) -> Void)?
@@ -293,7 +294,9 @@ struct SearchPaletteView: View {
                     onOpenContact?(contact)
                 }
             case .todo:
-                break // TODO: open todo detail
+                if let todoCard = result.todoCard {
+                    onOpenTodo?(todoCard)
+                }
             }
             onDismiss()
         }

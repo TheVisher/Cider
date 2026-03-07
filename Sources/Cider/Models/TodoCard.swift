@@ -28,19 +28,40 @@ struct TodoChecklistItem: Identifiable, Codable, Hashable {
     var isCompleted: Bool
     var completedAt: Date?
     var sortOrder: Int
+    var dueDate: Date?
+    var amount: Double?
+    var urlString: String?
 
     init(
         id: UUID = UUID(),
         title: String,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        dueDate: Date? = nil,
+        amount: Double? = nil,
+        urlString: String? = nil
     ) {
         self.id = id
         self.title = title
         self.isCompleted = isCompleted
         self.completedAt = completedAt
         self.sortOrder = sortOrder
+        self.dueDate = dueDate
+        self.amount = amount
+        self.urlString = urlString
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        isCompleted = (try c.decodeIfPresent(Bool.self, forKey: .isCompleted)) ?? false
+        completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+        sortOrder = (try c.decodeIfPresent(Int.self, forKey: .sortOrder)) ?? 0
+        dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate)
+        amount = try c.decodeIfPresent(Double.self, forKey: .amount)
+        urlString = try c.decodeIfPresent(String.self, forKey: .urlString)
     }
 }
 
@@ -126,5 +147,41 @@ struct TodoCard: Identifiable, Codable, Hashable {
     var isDueToday: Bool {
         guard !isCompleted, let dueDate else { return false }
         return Calendar.current.isDateInToday(dueDate)
+    }
+
+    /// The earliest approaching due date — either the card's own dueDate or any checklist item's dueDate.
+    var earliestApproachingDate: Date? {
+        var dates: [Date] = []
+        if let dueDate { dates.append(dueDate) }
+        for item in checklist where !item.isCompleted {
+            if let itemDue = item.dueDate { dates.append(itemDue) }
+        }
+        return dates.min()
+    }
+
+    /// Urgency based on the card's due date or any checklist item's due date.
+    func urgency(now: Date = Date(), windowDays: Int = 7) -> DateCardUrgency? {
+        guard !isCompleted else { return nil }
+        guard let target = earliestApproachingDate else { return nil }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: target)).day ?? 0
+        if days < 0 { return .overdue }
+        if days == 0 { return .today }
+        if days <= windowDays { return .approaching(daysUntil: days) }
+        return nil
+    }
+
+    /// Sum of all checklist item amounts (for bills tracking).
+    var totalAmount: Double? {
+        let amounts = checklist.compactMap(\.amount)
+        guard !amounts.isEmpty else { return nil }
+        return amounts.reduce(0, +)
+    }
+
+    /// Sum of uncompleted checklist item amounts.
+    var unpaidAmount: Double? {
+        let amounts = checklist.filter { !$0.isCompleted }.compactMap(\.amount)
+        guard !amounts.isEmpty else { return nil }
+        return amounts.reduce(0, +)
     }
 }

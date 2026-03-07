@@ -26,6 +26,7 @@ struct SearchResult: Identifiable {
     var note: Note?
     var dateCard: DateCard?
     var contact: ContactCard?
+    var todoCard: TodoCard?
 }
 
 // MARK: - Search Scope
@@ -297,6 +298,22 @@ enum SearchService {
             }
         }
 
+        if shouldSearchType(.todo) {
+            let todos = TodoCardStorage.shared.todoCards
+            let filtered = applyTagScope(todos: todos, scope: scope)
+            if tokens.isEmpty {
+                results += filtered.map { todo in
+                    SearchResult(
+                        id: todo.id, type: .todo, title: todo.title,
+                        subtitle: todo.isCompleted ? "Completed" : (todo.dueDate.map { "Due \($0.formatted(.dateTime.month().day()))" }),
+                        snippet: nil, date: todo.updatedAt, todoCard: todo
+                    )
+                }
+            } else {
+                results += searchTodos(tokens, in: filtered)
+            }
+        }
+
         return results
     }
 
@@ -439,6 +456,44 @@ enum SearchService {
                 snippet: snippet,
                 date: contact.updatedAt,
                 contact: contact
+            )
+        }
+    }
+
+    private static func applyTagScope(todos: [TodoCard], scope: SearchScope) -> [TodoCard] {
+        var result = applyFolderFilter(todos, scope: scope) { $0.folderID }
+        if let labelID = scope.labelID {
+            result = result.filter { $0.labelIDs.contains(labelID) }
+        }
+        return result
+    }
+
+    static func searchTodos(_ tokens: [String], in todos: [TodoCard]) -> [SearchResult] {
+        todos.compactMap { todo in
+            var fields = [todo.title, todo.details]
+            fields.append(contentsOf: todo.checklist.map(\.title))
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
+
+            let headerMatch = fieldsMatch(tokens, in: [todo.title])
+
+            let snippet: SearchSnippet?
+            let subtitle: String?
+            if headerMatch {
+                subtitle = todo.isCompleted ? "Completed" : (todo.dueDate.map { "Due \($0.formatted(.dateTime.month().day()))" })
+                snippet  = nil
+            } else {
+                subtitle = nil
+                snippet  = extractSnippet(tokens: tokens, from: todo.details)
+            }
+
+            return SearchResult(
+                id: todo.id,
+                type: .todo,
+                title: todo.title,
+                subtitle: subtitle,
+                snippet: snippet,
+                date: todo.updatedAt,
+                todoCard: todo
             )
         }
     }

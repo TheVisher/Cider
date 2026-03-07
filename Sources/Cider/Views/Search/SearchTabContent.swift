@@ -8,6 +8,7 @@ struct SearchTabContent: View {
     let onOpenNote: (Note) -> Void
     var onOpenDateCard: ((DateCard) -> Void)? = nil
     var onOpenContact: ((ContactCard) -> Void)? = nil
+    var onOpenTodo: ((TodoCard) -> Void)? = nil
 
     @State private var results: [SearchResult] = []
 
@@ -119,7 +120,9 @@ struct SearchTabContent: View {
                     onOpenContact?(contact)
                 }
             case .todo:
-                break // TODO: open todo detail
+                if let todoCard = result.todoCard {
+                    onOpenTodo?(todoCard)
+                }
             }
         } label: {
             HStack(spacing: Spacing.sm) {

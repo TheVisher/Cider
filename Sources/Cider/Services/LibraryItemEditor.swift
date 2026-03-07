@@ -15,6 +15,12 @@ struct ContactEditorContext: Identifiable {
     let existingContact: ContactCard?
 }
 
+/// Triggers `.sheet(item:)` presentation of TodoEditorSheet.
+struct TodoEditorContext: Identifiable {
+    let id = UUID()
+    let existingCard: TodoCard?
+}
+
 // MARK: - LibraryItemEditor
 
 /// Shared save/create helpers for date cards and contacts.

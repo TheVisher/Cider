@@ -62,15 +62,24 @@ struct HomeDashboardView: View {
         libraryViewModel.filteredItems(using: filterSpec, sort: sortSpec)
     }
 
-    /// Date cards with approaching/today/overdue dates, sorted by startAt
-    private var comingUpItems: [DateCard] {
+    /// Date cards and todos with approaching/today/overdue dates
+    private var comingUpItems: [LibraryItemV2] {
         let windowDays = config.dateCardSurfacingDays
         guard windowDays > 0 else { return [] }
-        return libraryItems.compactMap { item -> DateCard? in
-            guard case .dateCard(let dc) = item,
-                  dc.urgency(windowDays: windowDays) != nil else { return nil }
-            return dc
-        }.sorted { $0.effectiveDate() < $1.effectiveDate() }
+        return libraryItems.filter { item in
+            switch item {
+            case .dateCard(let dc):
+                return dc.urgency(windowDays: windowDays) != nil
+            case .todo(let tc):
+                return tc.urgency(windowDays: windowDays) != nil
+            default:
+                return false
+            }
+        }.sorted { lhs, rhs in
+            let lhsDate = lhs.dateAnchor ?? lhs.createdDate
+            let rhsDate = rhs.dateAnchor ?? rhs.createdDate
+            return lhsDate < rhsDate
+        }
     }
 
     private var cardSizing: LibraryCardSizing {
@@ -191,30 +200,10 @@ struct HomeDashboardView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: Spacing.sm) {
-                    ForEach(comingUpItems) { dateCard in
-                        DateCardCardView(
-                            dateCard: dateCard,
-                            urgency: dateCard.urgency(windowDays: config.dateCardSurfacingDays),
-                            onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
-                            onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
-                            folders: bookmarksViewModel.folders,
-                            onMoveToFolder: { folderID in
-                                let oldFolderID = dateCard.folderID
-                                DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
-                                let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
-                                CiderUndoManager.shared.record(.movedToFolder(
-                                    itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
-                                    fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
-                                ))
-                            },
-                            onDelete: {
-                                if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
-                                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
-                                }
-                            }
-                        )
-                        .frame(width: 220)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(comingUpItems) { item in
+                        comingUpCard(item)
+                            .frame(width: 220)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -222,6 +211,57 @@ struct HomeDashboardView: View {
         }
         .padding(.horizontal, Spacing.md + Spacing.xxs)
         .padding(.top, Spacing.md)
+    }
+
+    @ViewBuilder
+    private func comingUpCard(_ item: LibraryItemV2) -> some View {
+        switch item {
+        case .dateCard(let dateCard):
+            DateCardCardView(
+                dateCard: dateCard,
+                urgency: dateCard.urgency(windowDays: config.dateCardSurfacingDays),
+                onOpen: { handleNormalAction { presentDateCardDetail(dateCard) } },
+                onToggleComplete: { DateCardStorage.shared.markCompleted(dateCard.id, completed: !dateCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = dateCard.folderID
+                    DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .dateCard, itemID: dateCard.id, title: dateCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    }
+                }
+            )
+        case .todo(let todoCard):
+            TodoCardCardView(
+                todoCard: todoCard,
+                onOpen: { handleNormalAction { presentTodoDetail(todoCard) } },
+                onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = todoCard.folderID
+                    TodoCardStorage.shared.assignTodoCard(todoCard.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .todo, itemID: todoCard.id, title: todoCard.title,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                    }
+                }
+            )
+        default:
+            EmptyView()
+        }
     }
 
     // MARK: - List Row

@@ -6,6 +6,7 @@ struct StackDetailSheet: View {
     var onOpenNote: ((Note) -> Void)? = nil
     var onOpenDateCard: ((DateCard) -> Void)? = nil
     var onOpenContact: ((ContactCard) -> Void)? = nil
+    var onOpenTodo: ((TodoCard) -> Void)? = nil
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @Environment(\.dismiss) private var dismiss
     @State private var hiddenItemIDs: Set<String> = []
@@ -210,8 +211,8 @@ struct StackDetailSheet: View {
             onOpenDateCard?(dateCard)
         case .contact(let contact):
             onOpenContact?(contact)
-        case .todo:
-            break // TODO: open todo detail
+        case .todo(let todoCard):
+            onOpenTodo?(todoCard)
         case .externalFile(let file):
             NotificationCenter.default.post(
                 name: .openExternalFile,

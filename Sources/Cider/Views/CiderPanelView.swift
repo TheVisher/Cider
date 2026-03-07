@@ -43,6 +43,7 @@ struct CiderPanelView: View {
     @State private var detailWidthSaveTask: Task<Void, Never>?
     @State private var selectedDateCard: DateCard?
     @State private var selectedContact: ContactCard?
+    @State private var selectedTodoCard: TodoCard?
     @State private var cardScaleSaveTask: Task<Void, Never>?
     @State private var sidebarSearchText: String = ""
     @State private var debouncedSearchText: String = ""
@@ -51,6 +52,7 @@ struct CiderPanelView: View {
     @State private var isEditingNoteTitle = false
     @State private var newEventEditorContext: DateCardEditorContext?
     @State private var newContactEditorContext: ContactEditorContext?
+    @State private var newTodoEditorContext: TodoEditorContext?
     @State private var contentAreaWidth: CGFloat = 800
     @State private var enableLinkedSources: Bool = CiderConfig.load().enableLinkedSources
     @State private var selectedTagIDs: Set<UUID> = []
@@ -113,6 +115,7 @@ struct CiderPanelView: View {
                     },
                     onOpenDateCard: { openDateCardDetail($0) },
                     onOpenContact: { openContactDetail($0) },
+                    onOpenTodo: { openTodoDetail($0) },
                     onSpawnSearchTab: spawnSearchTab,
                     onDismiss: { isSearchPaletteVisible = false },
                     onAction: { action in
@@ -373,6 +376,32 @@ struct CiderPanelView: View {
                 onDelete: { contact in
                     if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
                         CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
+                }
+            )
+        }
+        .sheet(item: $newTodoEditorContext) { context in
+            TodoEditorSheet(
+                existingCard: context.existingCard,
+                onSave: { card in
+                    if context.existingCard != nil {
+                        _ = TodoCardStorage.shared.updateTodoCard(card)
+                    } else {
+                        // New card — create via storage so it gets a fresh ID and timestamps
+                        var created = TodoCardStorage.shared.createTodoCard(
+                            title: card.title,
+                            dueDate: card.dueDate,
+                            priority: card.priority
+                        )
+                        created.details = card.details
+                        created.checklist = card.checklist
+                        created.labelIDs = card.labelIDs
+                        _ = TodoCardStorage.shared.updateTodoCard(created)
+                    }
+                },
+                onDelete: { todoCard in
+                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
                     }
                 }
             )
@@ -974,6 +1003,7 @@ struct CiderPanelView: View {
                 },
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) },
+                onOpenTodo: { openTodoDetail($0) },
                 onSelectTag: { id in
                     selectedTagIDs = [id]
                 },
@@ -1015,6 +1045,7 @@ struct CiderPanelView: View {
                 },
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) },
+                onOpenTodo: { openTodoDetail($0) },
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
@@ -1055,6 +1086,7 @@ struct CiderPanelView: View {
                             },
                             onOpenDateCard: { openDateCardDetail($0) },
                             onOpenContact: { openContactDetail($0) },
+                            onOpenTodo: { openTodoDetail($0) },
                             onlyUnassigned: savedView.filterSpec.onlyUnassigned,
                             activeLabelIDs: savedView.filterSpec.labelIDs,
                             onToggleLabelBulk: { toggleTagOnSelected($0) },
@@ -1085,7 +1117,8 @@ struct CiderPanelView: View {
                         openNoteDetail(note)
                     },
                     onOpenDateCard: { openDateCardDetail($0) },
-                    onOpenContact: { openContactDetail($0) }
+                    onOpenContact: { openContactDetail($0) },
+                    onOpenTodo: { openTodoDetail($0) }
                 )
             case .externalSource(let id, _):
                 if let source = externalSourceStorage.source(for: id) {
@@ -1120,6 +1153,7 @@ struct CiderPanelView: View {
                     },
                     onOpenDateCard: { openDateCardDetail($0) },
                     onOpenContact: { openContactDetail($0) },
+                    onOpenTodo: { openTodoDetail($0) },
                     onSelectTag: { id in
                         selectedTagIDs = [id]
                     },
@@ -1435,6 +1469,7 @@ struct CiderPanelView: View {
         detailsDraft = nil
         detailsErrorMessage = nil
         selectedDateCard = nil
+        selectedTodoCard = nil
         selectedContact = contact
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
@@ -1445,10 +1480,15 @@ struct CiderPanelView: View {
         }
     }
 
+    private func openTodoDetail(_ todoCard: TodoCard) {
+        newTodoEditorContext = TodoEditorContext(existingCard: todoCard)
+    }
+
     private func closeGenericDetail() {
         guard isGenericDetailOpen else { return }
         selectedDateCard = nil
         selectedContact = nil
+        selectedTodoCard = nil
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
@@ -1460,6 +1500,7 @@ struct CiderPanelView: View {
         detailsErrorMessage = nil
         selectedDateCard = nil
         selectedContact = nil
+        selectedTodoCard = nil
         selectedNote = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false

@@ -134,7 +134,7 @@ enum LibraryItemV2: Identifiable, Hashable {
         case .contact(let contact):
             return contact.birthday
         case .todo(let todo):
-            return todo.dueDate
+            return todo.earliestApproachingDate
         case .bookmark, .note, .externalFile:
             return nil
         }
