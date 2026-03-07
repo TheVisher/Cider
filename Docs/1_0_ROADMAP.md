@@ -282,14 +282,16 @@ Make everything that shipped in beta feel finished.
 ### R-13: Advanced Search
 > Scope modifiers for power users.
 
-**Status:** `Not Started`
+**Status:** `✅ Complete`
 **Priority:** Medium
 
 **Scope:**
-- `@bookmarks`, `@notes`, `@datecards`, `@contacts` type filters
-- `@folder:name` scope to specific folder
-- `@tag:name` scope to specific tag
-- Works in both Cmd+K palette and sidebar search
+- `@bookmarks`, `@notes`, `@events`, `@contacts` type filters with prefix matching (`@b` works)
+- `@folder:Name` scope to specific folder (multi-word, prefix match, multiple folders)
+- `@folder:` (bare) shows all folder items grouped by folder with headers
+- `@tag:Name` scope to specific tag (prefix match)
+- Scope pills shown below search field when active
+- Works in Cmd+K palette, sidebar search, and search tabs
 
 ---
 
@@ -460,7 +462,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-10 | Custom Folder Icons | 2 | ✅ Complete |
 | R-11 | Drag Out to External Apps | 2 | ✅ Complete |
 | R-12 | Clipboard Viewer | 2 | ✅ Complete |
-| R-13 | Advanced Search | 2 | Not Started |
+| R-13 | Advanced Search | 2 | ✅ Complete |
 | R-20 | Screen Capture Polish | 2 | Not Started |
 | R-21 | Keyboard Shortcuts Reference | 2 | ✅ Complete |
 | R-14 | Bookmark Detail View V2 | 3 | Not Started |
