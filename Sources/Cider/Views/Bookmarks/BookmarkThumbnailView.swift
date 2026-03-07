@@ -262,20 +262,12 @@ struct CarouselThumbnailView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 0) {
-                    ForEach(Array(urls.enumerated()), id: \.offset) { index, _ in
-                        CarouselPageImage(
-                            url: urls[index],
-                            fillMode: mode == .masonry ? .fit : .fill
-                        )
-                        .containerRelativeFrame(.horizontal)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $currentPage)
+            CarouselPageImage(
+                url: urls[page],
+                fillMode: .fill
+            )
+            .id(page)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .overlay {
                 CarouselScrollWheelOverlay { delta in

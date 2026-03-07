@@ -862,32 +862,21 @@ struct CarouselHeroView: View {
     let bookmark: Bookmark
     @Binding var currentPage: Int
 
-    @State private var scrolledPage: Int?
     @State private var isHovered = false
 
     private var urls: [URL] { bookmark.carouselImageFileURLs }
 
     var body: some View {
         ZStack {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 0) {
-                    ForEach(Array(urls.enumerated()), id: \.offset) { index, _ in
-                        CarouselPageImage(url: urls[index], fillMode: .fit)
-                            .containerRelativeFrame(.horizontal)
+            CarouselPageImage(url: urls[currentPage], fillMode: .fit)
+                .id(currentPage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.opacity)
+                .overlay {
+                    CarouselScrollWheelOverlay { delta in
+                        navigatePage(delta: delta)
                     }
                 }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $scrolledPage)
-            .onChange(of: scrolledPage) { _, newValue in
-                if let newValue { currentPage = newValue }
-            }
-            .overlay {
-                CarouselScrollWheelOverlay { delta in
-                    navigatePage(delta: delta)
-                }
-            }
 
             // Navigation arrows on hover
             if isHovered, urls.count > 1 {
@@ -932,7 +921,6 @@ struct CarouselHeroView: View {
         .onKeyPress(.leftArrow) { navigatePage(delta: -1); return .handled }
         .onKeyPress(.rightArrow) { navigatePage(delta: 1); return .handled }
         .onHover { isHovered = $0 }
-        .onAppear { scrolledPage = currentPage }
     }
 
     private func navigatePage(delta: Int) {
@@ -940,7 +928,6 @@ struct CarouselHeroView: View {
         guard target != currentPage else { return }
         withAnimation(.snappy) {
             currentPage = target
-            scrolledPage = target
         }
     }
 
