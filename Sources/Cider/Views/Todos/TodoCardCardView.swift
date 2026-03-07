@@ -73,29 +73,29 @@ struct TodoCardCardView: View {
                         .lineLimit(3)
                 }
 
-                // Checklist preview (first 4 items)
+                // Checklist items
                 if !todoCard.checklist.isEmpty {
                     let preview = todoCard.checklist.prefix(4)
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
                         ForEach(Array(preview)) { item in
                             HStack(spacing: Spacing.xs) {
-                                Image(systemName: item.isCompleted ? "checkmark.square.fill" : "square")
-                                    .font(CiderFont.captionMedium)
+                                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .font(CiderFont.body)
                                     .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                                 Text(item.title)
-                                    .font(CiderFont.caption)
-                                    .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
+                                    .font(CiderFont.body)
+                                    .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.primary)
                                     .strikethrough(item.isCompleted)
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
                                 if let amount = item.amount {
                                     Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
-                                        .font(CiderFont.caption)
-                                        .foregroundColor(CiderColors.tertiary)
+                                        .font(CiderFont.body)
+                                        .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
                                 }
                                 if let itemDue = item.dueDate, !item.isCompleted {
                                     Text(itemDue.formatted(.dateTime.month(.abbreviated).day()))
-                                        .font(CiderFont.micro)
+                                        .font(CiderFont.caption)
                                         .foregroundColor(itemDueDateColor(itemDue))
                                 }
                             }

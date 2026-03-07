@@ -176,7 +176,7 @@ struct TodoEditorSheet: View {
                     checklist[index].isCompleted.toggle()
                     checklist[index].completedAt = checklist[index].isCompleted ? Date() : nil
                 } label: {
-                    Image(systemName: item.isCompleted ? "checkmark.square.fill" : "square")
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                         .font(CiderFont.captionMedium)
                         .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                 }
