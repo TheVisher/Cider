@@ -294,8 +294,14 @@ struct CiderPanelView: View {
             openBookmarkDetails(bookmark)
         }
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
-            newItemInitialStep = notification.userInfo?["initialStep"] as? String
-            newItemOCRData = (notification.userInfo as? [String: Any]) ?? [:]
+            let ui = notification.userInfo
+            newItemInitialStep = ui?["initialStep"] as? String
+            var ocrDict: [String: Any] = [:]
+            if let title = ui?["suggestedTitle"] as? String { ocrDict["suggestedTitle"] = title }
+            if let dates = ui?["detectedDates"] as? [Date] { ocrDict["detectedDates"] = dates }
+            if let emails = ui?["detectedEmails"] as? [String] { ocrDict["detectedEmails"] = emails }
+            if let phones = ui?["detectedPhones"] as? [String] { ocrDict["detectedPhones"] = phones }
+            newItemOCRData = ocrDict
             showNewItemPicker = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in

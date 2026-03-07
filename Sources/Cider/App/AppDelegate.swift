@@ -1337,7 +1337,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 var info: [String: Any] = ["initialStep": "event"]
                 if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
                 if !route.detectedDates.isEmpty { info["detectedDates"] = route.detectedDates }
-                NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)
+                }
             },
             onCreateContact: { [weak self] in
                 self?.dismissScreenCaptureToast()
@@ -1346,7 +1348,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
                 if !route.detectedEmails.isEmpty { info["detectedEmails"] = route.detectedEmails }
                 if !route.detectedPhones.isEmpty { info["detectedPhones"] = route.detectedPhones }
-                NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)
+                }
             }
         )
 

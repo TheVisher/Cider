@@ -39,7 +39,7 @@ struct ScreenCaptureRoutingToastView: View {
                     if let captureImage {
                         Image(nsImage: captureImage)
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .aspectRatio(contentMode: .fit)
                             .frame(width: 36, height: 36)
                             .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
                     } else {
