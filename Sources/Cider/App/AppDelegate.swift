@@ -1337,6 +1337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 var info: [String: Any] = ["initialStep": "event"]
                 if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
                 if !route.detectedDates.isEmpty { info["detectedDates"] = route.detectedDates }
+                if !route.suggestedLocation.isEmpty { info["suggestedLocation"] = route.suggestedLocation }
                 if let ocrText, !ocrText.isEmpty { info["ocrText"] = ocrText }
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)

@@ -300,8 +300,10 @@ struct CiderPanelView: View {
                 let title = ui?["suggestedTitle"] as? String ?? ""
                 let date = (ui?["detectedDates"] as? [Date])?.first ?? Date()
                 let ocrText = ui?["ocrText"] as? String ?? ""
+                let location = ui?["suggestedLocation"] as? String ?? ""
                 var card = DateCardStorage.shared.createDateCard(title: title, startAt: date, allDay: false)
                 if !ocrText.isEmpty { card.details = ocrText }
+                if !location.isEmpty { card.location = location }
                 _ = DateCardStorage.shared.updateDateCard(card)
                 newEventEditorContext = DateCardEditorContext(existingCard: card, defaultDate: date)
                 return
