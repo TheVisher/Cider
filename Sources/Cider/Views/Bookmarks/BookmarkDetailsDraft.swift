@@ -58,6 +58,7 @@ struct BookmarkMetadataSidebar: View {
     @State private var showAddTagPicker = false
 
     @State private var isSourceExpanded = true
+    @State private var isImagesExpanded = true
     @State private var isFolderExpanded = true
     @State private var isTagsExpanded = true
     @State private var isKeywordsExpanded = false
@@ -83,6 +84,12 @@ struct BookmarkMetadataSidebar: View {
                     sectionDivider
                     sourceSection
                         .padding(.vertical, Spacing.md)
+
+                    if bookmark?.isCarousel == true {
+                        sectionDivider
+                        imagesSection
+                            .padding(.vertical, Spacing.md)
+                    }
 
                     sectionDivider
                     folderSection
@@ -276,6 +283,26 @@ struct BookmarkMetadataSidebar: View {
                     TextField("Add a source", text: $draft.sourceURL)
                         .font(CiderFont.body(scale: textScale))
                         .textFieldStyle(.roundedBorder)
+                }
+            }
+        }
+    }
+
+    // MARK: - Images (Carousel)
+
+    @ViewBuilder
+    private var imagesSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Images (\(bookmark?.imageCount ?? 0))", isExpanded: $isImagesExpanded)
+
+            if isImagesExpanded, let bookmark, let paths = bookmark.carouselImagePaths, !paths.isEmpty {
+                let urls = bookmark.carouselImageFileURLs
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 60, maximum: 80), spacing: Spacing.xs)], spacing: Spacing.xs) {
+                    ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                        CarouselMetadataThumbnail(url: url) {
+                            BookmarksStorage.shared.removeCarouselImage(for: bookmark.id, at: index)
+                        }
+                    }
                 }
             }
         }
@@ -702,6 +729,18 @@ struct BookmarkMetadataSidebar: View {
     }
 
     private func openOriginalImage() {
+        // Carousel: open all images in Preview
+        if let bookmark, bookmark.isCarousel {
+            let urls = bookmark.carouselImageFileURLs.filter {
+                FileManager.default.fileExists(atPath: $0.path)
+            }
+            if !urls.isEmpty {
+                let config = NSWorkspace.OpenConfiguration()
+                NSWorkspace.shared.open(urls, withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"), configuration: config)
+                return
+            }
+        }
+
         if let originalFileURL = bookmark?.originalImageFileURL,
            FileManager.default.fileExists(atPath: originalFileURL.path) {
             NSWorkspace.shared.open(originalFileURL)
@@ -940,5 +979,69 @@ struct CarouselHeroView: View {
                 .background(Circle().fill(Color.black.opacity(0.55)))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Carousel Metadata Thumbnail
+
+struct CarouselMetadataThumbnail: View {
+    let url: URL
+    let onDelete: () -> Void
+
+    @State private var image: NSImage?
+    @State private var isHovered = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    if let image {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
+                .contextMenu {
+                    Button("Open in Preview") {
+                        NSWorkspace.shared.open(url)
+                    }
+                    Divider()
+                    Button("Remove", role: .destructive) {
+                        onDelete()
+                    }
+                }
+
+            if isHovered {
+                Button(action: onDelete) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(CiderColors.textOnColor)
+                        .frame(width: 16, height: 16)
+                        .background(Circle().fill(Color.black.opacity(0.7)))
+                }
+                .buttonStyle(.plain)
+                .padding(Spacing.xxs)
+            }
+        }
+        .onHover { isHovered = $0 }
+        .task(id: url) {
+            image = await loadImage()
+        }
+    }
+
+    private func loadImage() async -> NSImage? {
+        await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: 160,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }.value
     }
 }

@@ -262,18 +262,21 @@ struct CarouselThumbnailView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            CarouselPageImage(
-                url: urls[page],
-                fillMode: .fill
-            )
-            .id(page)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            .overlay {
-                CarouselScrollWheelOverlay { delta in
-                    navigatePage(delta: delta)
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(Color.clear)
+                .overlay {
+                    CarouselPageImage(
+                        url: urls[page],
+                        fillMode: mode == .masonry ? .fit : .fill
+                    )
+                    .id(page)
                 }
-            }
+                .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                .overlay {
+                    CarouselScrollWheelOverlay { delta in
+                        navigatePage(delta: delta)
+                    }
+                }
 
             // Navigation arrows on hover
             if isHovered, urls.count > 1 {
@@ -404,8 +407,8 @@ struct CarouselScrollWheelOverlay: NSViewRepresentable {
 
 final class CarouselScrollWheelNSView: NSView {
     var onPageDelta: (Int) -> Void
-    private var accumulatedDelta: CGFloat = 0
-    private let threshold: CGFloat = 30
+    private var lastFireTime: TimeInterval = 0
+    private var trackpadFired = false
 
     init(onPageDelta: @escaping (Int) -> Void) {
         self.onPageDelta = onPageDelta
@@ -416,28 +419,36 @@ final class CarouselScrollWheelNSView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func scrollWheel(with event: NSEvent) {
-        // Use scrollingDeltaX for horizontal scroll, deltaY for vertical
+        let isTrackpad = event.phase != [] || event.momentumPhase != []
+
         let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
             ? event.scrollingDeltaX
             : -event.scrollingDeltaY
 
-        if event.phase == .began {
-            accumulatedDelta = 0
-        }
-
-        accumulatedDelta += delta
-
-        if accumulatedDelta > threshold {
-            accumulatedDelta = 0
-            onPageDelta(1)
-        } else if accumulatedDelta < -threshold {
-            accumulatedDelta = 0
-            onPageDelta(-1)
-        }
-
-        // Reset on end/cancelled
-        if event.phase == .ended || event.phase == .cancelled {
-            accumulatedDelta = 0
+        if isTrackpad {
+            // Trackpad: fire once per gesture
+            if event.phase == .began {
+                trackpadFired = false
+            }
+            guard !trackpadFired, event.momentumPhase == [] else { return }
+            if delta > 2 {
+                trackpadFired = true
+                onPageDelta(1)
+            } else if delta < -2 {
+                trackpadFired = true
+                onPageDelta(-1)
+            }
+        } else {
+            // Mouse wheel: each click is a discrete event, debounce at 200ms
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastFireTime > 0.2 else { return }
+            if delta > 0 {
+                lastFireTime = now
+                onPageDelta(1)
+            } else if delta < 0 {
+                lastFireTime = now
+                onPageDelta(-1)
+            }
         }
     }
 }
