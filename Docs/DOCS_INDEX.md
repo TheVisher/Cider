@@ -33,6 +33,9 @@ These are active standards. Agents are directed to read specific ones from CLAUD
 | **SHARED_COMPONENTS.md** | Inventory of reusable cross-tab components — check here before building something new | Adding any new UI component |
 | **TECH_STACK.md** | Swift 6.2, Combine, approachable concurrency, UserDefaults + Codable patterns | Concurrency or storage work |
 | **USER_PREFERENCES.md** | CiderConfig structure, adding new settings, backward-compatible decoding | Adding any new setting |
+| **ARCHITECTURE.md** | Panel structure, layout alignment rules, display modes (bookmark/note/home), search architecture, settings architecture | Panel layout, display modes, search, or settings work |
+| **SWIFTUI_GOTCHAS.md** | Hard-won SwiftUI + NSPanel lessons: layout, focus, popovers, drag-drop, keyboard, caching, storage | Debugging any SwiftUI issue in the panel |
+| **TIPTAP_EDITOR.md** | TipTap/ProseMirror editor: singleton WebView, image serialization, content sync, CSS gotchas | Any notes editor work |
 | **TROUBLESHOOTING.md** | Known layout/rendering issues and their fixes (masonry, width pressure, thumbnails, CPU) | Debugging display or performance issues |
 | **RELEASE_CHECKLIST.md** | Pre-release QA verification | Before shipping |
 | **NOTES_EDITOR_SMOKE_CHECKLIST.md** | Notes editor-specific QA (formatting, tables, slash menu, drops) | Before shipping notes changes |
