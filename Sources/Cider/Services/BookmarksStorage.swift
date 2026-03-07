@@ -1807,6 +1807,20 @@ final class BookmarksStorage: ObservableObject {
         bookmarks[index].aiSummary = summary
         persist()
     }
+
+    func setReaderUnavailable(_ unavailable: Bool, for bookmarkID: UUID) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        guard bookmarks[index].readerUnavailable != unavailable else { return }
+        bookmarks[index].readerUnavailable = unavailable
+        persist()
+    }
+
+    func setPreferredHeroMode(_ mode: String, for bookmarkID: UUID) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        guard bookmarks[index].preferredHeroMode != mode else { return }
+        bookmarks[index].preferredHeroMode = mode
+        persist()
+    }
 }
 
 private struct BookmarkEnrichmentPayload {

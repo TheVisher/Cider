@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 
-enum BookmarkHeroMode { case thumbnail, web, reader }
+enum BookmarkHeroMode: String { case thumbnail, web, reader }
 
 struct DetailSlideOutView: View {
     @Binding var draft: BookmarkDetailsDraft
@@ -14,6 +14,7 @@ struct DetailSlideOutView: View {
     var detailViewMode: DetailViewMode
     @Binding var isMetadataVisible: Bool
     @Binding var heroMode: BookmarkHeroMode
+    var webViewStore: DetailWebViewStore
     var onResize: (CGFloat) -> Void = { _ in }
     var onDelete: () -> Void
     var onFolderChanged: (UUID?) -> Void
@@ -30,10 +31,7 @@ struct DetailSlideOutView: View {
     // it from compounding with the parent panel's slide-in transition. Enabled
     // after first render so the info-button toggle animates correctly.
     @State private var sidebarTransitionEnabled: Bool = false
-    @State private var webViewActivated: Bool = false
     @State private var webViewIsLoading: Bool = false
-    @State private var readerViewActivated: Bool = false
-    @State private var readerIsLoading: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -96,16 +94,16 @@ struct DetailSlideOutView: View {
                                 .opacity(heroMode == .thumbnail ? 1 : 0)
                                 .allowsHitTesting(heroMode == .thumbnail)
 
-                            // Web layer
-                            if webViewActivated, let url = bookmark?.url {
+                            // Web layer (always present — eagerly preloaded)
+                            if let url = bookmark?.url {
                                 ZStack {
-                                    BookmarkWebView(url: url, isLoading: $webViewIsLoading, isActive: heroMode == .web)
+                                    BookmarkWebView(url: url, isLoading: $webViewIsLoading, isActive: heroMode == .web, store: webViewStore)
 
-                                    if webViewIsLoading {
+                                    if !webViewStore.webViewReady {
                                         ProgressView()
                                             .controlSize(.large)
                                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                            .background(CiderColors.surfaceSubtle.opacity(0.6))
+                                            .background(CiderColors.surfaceSubtle)
                                     }
                                 }
                                 .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
@@ -117,25 +115,16 @@ struct DetailSlideOutView: View {
                                 .allowsHitTesting(heroMode == .web)
                             }
 
-                            // Reader layer
-                            if readerViewActivated, let url = bookmark?.url {
-                                ZStack {
-                                    BookmarkReaderView(url: url, isLoading: $readerIsLoading, bookmarkID: bookmark?.id)
-
-                                    if readerIsLoading {
-                                        ProgressView()
-                                            .controlSize(.large)
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                            .background(CiderColors.surfaceSubtle.opacity(0.6))
-                                    }
-                                }
-                                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                                        .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
-                                )
-                                .opacity(heroMode == .reader ? 1 : 0)
-                                .allowsHitTesting(heroMode == .reader)
+                            // Reader layer (always present — content from cached extraction)
+                            if let url = bookmark?.url, webViewStore.readerReady {
+                                BookmarkReaderView(url: url, bookmarkID: bookmark?.id, store: webViewStore)
+                                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                            .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                                    )
+                                    .opacity(heroMode == .reader ? 1 : 0)
+                                    .allowsHitTesting(heroMode == .reader)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -176,14 +165,38 @@ struct DetailSlideOutView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .onChange(of: bookmark?.id) { _, _ in
-            heroMode = .thumbnail
-            webViewActivated = false
+        .onChange(of: heroMode) { _, newMode in
+            // Persist per-bookmark hero mode preference
+            if let id = bookmark?.id {
+                BookmarksStorage.shared.setPreferredHeroMode(newMode.rawValue, for: id)
+            }
+        }
+        .onChange(of: webViewStore.readerFailed) { _, failed in
+            if failed, heroMode == .reader {
+                withAnimation(reduceMotion ? .none : .snappy) { heroMode = .thumbnail }
+            }
+        }
+        .onChange(of: bookmark?.id) { _, newID in
             webViewIsLoading = false
-            readerViewActivated = false
-            readerIsLoading = false
+            webViewStore.reset()
+            // Restore per-bookmark hero mode and reader availability
+            if let bm = newID.flatMap({ id in BookmarksStorage.shared.bookmarks.first { $0.id == id } }) {
+                let isReaderUnavailable = bm.readerUnavailable == true
+                let restored = bm.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
+                heroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
+                // Eagerly preload for the new bookmark
+                if bm.hasURL, let url = bm.url {
+                    webViewStore.preload(url: url, bookmarkID: bm.id)
+                }
+            } else {
+                heroMode = .thumbnail
+            }
         }
         .onAppear {
+            // Eagerly preload web + reader content when the detail view appears
+            if let bm = bookmark, bm.hasURL, let url = bm.url {
+                webViewStore.preload(url: url, bookmarkID: bm.id)
+            }
             // Enable the sidebar's own transition only after the first render,
             // so it doesn't compound with the parent panel's slide-in animation.
             DispatchQueue.main.async { sidebarTransitionEnabled = true }
@@ -205,6 +218,47 @@ struct DetailSlideOutView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    // MARK: - Button State
+
+    private var readerButtonDisabled: Bool {
+        webViewStore.readerFailed || (!webViewStore.readerReady && heroMode != .reader)
+    }
+
+    private var readerButtonHelp: String {
+        if webViewStore.readerFailed { return "Reader content not available for this page" }
+        if !webViewStore.readerReady { return "Extracting reader content..." }
+        return "Reader view"
+    }
+
+    // MARK: - Hero Mode Button
+
+    @ViewBuilder
+    private func heroModeButton(symbol: String, mode: BookmarkHeroMode, isLoading: Bool, isDisabled: Bool, help: String) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                heroMode = heroMode == mode ? .thumbnail : mode
+            }
+        } label: {
+            ZStack {
+                Image(systemName: symbol)
+                    .font(CiderFont.label)
+                    .foregroundColor(isDisabled ? CiderColors.quaternary : (heroMode == mode ? CiderColors.controlAccent : CiderColors.tertiary))
+                    .opacity(isLoading ? 0 : 1)
+
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(help)
     }
 
     // MARK: - Toolbar
@@ -241,43 +295,21 @@ struct DetailSlideOutView: View {
                 .buttonStyle(.plain)
                 .help("Preview")
 
-                Button {
-                    withAnimation(reduceMotion ? .none : .snappy) {
-                        if heroMode == .reader {
-                            heroMode = .thumbnail
-                        } else {
-                            if !readerViewActivated { readerViewActivated = true }
-                            heroMode = .reader
-                        }
-                    }
-                } label: {
-                    Image(systemName: "doc.richtext")
-                        .font(CiderFont.label)
-                        .foregroundColor(heroMode == .reader ? CiderColors.controlAccent : CiderColors.tertiary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Reader view")
+                heroModeButton(
+                    symbol: "doc.richtext",
+                    mode: .reader,
+                    isLoading: !webViewStore.readerReady && !webViewStore.readerFailed,
+                    isDisabled: readerButtonDisabled,
+                    help: readerButtonHelp
+                )
 
-                Button {
-                    withAnimation(reduceMotion ? .none : .snappy) {
-                        if heroMode == .web {
-                            heroMode = .thumbnail
-                        } else {
-                            if !webViewActivated { webViewActivated = true }
-                            heroMode = .web
-                        }
-                    }
-                } label: {
-                    Image(systemName: "globe")
-                        .font(CiderFont.label)
-                        .foregroundColor(heroMode == .web ? CiderColors.controlAccent : CiderColors.tertiary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("View live page")
+                heroModeButton(
+                    symbol: "globe",
+                    mode: .web,
+                    isLoading: !webViewStore.webViewReady,
+                    isDisabled: !webViewStore.webViewReady && heroMode != .web,
+                    help: webViewStore.webViewReady ? "View live page" : "Loading page..."
+                )
             }
 
             // Metadata sidebar toggle
@@ -309,9 +341,22 @@ struct DetailSlideOutView: View {
 
 struct BookmarkPageToolbar: View {
     var hasURL: Bool
+    var readerFailed: Bool
+    var readerReady: Bool
+    var webViewReady: Bool
     @Binding var heroMode: BookmarkHeroMode
     @Binding var isMetadataVisible: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var readerDisabled: Bool {
+        readerFailed || (!readerReady && heroMode != .reader)
+    }
+
+    private var readerHelp: String {
+        if readerFailed { return "Reader content not available for this page" }
+        if !readerReady { return "Extracting reader content..." }
+        return "Reader view"
+    }
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -319,12 +364,12 @@ struct BookmarkPageToolbar: View {
                 toolbarButton("photo", active: heroMode == .thumbnail, help: "Preview") {
                     withAnimation(reduceMotion ? .none : .snappy) { heroMode = .thumbnail }
                 }
-                toolbarButton("doc.richtext", active: heroMode == .reader, help: "Reader view") {
+                toolbarButton("doc.richtext", active: heroMode == .reader, disabled: readerDisabled, loading: !readerReady && !readerFailed, help: readerHelp) {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         heroMode = heroMode == .reader ? .thumbnail : .reader
                     }
                 }
-                toolbarButton("globe", active: heroMode == .web, help: "View live page") {
+                toolbarButton("globe", active: heroMode == .web, disabled: !webViewReady && heroMode != .web, loading: !webViewReady, help: webViewReady ? "View live page" : "Loading page...") {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         heroMode = heroMode == .web ? .thumbnail : .web
                     }
@@ -351,15 +396,25 @@ struct BookmarkPageToolbar: View {
     }
 
     @ViewBuilder
-    private func toolbarButton(_ symbol: String, active: Bool, help: String, action: @escaping () -> Void) -> some View {
+    private func toolbarButton(_ symbol: String, active: Bool, disabled: Bool = false, loading: Bool = false, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(CiderFont.label)
-                .foregroundColor(active ? CiderColors.controlAccent : CiderColors.tertiary)
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
+            ZStack {
+                Image(systemName: symbol)
+                    .font(CiderFont.label)
+                    .foregroundColor(disabled ? CiderColors.quaternary : (active ? CiderColors.controlAccent : CiderColors.tertiary))
+                    .opacity(loading ? 0 : 1)
+
+                if loading {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
         .help(help)
     }
 }

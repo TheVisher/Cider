@@ -39,6 +39,7 @@ struct CiderPanelView: View {
     @State private var detailsErrorMessage: String?
     @State private var bookmarkHeroMode: BookmarkHeroMode = .thumbnail
     @State private var bookmarkMetadataVisible: Bool = true
+    @StateObject private var detailWebViewStore = DetailWebViewStore()
     @State private var detailWidthSaveTask: Task<Void, Never>?
     @State private var selectedDateCard: DateCard?
     @State private var selectedContact: ContactCard?
@@ -1349,6 +1350,15 @@ struct CiderPanelView: View {
         detailBookmarkID = bookmark.id
         detailsDraft = BookmarkDetailsDraft(bookmark: bookmark)
         detailsErrorMessage = nil
+        // Restore per-bookmark hero mode, falling back to thumbnail
+        let isReaderUnavailable = bookmark.readerUnavailable == true
+        let restored = bookmark.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
+        bookmarkHeroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
+        detailWebViewStore.reset()
+        // Eagerly preload web + reader content
+        if bookmark.hasURL, let url = bookmark.url {
+            detailWebViewStore.preload(url: url, bookmarkID: bookmark.id)
+        }
         if detailViewMode == .slideOut {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,
@@ -1363,6 +1373,7 @@ struct CiderPanelView: View {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        detailWebViewStore.reset()
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
@@ -1522,6 +1533,8 @@ struct CiderPanelView: View {
             detailViewMode: detailViewMode,
             isMetadataVisible: $bookmarkMetadataVisible,
             heroMode: $bookmarkHeroMode,
+
+            webViewStore: detailWebViewStore,
             onResize: { newWidth in
                 let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                 detailSlideOutWidth = clamped
@@ -1556,6 +1569,8 @@ struct CiderPanelView: View {
                 detailViewMode: detailViewMode,
                 isMetadataVisible: $bookmarkMetadataVisible,
                 heroMode: $bookmarkHeroMode,
+    
+                webViewStore: detailWebViewStore,
                 onDelete: deleteDetailBookmark,
                 onFolderChanged: assignDetailBookmarkToFolder,
                 onOpenURL: openDetailURL,
@@ -1711,6 +1726,9 @@ struct CiderPanelView: View {
         if isDetailPageMode {
             BookmarkPageToolbar(
                 hasURL: detailsDraft?.hasURL == true,
+                readerFailed: detailWebViewStore.readerFailed,
+                readerReady: detailWebViewStore.readerReady,
+                webViewReady: detailWebViewStore.webViewReady,
                 heroMode: $bookmarkHeroMode,
                 isMetadataVisible: $bookmarkMetadataVisible
             )
@@ -1749,6 +1767,8 @@ struct CiderPanelView: View {
             detailViewMode: detailViewMode,
             isMetadataVisible: $bookmarkMetadataVisible,
             heroMode: $bookmarkHeroMode,
+
+            webViewStore: detailWebViewStore,
             onDelete: deleteDetailBookmark,
             onFolderChanged: assignDetailBookmarkToFolder,
             onOpenURL: openDetailURL,

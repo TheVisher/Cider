@@ -215,6 +215,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var aiSummary: String?           // Foundation Models 2-sentence summary
     var ocrText: String?             // Vision OCR text from thumbnail (for search)
     var dominantColors: [String]?    // Hex color strings extracted from thumbnail
+    var readerUnavailable: Bool?      // true when Readability.js fails to extract content
+    var preferredHeroMode: String?    // "thumbnail", "reader", or "web" — last used hero mode
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -234,6 +236,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case aiSummary
         case ocrText
         case dominantColors
+        case readerUnavailable
+        case preferredHeroMode
     }
 
     init(
@@ -254,7 +258,9 @@ struct Bookmark: Identifiable, Hashable, Codable {
         isEnriching: Bool = false,
         aiSummary: String? = nil,
         ocrText: String? = nil,
-        dominantColors: [String]? = nil
+        dominantColors: [String]? = nil,
+        readerUnavailable: Bool? = nil,
+        preferredHeroMode: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -274,6 +280,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.aiSummary = aiSummary
         self.ocrText = ocrText
         self.dominantColors = dominantColors
+        self.readerUnavailable = readerUnavailable
+        self.preferredHeroMode = preferredHeroMode
     }
 
     init(from decoder: Decoder) throws {
@@ -295,6 +303,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         aiSummary = try container.decodeIfPresent(String.self, forKey: .aiSummary)
         ocrText = try container.decodeIfPresent(String.self, forKey: .ocrText)
         dominantColors = try container.decodeIfPresent([String].self, forKey: .dominantColors)
+        readerUnavailable = try container.decodeIfPresent(Bool.self, forKey: .readerUnavailable)
+        preferredHeroMode = try container.decodeIfPresent(String.self, forKey: .preferredHeroMode)
     }
 
     var url: URL? {
