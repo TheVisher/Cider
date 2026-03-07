@@ -342,8 +342,9 @@ struct SearchPaletteView: View {
     // MARK: - Scope Pills
 
     private var scopePillsBar: some View {
-        HStack(spacing: Spacing.xs) {
-            ForEach(activeScope.activeScopeDescriptions, id: \.self) { desc in
+        let descriptions = activeScope.activeScopeDescriptions
+        return HStack(spacing: Spacing.xs) {
+            ForEach(Array(descriptions.enumerated()), id: \.offset) { _, desc in
                 HStack(spacing: Spacing.xxs) {
                     Image(systemName: scopeIcon(for: desc))
                         .font(CiderFont.caption)
