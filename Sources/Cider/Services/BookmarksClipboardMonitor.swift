@@ -136,7 +136,8 @@ final class BookmarksClipboardMonitor {
     }
 
     private static let imageTypes: [NSPasteboard.PasteboardType] = [
-        .png, .tiff, NSPasteboard.PasteboardType("public.jpeg")
+        .png, .tiff, NSPasteboard.PasteboardType("public.jpeg"),
+        NSPasteboard.PasteboardType("com.compuserve.gif")
     ]
 
     private func hasImageData(pasteboard: NSPasteboard) -> Bool {
@@ -149,8 +150,13 @@ final class BookmarksClipboardMonitor {
     }
 
     /// Reads image data from the general pasteboard. Called by the toast save action.
+    /// Checks GIF first so animated content is preserved when clipboard has both PNG and GIF.
     static func readImageFromClipboard() -> Data? {
         let pasteboard = NSPasteboard.general
+        let gifType = NSPasteboard.PasteboardType("com.compuserve.gif")
+        if let gifData = pasteboard.data(forType: gifType) {
+            return gifData
+        }
         for type in imageTypes {
             if let data = pasteboard.data(forType: type) {
                 return data

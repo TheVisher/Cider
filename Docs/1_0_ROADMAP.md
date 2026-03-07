@@ -353,11 +353,20 @@ Richer content display and media type support.
 ### R-15: GIF, Video & Carousel Bookmarks
 > Extended media type support beyond static images.
 
-**Status:** `Not Started`
+**Status:** `Implementing` — GIF support complete, video & carousel not started
 **Priority:** Medium
 
 **Scope:**
-- **GIF support:** Clipboard monitor detects GIFs, store as originals with first-frame PNG thumbnails, animate on hover
+- **GIF support (done):**
+  - `BookmarkMediaType` enum (`.image`, `.gif`, `.video`) on Bookmark model
+  - GIF detection via magic bytes (`GIF87a`/`GIF89a`) and CGImageSource frame count for animated WebP/APNG
+  - Direct image URL enrichment bypass (skip HTML parsing, download image directly)
+  - `.webp` → `.gif` URL variant fallback for Giphy/Tenor/Imgur
+  - Clipboard `com.compuserve.gif` detection (preserves animation over PNG fallback)
+  - `AnimatedGIFView` (NSViewRepresentable) with custom aspect-fill layout via `AnimatedGIFWrapper`
+  - Hover-to-animate on bookmark cards, always-animate in detail view
+  - "GIF" badge overlay on animated thumbnails
+  - **Known limitation:** Drag-drop GIF from browser provides static TIFF — animation lost. URL-based GIF bookmarks work fully.
 - **Video bookmarks:** Accept .mp4/.mov/.webm drag-drop, thumbnail extraction via AVAssetImageGenerator
 - **Multi-image/carousel:** Support multiple images per bookmark, horizontal scroll on cards, useful for Instagram posts, design boards
 
@@ -473,7 +482,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-20 | Screen Capture Polish | 2 | Not Started |
 | R-21 | Keyboard Shortcuts Reference | 2 | ✅ Complete |
 | R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
-| R-15 | GIF/Video/Carousel Bookmarks | 3 | Not Started |
+| R-15 | GIF/Video/Carousel Bookmarks | 3 | Implementing |
 | R-16 | Books Card Type | 4 | Not Started |
 | R-17 | Todos Card Type | 4 | Not Started |
 | R-18 | Documents Card Type | 4 | Not Started |

@@ -679,6 +679,7 @@ struct BookmarkMetadataSidebar: View {
     // MARK: - Helpers
 
     private var itemType: String {
+        if bookmark?.isAnimatedImage == true { return "GIF" }
         if !draft.hasURL { return "Image" }
         if draft.originalURLString.lowercased().hasPrefix("file:") { return "File" }
         return "Bookmark"
@@ -773,7 +774,12 @@ struct BookmarkDetailsHeroPreview: View {
 
     @ViewBuilder
     private var heroContent: some View {
-        if let thumbnailImage {
+        if let gifURL = bookmark?.animatedImageFileURL {
+            AnimatedGIFView(url: gifURL, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(Spacing.md)
+                .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 3)
+        } else if let thumbnailImage {
             Image(nsImage: thumbnailImage)
                 .resizable()
                 .interpolation(.high)

@@ -1,6 +1,12 @@
 import CoreGraphics
 import Foundation
 
+enum BookmarkMediaType: String, Codable {
+    case image
+    case gif
+    case video
+}
+
 enum BookmarkDisplayMode: String, Codable, CaseIterable {
     case list
     case grid
@@ -215,6 +221,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var aiSummary: String?           // Foundation Models 2-sentence summary
     var ocrText: String?             // Vision OCR text from thumbnail (for search)
     var dominantColors: [String]?    // Hex color strings extracted from thumbnail
+    var mediaType: BookmarkMediaType?  // nil or .image for standard images, .gif for animated GIFs, .video for video clips
     var readerUnavailable: Bool?      // true when Readability.js fails to extract content
     var preferredHeroMode: String?    // "thumbnail", "reader", or "web" — last used hero mode
 
@@ -236,6 +243,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case aiSummary
         case ocrText
         case dominantColors
+        case mediaType
         case readerUnavailable
         case preferredHeroMode
     }
@@ -259,6 +267,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         aiSummary: String? = nil,
         ocrText: String? = nil,
         dominantColors: [String]? = nil,
+        mediaType: BookmarkMediaType? = nil,
         readerUnavailable: Bool? = nil,
         preferredHeroMode: String? = nil
     ) {
@@ -280,6 +289,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.aiSummary = aiSummary
         self.ocrText = ocrText
         self.dominantColors = dominantColors
+        self.mediaType = mediaType
         self.readerUnavailable = readerUnavailable
         self.preferredHeroMode = preferredHeroMode
     }
@@ -303,6 +313,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         aiSummary = try container.decodeIfPresent(String.self, forKey: .aiSummary)
         ocrText = try container.decodeIfPresent(String.self, forKey: .ocrText)
         dominantColors = try container.decodeIfPresent([String].self, forKey: .dominantColors)
+        mediaType = try container.decodeIfPresent(BookmarkMediaType.self, forKey: .mediaType)
         readerUnavailable = try container.decodeIfPresent(Bool.self, forKey: .readerUnavailable)
         preferredHeroMode = try container.decodeIfPresent(String.self, forKey: .preferredHeroMode)
     }
@@ -341,5 +352,16 @@ struct Bookmark: Identifiable, Hashable, Codable {
             return nil
         }
         return StoragePaths.cachedDirectoryURL(for: .bookmarks).appendingPathComponent(originalImageRelativePath)
+    }
+
+    /// Whether this bookmark contains an animated image (GIF, animated WebP, APNG).
+    var isAnimatedImage: Bool {
+        mediaType == .gif
+    }
+
+    /// The file URL for the animated original (GIF, animated WebP, etc).
+    var animatedImageFileURL: URL? {
+        guard isAnimatedImage else { return nil }
+        return originalImageFileURL
     }
 }

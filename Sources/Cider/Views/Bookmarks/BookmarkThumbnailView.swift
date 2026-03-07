@@ -10,9 +10,11 @@ struct BookmarkThumbnailView: View {
 
     let bookmark: Bookmark
     let mode: ThumbnailMode
+    var isHovered: Bool = false
     var onAspectRatioResolved: ((CGFloat?) -> Void)? = nil
 
     @Environment(\.textScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnailImage: NSImage?
     @State private var rendersAsIconOverlay = false
 
@@ -27,11 +29,21 @@ struct BookmarkThumbnailView: View {
         return "\(path)|\(ts)|\(remote)"
     }
 
+    /// Whether to show the animated GIF instead of the static thumbnail.
+    private var shouldAnimate: Bool {
+        bookmark.isAnimatedImage && isHovered && !reduceMotion && bookmark.animatedImageFileURL != nil
+    }
+
     var body: some View {
         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
             .fill(Color.clear)
             .overlay(content: thumbnailContent)
             .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                if bookmark.isAnimatedImage, thumbnailImage != nil {
+                    gifBadge
+                }
+            }
             .task(id: thumbnailFingerprint) {
                 await loadThumbnailAsync()
             }
@@ -42,6 +54,9 @@ struct BookmarkThumbnailView: View {
         if let thumbnailImage, !shouldSuppressDownloadedThumbnail {
             if rendersAsIconOverlay {
                 iconOverlayGradient(for: thumbnailImage)
+            } else if shouldAnimate, let gifURL = bookmark.animatedImageFileURL {
+                AnimatedGIFView(url: gifURL, contentMode: mode == .masonry ? .fit : .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Image(nsImage: thumbnailImage)
                     .resizable()
@@ -53,6 +68,19 @@ struct BookmarkThumbnailView: View {
         } else {
             fallbackGradient
         }
+    }
+
+    private var gifBadge: some View {
+        Text("GIF")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundColor(CiderColors.textOnColor)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.55))
+            )
+            .padding(Spacing.sm)
     }
 
     private var shouldSuppressDownloadedThumbnail: Bool {
@@ -193,6 +221,103 @@ struct BookmarkThumbnailView: View {
             remoteFingerprint.hasSuffix(".ico")
 
         return hasIconURLHint || isTinySquareAsset
+    }
+}
+
+// MARK: - Animated GIF View
+
+/// Displays an animated GIF/WebP/APNG using NSImageView.
+/// For `.fill` content mode, the NSImageView is oversized to simulate aspect-fill
+/// (NSImageView only supports aspect-fit natively) and the wrapper clips the overflow.
+struct AnimatedGIFView: NSViewRepresentable {
+    let url: URL
+    var contentMode: ContentMode = .fill
+
+    func makeNSView(context: Context) -> AnimatedGIFWrapper {
+        let wrapper = AnimatedGIFWrapper(contentMode: contentMode)
+        if let image = NSImage(contentsOf: url) {
+            wrapper.setImage(image)
+        }
+        context.coordinator.loadedURL = url
+        return wrapper
+    }
+
+    func updateNSView(_ wrapper: AnimatedGIFWrapper, context: Context) {
+        wrapper.contentFillMode = contentMode
+        if context.coordinator.loadedURL != url, let image = NSImage(contentsOf: url) {
+            wrapper.setImage(image)
+            context.coordinator.loadedURL = url
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator {
+        var loadedURL: URL
+        init(url: URL) { loadedURL = url }
+    }
+}
+
+/// Custom NSView that wraps NSImageView and handles aspect-fill by oversizing
+/// the image view and clipping the container.
+final class AnimatedGIFWrapper: NSView {
+    var contentFillMode: ContentMode = .fill
+    private let imageView = NSImageView()
+    private var imageAspectRatio: CGFloat = 1.0 // width / height
+
+    init(contentMode: ContentMode) {
+        self.contentFillMode = contentMode
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = true
+
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.animates = true
+        imageView.isEditable = false
+        imageView.canDrawSubviewsIntoLayer = true
+        addSubview(imageView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setImage(_ image: NSImage) {
+        imageView.image = image
+        let size = image.size
+        imageAspectRatio = size.height > 0 ? size.width / size.height : 1.0
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let containerW = bounds.width
+        let containerH = bounds.height
+        guard containerW > 0, containerH > 0 else { return }
+
+        if contentFillMode == .fit {
+            imageView.frame = bounds
+            return
+        }
+
+        // Aspect-fill: scale image to cover the container, then center
+        let containerAspect = containerW / containerH
+        let imageW: CGFloat
+        let imageH: CGFloat
+        if imageAspectRatio > containerAspect {
+            // Image is wider — match height, overflow width
+            imageH = containerH
+            imageW = containerH * imageAspectRatio
+        } else {
+            // Image is taller — match width, overflow height
+            imageW = containerW
+            imageH = containerW / imageAspectRatio
+        }
+        imageView.frame = CGRect(
+            x: (containerW - imageW) / 2,
+            y: (containerH - imageH) / 2,
+            width: imageW,
+            height: imageH
+        )
     }
 }
 

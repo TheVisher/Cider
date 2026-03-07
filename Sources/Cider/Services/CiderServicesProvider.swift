@@ -46,7 +46,8 @@ final class CiderServicesProvider: NSObject {
         userData: String?,
         error: AutoreleasingUnsafeMutablePointer<NSString>
     ) {
-        let imageData = pasteboard.data(forType: .png)
+        let imageData = pasteboard.data(forType: NSPasteboard.PasteboardType("com.compuserve.gif"))
+            ?? pasteboard.data(forType: .png)
             ?? pasteboard.data(forType: .tiff)
             ?? pasteboard.data(forType: NSPasteboard.PasteboardType("public.jpeg"))
         Task { @MainActor [weak self] in

@@ -926,6 +926,19 @@ final class BookmarksStorage: ObservableObject {
 
         let task = Task { [weak self] in
             guard let self else { return }
+
+            // Direct image URL — skip HTML parsing and download image as-is
+            if Self.isDirectImageURL(url) {
+                let imageAssets = await self.cacheImageAssets(from: url, for: bookmarkID)
+                await self.completeEnrichment(
+                    for: bookmarkID,
+                    sourceURL: url,
+                    payload: nil,
+                    imageAssets: imageAssets
+                )
+                return
+            }
+
             let payload = await Self.fetchEnrichmentPayload(for: url)
 
             var imageAssets: BookmarkImageAssets?
@@ -1110,10 +1123,25 @@ final class BookmarksStorage: ObservableObject {
 
     private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
+
+        // If the thumbnail URL is .webp, try the .gif variant first (works for Giphy, Tenor, Imgur, most CDNs)
+        if remoteURL.pathExtension.lowercased() == "webp" {
+            let gifURL = remoteURL.deletingPathExtension().appendingPathExtension("gif")
+            if let gifAssets = await downloadImageAssets(from: gifURL, for: bookmarkID, pageURL: pageURL) {
+                enrichLog.info("Found GIF variant at \(gifURL.lastPathComponent, privacy: .public) for \(remoteURL.host ?? "?", privacy: .public)")
+                return gifAssets
+            }
+        }
+
+        return await downloadImageAssets(from: remoteURL, for: bookmarkID, pageURL: pageURL)
+    }
+
+    private func downloadImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
+        let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         var request = URLRequest(url: remoteURL)
         request.timeoutInterval = 8
         Self.applyBrowserHeaders(&request)
-        request.setValue("image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("image/gif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
         if let pageURL {
             request.setValue(pageURL.absoluteString, forHTTPHeaderField: "Referer")
         }
@@ -1122,6 +1150,9 @@ final class BookmarksStorage: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard !Task.isCancelled else { return nil }
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) else {
+                return nil
+            }
             enrichLog.info("Image download \(remoteURL.host ?? "?", privacy: .public): HTTP \(code), \(data.count) bytes")
             let fileExtension = inferredImageFileExtension(response: response, remoteURL: remoteURL)
             return cacheImageAssets(
@@ -1143,11 +1174,39 @@ final class BookmarksStorage: ObservableObject {
         guard data.count > 128, data.count < 12_000_000 else { return nil }
         guard NSImage(data: data) != nil else { return nil }
 
+        // Detect animated images: GIF magic bytes, file extension, or multi-frame image data
+        let isAnimated = preferredFileExtension?.lowercased() == "gif"
+            || Self.isGIFData(data)
+            || Self.isAnimatedImageData(data)
+        if isAnimated {
+            setMediaType(.gif, for: bookmarkID)
+        }
+
         return persistImageAssets(
             for: bookmarkID,
             sourceData: data,
-            preferredFileExtension: preferredFileExtension
+            preferredFileExtension: isAnimated ? (Self.isGIFData(data) ? "gif" : preferredFileExtension) : preferredFileExtension
         )
+    }
+
+    /// Returns true if the URL points directly to an image file (by extension).
+    private static func isDirectImageURL(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ["gif", "png", "jpg", "jpeg", "webp", "heic", "avif", "bmp", "tiff", "ico"].contains(ext)
+    }
+
+    private static func isGIFData(_ data: Data) -> Bool {
+        guard data.count >= 6 else { return false }
+        // GIF87a or GIF89a magic bytes
+        let header = data.prefix(6)
+        return header.elementsEqual([0x47, 0x49, 0x46, 0x38, 0x37, 0x61])  // GIF87a
+            || header.elementsEqual([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])  // GIF89a
+    }
+
+    /// Detects animated images (animated GIF, WebP, APNG) by checking frame count via CGImageSource.
+    private static func isAnimatedImageData(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
+        return CGImageSourceGetCount(source) > 1
     }
 
     private func persistImageAssets(
@@ -1819,6 +1878,13 @@ final class BookmarksStorage: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard bookmarks[index].preferredHeroMode != mode else { return }
         bookmarks[index].preferredHeroMode = mode
+        persist()
+    }
+
+    func setMediaType(_ mediaType: BookmarkMediaType, for bookmarkID: UUID) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        guard bookmarks[index].mediaType != mediaType else { return }
+        bookmarks[index].mediaType = mediaType
         persist()
     }
 }

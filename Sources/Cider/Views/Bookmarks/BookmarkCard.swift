@@ -57,6 +57,7 @@ struct BookmarkCard: View {
                 BookmarkThumbnailView(
                     bookmark: bookmark,
                     mode: mode == .grid ? .grid : .masonry,
+                    isHovered: isHovered,
                     onAspectRatioResolved: { resolvedThumbnailAspectRatio = $0 }
                 )
                     .frame(height: resolvedThumbnailHeight)
@@ -193,18 +194,23 @@ struct BookmarkCard: View {
     private func loadThumbnailDrop(from provider: NSItemProvider) -> Bool {
         let bookmarkID = bookmark.id
 
-        if provider.canLoadObject(ofClass: NSImage.self) {
-            provider.loadObject(ofClass: NSImage.self) { item, _ in
-                guard let image = item as? NSImage,
-                      let data = image.pngRepresentation else { return }
+        // Check for GIF-specific type identifier first (preserves animation)
+        let gifIdentifier = provider.registeredTypeIdentifiers.first { identifier in
+            guard let type = UTType(identifier) else { return false }
+            return type.conforms(to: .gif)
+        }
+        if let gifIdentifier {
+            provider.loadDataRepresentation(forTypeIdentifier: gifIdentifier) { data, _ in
+                guard let data else { return }
                 Task { @MainActor in
-                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
+                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
                     Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                 }
             }
             return true
         }
 
+        // Load raw image data
         let imageIdentifiers = provider.registeredTypeIdentifiers.filter { identifier in
             guard let type = UTType(identifier) else { return false }
             return type.conforms(to: .image)
@@ -216,6 +222,20 @@ struct BookmarkCard: View {
                 let ext = Self.preferredImageFileExtension(for: identifier)
                 Task { @MainActor in
                     let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+                    Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                }
+            }
+            // Also try to load the source URL — if it's a .gif, upgrade the static TIFF to animated GIF
+            Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
+            return true
+        }
+
+        if provider.canLoadObject(ofClass: NSImage.self) {
+            provider.loadObject(ofClass: NSImage.self) { item, _ in
+                guard let image = item as? NSImage,
+                      let data = image.pngRepresentation else { return }
+                Task { @MainActor in
+                    let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
                     Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                 }
             }
@@ -301,6 +321,28 @@ struct BookmarkCard: View {
         }
 
         return false
+    }
+
+    /// After saving a static image from a drop, check if the provider also has a URL
+    /// pointing to an animated format (.gif). If so, download the actual animated data
+    /// and replace the static thumbnail. Browsers provide TIFF (single frame) for dragged
+    /// images, so this is the only way to preserve animation from drag-drop.
+    /// After saving static image data from a browser drag, try to download the actual
+    /// animated source from the image's URL. Browsers give TIFF (single frame) for dragged
+    /// images, so this is the only way to preserve GIF animation from drag-drop.
+    private static func tryUpgradeToAnimatedSource(provider: NSItemProvider, bookmarkID: UUID) {
+        guard provider.canLoadObject(ofClass: NSURL.self) else { return }
+        provider.loadObject(ofClass: NSURL.self) { item, _ in
+            guard let droppedURL = item as? URL, !droppedURL.isFileURL else { return }
+            // Download from the source URL — cacheImageAssets detects GIF/animation via magic bytes
+            // and will try .gif variant if URL is .webp
+            Task { @MainActor in
+                _ = await BookmarksStorage.shared.assignThumbnail(
+                    for: bookmarkID,
+                    fromDroppedString: droppedURL.absoluteString
+                )
+            }
+        }
     }
 
     private static func postThumbnailToast(_ message: String, isSuccess: Bool) {
