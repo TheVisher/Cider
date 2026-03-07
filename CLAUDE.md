@@ -41,6 +41,7 @@ Read the relevant doc BEFORE writing code in that area:
 | Adding settings | `Docs/USER_PREFERENCES.md` |
 | Reusable components | `Docs/SHARED_COMPONENTS.md` |
 | Detail views | `Docs/DETAIL_PANEL_SPEC.md` |
+| Cider Web sync | `Docs/ARCHITECTURE.md` § Cider Web Sync |
 | Display/perf bugs | `Docs/TROUBLESHOOTING.md` |
 | Code health/debt | `Docs/CODE_HEALTH.md` |
 | Pre-release QA | `Docs/RELEASE_CHECKLIST.md` |
@@ -98,7 +99,7 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 Sources/Cider/
 ├── App/              # AppDelegate, Panels (CiderPanel, DetailPopover, Settings)
 ├── Models/           # Bookmark, Note, Folder, CiderConfig, TrashItem, CiderTab
-├── Services/         # Storage, DoubleTapDetector, TrashStorage, CiderUndoManager, AI/
+├── Services/         # Storage, DoubleTapDetector, TrashStorage, CiderUndoManager, SyncService, AI/
 ├── Utilities/        # Constants, CiderFont, ButtonStyles, ContainerStyles, HoverState
 ├── ViewModels/       # BookmarksViewModel, NotesViewModel, SettingsViewModel
 └── Views/

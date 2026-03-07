@@ -129,10 +129,53 @@ Two search systems: **SearchService** (search palette / search tab) and **Librar
 
 **SearchService** also produces `SearchSnippet` (prefix/match/suffix with ellipsis) for body-only matches. Uses `extractSnippet(tokens:from:windowSize:)` to find the first matching token and return surrounding context.
 
+**Scope modifiers** (`SearchScope` + `SearchService.parseScope`): Queries can contain `@`-prefixed scope modifiers that filter results before token matching:
+- Entity type: `@bookmarks`, `@notes`, `@events`, `@contacts` (prefix matching: `@b` works). Multiple combine (OR).
+- Folder: `@folder:Name` (multi-word, prefix match, case-insensitive). `@folder:` (bare) = all folder-assigned items. Multiple `@folder:` scopes combine (OR). Results grouped by folder with headers in Cmd+K.
+- Tag: `@tag:Name` (prefix match, case-insensitive).
+- Shorthand: `@f:` for folder, `@t:` for tag.
+- `SearchScope` struct holds parsed scopes + `cleanQuery` (remaining text after scope extraction).
+- Scope pills (blue badges) shown below search field in Cmd+K when active.
+- Works in Cmd+K palette, search tabs, sidebar search, and saved view filtering (`LibraryViewModel.filteredItems` parses scopes from `textQuery`).
+- Sidebar search on Inbox tab: `onlyUnassigned` is overridden when a `@folder:` scope is active.
+
 **SpotlightIndexer** (`Services/SpotlightIndexer.swift`) indexes all items into Core Spotlight for system-wide search (Spotlight, Raycast, Alfred). Subscribes to storage `$published` properties with 2-second debounce. Gated by `CiderConfig.enableSpotlightIndexing`. Note: Core Spotlight requires a proper `.app` bundle — SPM executables silently fail to surface items. Indexing code is ready but dormant during development builds.
 
 ---
 
 ## Settings Architecture
 
-Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Notes, Bookmarks, Appearance, Data, Advanced, About. Data subcategories: Directories (vault root + per-type override pickers), Trash (`StorageSettingsView`), Notifications (toast position pickers). Notes subcategories: Behavior, Editor. Bookmarks subcategory: Behavior (no directory picker — moved to Data → Directories). Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category).
+Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Notes, Bookmarks, Appearance, Data, Advanced, About. Data subcategories: Directories (vault root + per-type override pickers), Trash (`StorageSettingsView`), Notifications (toast position pickers), Cider Web Sync (`SyncSettingsView`). Notes subcategories: Behavior, Editor. Bookmarks subcategory: Behavior (no directory picker — moved to Data → Directories). Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category).
+
+## Cider Web Sync
+
+Cider Web is a companion web app that lets users capture bookmarks from their phone and sync them to the desktop app. Sync is entirely optional — disabled by default.
+
+**Architecture:**
+- `SyncService` (`Services/SyncService.swift`) — `@MainActor` singleton, polls every 5 seconds when enabled
+- Bidirectional: pushes all local bookmarks to web, pulls new/updated bookmarks from web
+- Conflict resolution: last-write-wins based on `updatedAt` timestamps
+- Deletion tracking: `BookmarksStorage.remove()` calls `SyncService.shared.trackDeletion()`, pending deletions persisted in UserDefaults and pushed on next sync cycle
+- Authentication: Bearer token in `Authorization` header, configured per-user in Settings → Data → Cider Web Sync
+
+**Sync flow:**
+1. **Push** — serializes all local bookmarks as JSON, POSTs to `/api/sync/push`
+2. **Push deletions** — sends tombstone records for locally-deleted bookmarks
+3. **Pull** — POSTs to `/api/sync/pull` with `since` timestamp, receives new/updated/deleted bookmarks
+4. Pull creates new bookmarks via `BookmarksStorage.addFromSync()` (preserves the web-assigned UUID)
+5. Pull updates existing bookmarks via `BookmarksStorage.updateFromSync()` (only if remote is newer)
+6. Pull removes bookmarks via `BookmarksStorage.removeSynced()` (no trash, no undo — web is authoritative)
+7. Server timestamp saved to `CiderConfig.lastSyncTimestamp` for incremental pulls
+
+**CiderConfig properties:** `syncEnabled`, `syncURL`, `syncToken`, `lastSyncTimestamp`
+
+**BookmarksStorage sync methods:**
+- `addFromSync(id:title:urlString:...)` — creates bookmark with specific UUID, triggers enrichment
+- `updateFromSync(bookmarkID:title:...)` — updates fields, sets `updatedAt` to now
+- `removeSynced(_:)` — removes without trashing (no undo toast)
+
+**Settings UI:** `SyncSettingsView` under Data → Cider Web Sync. Fields: Convex site URL, sync token (SecureField), enable toggle, status indicator (syncing/error/last synced), Sync Now button.
+
+**Backend:** Convex (convex.dev) — the web app URL is a Convex HTTP site URL (e.g. `https://foo-123.convex.site`). The desktop app doesn't need to know about Convex internals — it just hits REST endpoints.
+
+**Important:** Only bookmarks sync currently. Notes, date cards, contacts, folders, and tags are local-only.

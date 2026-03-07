@@ -60,10 +60,11 @@ Each tab and major feature area has its own doc. These capture what's been built
 | --- | --- | --- |
 | **WORKSPACES_VISION.md** | Folders, saved views, search tabs, sidebar design, themed folders, multi-select; Projects removed (dormant storage only); New Tab in +New popover | ✅ Phases 1-3 + New Tab complete; Phase 4-5 (manual item refs, Kanban) future |
 
-### Future Integrations & AI
+### Integrations & Sync
 
 | Doc | What it covers | Status |
 | --- | --- | --- |
+| **ARCHITECTURE.md** § Cider Web Sync | Bidirectional bookmark sync with Cider Web (phone capture → desktop). SyncService, REST API, conflict resolution, settings. Only bookmarks sync currently. | ✅ Implemented (bookmarks only) |
 | **LINKED_SOURCES_VISION.md** | External filesystem folders surfaced in Cider — sidebar, tabs, library feed. Makes Cider a default `.md` editor/viewer. | ✅ Implemented |
 | **AI_VISION.md** | On-device ML, smart tagging, semantic search, Apple Intelligence integration, tiered AI strategy | 🔲 Future |
 | **INTEGRATION_DESIGN.md** | Obsidian / knowledge-base sync architecture and design | 🔲 Future (Phase 2+) |
