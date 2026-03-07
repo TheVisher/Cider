@@ -298,14 +298,15 @@ Make everything that shipped in beta feel finished.
 ### R-20: Screen Capture Polish
 > Complete the screen capture flow — Date Card and Contact OCR routing is broken, and the feature needs general polish.
 
-**Status:** `Not Started`
+**Status:** `Testing`
 **Priority:** Medium
 
 **Scope:**
-- **Fix Date Card OCR routing:** Screen capture → OCR text is not passed to the Date Card editor (data lost)
-- **Fix Contact OCR routing:** Same issue — OCR text not passed to Contact editor
-- **Notes routing works:** Verified functional (OCR text → new note)
-- **Image preview in capture toast:** Show a thumbnail of the captured region
+- ✅ **Fix Date Card OCR routing:** OCR detected dates + suggested title now passed through notification → NewItemPopover → EventCreationForm pre-fill
+- ✅ **Fix Contact OCR routing:** OCR detected emails/phones + suggested title now passed through notification → NewItemPopover → ContactCreationForm pre-fill
+- ✅ **Notes routing works:** Verified functional (OCR text → new note) — was already working
+- ✅ **Image preview in capture toast:** Capture thumbnail shown in toast header (replaces camera icon)
+- ✅ **Direct step navigation:** Screen capture toast buttons skip the item picker and go directly to the Event/Contact form
 - **General UX polish:** Review the full capture flow end-to-end, fix any rough edges
 
 ---
@@ -353,7 +354,7 @@ Richer content display and media type support.
 ### R-15: GIF, Video & Carousel Bookmarks
 > Extended media type support beyond static images.
 
-**Status:** `Implementing` — GIF support complete, video & carousel not started
+**Status:** `Testing` — GIF + carousel complete, video deferred to post-1.0
 **Priority:** Medium
 
 **Scope:**
@@ -367,8 +368,8 @@ Richer content display and media type support.
   - Hover-to-animate on bookmark cards, always-animate in detail view
   - "GIF" badge overlay on animated thumbnails
   - **Known limitation:** Drag-drop GIF from browser provides static TIFF — animation lost. URL-based GIF bookmarks work fully.
-- **Video bookmarks:** Accept .mp4/.mov/.webm drag-drop, thumbnail extraction via AVAssetImageGenerator
-- **Multi-image/carousel:** Support multiple images per bookmark, horizontal scroll on cards, useful for Instagram posts, design boards
+- **Video bookmarks (deferred to post-1.0):** Accept .mp4/.mov/.webm drag-drop, thumbnail extraction via AVAssetImageGenerator
+- **Multi-image/carousel (done):** Multiple images per bookmark, horizontal paging on cards with arrows/scroll wheel/keyboard, page dots, count badge, images section in metadata sidebar with delete/open in Preview
 
 ---
 
@@ -479,10 +480,10 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-11 | Drag Out to External Apps | 2 | ✅ Complete |
 | R-12 | Clipboard Viewer | 2 | ✅ Complete |
 | R-13 | Advanced Search | 2 | ✅ Complete |
-| R-20 | Screen Capture Polish | 2 | Not Started |
+| R-20 | Screen Capture Polish | 2 | Testing |
 | R-21 | Keyboard Shortcuts Reference | 2 | ✅ Complete |
 | R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
-| R-15 | GIF/Video/Carousel Bookmarks | 3 | Implementing |
+| R-15 | GIF/Video/Carousel Bookmarks | 3 | Testing |
 | R-16 | Books Card Type | 4 | Not Started |
 | R-17 | Todos Card Type | 4 | Not Started |
 | R-18 | Documents Card Type | 4 | Not Started |
@@ -562,6 +563,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 ### Bookmarks
 | Item | Source | Notes |
 |------|--------|-------|
+| Video bookmarks | R-15 | Drag-drop .mp4/.mov/.webm, thumbnail extraction via AVAssetImageGenerator |
 | YouTube transcript sync | BOOKMARKS_VISION | Live captions, click-to-seek |
 | PiP video player | BOOKMARKS_VISION | Mini-panel playback when panel closed |
 | Richer import feedback | BOOKMARKS_VISION | Malformed file diagnostics |

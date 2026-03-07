@@ -4,6 +4,8 @@ import SwiftUI
 
 struct NewItemPopover: View {
     let folders: [Folder]
+    var initialStep: String?
+    var ocrData: [String: Any] = [:]
     var onCreateBookmark: (String, String?) -> Void
     var onCreateNote: (String, String) -> Void
     var onCreateEvent: (String, Date, Bool) -> Void
@@ -38,6 +40,8 @@ struct NewItemPopover: View {
                 )
             case .event:
                 EventCreationForm(
+                    prefillTitle: ocrData["suggestedTitle"] as? String,
+                    prefillDate: (ocrData["detectedDates"] as? [Date])?.first,
                     onBack: back,
                     onCreate: { title, date, allDay in
                         onCreateEvent(title, date, allDay)
@@ -46,6 +50,9 @@ struct NewItemPopover: View {
                 )
             case .contact:
                 ContactCreationForm(
+                    prefillName: ocrData["suggestedTitle"] as? String,
+                    prefillEmail: (ocrData["detectedEmails"] as? [String])?.first,
+                    prefillPhone: (ocrData["detectedPhones"] as? [String])?.first,
                     onBack: back,
                     onCreate: { name, relationship in
                         onCreateContact(name, relationship)
@@ -82,6 +89,17 @@ struct NewItemPopover: View {
         // No animation on step changes: animating popover content size via ViewBridge
         // (RemoteViewService XPC) causes crashes in non-activating NSPanel popovers.
         .frame(width: 264)
+        .onAppear {
+            if let initialStep {
+                switch initialStep {
+                case "event": step = .event
+                case "contact": step = .contact
+                case "bookmark": step = .bookmark
+                case "note": step = .note
+                default: break
+                }
+            }
+        }
     }
 
     private func back() {
@@ -388,6 +406,8 @@ private struct NoteCreationForm: View {
 // MARK: - Event Form
 
 private struct EventCreationForm: View {
+    var prefillTitle: String?
+    var prefillDate: Date?
     let onBack: () -> Void
     let onCreate: (String, Date, Bool) -> Void
 
@@ -402,6 +422,7 @@ private struct EventCreationForm: View {
     }()
     @State private var allDay = false
     @State private var errorMessage = ""
+    @State private var didApplyPrefill = false
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -440,6 +461,19 @@ private struct EventCreationForm: View {
             AddButton(label: "Create Event", action: commit)
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
+        }
+        .onAppear {
+            guard !didApplyPrefill else { return }
+            didApplyPrefill = true
+            if let prefillTitle, !prefillTitle.isEmpty {
+                title = prefillTitle
+            }
+            if let prefillDate {
+                let df = DateFormatter(); df.dateFormat = "MMM d, yyyy"
+                dateText = df.string(from: prefillDate)
+                let tf = DateFormatter(); tf.dateFormat = "h:mm a"
+                timeText = tf.string(from: prefillDate)
+            }
         }
     }
 
@@ -506,12 +540,16 @@ private struct EventCreationForm: View {
 // MARK: - Contact Form
 
 private struct ContactCreationForm: View {
+    var prefillName: String?
+    var prefillEmail: String?
+    var prefillPhone: String?
     let onBack: () -> Void
     let onCreate: (String, String) -> Void
 
     @State private var name = ""
     @State private var relationship = ""
     @State private var errorMessage = ""
+    @State private var didApplyPrefill = false
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -553,6 +591,19 @@ private struct ContactCreationForm: View {
             AddButton(label: "Create Contact", action: commit)
                 .padding(.horizontal, Spacing.md)
                 .padding(.bottom, Spacing.md)
+        }
+        .onAppear {
+            guard !didApplyPrefill else { return }
+            didApplyPrefill = true
+            if let prefillName, !prefillName.isEmpty {
+                name = prefillName
+            }
+            if let prefillEmail, !prefillEmail.isEmpty {
+                // Show email/phone in relationship field as context
+                relationship = prefillEmail
+            } else if let prefillPhone, !prefillPhone.isEmpty {
+                relationship = prefillPhone
+            }
         }
     }
 

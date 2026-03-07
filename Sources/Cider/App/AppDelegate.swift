@@ -1311,6 +1311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let toastView = ScreenCaptureRoutingToastView(
             model: screenCaptureToastModel,
             route: route,
+            captureImage: image,
             onHoverChanged: { [weak self] hovering in
                 guard let self else { return }
                 self.screenCaptureToastIsHovering = hovering
@@ -1333,14 +1334,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onCreateDateCard: { [weak self] in
                 self?.dismissScreenCaptureToast()
                 self?.showCiderPanel()
-                NotificationCenter.default.post(name: .openNewItemPopover, object: nil,
-                    userInfo: ["initialStep": "event"])
+                var info: [String: Any] = ["initialStep": "event"]
+                if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
+                if !route.detectedDates.isEmpty { info["detectedDates"] = route.detectedDates }
+                NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)
             },
             onCreateContact: { [weak self] in
                 self?.dismissScreenCaptureToast()
                 self?.showCiderPanel()
-                NotificationCenter.default.post(name: .openNewItemPopover, object: nil,
-                    userInfo: ["initialStep": "contact"])
+                var info: [String: Any] = ["initialStep": "contact"]
+                if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
+                if !route.detectedEmails.isEmpty { info["detectedEmails"] = route.detectedEmails }
+                if !route.detectedPhones.isEmpty { info["detectedPhones"] = route.detectedPhones }
+                NotificationCenter.default.post(name: .openNewItemPopover, object: nil, userInfo: info)
             }
         )
 

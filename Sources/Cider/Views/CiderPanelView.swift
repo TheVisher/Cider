@@ -18,6 +18,8 @@ struct CiderPanelView: View {
     @State private var dynamicTabs: [CiderTab] = []
     @State private var isHomeViewOptionsVisible = false
     @State private var showNewItemPicker = false
+    @State private var newItemInitialStep: String?
+    @State private var newItemOCRData: [String: Any] = [:]
     @State private var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State private var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
     @State private var homeSort: LibrarySortMode = CiderConfig.load().homeSort
@@ -291,7 +293,9 @@ struct CiderPanelView: View {
                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
             openBookmarkDetails(bookmark)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
+            newItemInitialStep = notification.userInfo?["initialStep"] as? String
+            newItemOCRData = (notification.userInfo as? [String: Any]) ?? [:]
             showNewItemPicker = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
@@ -716,8 +720,12 @@ struct CiderPanelView: View {
         let bvm = bookmarksViewModel
         let eventContextSetter = _newEventEditorContext
         let contactContextSetter = _newContactEditorContext
+        let initialStep = newItemInitialStep
+        let ocrData = newItemOCRData
         return NewItemPopover(
             folders: bvm.folders,
+            initialStep: initialStep,
+            ocrData: ocrData,
             onCreateBookmark: { urlString, title in
                 _ = bvm.addBookmark(urlString: urlString, title: title)
             },
@@ -762,6 +770,8 @@ struct CiderPanelView: View {
             },
             onDismiss: { [self] in
                 showNewItemPicker = false
+                newItemInitialStep = nil
+                newItemOCRData = [:]
             }
         )
     }

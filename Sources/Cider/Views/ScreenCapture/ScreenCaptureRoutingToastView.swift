@@ -3,6 +3,7 @@ import SwiftUI
 struct ScreenCaptureRoutingToastView: View {
     @ObservedObject var model: ScreenCaptureToastModel
     let route: CaptureRoute
+    let captureImage: NSImage?
     let onHoverChanged: (Bool) -> Void
     let onCreateNote: () -> Void
     let onCreateDateCard: () -> Void
@@ -13,6 +14,7 @@ struct ScreenCaptureRoutingToastView: View {
     init(
         model: ScreenCaptureToastModel,
         route: CaptureRoute,
+        captureImage: NSImage? = nil,
         onHoverChanged: @escaping (Bool) -> Void,
         onCreateNote: @escaping () -> Void,
         onCreateDateCard: @escaping () -> Void,
@@ -20,6 +22,7 @@ struct ScreenCaptureRoutingToastView: View {
     ) {
         self.model = model
         self.route = route
+        self.captureImage = captureImage
         self.onHoverChanged = onHoverChanged
         self.onCreateNote = onCreateNote
         self.onCreateDateCard = onCreateDateCard
@@ -33,9 +36,17 @@ struct ScreenCaptureRoutingToastView: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.sm) {
-                    Image(systemName: "camera.viewfinder")
-                        .font(CiderFont.labelSemibold)
-                        .foregroundColor(CiderColors.controlAccent)
+                    if let captureImage {
+                        Image(nsImage: captureImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
+                    } else {
+                        Image(systemName: "camera.viewfinder")
+                            .font(CiderFont.labelSemibold)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
 
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         Text("Screen captured")
