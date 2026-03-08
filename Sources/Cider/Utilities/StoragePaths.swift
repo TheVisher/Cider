@@ -14,6 +14,7 @@ enum StorageType: String, CaseIterable {
     case sources = "Sources"
     case todos = "Todos"
     case clipboard = "Clipboard"
+    case whiteboards = "Whiteboards"
 }
 
 enum StoragePaths {

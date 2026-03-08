@@ -191,6 +191,7 @@ private struct TrashItemRow: View {
         case .dateCard: return "calendar"
         case .contact: return "person.crop.circle"
         case .todo: return "checklist"
+        case .whiteboard: return "scribble"
         case .folder: return "folder"
         }
     }

@@ -1,0 +1,12 @@
+/* Excalidraw base styles — resolved via esbuild alias */
+@import "excalidraw-css";
+
+/* Make Excalidraw canvas transparent so Cider's acrylic shows through */
+.excalidraw {
+  --color-surface-lowest: transparent !important;
+}
+
+/* Hide the main menu hamburger — Cider manages persistence */
+.excalidraw .main-menu-trigger {
+  display: none !important;
+}

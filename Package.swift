@@ -21,6 +21,7 @@ let package = Package(
                 // Resources are bundled by the Xcode project (Cider.xcodeproj).
                 // swift build is used for compilation verification only.
                 "Resources/TipTapEditor",
+                "Resources/ExcalidrawEditor",
                 "Resources/ReaderMode",
                 "Resources/Assets.xcassets",
                 "Resources/Info.plist",

@@ -97,6 +97,7 @@ struct SavedView: Identifiable, Codable, Hashable {
     var isTabPinned: Bool
     var isBlank: Bool
     var isOnboarding: Bool
+    var kind: SavedViewKind
     var createdAt: Date
     var updatedAt: Date
 
@@ -109,6 +110,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         isTabPinned: Bool = true,
         isBlank: Bool = false,
         isOnboarding: Bool = false,
+        kind: SavedViewKind = .library,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -120,6 +122,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         self.isTabPinned = isTabPinned
         self.isBlank = isBlank
         self.isOnboarding = isOnboarding
+        self.kind = kind
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -134,6 +137,7 @@ struct SavedView: Identifiable, Codable, Hashable {
         isTabPinned = try container.decodeIfPresent(Bool.self, forKey: .isTabPinned) ?? true
         isBlank = try container.decodeIfPresent(Bool.self, forKey: .isBlank) ?? false
         isOnboarding = try container.decodeIfPresent(Bool.self, forKey: .isOnboarding) ?? false
+        kind = try container.decodeIfPresent(SavedViewKind.self, forKey: .kind) ?? .library
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }

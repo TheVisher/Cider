@@ -13,6 +13,7 @@ struct NewItemPopover: View {
     var onCreateFolder: (String, UUID?) -> Void
     var onCreateTab: (String, Set<LibraryEntityType>) -> Void
     var onCreateTag: (String, String) -> Void
+    var onCreateWhiteboard: (String) -> Void
     var onDismiss: () -> Void
 
     @State private var step: NewItemStep = .picker
@@ -91,6 +92,14 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
+            case .whiteboard:
+                WhiteboardCreationForm(
+                    onBack: back,
+                    onCreate: { name in
+                        onCreateWhiteboard(name)
+                        onDismiss()
+                    }
+                )
             }
         }
         // No animation on step changes: animating popover content size via ViewBridge
@@ -123,6 +132,7 @@ struct NewItemPopover: View {
                 typeCard(.todo)
                 typeCard(.folder)
                 typeCard(.tab)
+                typeCard(.whiteboard)
                 typeCard(.tag)
             }
             .padding(.horizontal, Spacing.md)
@@ -162,8 +172,9 @@ struct NewItemPopover: View {
         case .contact:  step = .contact
         case .todo:     step = .todo
         case .folder:   step = .folder
-        case .tab:      step = .tab
-        case .tag:      step = .tag
+        case .tab:        step = .tab
+        case .whiteboard: step = .whiteboard
+        case .tag:        step = .tag
         }
     }
 }
@@ -171,13 +182,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, todo, folder, tab, tag
+    case picker, bookmark, note, event, contact, todo, folder, tab, whiteboard, tag
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, todo, folder, tab, tag
+    case bookmark, note, event, contact, todo, folder, tab, whiteboard, tag
 
     var id: String { rawValue }
 
@@ -188,9 +199,10 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .event:    "Event"
         case .contact:  "Contact"
         case .todo:     "Todo"
-        case .folder:   "Folder"
-        case .tab:      "Tab"
-        case .tag:      "Tag"
+        case .folder:     "Folder"
+        case .tab:        "Tab"
+        case .whiteboard: "Whiteboard"
+        case .tag:        "Tag"
         }
     }
 
@@ -201,9 +213,10 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .event:    "calendar.badge.plus"
         case .contact:  "person.badge.plus"
         case .todo:     "checklist"
-        case .folder:   "folder.badge.plus"
-        case .tab:      "rectangle.badge.plus"
-        case .tag:      "tag"
+        case .folder:     "folder.badge.plus"
+        case .tab:        "rectangle.badge.plus"
+        case .whiteboard: "scribble"
+        case .tag:        "tag"
         }
     }
 }
@@ -973,5 +986,49 @@ private struct TagCreationForm: View {
             return
         }
         onCreate(trimmedName, selectedColorHex)
+    }
+}
+
+// MARK: - Whiteboard Form
+
+private struct WhiteboardCreationForm: View {
+    let onBack: () -> Void
+    let onCreate: (String) -> Void
+
+    @State private var name = ""
+    @State private var errorMessage = ""
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            FormHeader(title: "New Whiteboard", onBack: onBack)
+
+            inputField("Whiteboard name", text: $name, onSubmit: commit)
+                .padding(.horizontal, Spacing.md)
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+            }
+
+            AddButton(
+                label: "Create Whiteboard",
+                disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                action: commit
+            )
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private func commit() {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            errorMessage = "Name is required"
+            return
+        }
+        onCreate(trimmedName)
     }
 }

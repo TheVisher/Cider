@@ -235,6 +235,35 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
+    // MARK: - Whiteboard Trash
+
+    func trashWhiteboard(_ canvas: WhiteboardCanvas, whiteboardsDir: URL) -> TrashItem {
+        let trashDir = whiteboardsDir.appendingPathComponent(trashDirName)
+        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        let payload = WhiteboardTrashPayload(canvas: canvas)
+        let trashItem = TrashItem(
+            itemID: canvas.id,
+            itemType: .whiteboard,
+            title: canvas.name,
+            originalFolderID: nil,
+            whiteboardPayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        return trashItem
+    }
+
+    func restoreWhiteboard(_ trashItem: TrashItem) {
+        guard let payload = trashItem.whiteboardPayload else { return }
+
+        let whiteboardsDir = StoragePaths.directoryURL(for: .whiteboards)
+        let trashDir = whiteboardsDir.appendingPathComponent(trashDirName)
+
+        WhiteboardStorage.shared.restoreFromTrash(payload.canvas)
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+    }
+
     // MARK: - Contact Trash
 
     func trashContact(_ contact: ContactCard, contactsDir: URL) -> TrashItem {
@@ -332,6 +361,8 @@ final class TrashStorage {
             restoreDateCard(trashItem)
         case .todo:
             restoreTodoCard(trashItem)
+        case .whiteboard:
+            restoreWhiteboard(trashItem)
         case .contact:
             restoreContact(trashItem)
         }
@@ -400,6 +431,12 @@ final class TrashStorage {
         case .todo:
             let trashDir = StoragePaths.directoryURL(for: .todos).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+        case .whiteboard:
+            let trashDir = StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
+            // Delete the trashed scene file
+            let trashSceneURL = trashDir.appendingPathComponent("\(trashItem.itemID.uuidString).excalidraw")
+            try? FileManager.default.removeItem(at: trashSceneURL)
+            removeFromManifest(trashItem.id, trashDir: trashDir)
         case .contact:
             let trashDir = StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
@@ -453,6 +490,10 @@ final class TrashStorage {
             break // No files to delete — data is in the manifest payload
         case .todo:
             break // No files to delete — data is in the manifest payload
+        case .whiteboard:
+            let trashDir = StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
+            let trashSceneURL = trashDir.appendingPathComponent("\(trashItem.itemID.uuidString).excalidraw")
+            try? FileManager.default.removeItem(at: trashSceneURL)
         case .contact:
             if let payload = trashItem.contactPayload, let avatarRelPath = payload.trashAvatarRelativePath {
                 try? fm.removeItem(at: trashDir.appendingPathComponent(avatarRelPath))

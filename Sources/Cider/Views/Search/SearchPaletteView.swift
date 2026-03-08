@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Quick Action Model
 
 enum QuickAction: String, CaseIterable, Identifiable {
-    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, openSettings
+    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newWhiteboard, openSettings
 
     var id: String { rawValue }
 
@@ -16,7 +16,8 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTodo:      return "New Todo"
         case .newFolder:    return "New Folder"
         case .newTag:       return "New Tag"
-        case .newTab:       return "New Tab"
+        case .newTab:        return "New Tab"
+        case .newWhiteboard: return "New Whiteboard"
         case .openSettings: return "Open Settings"
         }
     }
@@ -30,7 +31,8 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTodo:      return "checklist"
         case .newFolder:    return "folder.badge.plus"
         case .newTag:       return "tag"
-        case .newTab:       return "plus.square.on.square"
+        case .newTab:        return "plus.square.on.square"
+        case .newWhiteboard: return "scribble"
         case .openSettings: return "gearshape"
         }
     }
@@ -44,7 +46,8 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTodo:      return ["task", "checklist", "bills", "create", "add"]
         case .newFolder:    return ["organize", "create", "add"]
         case .newTag:       return ["label", "create", "add"]
-        case .newTab:       return ["view", "create", "add"]
+        case .newTab:        return ["view", "create", "add"]
+        case .newWhiteboard: return ["draw", "canvas", "sketch", "excalidraw", "create", "add"]
         case .openSettings: return ["preferences", "config", "set"]
         }
     }

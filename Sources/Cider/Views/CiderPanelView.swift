@@ -8,6 +8,7 @@ struct CiderPanelView: View {
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
     @ObservedObject private var externalSourceStorage = ExternalSourceStorage.shared
     @StateObject private var libraryViewModel = LibraryViewModel()
+    @StateObject private var whiteboardViewModel = WhiteboardViewModel()
     @State private var selectedTab: CiderTab?
     @State private var isCollapsed = false
     @State private var selectedFolderID: UUID?
@@ -201,6 +202,8 @@ struct CiderPanelView: View {
             }
         }
         .onChange(of: selectedTab) { _, _ in
+            // Flush any pending whiteboard save before switching
+            whiteboardViewModel.flushSave()
             selectedFolderID = nil
             selectedSourceID = nil
             selectedTagIDs.removeAll()
@@ -823,6 +826,13 @@ struct CiderPanelView: View {
             onCreateTag: { name, colorHex in
                 CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)
             },
+            onCreateWhiteboard: { [self] name in
+                let canvas = WhiteboardStorage.shared.createCanvas(name: name)
+                let savedView = savedViewStorage.createWhiteboardView(name: name, canvasID: canvas.id)
+                savedViewStorage.addToTabOrder(savedView.id)
+                selectedFolderID = nil
+                selectedTab = .savedView(id: savedView.id, name: savedView.name)
+            },
             onDismiss: { [self] in
                 showNewItemPicker = false
             }
@@ -1057,7 +1067,9 @@ struct CiderPanelView: View {
             switch tab {
             case .savedView(let id, _):
                 if let savedView = savedViewStorage.savedView(for: id) {
-                    if savedView.isOnboarding {
+                    if case .whiteboard(let canvasID) = savedView.kind {
+                        WhiteboardTabView(canvasID: canvasID, viewModel: whiteboardViewModel)
+                    } else if savedView.isOnboarding {
                         OnboardingTabView(onDismiss: {
                             dismissOnboardingTab(id: id)
                         })
@@ -1301,6 +1313,12 @@ struct CiderPanelView: View {
             openOrSelectTagTab()
         case .newTab:
             createSavedViewFromCurrentState()
+        case .newWhiteboard:
+            let canvas = WhiteboardStorage.shared.createCanvas(name: "Untitled Whiteboard")
+            let savedView = savedViewStorage.createWhiteboardView(name: canvas.name, canvasID: canvas.id)
+            savedViewStorage.addToTabOrder(savedView.id)
+            selectedFolderID = nil
+            selectedTab = .savedView(id: savedView.id, name: savedView.name)
         case .openSettings:
             NotificationCenter.default.post(name: .openCiderSettings, object: nil)
         }

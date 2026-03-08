@@ -99,6 +99,19 @@ final class SavedViewStorage: ObservableObject {
     }
 
     @discardableResult
+    func createWhiteboardView(name: String, canvasID: UUID) -> SavedView {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmed.isEmpty ? "Untitled Whiteboard" : trimmed
+        let savedView = SavedView(
+            name: finalName,
+            kind: .whiteboard(canvasID: canvasID)
+        )
+        savedViews.append(savedView)
+        persist()
+        return savedView
+    }
+
+    @discardableResult
     func updateSavedView(_ updated: SavedView) -> Bool {
         guard let idx = savedViews.firstIndex(where: { $0.id == updated.id }) else { return false }
         var copy = updated

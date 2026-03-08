@@ -97,7 +97,7 @@ final class CiderUndoManager {
                 ContactStorage.shared.assignContact(itemID, toFolder: fromFolderID)
             case .todo:
                 TodoCardStorage.shared.assignTodoCard(itemID, toFolder: fromFolderID)
-            case .folder:
+            case .whiteboard, .folder:
                 break
             }
 
@@ -114,7 +114,7 @@ final class CiderUndoManager {
                     ContactStorage.shared.assignContact(item.itemID, toFolder: item.fromFolderID)
                 case .todo:
                     TodoCardStorage.shared.assignTodoCard(item.itemID, toFolder: item.fromFolderID)
-                case .folder:
+                case .whiteboard, .folder:
                     break
                 }
             }
@@ -149,6 +149,8 @@ final class CiderUndoManager {
                     todoCard.title = oldTitle
                     _ = TodoCardStorage.shared.updateTodoCard(todoCard)
                 }
+            case .whiteboard:
+                _ = WhiteboardStorage.shared.renameCanvas(itemID, to: oldTitle)
             case .folder:
                 break
             }

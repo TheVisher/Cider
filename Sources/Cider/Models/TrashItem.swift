@@ -7,6 +7,7 @@ enum TrashItemType: String, Codable {
     case dateCard
     case contact
     case todo
+    case whiteboard
 }
 
 /// Payload stored alongside a trashed bookmark, containing the full bookmark data
@@ -34,6 +35,11 @@ struct DateCardTrashPayload: Codable {
 /// Payload stored alongside a trashed todo card.
 struct TodoCardTrashPayload: Codable {
     let todoCard: TodoCard
+}
+
+/// Payload stored alongside a trashed whiteboard canvas.
+struct WhiteboardTrashPayload: Codable {
+    let canvas: WhiteboardCanvas
 }
 
 /// Payload stored alongside a trashed contact.
@@ -72,6 +78,9 @@ struct TrashItem: Codable, Identifiable {
     // Contact-specific
     var contactPayload: ContactTrashPayload?
 
+    // Whiteboard-specific
+    var whiteboardPayload: WhiteboardTrashPayload?
+
     init(
         id: UUID = UUID(),
         itemID: UUID,
@@ -84,7 +93,8 @@ struct TrashItem: Codable, Identifiable {
         folderContents: [TrashItem]? = nil,
         dateCardPayload: DateCardTrashPayload? = nil,
         todoCardPayload: TodoCardTrashPayload? = nil,
-        contactPayload: ContactTrashPayload? = nil
+        contactPayload: ContactTrashPayload? = nil,
+        whiteboardPayload: WhiteboardTrashPayload? = nil
     ) {
         self.id = id
         self.itemID = itemID
@@ -98,5 +108,6 @@ struct TrashItem: Codable, Identifiable {
         self.dateCardPayload = dateCardPayload
         self.todoCardPayload = todoCardPayload
         self.contactPayload = contactPayload
+        self.whiteboardPayload = whiteboardPayload
     }
 }
