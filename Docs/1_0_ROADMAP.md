@@ -462,20 +462,38 @@ Expand Cider beyond bookmarks and notes.
 
 ---
 
-### R-19: Whiteboard Folder Theme
-> Display a folder as a freeform canvas instead of list/grid/masonry.
+### R-19: Excalidraw Whiteboard Tab
+> Full Excalidraw-powered whiteboard as a tab type, with Cider library integration.
 
-**Status:** `Not Started`
+**Status:** `Testing`
 **Priority:** Medium
 
-**Scope:**
-- New display mode on folders: Whiteboard (alongside list/grid/masonry)
-- Infinite canvas with dot grid background
-- Existing cards (bookmarks, notes, etc.) rendered as draggable blocks
-- Drag to reposition, persist positions per item per folder
-- Pan (scroll) and zoom (Cmd+scroll)
-- Drag items from other folders/tabs onto the canvas
-- Phase 2 (post-1.0): connections between blocks, lasso select, block rotation, export as image
+**Phase A — Foundation (Complete):**
+- `SavedViewKind` enum (`.library` / `.whiteboard(canvasID)`) with backward-compat decoding
+- `WhiteboardCanvas` model + `WhiteboardStorage` service (vault persistence in `~/CiderVault/Whiteboards/`)
+- `StorageType.whiteboards`, trash/restore/undo manager support
+- Excalidraw JS bundle (React + esbuild, bundled in `Resources/ExcalidrawEditor/`)
+- `WhiteboardViewModel` with singleton WKWebView, debounced scene saves (1.5s)
+- `ExcalidrawView` (NSViewRepresentable) + `WhiteboardTabView`
+- "Create Whiteboard" in NewItemPopover and Cmd+K palette
+- Tab system routing: whiteboard SavedViews render Excalidraw canvas
+- Flush-save on tab switch, transparent canvas background
+- Xcode project wiring (`ExcalidrawEditor` folder reference in Resources build phase)
+
+**Phase B — Cider Library Integration (Not Started):**
+- Drag bookmarks from sidebar/library → drops as linked card on canvas
+- Drag images from Cider library → inserts as Excalidraw image element via JS bridge
+- Right-click any card → "Send to Whiteboard" → pick target whiteboard
+- `cider-library-item` custom element type with `libraryItemID` in Excalidraw `customData`
+- Swift bridge resolves IDs to current card data (title, thumbnail, URL)
+
+**Phase C — Polish (Not Started):**
+- Canvas rename via tab context menu
+- Canvas delete with undo toast
+- Theme sync (dark/light appearance changes)
+- Whiteboard tab icon ("scribble") in tab bar
+- Keyboard shortcut conflict prevention (Excalidraw vs panel shortcuts)
+- Export whiteboard as PNG/PDF
 
 ---
 
@@ -520,7 +538,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-16 | Books Card Type | 4 | Not Started |
 | R-17 | Todos Card Type | 4 | In Review |
 | R-18 | Documents Card Type | 4 | Not Started |
-| R-19 | Whiteboard Folder Theme | 4 | Not Started |
+| R-19 | Excalidraw Whiteboard Tab | 4 | Testing |
 
 **Completed:** 14/21
 
@@ -635,13 +653,13 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Documents: filesystem watcher | DOCUMENTS_VISION | FSEvents directory monitoring |
 | Documents: full-text search | DOCUMENTS_VISION | PDF text, image OCR |
 | Documents: window-based capture | DOCUMENTS_VISION | Proxy icon drops, AX file path detection |
-| Whiteboard: connections | WHITEBOARD_VISION | Draw lines between blocks |
-| Whiteboard: lasso select | WHITEBOARD_VISION | Multi-select on canvas |
-| Whiteboard: sketch/draw | WHITEBOARD_VISION | PencilKit blocks |
-| Whiteboard: templates | WHITEBOARD_VISION | Brainstorming, planning layouts |
-| Whiteboard: export as image | WHITEBOARD_VISION | PNG/PDF export of canvas |
+| Whiteboard: drag library items onto canvas | R-19 Phase B | Drag bookmarks/notes/images from sidebar → Excalidraw canvas via JS bridge |
+| Whiteboard: "Send to Whiteboard" action | R-19 Phase B | Right-click any card → pick target whiteboard → insert as element |
+| Whiteboard: cider-library-item elements | R-19 Phase B | Custom Excalidraw element type with libraryItemID, resolved to live card data |
+| Whiteboard: export as PNG/PDF | R-19 Phase C | Export canvas via Excalidraw's export API |
 | Whiteboard: clipboard capture flow | WHITEBOARD_VISION | Route text/images to whiteboard via toast |
-| Whiteboard: Excalidraw engine | WHITEBOARD_VISION | Embed Excalidraw in WKWebView as drawing engine, .excalidraw JSON persistence |
+| Whiteboard: templates | WHITEBOARD_VISION | Brainstorming, planning layouts |
+| Whiteboard: "Create Note" from selection | WHITEBOARD_VISION | Select blocks → promote to structured note in Notes tab |
 
 ### Drag & Drop
 | Item | Source | Notes |

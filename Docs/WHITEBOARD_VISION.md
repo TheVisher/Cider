@@ -1,6 +1,6 @@
 # Whiteboard Tab Vision
 
-> **Status:** Not Yet Implemented
+> **Status:** Phase A Shipped (Excalidraw canvas tab), Phase B (library integration) Not Started
 
 ## Overview
 
@@ -374,6 +374,28 @@ Embed [Excalidraw](https://github.com/excalidraw/excalidraw) (MIT, React-based) 
 - Should each whiteboard folder get one canvas, or can users create multiple canvases?
 - Excalidraw's toolbar vs Cider's toolbar — hide Excalidraw's and build a Cider-native one, or style Excalidraw's to match?
 - Live card updates — when a bookmark title changes, does it auto-update on all whiteboards containing it?
+
+## What's Shipped (Phase A)
+
+As of R-19 Phase A, the following is implemented:
+
+- **Excalidraw embedded in WKWebView** — full drawing/shapes/text/freehand canvas
+- **Whiteboard as a tab type** — `SavedViewKind.whiteboard(canvasID)` on `SavedView`
+- **Create from + button or Cmd+K** — "New Whiteboard" option in both flows
+- **Auto-save** — debounced 1.5s scene saves to `~/CiderVault/Whiteboards/{id}.excalidraw`
+- **Flush-save on tab switch** — no data loss when switching between tabs
+- **Transparent canvas** — Cider's acrylic shows through
+- **Trash/restore** — delete via TrashStorage with undo support
+- **Singleton WKWebView** — shared across whiteboard tabs (same pattern as TipTap)
+
+### What's NOT Shipped Yet
+
+- **No drag-and-drop from Cider library** — can't drag bookmarks/notes/images from sidebar onto canvas
+- **No "Send to Whiteboard" action** — no right-click menu option on cards
+- **No `cider-library-item` custom elements** — no linked card rendering on canvas
+- **No theme sync** — always dark theme regardless of system appearance
+- **No export** — can't export canvas as PNG/PDF
+- **No clipboard capture flow** — copying text doesn't offer "Save to Whiteboard" toast
 
 ## Inspiration
 
