@@ -427,6 +427,8 @@ enum CiderColors {
 
     // MARK: - Destructive Fills
 
+    /// Faint warning background (due-today badges)
+    static let warningSubtle = warning.opacity(0.08)
     /// Faint destructive background (button rest state)
     static let destructiveSubtle = destructive.opacity(0.08)
     /// Light destructive background (button hover/fill)

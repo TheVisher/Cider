@@ -179,7 +179,7 @@ struct TodoEditorSheet: View {
                         checklist.swapAt(index, index - 1)
                     } label: {
                         Image(systemName: "chevron.up")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(CiderFont.microBold)
                             .foregroundColor(index > 0 ? CiderColors.tertiary : CiderColors.quaternary.opacity(0.3))
                     }
                     .buttonStyle(.plain)
@@ -190,7 +190,7 @@ struct TodoEditorSheet: View {
                         checklist.swapAt(index, index + 1)
                     } label: {
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(CiderFont.microBold)
                             .foregroundColor(index < checklist.count - 1 ? CiderColors.tertiary : CiderColors.quaternary.opacity(0.3))
                     }
                     .buttonStyle(.plain)

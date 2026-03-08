@@ -188,7 +188,7 @@ struct DateCardCardView: View {
             case .overdue:
                 return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
             case .today:
-                return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+                return ("Today", CiderColors.warning, CiderColors.warningSubtle)
             case .approaching(let d):
                 return ("In \(d) day\(d == 1 ? "" : "s")", CiderColors.controlAccent, CiderColors.accentSubtle)
             }
@@ -374,7 +374,7 @@ struct DateCardListRow: View {
             case .overdue:
                 return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
             case .today:
-                return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+                return ("Today", CiderColors.warning, CiderColors.warningSubtle)
             case .approaching(let d):
                 return ("In \(d) day\(d == 1 ? "" : "s")", CiderColors.controlAccent, CiderColors.accentSubtle)
             }

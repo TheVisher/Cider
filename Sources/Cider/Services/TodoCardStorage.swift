@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import os
 
 private struct TodoCardsSnapshot: Codable {
     var todoCards: [TodoCard]
@@ -8,6 +9,8 @@ private struct TodoCardsSnapshot: Codable {
 @MainActor
 final class TodoCardStorage: ObservableObject {
     static let shared = TodoCardStorage()
+
+    private static let logger = Logger(subsystem: "com.cider", category: "TodoCardStorage")
 
     @Published private(set) var todoCards: [TodoCard] = []
 
@@ -182,6 +185,7 @@ final class TodoCardStorage: ObservableObject {
             todoCards = snapshot.todoCards
             sortCards()
         } catch {
+            Self.logger.error("Failed to decode todo cards: \(error)")
             todoCards = []
         }
     }
@@ -195,7 +199,7 @@ final class TodoCardStorage: ObservableObject {
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            // Best-effort persistence.
+            Self.logger.error("Failed to persist todo cards: \(error)")
         }
     }
 }

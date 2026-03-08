@@ -225,7 +225,7 @@ struct TodoCardCardView: View {
             return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
         }
         if todoCard.isDueToday {
-            return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+            return ("Today", CiderColors.warning, CiderColors.warningSubtle)
         }
         return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
     }
@@ -292,7 +292,7 @@ struct TodoListRow: View {
                     .buttonStyle(.plain)
                 }
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(todoCard.title)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(todoCard.isCompleted ? CiderColors.tertiary : CiderColors.primary)
@@ -406,7 +406,7 @@ struct TodoListRow: View {
                 .foregroundColor(CiderColors.warning)
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, Spacing.xxs)
-                .background(Capsule().fill(CiderColors.warning.opacity(0.08)))
+                .background(Capsule().fill(CiderColors.warningSubtle))
         } else {
             Text(date.formatted(.dateTime.month(.abbreviated).day()))
                 .font(CiderFont.caption)

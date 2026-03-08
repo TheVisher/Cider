@@ -327,7 +327,7 @@ struct TodoDetailView: View {
                 return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
             }
             if isDueToday {
-                return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+                return ("Today", CiderColors.warning, CiderColors.warningSubtle)
             }
             return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
         }()
