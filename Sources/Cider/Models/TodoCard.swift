@@ -106,6 +106,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
     var isCompleted: Bool
     var completedAt: Date?
     var labelIDs: [UUID]
+    var notes: String
     var linkedEntities: [LibraryEntityRef]
     var folderID: UUID?
     var createdAt: Date
@@ -121,6 +122,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         isCompleted: Bool = false,
         completedAt: Date? = nil,
         labelIDs: [UUID] = [],
+        notes: String = "",
         linkedEntities: [LibraryEntityRef] = [],
         folderID: UUID? = nil,
         createdAt: Date = Date(),
@@ -135,6 +137,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         self.isCompleted = isCompleted
         self.completedAt = completedAt
         self.labelIDs = labelIDs
+        self.notes = notes
         self.linkedEntities = linkedEntities
         self.folderID = folderID
         self.createdAt = createdAt
@@ -152,6 +155,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         isCompleted = (try c.decodeIfPresent(Bool.self, forKey: .isCompleted)) ?? false
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
         labelIDs = (try c.decodeIfPresent([UUID].self, forKey: .labelIDs)) ?? []
+        notes = (try c.decodeIfPresent(String.self, forKey: .notes)) ?? ""
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
         folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
         createdAt = try c.decode(Date.self, forKey: .createdAt)

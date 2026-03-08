@@ -89,6 +89,11 @@ struct TodoDetailView: View {
                 .buttonStyle(.plain)
             }
 
+            // Notes / History
+            if !todo.notes.isEmpty {
+                notesSection(todo: todo)
+            }
+
             // Labels
             let labels = labelStorage.labels.filter { todo.labelIDs.contains($0.id) }
             if !labels.isEmpty {
@@ -221,9 +226,15 @@ struct TodoDetailView: View {
                         VStack(alignment: .leading, spacing: Spacing.xxs) {
                             ForEach(item.subtasks) { subtask in
                                 HStack(spacing: Spacing.xs) {
-                                    Image(systemName: subtask.isCompleted ? "checkmark.square.fill" : "square")
-                                        .font(CiderFont.captionMedium)
-                                        .foregroundColor(subtask.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                                    Button {
+                                        todoStorage.toggleSubtask(todo.id, checklistItemID: item.id, subtaskID: subtask.id)
+                                    } label: {
+                                        Image(systemName: subtask.isCompleted ? "checkmark.square.fill" : "square")
+                                            .font(CiderFont.captionMedium)
+                                            .foregroundColor(subtask.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                                    }
+                                    .buttonStyle(.plain)
+
                                     Text(subtask.title)
                                         .font(CiderFont.caption)
                                         .foregroundColor(subtask.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
@@ -234,6 +245,46 @@ struct TodoDetailView: View {
                         .padding(.leading, Spacing.lg + Spacing.xs)
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Notes
+
+    @State private var isNotesExpanded = false
+
+    private func notesSection(todo: TodoCard) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Button {
+                withAnimation(reduceMotion ? .none : .snappy) { isNotesExpanded.toggle() }
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "note.text")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                    Text("Notes & History")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                    Spacer(minLength: 0)
+                    Image(systemName: isNotesExpanded ? "chevron.up" : "chevron.down")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isNotesExpanded {
+                Text(todo.notes)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(Spacing.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceSubtle)
+                    )
             }
         }
     }

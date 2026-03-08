@@ -15,6 +15,7 @@ struct TodoEditorSheet: View {
     @State private var priority: TodoPriority?
     @State private var checklist: [TodoChecklistItem]
     @State private var selectedLabelIDs: Set<UUID>
+    @State private var notes: String
     @State private var draftLabelName = ""
     @State private var draftItemTitle = ""
 
@@ -34,6 +35,7 @@ struct TodoEditorSheet: View {
         _priority = State(initialValue: existingCard?.priority)
         _checklist = State(initialValue: existingCard?.checklist ?? [])
         _selectedLabelIDs = State(initialValue: Set(existingCard?.labelIDs ?? []))
+        _notes = State(initialValue: existingCard?.notes ?? "")
     }
 
     var body: some View {
@@ -137,6 +139,16 @@ struct TodoEditorSheet: View {
                             }
                             .buttonStyle(.borderless)
                         }
+                    }
+                    // Notes
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Notes")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.tertiary)
+
+                        TextField("Notes & history", text: $notes, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(3...8)
                     }
                 }
             }
@@ -379,6 +391,7 @@ struct TodoEditorSheet: View {
         }
         card.checklist = checklist
         card.labelIDs = Array(selectedLabelIDs)
+        card.notes = notes
 
         onSave(card)
         dismiss()

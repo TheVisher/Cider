@@ -86,11 +86,39 @@ final class TodoCardStorage: ObservableObject {
             return false
         }
         let wasCompleted = todoCards[todoIdx].checklist[itemIdx].isCompleted
+        let itemTitle = todoCards[todoIdx].checklist[itemIdx].title
         todoCards[todoIdx].checklist[itemIdx].isCompleted = !wasCompleted
         todoCards[todoIdx].checklist[itemIdx].completedAt = wasCompleted ? nil : Date()
+        // Auto-log to notes
+        let dateStr = Date().formatted(.dateTime.month(.abbreviated).day())
+        let logEntry = wasCompleted ? "↩ \(itemTitle) unmarked — \(dateStr)" : "✓ \(itemTitle) completed — \(dateStr)"
+        appendToNotes(todoIdx: todoIdx, entry: logEntry)
         todoCards[todoIdx].updatedAt = Date()
         persist()
         return true
+    }
+
+    @discardableResult
+    func toggleSubtask(_ todoID: UUID, checklistItemID: UUID, subtaskID: UUID) -> Bool {
+        guard let todoIdx = todoCards.firstIndex(where: { $0.id == todoID }),
+              let itemIdx = todoCards[todoIdx].checklist.firstIndex(where: { $0.id == checklistItemID }),
+              let subIdx = todoCards[todoIdx].checklist[itemIdx].subtasks.firstIndex(where: { $0.id == subtaskID }) else {
+            return false
+        }
+        let wasCompleted = todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].isCompleted
+        todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].isCompleted = !wasCompleted
+        todoCards[todoIdx].checklist[itemIdx].subtasks[subIdx].completedAt = wasCompleted ? nil : Date()
+        todoCards[todoIdx].updatedAt = Date()
+        persist()
+        return true
+    }
+
+    private func appendToNotes(todoIdx: Int, entry: String) {
+        if todoCards[todoIdx].notes.isEmpty {
+            todoCards[todoIdx].notes = entry
+        } else {
+            todoCards[todoIdx].notes += "\n" + entry
+        }
     }
 
     @discardableResult
