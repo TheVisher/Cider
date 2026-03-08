@@ -807,6 +807,9 @@ struct CiderPanelView: View {
             onCreateTodo: { card in
                 TodoCardStorage.shared.addTodoCard(card)
             },
+            onOpenTodoEditor: {
+                newTodoEditorContext = TodoEditorContext(existingCard: nil)
+            },
             onCreateFolder: { name, parentID in
                 bvm.createFolder(name: name, parentID: parentID)
             },

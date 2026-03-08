@@ -40,21 +40,23 @@ struct TodoCardCardView: View {
             handleClick { onOpen?() }
         } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                // Header: completion toggle + title + priority
+                // Header: completion toggle (single todos only) + title + priority
                 HStack(alignment: .top, spacing: Spacing.xs) {
-                    Button {
-                        onToggleComplete?()
-                    } label: {
-                        Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
-                            .font(CiderFont.bodyMedium)
-                            .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                    if todoCard.checklist.isEmpty {
+                        Button {
+                            onToggleComplete?()
+                        } label: {
+                            Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(CiderFont.bodyMedium)
+                                .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     Text(todoCard.title)
                         .font(CiderFont.subheadingSemibold)
                         .foregroundColor(todoCard.isCompleted ? CiderColors.tertiary : CiderColors.primary)
-                        .strikethrough(todoCard.isCompleted)
+                        .strikethrough(todoCard.isCompleted && todoCard.checklist.isEmpty)
                         .lineLimit(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -279,20 +281,22 @@ struct TodoListRow: View {
                     SelectionCheckmark()
                 }
 
-                Button {
-                    onToggleComplete?()
-                } label: {
-                    Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(CiderFont.bodyMedium)
-                        .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                if todoCard.checklist.isEmpty {
+                    Button {
+                        onToggleComplete?()
+                    } label: {
+                        Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(todoCard.title)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(todoCard.isCompleted ? CiderColors.tertiary : CiderColors.primary)
-                        .strikethrough(todoCard.isCompleted)
+                        .strikethrough(todoCard.isCompleted && todoCard.checklist.isEmpty)
                         .lineLimit(1)
 
                     HStack(spacing: Spacing.xs) {
