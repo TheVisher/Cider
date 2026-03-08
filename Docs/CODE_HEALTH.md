@@ -48,6 +48,30 @@ Added `.isSymbolicLinkKey` to resource keys in `scan()` and filter that rejects 
 
 - File refs: `Sources/Cider/Services/ExternalSourceScanner.swift`
 
+### CH-S05 — Sync token stored in plaintext config and sent without HTTPS enforcement
+
+**Severity:** High
+
+`syncToken` is still stored inside `CiderConfig` and persisted directly to `UserDefaults`. `SyncService.syncRequest` also accepts any configured URL and always attaches `Authorization: Bearer ...` without enforcing `https://`.
+
+- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`, `Sources/Cider/Services/SyncService.swift`
+
+### CH-S06 — Bookmark enrichment leaks full page URL via `Referer` and public logs
+
+**Severity:** Medium
+
+Remote thumbnail downloads still forward `pageURL.absoluteString` as the `Referer`, which can leak sensitive query params/tokens to third-party image hosts. Enrichment and WebView extraction also log titles, hosts, and image URLs with `privacy: .public`.
+
+- File refs: `Sources/Cider/Services/BookmarksStorage.swift`, `Sources/Cider/Services/WebViewMetadataExtractor.swift`
+
+### CH-S07 — Clipboard URL favicon fetch leaks copied domains to third parties
+
+**Severity:** Medium
+
+Saving a URL clipboard item automatically triggers favicon requests to DuckDuckGo and Google, leaking copied domains without an explicit user action.
+
+- File refs: `Sources/Cider/Services/ClipboardStorage.swift`
+
 ---
 
 ## Correctness / Data
@@ -130,6 +154,54 @@ Added `CiderConfig.load().enablePageSummaries` guard to the summary generation c
 
 - File refs: `Sources/Cider/Utilities/HighlightedText.swift`
 
+### CH-C15 — `NotesStorage.updateDirectory` still breaks synchronous callers and regression test
+
+**Severity:** High
+
+Although `updateDirectory(to:)` now clears stale state synchronously, it still repopulates `notes` and `index` via an unawaited async task. Callers can still observe an empty note list immediately after switching directories, and the regression test `Scan notes tolerates duplicate filename index entries` still fails because `storage.notes.count` is `0` right after `updateDirectory`.
+
+- File refs: `Sources/Cider/Services/NotesStorage.swift`, `Tests/CiderTests/NotesStorageRegressionTests.swift`
+
+### CH-C16 — Dirty-only sync can miss bookmark folder moves
+
+**Severity:** High
+
+`SyncService.push` now only pushes items whose `updatedAt` is newer than `lastSuccessfulPushAt`, but `BookmarksStorage.assignBookmark(_:toFolder:)` still does not bump `updatedAt`. Folder assignment changes can therefore be excluded from sync indefinitely.
+
+- File refs: `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Services/BookmarksStorage.swift`
+
+### CH-C17 — Sync stop/reconfigure does not cancel in-flight work
+
+**Severity:** Medium
+
+`SyncService.stop()` invalidates the timer but does not cancel the active async sync task. A sync cycle can continue mutating local state after sync is disabled or reconfigured.
+
+- File refs: `Sources/Cider/Services/SyncService.swift`
+
+### CH-C18 — Folder parent resolution during pull is order-dependent
+
+**Severity:** Medium
+
+Folder pull resolves `parentSyncId` in a single pass against already-loaded folders. If the payload arrives child-before-parent, the child is created without its parent link and there is no repair pass afterward.
+
+- File refs: `Sources/Cider/Services/SyncService.swift`
+
+### CH-C19 — Duplicate external sources are allowed by path
+
+**Severity:** Medium
+
+`ExternalSourceStorage.addSource(path:displayName:)` does not deduplicate on `path`, so the same directory can be added multiple times, creating duplicate source records and duplicate scans.
+
+- File refs: `Sources/Cider/Services/ExternalSourceStorage.swift`
+
+### CH-C20 — `screenCaptureDefaultAction` setting is currently non-functional
+
+**Severity:** Medium
+
+When the screen-capture toast timer expires, `executeScreenCaptureDefaultAction()` is called, but it only dismisses the toast and optionally restores the panel. It does not branch on `CiderConfig.screenCaptureDefaultAction`.
+
+- File refs: `Sources/Cider/App/AppDelegate.swift`, `Sources/Cider/Models/CiderConfig.swift`
+
 ---
 
 ## Performance
@@ -161,6 +233,22 @@ Added `CiderConfig.load().enablePageSummaries` guard to the summary generation c
 ### ~~CH-P05 — CiderFont decodes config on every render access~~ ✅ Fixed 2026-02-21
 
 `_cachedScale` (`nonisolated(unsafe) static var`) is set once at startup. `invalidateScale()` re-reads config and updates the cache; called at the top of `AppDelegate.handleConfigChanged()`. Font tokens now read the cached value with no UserDefaults decode per access.
+
+### CH-P07 — SpotlightIndexer duplicates subscriptions on repeated `start()`
+
+**Severity:** Medium
+
+`SpotlightIndexer.start()` always calls `bindStorages()` without guarding against existing subscriptions. Repeated calls while indexing remains enabled stack Combine sinks in `cancellables` and multiply reindex triggers.
+
+- File refs: `Sources/Cider/Services/SpotlightIndexer.swift`, `Sources/Cider/App/AppDelegate.swift`
+
+### CH-P08 — Spotlight reindex still performs blocking disk I/O on the main actor
+
+**Severity:** Medium
+
+`SpotlightIndexer` is `@MainActor`, and `reindexAll()` still reads thumbnail files and note content synchronously during indexing. Larger libraries can stall the UI during reindex cycles.
+
+- File refs: `Sources/Cider/Services/SpotlightIndexer.swift`
 
 ---
 
@@ -221,6 +309,38 @@ Four instances of `.font(.system(size: 8/9))` on small icon elements did not sca
 Three instances of `.foregroundColor(.white)` on text/icons over colored backgrounds replaced with `CiderColors.textOnColor` (`Color.white.opacity(0.9)`).
 
 - File refs: `Sources/Cider/Views/Shared/SelectionCheckmark.swift`, `Sources/Cider/Views/Shared/NewItemPopover.swift`, `Sources/Cider/Views/Shared/FolderDetailView.swift`
+
+### CH-D12 — Spotlight indexing is enabled by default for user content
+
+**Severity:** Medium
+
+`enableSpotlightIndexing` defaults to `true`, which means bookmark notes, note snippets, and contact metadata are published into the system search index unless the user opts out after launch.
+
+- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/SpotlightIndexer.swift`
+
+### CH-D13 — Clipboard history defaults are too aggressive for sensitive data
+
+**Severity:** Medium
+
+Clipboard history is enabled by default and text retention defaults to `0` (infinite). The app therefore stores copied content persistently unless the user explicitly changes the setting.
+
+- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/ClipboardStorage.swift`, `Sources/Cider/Services/ClipboardHistoryService.swift`
+
+### CH-D14 — WebView metadata extraction uses persistent website data by default
+
+**Severity:** Low
+
+The headless metadata extraction path still uses a standard `WKWebViewConfiguration` with shared process state instead of an ephemeral website data store, increasing cookie/storage bleed across enrichment runs.
+
+- File refs: `Sources/Cider/Services/WebViewMetadataExtractor.swift`
+
+### CH-D15 — `AppDelegate` remains a high-coupling coordinator
+
+**Severity:** Low
+
+`AppDelegate.swift` is still responsible for hotkeys, panel lifecycle, sync startup, Spotlight, clipboard viewer flow, screen-capture routing, notifications, and multiple toast/timer state machines. The file remains a large coordination bottleneck and raises regression risk for unrelated changes.
+
+- File refs: `Sources/Cider/App/AppDelegate.swift`
 
 ---
 
