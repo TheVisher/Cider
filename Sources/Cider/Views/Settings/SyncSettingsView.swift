@@ -33,7 +33,7 @@ struct SyncSettingsView: View {
                         }
                 }
 
-                // Sync Token
+                // Sync Token (stored in Keychain, not UserDefaults)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Sync Token")
                         .font(CiderFont.caption)
@@ -43,8 +43,7 @@ struct SyncSettingsView: View {
                         .font(CiderFont.body)
                         .frame(maxWidth: 400)
                         .onChange(of: syncToken) { _, newValue in
-                            config.syncToken = newValue
-                            config.save()
+                            SyncService.saveSyncToken(newValue)
                         }
                 }
 
@@ -105,7 +104,7 @@ struct SyncSettingsView: View {
         .onAppear {
             let loaded = CiderConfig.load()
             syncURL = loaded.syncURL
-            syncToken = loaded.syncToken
+            syncToken = SyncService.loadSyncToken()
             syncEnabled = loaded.syncEnabled
         }
     }

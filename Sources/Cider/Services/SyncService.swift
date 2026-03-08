@@ -149,7 +149,7 @@ final class SyncService: ObservableObject {
     private let logger = Logger(subsystem: "com.cider.app", category: "Sync")
 
     /// How often to auto-sync (seconds).
-    private let syncInterval: TimeInterval = 5
+    private let syncInterval: TimeInterval = 60
 
     /// Consecutive failure count for backoff.
     private var consecutiveFailures = 0
@@ -177,7 +177,10 @@ final class SyncService: ObservableObject {
 
     func startIfEnabled() {
         let config = CiderConfig.load()
-        guard config.syncEnabled, !config.syncToken.isEmpty, !config.syncURL.isEmpty else {
+        // Migrate plaintext token from UserDefaults to Keychain on first run
+        migrateSyncTokenToKeychainIfNeeded()
+        let token = Self.loadSyncToken()
+        guard config.syncEnabled, !token.isEmpty, !config.syncURL.isEmpty else {
             stop()
             return
         }
@@ -256,7 +259,7 @@ final class SyncService: ObservableObject {
         }
 
         let config = CiderConfig.load()
-        guard config.syncEnabled, !config.syncToken.isEmpty, !config.syncURL.isEmpty else { return }
+        guard config.syncEnabled, !Self.loadSyncToken().isEmpty, !config.syncURL.isEmpty else { return }
 
         isSyncing = true
         lastError = nil
@@ -549,23 +552,64 @@ final class SyncService: ObservableObject {
             }
         }
 
-        // Save the server timestamp so next pull is incremental
-        var updatedConfig = config
-        updatedConfig.lastSyncTimestamp = serverTime
-        updatedConfig.save()
+        // Save the server timestamp so next pull is incremental.
+        // Re-read config from disk to avoid clobbering lastSuccessfulPushAt
+        // that push() may have saved earlier in this sync cycle.
+        var freshConfig = CiderConfig.load()
+        freshConfig.lastSyncTimestamp = serverTime
+        freshConfig.save()
     }
 
     // MARK: - HTTP
+
+    private static let syncTokenKeychainKey = "syncToken"
+
+    /// Migrate sync token from CiderConfig (UserDefaults) to Keychain.
+    /// Called once when sync starts; clears the plaintext copy after migration.
+    private func migrateSyncTokenToKeychainIfNeeded() {
+        var config = CiderConfig.load()
+        guard !config.syncToken.isEmpty else { return }
+
+        KeychainHelper.save(key: Self.syncTokenKeychainKey, value: config.syncToken)
+        config.syncToken = ""
+        config.save()
+        logger.info("Migrated sync token from UserDefaults to Keychain")
+    }
+
+    /// Save a new sync token to Keychain (called from settings UI).
+    static func saveSyncToken(_ token: String) {
+        KeychainHelper.save(key: syncTokenKeychainKey, value: token)
+    }
+
+    /// Load the sync token from Keychain.
+    static func loadSyncToken() -> String {
+        KeychainHelper.load(key: syncTokenKeychainKey) ?? ""
+    }
+
+    /// Delete the sync token from Keychain.
+    static func deleteSyncToken() {
+        KeychainHelper.delete(key: syncTokenKeychainKey)
+    }
 
     private func syncRequest(config: CiderConfig, path: String, body: Data) async throws -> Data {
         guard let url = URL(string: config.syncURL + path) else {
             throw SyncError.invalidURL
         }
 
+        // CH-S05: Enforce HTTPS to prevent sending the bearer token over cleartext
+        guard url.scheme?.lowercased() == "https" else {
+            throw SyncError.insecureURL
+        }
+
+        let token = Self.loadSyncToken()
+        guard !token.isEmpty else {
+            throw SyncError.unauthorized
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(config.syncToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = body
         request.timeoutInterval = 30
 
@@ -591,6 +635,7 @@ final class SyncService: ObservableObject {
 
 enum SyncError: LocalizedError {
     case invalidURL
+    case insecureURL
     case invalidResponse
     case unauthorized
     case validationError(String)
@@ -600,6 +645,8 @@ enum SyncError: LocalizedError {
         switch self {
         case .invalidURL:
             "Invalid sync URL"
+        case .insecureURL:
+            "Sync URL must use HTTPS"
         case .invalidResponse:
             "Invalid server response"
         case .unauthorized:

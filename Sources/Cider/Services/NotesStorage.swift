@@ -89,24 +89,21 @@ final class NotesStorage: ObservableObject {
         attachmentCleanupWorkItem = nil
         let expanded = NSString(string: newPath).expandingTildeInPath
         directoryURL = URL(fileURLWithPath: expanded)
-        // CH-C11: Clear stale notes immediately so no operations reference
-        // old directory paths while the async scan loads from the new one.
         notes = []
         index = [:]
         ensureDirectory()
         startDirectoryWatcher()
-        let dirURL = directoryURL
-        let idxURL = dirURL.appendingPathComponent(indexFileName)
-        let idxName = indexFileName
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let result = await Task.detached(priority: .userInitiated) {
-                Self.loadAndScan(directoryURL: dirURL, indexURL: idxURL, indexFileName: idxName)
-            }.value
-            self.index = result.index
-            self.notes = result.notes
-            if result.needsSave { self.saveIndex() }
-        }
+        // CH-C15: Load synchronously so callers see notes immediately after return.
+        // Unlike init(), updateDirectory is user-triggered (rare) so brief main-thread
+        // I/O is acceptable to avoid the async race that broke callers and tests.
+        let result = Self.loadAndScan(
+            directoryURL: directoryURL,
+            indexURL: directoryURL.appendingPathComponent(indexFileName),
+            indexFileName: indexFileName
+        )
+        index = result.index
+        notes = result.notes
+        if result.needsSave { saveIndex() }
     }
 
     private func ensureDirectory() {

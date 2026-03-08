@@ -48,13 +48,11 @@ Added `.isSymbolicLinkKey` to resource keys in `scan()` and filter that rejects 
 
 - File refs: `Sources/Cider/Services/ExternalSourceScanner.swift`
 
-### CH-S05 — Sync token stored in plaintext config and sent without HTTPS enforcement
+### ~~CH-S05 — Sync token stored in plaintext config and sent without HTTPS enforcement~~ ✅ Fixed 2026-03-08
 
-**Severity:** High
+Sync token moved from `CiderConfig` (UserDefaults) to macOS Keychain via `KeychainHelper`. `SyncService.startIfEnabled()` auto-migrates any existing plaintext token on first run and clears the UserDefaults copy. `syncRequest` now rejects non-HTTPS URLs with a new `SyncError.insecureURL` case. `SyncSettingsView` reads/writes the token through `SyncService.loadSyncToken()`/`saveSyncToken()`.
 
-`syncToken` is still stored inside `CiderConfig` and persisted directly to `UserDefaults`. `SyncService.syncRequest` also accepts any configured URL and always attaches `Authorization: Bearer ...` without enforcing `https://`.
-
-- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`, `Sources/Cider/Services/SyncService.swift`
+- File refs: `Sources/Cider/Services/KeychainHelper.swift`, `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`
 
 ### CH-S06 — Bookmark enrichment leaks full page URL via `Referer` and public logs
 
@@ -154,21 +152,17 @@ Added `CiderConfig.load().enablePageSummaries` guard to the summary generation c
 
 - File refs: `Sources/Cider/Utilities/HighlightedText.swift`
 
-### CH-C15 — `NotesStorage.updateDirectory` still breaks synchronous callers and regression test
+### ~~CH-C15 — `NotesStorage.updateDirectory` still breaks synchronous callers and regression test~~ ✅ Fixed 2026-03-08
 
-**Severity:** High
+`updateDirectory(to:)` now calls `loadAndScan` synchronously instead of spawning an unawaited async `Task`. Notes and index are populated before the method returns. The async path is kept only for `init()` (startup) where background loading avoids blocking app launch. The regression test now passes since `storage.notes.count` reflects the scanned state immediately.
 
-Although `updateDirectory(to:)` now clears stale state synchronously, it still repopulates `notes` and `index` via an unawaited async task. Callers can still observe an empty note list immediately after switching directories, and the regression test `Scan notes tolerates duplicate filename index entries` still fails because `storage.notes.count` is `0` right after `updateDirectory`.
+- File refs: `Sources/Cider/Services/NotesStorage.swift`
 
-- File refs: `Sources/Cider/Services/NotesStorage.swift`, `Tests/CiderTests/NotesStorageRegressionTests.swift`
+### ~~CH-C16 — Dirty-only sync can miss bookmark folder moves~~ ✅ Fixed 2026-03-08
 
-### CH-C16 — Dirty-only sync can miss bookmark folder moves
+`BookmarksStorage.assignBookmark(_:toFolder:)` now bumps `updatedAt` to `Date()` before calling `persist()`, so the dirty-only push filter in `SyncService` includes folder reassignments.
 
-**Severity:** High
-
-`SyncService.push` now only pushes items whose `updatedAt` is newer than `lastSuccessfulPushAt`, but `BookmarksStorage.assignBookmark(_:toFolder:)` still does not bump `updatedAt`. Folder assignment changes can therefore be excluded from sync indefinitely.
-
-- File refs: `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Services/BookmarksStorage.swift`
+- File refs: `Sources/Cider/Services/BookmarksStorage.swift`
 
 ### CH-C17 — Sync stop/reconfigure does not cancel in-flight work
 
