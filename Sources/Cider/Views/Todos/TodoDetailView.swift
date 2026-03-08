@@ -49,13 +49,7 @@ struct TodoDetailView: View {
                     }
 
                     if let dueDate = todo.dueDate {
-                        HStack(spacing: Spacing.xxs) {
-                            Image(systemName: "calendar")
-                                .font(CiderFont.captionMedium)
-                            Text(dueDate.formatted(.dateTime.month(.abbreviated).day()))
-                                .font(CiderFont.caption)
-                        }
-                        .foregroundColor(dueDateColor(dueDate, isCompleted: todo.isCompleted))
+                        dueDateBadge(dueDate, isCompleted: todo.isCompleted, isOverdue: todo.isOverdue, isDueToday: todo.isDueToday)
                     }
 
                     if !todo.checklist.isEmpty {
@@ -185,10 +179,16 @@ struct TodoDetailView: View {
                                 .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
                         }
 
-                        if let itemDue = item.dueDate {
+                        if let itemDue = item.dueDate, !item.isCompleted {
                             Text(itemDue.formatted(.dateTime.month(.abbreviated).day()))
                                 .font(CiderFont.caption)
                                 .foregroundColor(itemDueDateColor(itemDue, isCompleted: item.isCompleted))
+                        }
+
+                        if item.isCompleted, let completedAt = item.completedAt {
+                            Text("Done \(completedAt.formatted(.dateTime.month(.abbreviated).day()))")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.controlAccent)
                         }
                     }
 
@@ -239,6 +239,28 @@ struct TodoDetailView: View {
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private func dueDateBadge(_ date: Date, isCompleted: Bool, isOverdue: Bool, isDueToday: Bool) -> some View {
+        let (text, fgColor, bgColor): (String, Color, Color) = {
+            if isCompleted {
+                return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+            }
+            if isOverdue {
+                return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
+            }
+            if isDueToday {
+                return ("Today", CiderColors.warning, CiderColors.warning.opacity(0.08))
+            }
+            return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+        }()
+        Text(text)
+            .font(CiderFont.captionSemibold)
+            .foregroundColor(fgColor)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .background(Capsule().fill(bgColor))
+    }
 
     private func priorityColor(_ priority: TodoPriority) -> Color {
         switch priority {

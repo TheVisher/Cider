@@ -172,6 +172,32 @@ struct TodoEditorSheet: View {
     private func checklistItemRow(index: Int, item: TodoChecklistItem) -> some View {
         VStack(spacing: Spacing.xxs) {
             HStack(spacing: Spacing.xs) {
+                // Reorder controls
+                VStack(spacing: 0) {
+                    Button {
+                        guard index > 0 else { return }
+                        checklist.swapAt(index, index - 1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(index > 0 ? CiderColors.tertiary : CiderColors.quaternary.opacity(0.3))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(index == 0)
+
+                    Button {
+                        guard index < checklist.count - 1 else { return }
+                        checklist.swapAt(index, index + 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(index < checklist.count - 1 ? CiderColors.tertiary : CiderColors.quaternary.opacity(0.3))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(index >= checklist.count - 1)
+                }
+                .frame(width: 12)
+
                 Button {
                     checklist[index].isCompleted.toggle()
                     checklist[index].completedAt = checklist[index].isCompleted ? Date() : nil
@@ -347,6 +373,10 @@ struct TodoEditorSheet: View {
         card.details = details.trimmingCharacters(in: .whitespacesAndNewlines)
         card.dueDate = hasDueDate ? dueDate : nil
         card.priority = priority
+        // Update sortOrder to match current array position
+        for i in checklist.indices {
+            checklist[i].sortOrder = i
+        }
         card.checklist = checklist
         card.labelIDs = Array(selectedLabelIDs)
 
