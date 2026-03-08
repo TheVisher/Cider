@@ -156,7 +156,7 @@ struct CiderPanelView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 genericDetailSlideOutContainer
-                    .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                    .frame(width: isTodoDetailOpen ? BookmarksDesign.detailsSlideOutMinWidth : min(detailSlideOutWidth, maxSlideOutWidth))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(BookmarksDesign.detailsSlideOutFloatInset)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -1383,8 +1383,12 @@ struct CiderPanelView: View {
         isDetailOpen && detailViewMode == .page
     }
 
+    private var isTodoDetailOpen: Bool {
+        selectedTodoCard != nil
+    }
+
     private var isGenericDetailOpen: Bool {
-        selectedDateCard != nil || selectedContact != nil
+        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen
     }
 
     private var isAnyDetailOpen: Bool {
@@ -1392,15 +1396,16 @@ struct CiderPanelView: View {
     }
 
     private var isGenericDetailSlideOut: Bool {
-        isGenericDetailOpen && detailViewMode == .slideOut
+        // Todos always use slide-out regardless of detailViewMode
+        isTodoDetailOpen || ((selectedDateCard != nil || selectedContact != nil) && detailViewMode == .slideOut)
     }
 
     private var isGenericDetailFullPanel: Bool {
-        isGenericDetailOpen && detailViewMode == .fullPanel
+        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil) && detailViewMode == .fullPanel
     }
 
     private var isGenericDetailPageMode: Bool {
-        isGenericDetailOpen && detailViewMode == .page
+        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil) && detailViewMode == .page
     }
 
     private var isAnyDetailPageMode: Bool {
@@ -1486,7 +1491,22 @@ struct CiderPanelView: View {
     }
 
     private func openTodoDetail(_ todoCard: TodoCard) {
-        newTodoEditorContext = TodoEditorContext(existingCard: todoCard)
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isNoteDetailOpen { closeNoteDetail() }
+        let wasExpanded = isAnyDetailOpen
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        selectedDateCard = nil
+        selectedContact = nil
+        selectedTodoCard = todoCard
+        if !wasExpanded {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
     }
 
     private func closeGenericDetail() {
@@ -1712,6 +1732,25 @@ struct CiderPanelView: View {
                     onDismiss: closeGenericDetail
                 )
             }
+        } else if let todoCard = selectedTodoCard {
+            // Todos always use slide-out at fixed min width — no full panel or page modes
+            GenericItemDetailPanel(
+                title: todoCard.title,
+                detailViewMode: .slideOut,
+                width: BookmarksDesign.detailsSlideOutMinWidth,
+                maxWidth: BookmarksDesign.detailsSlideOutMinWidth,
+                onClose: closeGenericDetail,
+                onModeChange: { _ in }
+            ) {
+                TodoDetailView(
+                    todoCard: todoCard,
+                    onEdit: {
+                        closeGenericDetail()
+                        newTodoEditorContext = TodoEditorContext(existingCard: todoCard)
+                    },
+                    onDismiss: closeGenericDetail
+                )
+            }
         }
     }
 
@@ -1818,6 +1857,7 @@ struct CiderPanelView: View {
         if let draft = detailsDraft { return draft.title }
         if let dateCard = selectedDateCard { return dateCard.title }
         if let contact = selectedContact { return contact.displayName }
+        if let todoCard = selectedTodoCard { return todoCard.title }
         if isNoteDetailPageMode {
             return notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
         }
