@@ -90,9 +90,7 @@ struct TodoDetailView: View {
             }
 
             // Notes / History
-            if !todo.notes.isEmpty {
-                notesSection(todo: todo)
-            }
+            notesSection(todo: todo)
 
             // Labels
             let labels = labelStorage.labels.filter { todo.labelIDs.contains($0.id) }
@@ -252,6 +250,8 @@ struct TodoDetailView: View {
     // MARK: - Notes
 
     @State private var isNotesExpanded = false
+    @State private var draftNotes: String = ""
+    @State private var notesInitialized = false
 
     private func notesSection(todo: TodoCard) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -265,6 +265,11 @@ struct TodoDetailView: View {
                     Text("Notes & History")
                         .font(CiderFont.captionSemibold)
                         .foregroundColor(CiderColors.tertiary)
+                    if !todo.notes.isEmpty && !isNotesExpanded {
+                        Circle()
+                            .fill(CiderColors.controlAccent)
+                            .frame(width: 6, height: 6)
+                    }
                     Spacer(minLength: 0)
                     Image(systemName: isNotesExpanded ? "chevron.up" : "chevron.down")
                         .font(CiderFont.captionMedium)
@@ -274,19 +279,40 @@ struct TodoDetailView: View {
             .buttonStyle(.plain)
 
             if isNotesExpanded {
-                Text(todo.notes)
+                TextEditor(text: $draftNotes)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .padding(Spacing.sm)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 60, maxHeight: 160)
+                    .padding(Spacing.xs)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(CiderColors.surfaceSubtle)
                     )
+                    .onChange(of: draftNotes) {
+                        saveNotes(todoID: todo.id)
+                    }
             }
         }
+        .onAppear {
+            if !notesInitialized {
+                draftNotes = todo.notes
+                notesInitialized = true
+            }
+        }
+        .onChange(of: todo.notes) {
+            // Sync from storage when auto-log entries are added
+            if todo.notes != draftNotes {
+                draftNotes = todo.notes
+            }
+        }
+    }
+
+    private func saveNotes(todoID: UUID) {
+        guard var card = todoStorage.todoCard(for: todoID) else { return }
+        guard card.notes != draftNotes else { return }
+        card.notes = draftNotes
+        _ = todoStorage.updateTodoCard(card)
     }
 
     // MARK: - Helpers
