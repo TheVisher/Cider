@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Quick Action Model
 
 enum QuickAction: String, CaseIterable, Identifiable {
-    case newBookmark, newNote, newEvent, newContact, newFolder, newTag, newTab, openSettings
+    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, openSettings
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newNote:      return "New Note"
         case .newEvent:     return "New Event"
         case .newContact:   return "New Contact"
+        case .newTodo:      return "New Todo"
         case .newFolder:    return "New Folder"
         case .newTag:       return "New Tag"
         case .newTab:       return "New Tab"
@@ -26,6 +27,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newNote:      return "note.text.badge.plus"
         case .newEvent:     return "calendar.badge.plus"
         case .newContact:   return "person.badge.plus"
+        case .newTodo:      return "checklist"
         case .newFolder:    return "folder.badge.plus"
         case .newTag:       return "tag"
         case .newTab:       return "plus.square.on.square"
@@ -39,6 +41,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newNote:      return ["write", "create", "add"]
         case .newEvent:     return ["date card", "calendar", "schedule", "create", "add"]
         case .newContact:   return ["person", "people", "create", "add"]
+        case .newTodo:      return ["task", "checklist", "bills", "create", "add"]
         case .newFolder:    return ["organize", "create", "add"]
         case .newTag:       return ["label", "create", "add"]
         case .newTab:       return ["view", "create", "add"]

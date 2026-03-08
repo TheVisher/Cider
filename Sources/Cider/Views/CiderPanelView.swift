@@ -1293,6 +1293,8 @@ struct CiderPanelView: View {
             newEventEditorContext = DateCardEditorContext(existingCard: nil, defaultDate: Date())
         case .newContact:
             newContactEditorContext = ContactEditorContext(existingContact: nil)
+        case .newTodo:
+            newTodoEditorContext = TodoEditorContext(existingCard: nil)
         case .newFolder:
             NotificationCenter.default.post(name: .showFolderCreationField, object: nil)
         case .newTag:
