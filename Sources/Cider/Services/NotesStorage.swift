@@ -590,7 +590,132 @@ final class NotesStorage: ObservableObject {
         saveIndex()
         notes.removeAll { $0.id == note.id }
         scheduleAttachmentCleanup()
+
+        // Track deletion for sync
+        let config = CiderConfig.load()
+        if config.syncEnabled {
+            SyncService.shared.trackNoteDeletion(of: note.id)
+        }
+
         return trashItem
+    }
+
+    // MARK: - Sync
+
+    /// Create a note from a sync pull (new note from web).
+    func addFromSync(
+        id: UUID,
+        title: String,
+        content: String,
+        folderID: UUID?,
+        isPinned: Bool,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        let sanitizedTitle = title.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let safeTitle = sanitizedTitle.isEmpty ? "Untitled" : sanitizedTitle
+        let uniqued = uniqueTitle(safeTitle)
+        let filename = "\(uniqued).md"
+        let fileURL = directoryURL.appendingPathComponent(filename)
+
+        try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // Set file modification date to match remote updatedAt
+        try? FileManager.default.setAttributes(
+            [.modificationDate: updatedAt],
+            ofItemAtPath: fileURL.path
+        )
+
+        index[id] = NoteIndexEntry(
+            filename: filename,
+            folderID: folderID,
+            createdAt: createdAt,
+            isPinned: isPinned ? true : nil
+        )
+        saveIndex()
+
+        let note = Note(
+            id: id,
+            title: uniqued,
+            content: content,
+            createdAt: createdAt,
+            modifiedAt: updatedAt,
+            relativePath: filename,
+            folderID: folderID,
+            isPinned: isPinned
+        )
+        notes.insert(note, at: 0)
+    }
+
+    /// Update an existing note from a sync pull (remote is newer).
+    func updateFromSync(
+        noteID: UUID,
+        title: String,
+        content: String,
+        folderID: UUID?,
+        isPinned: Bool,
+        remoteUpdatedAt: Date
+    ) {
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return }
+
+        let oldFilename = notes[idx].relativePath
+
+        // Handle rename if title changed
+        let sanitizedTitle = title.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let newFilename: String
+        if sanitizedTitle != notes[idx].title && !sanitizedTitle.isEmpty {
+            let uniqued = uniqueTitle(sanitizedTitle)
+            newFilename = "\(uniqued).md"
+            let oldPath = directoryURL.appendingPathComponent(oldFilename)
+            let newPath = directoryURL.appendingPathComponent(newFilename)
+            if FileManager.default.fileExists(atPath: oldPath.path) {
+                try? FileManager.default.moveItem(at: oldPath, to: newPath)
+            }
+            notes[idx].title = uniqued
+            notes[idx].relativePath = newFilename
+        } else {
+            newFilename = oldFilename
+        }
+
+        // Write content
+        let fileURL = directoryURL.appendingPathComponent(newFilename)
+        try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // Set file modification date to match remote timestamp
+        try? FileManager.default.setAttributes(
+            [.modificationDate: remoteUpdatedAt],
+            ofItemAtPath: fileURL.path
+        )
+
+        notes[idx].content = content
+        notes[idx].modifiedAt = remoteUpdatedAt
+        notes[idx].folderID = folderID
+        notes[idx].isPinned = isPinned
+
+        // Invalidate caches
+        contentCache.removeValue(forKey: noteID)
+
+        // Update index
+        index[noteID] = NoteIndexEntry(
+            filename: newFilename,
+            folderID: folderID,
+            createdAt: notes[idx].createdAt,
+            isPinned: isPinned ? true : nil
+        )
+        saveIndex()
+    }
+
+    /// Delete a note from a sync pull (remote deleted it).
+    func deleteFromSync(_ note: Note) {
+        contentCache.removeValue(forKey: note.id)
+        let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+        try? FileManager.default.removeItem(at: fileURL)
+        try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
+        index.removeValue(forKey: note.id)
+        saveIndex()
+        notes.removeAll { $0.id == note.id }
     }
 
     func restoreFromTrash(noteID: UUID, filename: String, folderID: UUID?, createdAt: Date) {

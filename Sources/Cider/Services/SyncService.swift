@@ -88,9 +88,51 @@ private struct SyncPushFolder: Encodable {
     }
 }
 
+/// Maps a local Note to only the fields the Convex sync.ts push endpoint accepts.
+private struct SyncPushNote: Encodable {
+    let ciderSyncId: String
+    let title: String
+    let content: String
+    let tags: [String]?
+    let isPinned: Bool?
+    let folderSyncId: String?
+    let createdAt: Double
+    let updatedAt: Double
+    let deleted: Bool
+    let deletedAt: Double?
+
+    init(from note: Note) {
+        ciderSyncId = note.id.uuidString.lowercased()
+        title = note.title
+        content = note.resolvedContent
+        tags = nil // labelIDs are UUIDs — tag name mapping is a future enhancement
+        isPinned = note.isPinned ? true : nil
+        folderSyncId = note.folderID?.uuidString.lowercased()
+        createdAt = note.createdAt.timeIntervalSince1970 * 1000
+        updatedAt = note.modifiedAt.timeIntervalSince1970 * 1000
+        deleted = false
+        deletedAt = nil
+    }
+
+    /// Tombstone for a deleted note.
+    init(deletedSyncId: String, nowMs: Double) {
+        ciderSyncId = deletedSyncId
+        title = ""
+        content = ""
+        tags = nil
+        isPinned = nil
+        folderSyncId = nil
+        createdAt = nowMs
+        updatedAt = nowMs
+        deleted = true
+        deletedAt = nowMs
+    }
+}
+
 private struct SyncPushBody: Encodable {
     let bookmarks: [SyncPushBookmark]
     let folders: [SyncPushFolder]?
+    let notes: [SyncPushNote]?
 }
 
 /// Handles bidirectional sync between local Cider bookmarks and Cider Web (Convex).
@@ -118,12 +160,17 @@ final class SyncService: ObservableObject {
     /// Folders deleted locally that need to be pushed as deletions to the web.
     private var pendingFolderDeletions: [String] = [] // lowercased UUID strings
 
+    /// Notes deleted locally that need to be pushed as deletions to the web.
+    private var pendingNoteDeletions: [String] = [] // lowercased UUID strings
+
     private let pendingDeletionsKey = "CiderSyncPendingDeletions"
     private let pendingFolderDeletionsKey = "CiderSyncPendingFolderDeletions"
+    private let pendingNoteDeletionsKey = "CiderSyncPendingNoteDeletions"
 
     private init() {
         pendingDeletions = UserDefaults.standard.stringArray(forKey: pendingDeletionsKey) ?? []
         pendingFolderDeletions = UserDefaults.standard.stringArray(forKey: pendingFolderDeletionsKey) ?? []
+        pendingNoteDeletions = UserDefaults.standard.stringArray(forKey: pendingNoteDeletionsKey) ?? []
     }
 
     // MARK: - Lifecycle
@@ -169,6 +216,16 @@ final class SyncService: ObservableObject {
         let syncId = bookmarkID.uuidString.lowercased()
         pendingDeletions.removeAll { $0 == syncId }
         UserDefaults.standard.set(pendingDeletions, forKey: pendingDeletionsKey)
+    }
+
+    // MARK: - Note deletion tracking
+
+    /// Called by NotesStorage when a note is deleted while sync is enabled.
+    func trackNoteDeletion(of noteID: UUID) {
+        let syncId = noteID.uuidString.lowercased()
+        guard !pendingNoteDeletions.contains(syncId) else { return }
+        pendingNoteDeletions.append(syncId)
+        UserDefaults.standard.set(pendingNoteDeletions, forKey: pendingNoteDeletionsKey)
     }
 
     // MARK: - Folder deletion tracking
@@ -239,23 +296,26 @@ final class SyncService: ObservableObject {
 
     private func push(config: CiderConfig) async throws {
         let storage = BookmarksStorage.shared
+        let notesStorage = NotesStorage.shared
         let lastPushDate = Date(timeIntervalSince1970: config.lastSuccessfulPushAt)
 
-        // Only push bookmarks modified since last successful push
+        // Only push items modified since last successful push
         let dirtyBookmarks = storage.bookmarks.filter { $0.updatedAt > lastPushDate }
         let dirtyFolders = storage.folders.filter { $0.updatedAt > lastPushDate }
+        let dirtyNotes = notesStorage.notes.filter { $0.modifiedAt > lastPushDate }
 
-        guard !dirtyBookmarks.isEmpty || !dirtyFolders.isEmpty else {
-            logger.debug("Push: 0 dirty bookmarks, 0 dirty folders — skipping")
+        guard !dirtyBookmarks.isEmpty || !dirtyFolders.isEmpty || !dirtyNotes.isEmpty else {
+            logger.debug("Push: 0 dirty bookmarks, 0 dirty folders, 0 dirty notes — skipping")
             return
         }
 
-        logger.info("Push: \(dirtyBookmarks.count) bookmark(s), \(dirtyFolders.count) folder(s)")
+        logger.info("Push: \(dirtyBookmarks.count) bookmark(s), \(dirtyFolders.count) folder(s), \(dirtyNotes.count) note(s)")
 
         let bookmarkPayload = dirtyBookmarks.map { SyncPushBookmark(from: $0) }
         let folderPayload = dirtyFolders.isEmpty ? nil : dirtyFolders.map { SyncPushFolder(from: $0) }
+        let notePayload = dirtyNotes.isEmpty ? nil : dirtyNotes.map { SyncPushNote(from: $0) }
 
-        let pushBody = SyncPushBody(bookmarks: bookmarkPayload, folders: folderPayload)
+        let pushBody = SyncPushBody(bookmarks: bookmarkPayload, folders: folderPayload, notes: notePayload)
         let body = try JSONEncoder().encode(pushBody)
         let _ = try await syncRequest(config: config, path: "/api/sync/push", body: body)
 
@@ -268,7 +328,7 @@ final class SyncService: ObservableObject {
     // MARK: - Push deletions to web
 
     private func pushDeletions(config: CiderConfig) async throws {
-        guard !pendingDeletions.isEmpty || !pendingFolderDeletions.isEmpty else { return }
+        guard !pendingDeletions.isEmpty || !pendingFolderDeletions.isEmpty || !pendingNoteDeletions.isEmpty else { return }
 
         let now = Date().timeIntervalSince1970 * 1000
 
@@ -276,8 +336,11 @@ final class SyncService: ObservableObject {
         let folderPayload = pendingFolderDeletions.isEmpty
             ? nil
             : pendingFolderDeletions.map { SyncPushFolder(deletedSyncId: $0, nowMs: now) }
+        let notePayload = pendingNoteDeletions.isEmpty
+            ? nil
+            : pendingNoteDeletions.map { SyncPushNote(deletedSyncId: $0, nowMs: now) }
 
-        let pushBody = SyncPushBody(bookmarks: bookmarkPayload, folders: folderPayload)
+        let pushBody = SyncPushBody(bookmarks: bookmarkPayload, folders: folderPayload, notes: notePayload)
         let body = try JSONEncoder().encode(pushBody)
         let _ = try await syncRequest(config: config, path: "/api/sync/push", body: body)
 
@@ -286,6 +349,8 @@ final class SyncService: ObservableObject {
         UserDefaults.standard.set(pendingDeletions, forKey: pendingDeletionsKey)
         pendingFolderDeletions.removeAll()
         UserDefaults.standard.set(pendingFolderDeletions, forKey: pendingFolderDeletionsKey)
+        pendingNoteDeletions.removeAll()
+        UserDefaults.standard.set(pendingNoteDeletions, forKey: pendingNoteDeletionsKey)
     }
 
     // MARK: - Pull web bookmarks to local
@@ -420,6 +485,66 @@ final class SyncService: ObservableObject {
                         updatedAt: remoteUpdatedAt,
                         folderID: folderID
                     )
+                }
+            }
+        }
+
+        // --- Pull notes ---
+        if let noteDicts = json["notes"] as? [[String: Any]] {
+            let notesStorage = NotesStorage.shared
+
+            for dict in noteDicts {
+                guard let syncId = dict["ciderSyncId"] as? String,
+                      let title = dict["title"] as? String,
+                      let updatedAtMs = dict["updatedAt"] as? Double else {
+                    continue
+                }
+
+                let syncIdLower = syncId.lowercased()
+                let remoteUpdatedAt = Date(timeIntervalSince1970: updatedAtMs / 1000)
+                let isDeleted = dict["deleted"] as? Bool ?? false
+                let content = dict["content"] as? String ?? ""
+                let isPinned = dict["isPinned"] as? Bool ?? false
+
+                // Resolve folderSyncId to local folder UUID
+                let folderID: UUID? = if let folderSyncId = (dict["folderSyncId"] as? String)?.lowercased() {
+                    storage.folders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
+                } else {
+                    nil
+                }
+
+                if let localIndex = notesStorage.notes.firstIndex(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
+                    let local = notesStorage.notes[localIndex]
+
+                    if isDeleted {
+                        notesStorage.deleteFromSync(local)
+                        continue
+                    }
+
+                    // Last-write-wins
+                    if remoteUpdatedAt > local.modifiedAt {
+                        notesStorage.updateFromSync(
+                            noteID: local.id,
+                            title: title,
+                            content: content,
+                            folderID: folderID,
+                            isPinned: isPinned,
+                            remoteUpdatedAt: remoteUpdatedAt
+                        )
+                    }
+                } else if !isDeleted {
+                    if let uuid = UUID(uuidString: syncId) {
+                        let createdAtMs = dict["createdAt"] as? Double ?? updatedAtMs
+                        notesStorage.addFromSync(
+                            id: uuid,
+                            title: title,
+                            content: content,
+                            folderID: folderID,
+                            isPinned: isPinned,
+                            createdAt: Date(timeIntervalSince1970: createdAtMs / 1000),
+                            updatedAt: remoteUpdatedAt
+                        )
+                    }
                 }
             }
         }
