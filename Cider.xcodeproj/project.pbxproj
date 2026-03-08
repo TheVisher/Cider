@@ -11,10 +11,11 @@
 		B1A000000000000000000015 /* Cider in Frameworks */ = {isa = PBXBuildFile; productRef = B1A000000000000000000014 /* Cider */; };
 		B1A000000000000000000018 /* TipTapEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000016 /* TipTapEditor */; };
 		B1A000000000000000000019 /* ReaderMode in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000017 /* ReaderMode */; };
-		B1A000000000000000000020 /* ExcalidrawEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000021 /* ExcalidrawEditor */; };
 		B1A00000000000000000001A /* menubar-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001C /* menubar-icon.png */; };
 		B1A00000000000000000001B /* cider-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001D /* cider-icon.png */; };
 		B1A00000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001F /* Assets.xcassets */; };
+		B1A000000000000000000020 /* ExcalidrawEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000021 /* ExcalidrawEditor */; };
+		C08DC7F02F5E077D001B082C /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = C08DC7EF2F5E077D001B082C /* ConvexMobile */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,10 +24,10 @@
 		B1A000000000000000000007 /* Cider.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cider.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1A000000000000000000016 /* TipTapEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TipTapEditor; path = Sources/Cider/Resources/TipTapEditor; sourceTree = SOURCE_ROOT; };
 		B1A000000000000000000017 /* ReaderMode */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReaderMode; path = Sources/Cider/Resources/ReaderMode; sourceTree = SOURCE_ROOT; };
-		B1A000000000000000000021 /* ExcalidrawEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ExcalidrawEditor; path = Sources/Cider/Resources/ExcalidrawEditor; sourceTree = SOURCE_ROOT; };
 		B1A00000000000000000001C /* menubar-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "menubar-icon.png"; path = "Sources/Cider/Resources/menubar-icon.png"; sourceTree = SOURCE_ROOT; };
 		B1A00000000000000000001D /* cider-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "cider-icon.png"; path = "Sources/Cider/Resources/cider-icon.png"; sourceTree = SOURCE_ROOT; };
 		B1A00000000000000000001F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Sources/Cider/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		B1A000000000000000000021 /* ExcalidrawEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ExcalidrawEditor; path = Sources/Cider/Resources/ExcalidrawEditor; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -35,6 +36,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1A000000000000000000015 /* Cider in Frameworks */,
+				C08DC7F02F5E077D001B082C /* ConvexMobile in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +92,7 @@
 			name = CiderApp;
 			packageProductDependencies = (
 				B1A000000000000000000014 /* Cider */,
+				C08DC7EF2F5E077D001B082C /* ConvexMobile */,
 			);
 			productName = Cider;
 			productReference = B1A000000000000000000007 /* Cider.app */;
@@ -121,6 +124,7 @@
 			mainGroup = B1A000000000000000000006;
 			packageReferences = (
 				B1A000000000000000000013 /* XCLocalSwiftPackageReference "." */,
+				C08DC7EE2F5E077D001B082C /* XCRemoteSwiftPackageReference "convex-swift" */,
 			);
 			productRefGroup = B1A000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -301,7 +305,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.0-beta.2;
+				MARKETING_VERSION = "0.1.0-beta.2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cider.app;
 				PRODUCT_NAME = Cider;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -341,7 +345,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.0-beta.2;
+				MARKETING_VERSION = "0.1.0-beta.2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cider.app;
 				PRODUCT_NAME = Cider;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -387,11 +391,27 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		C08DC7EE2F5E077D001B082C /* XCRemoteSwiftPackageReference "convex-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/get-convex/convex-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.8.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		B1A000000000000000000014 /* Cider */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B1A000000000000000000013 /* XCLocalSwiftPackageReference "." */;
 			productName = Cider;
+		};
+		C08DC7EF2F5E077D001B082C /* ConvexMobile */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C08DC7EE2F5E077D001B082C /* XCRemoteSwiftPackageReference "convex-swift" */;
+			productName = ConvexMobile;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

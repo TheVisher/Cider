@@ -188,6 +188,14 @@ Folder pull resolves `parentSyncId` in a single pass against already-loaded fold
 
 - File refs: `Sources/Cider/Services/ExternalSourceStorage.swift`
 
+### CH-C21 — Web/iOS-created items without `ciderSyncId` are skipped on desktop pull
+
+**Severity:** Medium
+
+Bookmarks, folders, and notes created on Cider Web or Cider iOS that lack a `ciderSyncId` are silently skipped by the desktop `applyPullResult()` (`guard let syncId = ... else { continue }`). This means web/iOS-only items never appear on the desktop. Fix: generate and assign a `ciderSyncId` on the backend when items are created without one, or handle nil `ciderSyncId` on the desktop by generating a local UUID.
+
+- File refs: `Sources/Cider/Services/SyncService.swift`, `Cider-Web/convex/sync.ts`
+
 ### CH-C20 — `screenCaptureDefaultAction` setting is currently non-functional
 
 **Severity:** Medium

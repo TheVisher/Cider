@@ -526,6 +526,7 @@ final class NotesViewModel: ObservableObject {
                 self.ignoredExternalDiskContent = nil
                 self.externalChangeState = nil
                 NotesStorage.shared.save(note: current)
+                SyncService.shared.pushAfterLocalChange()
                 self.hasPendingSave = false
             }
         }
@@ -577,6 +578,7 @@ final class NotesViewModel: ObservableObject {
         ignoredExternalDiskContent = nil
         externalChangeState = nil
         NotesStorage.shared.save(note: note)
+        SyncService.shared.pushAfterLocalChange()
         hasPendingSave = false
 
         // Then ask the editor for current content to catch any final keystrokes

@@ -508,7 +508,9 @@ final class NotesStorage: ObservableObject {
             if let idx = notes.firstIndex(where: { $0.id == note.id }) {
                 notes[idx].title = sanitized
                 notes[idx].relativePath = newFilename
+                notes[idx].modifiedAt = Date()
             }
+            SyncService.shared.pushAfterLocalChange()
         } catch {
             NSLog("[NotesStorage] Rename failed: \(error)")
         }
@@ -518,11 +520,13 @@ final class NotesStorage: ObservableObject {
     func togglePin(_ noteID: UUID) -> Bool {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
         notes[idx].isPinned.toggle()
+        notes[idx].modifiedAt = Date()
         if var entry = index[noteID] {
             entry.isPinned = notes[idx].isPinned ? true : nil
             index[noteID] = entry
         }
         saveIndex()
+        SyncService.shared.pushAfterLocalChange()
         return true
     }
 
@@ -532,11 +536,13 @@ final class NotesStorage: ObservableObject {
         guard notes[idx].folderID != folderID else { return true }
 
         notes[idx].folderID = folderID
+        notes[idx].modifiedAt = Date()
         if var entry = index[noteID] {
             entry.folderID = folderID
             index[noteID] = entry
         }
         saveIndex()
+        SyncService.shared.pushAfterLocalChange()
         return true
     }
 

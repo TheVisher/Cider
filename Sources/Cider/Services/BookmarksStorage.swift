@@ -965,6 +965,8 @@ final class BookmarksStorage: ObservableObject {
         } catch {
             NSLog("[BookmarksStorage] Failed to write bookmarks metadata: \(error)")
         }
+
+        SyncService.shared.pushAfterLocalChange()
     }
 
     private func cancelAllEnrichmentTasks() {
