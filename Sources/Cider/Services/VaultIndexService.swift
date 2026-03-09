@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os
 
@@ -38,6 +39,9 @@ final class VaultIndexService {
     /// All indexed items.
     private(set) var entries: [UUID: VaultIndexEntry] = [:]
 
+    private var cancellables = Set<AnyCancellable>()
+    private var rebuildWorkItem: DispatchWorkItem?
+
     private let indexFileName = ".cider-index.json"
 
     private var indexFileURL: URL {
@@ -50,6 +54,54 @@ final class VaultIndexService {
 
     private init() {
         loadIndex()
+        observeStorageChanges()
+    }
+
+    // MARK: - Auto-sync with storage services
+
+    /// Observes all storage services and rebuilds the index when any of them change.
+    /// Debounced to 2 seconds so rapid edits don't thrash the disk.
+    private func observeStorageChanges() {
+        let rebuild = { [weak self] in
+            self?.scheduleRebuild()
+        }
+
+        NotesStorage.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { _ in rebuild() }
+            .store(in: &cancellables)
+
+        BookmarksStorage.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { _ in rebuild() }
+            .store(in: &cancellables)
+
+        TodoCardStorage.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { _ in rebuild() }
+            .store(in: &cancellables)
+
+        DateCardStorage.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { _ in rebuild() }
+            .store(in: &cancellables)
+
+        ContactStorage.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { _ in rebuild() }
+            .store(in: &cancellables)
+    }
+
+    /// Debounced rebuild — coalesces rapid changes into a single index update.
+    private func scheduleRebuild() {
+        rebuildWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.rebuildFromCurrentState()
+            }
+        }
+        rebuildWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
 
     // MARK: - CRUD
@@ -110,8 +162,10 @@ final class VaultIndexService {
     // MARK: - Persistence
 
     private func loadIndex() {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: indexFileURL),
-              let file = try? JSONDecoder().decode(VaultIndexFile.self, from: data) else {
+              let file = try? decoder.decode(VaultIndexFile.self, from: data) else {
             entries = [:]
             return
         }

@@ -32,8 +32,20 @@ struct Note: Identifiable, Hashable {
     var resolvedContent: String {
         if !content.isEmpty { return content }
         guard !relativePath.isEmpty else { return "" }
-        let fileURL = StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(relativePath)
+        let fileURL = absoluteFileURL
         return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+    }
+
+    /// Resolves the absolute file URL for this note.
+    /// Notes in vault folders have a relativePath containing "/" (e.g. "Work/My Note.md").
+    /// Notes in the default Notes/ dir have a plain filename (e.g. "My Note.md").
+    var absoluteFileURL: URL {
+        if relativePath.contains("/") {
+            // Vault-relative path (note lives in a vault folder)
+            return StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(relativePath)
+        }
+        // Default: file is in the Notes/ directory
+        return StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(relativePath)
     }
 
     // Pre-compiled regexes for image extraction
@@ -49,7 +61,8 @@ struct Note: Identifiable, Hashable {
     func imageURLs(from text: String) -> [URL] {
         guard !text.isEmpty else { return [] }
         var urls: [URL] = []
-        let baseURL = StoragePaths.cachedDirectoryURL(for: .notes)
+        // Use the note's directory (parent of its file) for resolving relative image paths
+        let baseURL = absoluteFileURL.deletingLastPathComponent()
 
         // Markdown images: ![alt](./.attachments/file.png) or ![alt](path)
         let mdMatches = Self.mdImageRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))

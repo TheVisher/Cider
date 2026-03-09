@@ -74,11 +74,21 @@ final class NotesStorage: ObservableObject {
             self.index = result.index
             self.notes = result.notes
             if result.needsSave { self.saveIndex() }
+            self.loadVaultFolderNotes()
         }
     }
 
     /// The base directory URL where notes are stored.
     var notesDirectoryURL: URL { directoryURL }
+
+    /// The vault root directory.
+    private var vaultRoot: URL { StoragePaths.cachedVaultDirectoryURL }
+
+    /// Resolves the absolute file URL for a note.
+    /// Uses Note.absoluteFileURL which handles both Notes/-based and vault-folder-based paths.
+    func noteFileURL(for note: Note) -> URL {
+        note.absoluteFileURL
+    }
 
     // MARK: - Directory Management
 
@@ -104,6 +114,7 @@ final class NotesStorage: ObservableObject {
         index = result.index
         notes = result.notes
         if result.needsSave { saveIndex() }
+        loadVaultFolderNotes()
     }
 
     private func ensureDirectory() {
@@ -216,9 +227,37 @@ final class NotesStorage: ObservableObject {
         // Rebuild the index from scanned files so duplicates/stale entries are
         // cleaned up automatically. Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
         let previousIndex = index
-        let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
+        var rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
             ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
         })
+
+        // Carry forward notes that live in vault folders (not in Notes/ dir).
+        // These aren't found by the Notes/-only scan but are tracked in the index.
+        let scannedIDs = Set(scannedNotes.map(\.id))
+        for (uuid, entry) in previousIndex where !scannedIDs.contains(uuid) {
+            guard entry.folderID != nil else { continue }
+            // Verify the file still exists on disk
+            if let vaultFolder = VaultFolderService.shared.folder(for: entry.folderID!) {
+                let filePath = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+                    .appendingPathComponent(entry.filename).path
+                if fm.fileExists(atPath: filePath) {
+                    rebuiltIndex[uuid] = entry
+                    let fileAttrs = try? fm.attributesOfItem(atPath: filePath)
+                    let modDate = (fileAttrs?[.modificationDate] as? Date) ?? Date()
+                    scannedNotes.append(Note(
+                        id: uuid,
+                        title: String(entry.filename.dropLast(3)),
+                        content: "",
+                        createdAt: entry.createdAt ?? Date(),
+                        modifiedAt: modDate,
+                        relativePath: "\(vaultFolder.relativePath)/\(entry.filename)",
+                        labelIDs: entry.labelIDs ?? [],
+                        folderID: entry.folderID,
+                        isPinned: entry.isPinned ?? false
+                    ))
+                }
+            }
+        }
         index = rebuiltIndex
 
         // Sort: pinned first, then by newest created
@@ -229,6 +268,47 @@ final class NotesStorage: ObservableObject {
         notes = scannedNotes
         if rebuiltIndex != previousIndex {
             saveIndex()
+        }
+    }
+
+    /// Loads notes that live in vault folders (not in the Notes/ directory).
+    /// Called after the initial scan or background load to pick up folder-based notes
+    /// that the Notes/-only scan can't find.
+    private func loadVaultFolderNotes() {
+        let fm = FileManager.default
+        let existingIDs = Set(notes.map(\.id))
+        var added = false
+
+        for (uuid, entry) in index where !existingIDs.contains(uuid) {
+            guard let folderID = entry.folderID,
+                  let vaultFolder = VaultFolderService.shared.folder(for: folderID) else { continue }
+
+            let filePath = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+                .appendingPathComponent(entry.filename)
+            guard fm.fileExists(atPath: filePath.path) else { continue }
+
+            let attrs = try? fm.attributesOfItem(atPath: filePath.path)
+            let modDate = attrs?[.modificationDate] as? Date ?? Date()
+
+            notes.append(Note(
+                id: uuid,
+                title: String(entry.filename.dropLast(3)),
+                content: "",
+                createdAt: entry.createdAt ?? Date(),
+                modifiedAt: modDate,
+                relativePath: "\(vaultFolder.relativePath)/\(entry.filename)",
+                labelIDs: entry.labelIDs ?? [],
+                folderID: folderID,
+                isPinned: entry.isPinned ?? false
+            ))
+            added = true
+        }
+
+        if added {
+            notes.sort { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.createdAt > b.createdAt
+            }
         }
     }
 
@@ -433,7 +513,7 @@ final class NotesStorage: ObservableObject {
         if let cached = contentCache[note.id], cached.modifiedAt == note.modifiedAt {
             return cached.content
         }
-        let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+        let fileURL = noteFileURL(for: note)
         let content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
         contentCache[note.id] = (note.modifiedAt, content)
         return content
@@ -450,7 +530,7 @@ final class NotesStorage: ObservableObject {
     }
 
     func save(note: Note, createSnapshot: Bool = true) {
-        let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+        let fileURL = noteFileURL(for: note)
         let previousContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
 
         if createSnapshot, previousContent != note.content {
@@ -489,14 +569,24 @@ final class NotesStorage: ObservableObject {
             .replacingOccurrences(of: ":", with: "-")
         guard !sanitized.isEmpty else { return }
 
-        let oldPath = directoryURL.appendingPathComponent(note.relativePath)
+        let oldFileURL = noteFileURL(for: note)
         let newFilename = "\(sanitized).md"
-        let newPath = directoryURL.appendingPathComponent(newFilename)
+        // New file goes in the same directory as the old one
+        let newFileURL = oldFileURL.deletingLastPathComponent().appendingPathComponent(newFilename)
 
-        guard !FileManager.default.fileExists(atPath: newPath.path) else { return }
+        guard !FileManager.default.fileExists(atPath: newFileURL.path) else { return }
+
+        // Build the new relativePath: if the note was in a vault folder, preserve the folder prefix
+        let newRelativePath: String
+        if note.relativePath.contains("/") {
+            let parentPath = (note.relativePath as NSString).deletingLastPathComponent
+            newRelativePath = "\(parentPath)/\(newFilename)"
+        } else {
+            newRelativePath = newFilename
+        }
 
         do {
-            try FileManager.default.moveItem(at: oldPath, to: newPath)
+            try FileManager.default.moveItem(at: oldFileURL, to: newFileURL)
             if var entry = index[note.id] {
                 entry.filename = newFilename
                 index[note.id] = entry
@@ -507,7 +597,7 @@ final class NotesStorage: ObservableObject {
 
             if let idx = notes.firstIndex(where: { $0.id == note.id }) {
                 notes[idx].title = sanitized
-                notes[idx].relativePath = newFilename
+                notes[idx].relativePath = newRelativePath
                 notes[idx].modifiedAt = Date()
             }
             SyncService.shared.pushAfterLocalChange()
@@ -535,8 +625,46 @@ final class NotesStorage: ObservableObject {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
         guard notes[idx].folderID != folderID else { return true }
 
+        let note = notes[idx]
+        let filename = (note.relativePath as NSString).lastPathComponent
+        let oldFileURL = noteFileURL(for: note)
+
+        // Determine the new directory: vault folder or default Notes/ dir
+        let newDirURL: URL
+        if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            newDirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+        } else {
+            newDirURL = directoryURL  // Notes/ directory
+        }
+
+        let newFileURL = newDirURL.appendingPathComponent(filename)
+
+        // Physically move the file if source and destination differ
+        if oldFileURL != newFileURL {
+            let fm = FileManager.default
+            // Ensure destination directory exists
+            try? fm.createDirectory(at: newDirURL, withIntermediateDirectories: true)
+            do {
+                try fm.moveItem(at: oldFileURL, to: newFileURL)
+            } catch {
+                NSLog("[NotesStorage] Failed to move note file: \(error)")
+                return false
+            }
+        }
+
+        // Build new relativePath
+        let newRelativePath: String
+        if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            newRelativePath = "\(vaultFolder.relativePath)/\(filename)"
+        } else {
+            newRelativePath = filename
+        }
+
         notes[idx].folderID = folderID
+        notes[idx].relativePath = newRelativePath
         notes[idx].modifiedAt = Date()
+        contentCache.removeValue(forKey: noteID)
+
         if var entry = index[noteID] {
             entry.folderID = folderID
             index[noteID] = entry
@@ -587,7 +715,24 @@ final class NotesStorage: ObservableObject {
     @discardableResult
     func delete(note: Note) -> TrashItem {
         contentCache.removeValue(forKey: note.id)
-        let trashItem = TrashStorage.shared.trashNote(note, notesDir: directoryURL)
+
+        // For notes in vault folders, move the file to Notes/ first so trash works correctly
+        var noteForTrash = note
+        if note.relativePath.contains("/") {
+            let filename = (note.relativePath as NSString).lastPathComponent
+            let vaultFileURL = noteFileURL(for: note)
+            let notesFileURL = directoryURL.appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: vaultFileURL.path) {
+                try? FileManager.default.moveItem(at: vaultFileURL, to: notesFileURL)
+            }
+            noteForTrash = Note(
+                id: note.id, title: note.title, content: note.content,
+                createdAt: note.createdAt, modifiedAt: note.modifiedAt,
+                relativePath: filename, labelIDs: note.labelIDs,
+                folderID: note.folderID, isPinned: note.isPinned
+            )
+        }
+        let trashItem = TrashStorage.shared.trashNote(noteForTrash, notesDir: directoryURL)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
         index.removeValue(forKey: note.id)
         saveIndex()
@@ -713,7 +858,7 @@ final class NotesStorage: ObservableObject {
     /// Delete a note from a sync pull (remote deleted it).
     func deleteFromSync(_ note: Note) {
         contentCache.removeValue(forKey: note.id)
-        let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+        let fileURL = noteFileURL(for: note)
         try? FileManager.default.removeItem(at: fileURL)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
         index.removeValue(forKey: note.id)
@@ -887,7 +1032,7 @@ final class NotesStorage: ObservableObject {
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let notePaths = self.notes.map { self.directoryURL.appendingPathComponent($0.relativePath) }
+                let notePaths = self.notes.map { self.noteFileURL(for: $0) }
                 let attachmentsDir = self.attachmentsDirectoryURL()
                 let gracePeriod = self.orphanAttachmentGracePeriodSeconds
                 Task.detached(priority: .background) {
