@@ -676,6 +676,12 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Pinned items section | HOME_VISION | Show pinned items at top |
 | Search shortcut / recent searches | HOME_VISION | Persist recent queries |
 | Continue section resurfacing | HOME_VISION | Mix 1-2 forgotten items into Continue alongside recents |
+| Rediscovery / auto-surface forgotten items | USER_IDEA | View option or tab section that surfaces cards not opened in X days. Could also pair with auto-purge setting to clean stale content after a threshold. |
+
+### Browser Integration
+| Item | Source | Notes |
+|------|--------|-------|
+| Browser tab capture & restore | USER_IDEA | Capture all open tabs from Safari/Chrome/Arc/Brave/Edge via AppleScript, save as session/folder. Restore to any browser via `open -a`. Low difficulty — core is ~2-3h. Firefox lacks AppleScript (skip or extension). |
 
 ### Code Health & Refactoring
 | Item | Source | Notes |
