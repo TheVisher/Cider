@@ -48,11 +48,16 @@ Added `.isSymbolicLinkKey` to resource keys in `scan()` and filter that rejects 
 
 - File refs: `Sources/Cider/Services/ExternalSourceScanner.swift`
 
-### ~~CH-S05 — Sync token stored in plaintext config and sent without HTTPS enforcement~~ ✅ Fixed 2026-03-08
+### CH-S05 — Sync token handling is only partially hardened
 
-Sync token moved from `CiderConfig` (UserDefaults) to macOS Keychain via `KeychainHelper`. `SyncService.startIfEnabled()` auto-migrates any existing plaintext token on first run and clears the UserDefaults copy. `syncRequest` now rejects non-HTTPS URLs with a new `SyncError.insecureURL` case. `SyncSettingsView` reads/writes the token through `SyncService.loadSyncToken()`/`saveSyncToken()`.
+**Severity:** High
 
-- File refs: `Sources/Cider/Services/KeychainHelper.swift`, `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`
+The sync token has been moved to Keychain for the main UI flow, and `SyncService.startIfEnabled()` migrates legacy plaintext tokens out of `UserDefaults`. However, the issue is not fully fixed:
+
+- `CiderConfig` still defines, decodes, and encodes `syncToken`, so plaintext token storage remains part of the persisted config schema.
+- `SyncService` does **not** currently enforce `https://` or reject insecure sync URLs despite the previous fix note claiming it does.
+
+- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/KeychainHelper.swift`, `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`
 
 ### CH-S06 — Bookmark enrichment leaks full page URL via `Referer` and public logs
 
