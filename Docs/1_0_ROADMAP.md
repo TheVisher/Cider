@@ -357,7 +357,7 @@ Richer content display and media type support.
 ### R-15: GIF, Video & Carousel Bookmarks
 > Extended media type support beyond static images.
 
-**Status:** `Testing` — GIF + carousel complete, video deferred to post-1.0
+**Status:** `Complete` (2026-03-09) — GIF + carousel complete, video deferred to vault roadmap
 **Priority:** Medium
 
 **Scope:**
@@ -400,7 +400,7 @@ Expand Cider beyond bookmarks and notes.
 ### R-17: Todos Card Type
 > Task cards that live in the library alongside everything else, with rich checklist items, due date surfacing, and recurring support.
 
-**Status:** `Testing`
+**Status:** `Complete` (2026-03-09)
 **Priority:** Medium
 
 **Scope:**
@@ -465,7 +465,7 @@ Expand Cider beyond bookmarks and notes.
 ### R-19: Excalidraw Whiteboard Tab
 > Full Excalidraw-powered whiteboard as a tab type, with Cider library integration.
 
-**Status:** `Testing`
+**Status:** `Complete` (2026-03-09) — Phase A done, Phases B & C deferred to vault roadmap
 **Priority:** Medium
 
 **Phase A — Foundation (Complete):**
@@ -518,8 +518,8 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 
 | ID | Feature | Phase | Status |
 |----|---------|-------|--------|
-| R-01 | Sparkle Auto-Updater | 1 | In Progress |
-| R-02 | Mac App Store Listing | 1 | Not Started |
+| R-01 | Sparkle Auto-Updater | 1 | Deferred → Vault Roadmap |
+| R-02 | Mac App Store Listing | 1 | Deferred → Vault Roadmap |
 | R-03 | Code Health Fixes | 1 | ✅ Complete |
 | R-04 | Vault Directory Migration | 1 | ✅ Complete |
 | R-05 | Tag System Completion | 2 | ✅ Complete |
@@ -531,16 +531,16 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-11 | Drag Out to External Apps | 2 | ✅ Complete |
 | R-12 | Clipboard Viewer | 2 | ✅ Complete |
 | R-13 | Advanced Search | 2 | ✅ Complete |
-| R-20 | Screen Capture Polish | 2 | Testing |
+| R-20 | Screen Capture Polish | 2 | Deferred → Vault Roadmap |
 | R-21 | Keyboard Shortcuts Reference | 2 | ✅ Complete |
 | R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
-| R-15 | GIF/Video/Carousel Bookmarks | 3 | Testing |
-| R-16 | Books Card Type | 4 | Not Started |
-| R-17 | Todos Card Type | 4 | Testing |
-| R-18 | Documents Card Type | 4 | Not Started |
-| R-19 | Excalidraw Whiteboard Tab | 4 | Testing |
+| R-15 | GIF/Video/Carousel Bookmarks | 3 | ✅ Complete |
+| R-16 | Books Card Type | 4 | Deferred → Vault Roadmap |
+| R-17 | Todos Card Type | 4 | ✅ Complete |
+| R-18 | Documents Card Type | 4 | Deferred → Vault Roadmap |
+| R-19 | Excalidraw Whiteboard Tab | 4 | ✅ Complete |
 
-**Completed:** 14/21
+**Completed:** 17/21 (4 deferred to Vault Roadmap)
 
 ---
 

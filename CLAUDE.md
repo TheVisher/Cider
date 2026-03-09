@@ -48,6 +48,7 @@ Read the relevant doc BEFORE writing code in that area:
 | Full docs map | `Docs/DOCS_INDEX.md` |
 
 Tab vision docs: `Docs/{TAB_NAME}_VISION.md` (HOME, BOOKMARKS, NOTES, WHITEBOARD, DOCUMENTS, BOOKS, TODOS, CLIPBOARD, LINKED_SOURCES)
+Long-term vault direction: `Docs/VAULT_VISION.md`
 
 ## Quick Reference
 
