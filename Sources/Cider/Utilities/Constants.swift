@@ -49,6 +49,7 @@ extension Notification.Name {
     static let toggleClipboardViewer = Notification.Name("cider.toggleClipboardViewer")
     static let dismissClipboardPanel = Notification.Name("cider.dismissClipboardPanel")
     static let toggleClipboardPanelWidth = Notification.Name("cider.toggleClipboardPanelWidth")
+    static let vaultFoldersChanged = Notification.Name("cider.vaultFoldersChanged")
 }
 
 // MARK: - Snap Target

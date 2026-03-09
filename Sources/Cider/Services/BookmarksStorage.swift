@@ -503,7 +503,9 @@ final class BookmarksStorage: ObservableObject {
             return false
         }
 
-        if let folderID, folders.first(where: { $0.id == folderID }) == nil {
+        if let folderID,
+           folders.first(where: { $0.id == folderID }) == nil,
+           VaultFolderService.shared.folder(for: folderID) == nil {
             return false
         }
 

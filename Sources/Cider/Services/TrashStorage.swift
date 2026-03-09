@@ -365,6 +365,8 @@ final class TrashStorage {
             restoreWhiteboard(trashItem)
         case .contact:
             restoreContact(trashItem)
+        case .vaultFolder:
+            VaultFolderService.shared.restoreFolder(trashItem)
         }
     }
 
@@ -380,6 +382,7 @@ final class TrashStorage {
         items += loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: dateCardsDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: contactsDir.appendingPathComponent(trashDirName))
+        items += VaultFolderService.shared.trashedFolders()
         return items.sorted { $0.deletedAt > $1.deletedAt }
     }
 
@@ -451,6 +454,15 @@ final class TrashStorage {
                 }
             }
             removeFromManifest(trashItem.id, trashDir: trashDir)
+        case .vaultFolder:
+            // Vault folder trash is managed by VaultFolderService
+            if let payload = trashItem.vaultFolderPayload {
+                let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+                let trashDir = vaultRoot.appendingPathComponent(".cider-folders/.trash")
+                let trashFolderURL = trashDir.appendingPathComponent(payload.folder.name)
+                try? FileManager.default.removeItem(at: trashFolderURL)
+                removeFromManifest(trashItem.id, trashDir: trashDir)
+            }
         }
     }
 
@@ -498,6 +510,8 @@ final class TrashStorage {
             if let payload = trashItem.contactPayload, let avatarRelPath = payload.trashAvatarRelativePath {
                 try? fm.removeItem(at: trashDir.appendingPathComponent(avatarRelPath))
             }
+        case .vaultFolder:
+            break // Handled by permanentlyDelete above
         }
     }
 

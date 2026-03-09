@@ -193,6 +193,7 @@ private struct TrashItemRow: View {
         case .todo: return "checklist"
         case .whiteboard: return "scribble"
         case .folder: return "folder"
+        case .vaultFolder: return "folder"
         }
     }
 

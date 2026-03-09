@@ -638,7 +638,7 @@ struct CiderPanelView: View {
             onAssignBookmarkToFolder: { bookmarksViewModel.assign($0, toFolder: $1) },
             onAssignNoteToFolder: { notesViewModel.assignNote($0, toFolder: $1) },
             onRenameFolder: { bookmarksViewModel.renameFolder($0, to: $1) },
-            onSetFolderIcon: { BookmarksStorage.shared.setFolderIcon($0, icon: $1) },
+            onSetFolderIcon: { VaultFolderService.shared.setIcon($1, for: $0) },
             onDeleteFolder: deleteFolder,
             searchText: $sidebarSearchText,
             onTriggerSearch: { isSearchPaletteVisible = true },

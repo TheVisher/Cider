@@ -978,7 +978,7 @@ struct NoteMetadataSidebar: View {
             sectionHeader("Folder", isExpanded: $isFolderExpanded)
 
             if isFolderExpanded {
-                let folders = BookmarksStorage.shared.folders
+                let folders = VaultFolderService.shared.legacyFolders
                 Menu {
                     Button("No Folder") {
                         viewModel.updateNoteFolder(nil)
@@ -1013,7 +1013,7 @@ struct NoteMetadataSidebar: View {
 
     private var currentFolderName: String {
         guard let fid = note.folderID else { return "No Folder" }
-        return BookmarksStorage.shared.folders.first(where: { $0.id == fid })?.name ?? "No Folder"
+        return VaultFolderService.shared.legacyFolders.first(where: { $0.id == fid })?.name ?? "No Folder"
     }
 
     // MARK: - Tags

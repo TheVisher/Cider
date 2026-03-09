@@ -29,16 +29,19 @@ final class BookmarksViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        BookmarksStorage.shared.$folders
+        VaultFolderService.shared.$folders
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] folders in
-                self?.foldersByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
-                self?.objectWillChange.send()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let legacy = VaultFolderService.shared.legacyFolders
+                self.foldersByID = Dictionary(uniqueKeysWithValues: legacy.map { ($0.id, $0) })
+                self.objectWillChange.send()
             }
             .store(in: &cancellables)
 
         // Initialize foldersByID from current state
-        foldersByID = Dictionary(uniqueKeysWithValues: BookmarksStorage.shared.folders.map { ($0.id, $0) })
+        let initialFolders = VaultFolderService.shared.legacyFolders
+        foldersByID = Dictionary(uniqueKeysWithValues: initialFolders.map { ($0.id, $0) })
 
         NotificationCenter.default.publisher(for: .ciderConfigChanged)
             .receive(on: DispatchQueue.main)
@@ -60,7 +63,7 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     var folders: [Folder] {
-        BookmarksStorage.shared.folders
+        VaultFolderService.shared.legacyFolders
     }
 
     var filteredBookmarks: [Bookmark] {
@@ -128,34 +131,74 @@ final class BookmarksViewModel: ObservableObject {
 
     @discardableResult
     func createFolder(name: String, parentID: UUID?) -> Folder? {
-        BookmarksStorage.shared.createFolder(name: name, parentID: parentID)
+        guard let vaultFolder = VaultFolderService.shared.createFolder(name: name, parentID: parentID) else {
+            return nil
+        }
+        return VaultFolderService.shared.toLegacyFolder(vaultFolder)
     }
 
     @discardableResult
     func renameFolder(_ folderID: UUID, to name: String) -> Bool {
-        BookmarksStorage.shared.renameFolder(folderID, to: name)
+        VaultFolderService.shared.renameFolder(folderID, to: name)
     }
 
     @discardableResult
     func deleteFolder(_ folderID: UUID) -> Bool {
-        BookmarksStorage.shared.deleteFolder(folderID)
+        // Collect all folder IDs being deleted (this folder + descendants)
+        let deletedIDs: Set<UUID> = {
+            var ids: Set<UUID> = [folderID]
+            for folder in VaultFolderService.shared.folders {
+                if let vf = VaultFolderService.shared.folder(for: folderID),
+                   folder.relativePath.hasPrefix(vf.relativePath + "/") {
+                    ids.insert(folder.id)
+                }
+            }
+            return ids
+        }()
+
+        guard let trashItem = VaultFolderService.shared.deleteFolder(folderID) else {
+            return false
+        }
+
+        // Unassign items that were in the deleted folders
+        for id in deletedIDs {
+            for bookmark in bookmarks where bookmark.folderID == id {
+                BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
+            }
+            for note in NotesStorage.shared.notes where note.folderID == id {
+                NotesStorage.shared.assignNote(note.id, toFolder: nil)
+            }
+            for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
+                TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
+            }
+            for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
+                DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
+            }
+            for contact in ContactStorage.shared.contacts where contact.folderID == id {
+                ContactStorage.shared.assignContact(contact.id, toFolder: nil)
+            }
+        }
+
+        CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFolder, trashItem: trashItem))
+        return true
     }
 
     @discardableResult
     func setFolderCover(_ folderID: UUID, imageData: Data) -> Bool {
-        BookmarksStorage.shared.setFolderCoverImage(folderID, imageData: imageData)
+        VaultFolderService.shared.setCoverImage(imageData, for: folderID)
     }
 
     func setFolderCoverOffset(_ folderID: UUID, offsetY: Double) {
-        BookmarksStorage.shared.setFolderCoverOffset(folderID, offsetY: offsetY)
+        VaultFolderService.shared.setCoverImageOffsetY(offsetY, for: folderID)
     }
 
     func removeFolderCover(_ folderID: UUID) {
-        BookmarksStorage.shared.removeFolderCoverImage(folderID)
+        VaultFolderService.shared.removeCoverImage(for: folderID)
     }
 
     func folderCoverURL(for folder: Folder) -> URL? {
-        BookmarksStorage.shared.folderCoverImageURL(for: folder)
+        guard let vaultFolder = VaultFolderService.shared.folder(for: folder.id) else { return nil }
+        return VaultFolderService.shared.coverImageURL(for: vaultFolder)
     }
 
     func folder(for bookmark: Bookmark) -> Folder? {
@@ -165,20 +208,9 @@ final class BookmarksViewModel: ObservableObject {
 
     func folderPath(to folderID: UUID?) -> [Folder] {
         guard let folderID else { return [] }
-        let folderByID = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
-        var path: [Folder] = []
-        var cursorID: UUID? = folderID
-        var visited = Set<UUID>()
-
-        while let currentID = cursorID,
-              !visited.contains(currentID),
-              let folder = folderByID[currentID] {
-            visited.insert(currentID)
-            path.append(folder)
-            cursorID = folder.parentID
+        return VaultFolderService.shared.path(to: folderID).map {
+            VaultFolderService.shared.toLegacyFolder($0)
         }
-
-        return path.reversed()
     }
 
     func childFolders(of parentID: UUID?) -> [Folder] {

@@ -391,7 +391,7 @@ struct SearchPaletteView: View {
 
     /// Groups results by folder, showing a folder header + divider for each.
     private var folderGroupedResults: some View {
-        let allFolders = BookmarksStorage.shared.folders
+        let allFolders = VaultFolderService.shared.legacyFolders
         // Determine which folders to show
         let targetFolderIDs: Set<UUID>
         if activeScope.showAllFolders {

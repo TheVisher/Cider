@@ -139,12 +139,12 @@ enum SearchService {
                     continue
                 }
                 // Look up folder: exact match first, then prefix match
-                if let folder = BookmarksStorage.shared.folders.first(where: {
+                if let folder = VaultFolderService.shared.legacyFolders.first(where: {
                     $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
                 }) {
                     folderIDs.insert(folder.id)
                     folderNames.append(folder.name)
-                } else if let folder = BookmarksStorage.shared.folders.first(where: {
+                } else if let folder = VaultFolderService.shared.legacyFolders.first(where: {
                     $0.name.lowercased().hasPrefix(name.lowercased())
                 }) {
                     folderIDs.insert(folder.id)
