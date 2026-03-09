@@ -400,7 +400,7 @@ Expand Cider beyond bookmarks and notes.
 ### R-17: Todos Card Type
 > Task cards that live in the library alongside everything else, with rich checklist items, due date surfacing, and recurring support.
 
-**Status:** `In Review`
+**Status:** `Testing`
 **Priority:** Medium
 
 **Scope:**
@@ -536,7 +536,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
 | R-15 | GIF/Video/Carousel Bookmarks | 3 | Testing |
 | R-16 | Books Card Type | 4 | Not Started |
-| R-17 | Todos Card Type | 4 | In Review |
+| R-17 | Todos Card Type | 4 | Testing |
 | R-18 | Documents Card Type | 4 | Not Started |
 | R-19 | Excalidraw Whiteboard Tab | 4 | Testing |
 

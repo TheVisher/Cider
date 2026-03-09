@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum TodoPriority: String, Codable, CaseIterable, Hashable {
     case low
@@ -18,6 +19,14 @@ enum TodoPriority: String, Codable, CaseIterable, Hashable {
         case .low: "arrow.down"
         case .medium: "minus"
         case .high: "arrow.up"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .high: CiderColors.destructive
+        case .medium: CiderColors.warning
+        case .low: CiderColors.controlAccent
         }
     }
 }
@@ -219,4 +228,12 @@ struct TodoCard: Identifiable, Codable, Hashable {
         guard !amounts.isEmpty else { return nil }
         return amounts.reduce(0, +)
     }
+
+    /// Shared currency formatter for todo amount displays.
+    static let currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
 }

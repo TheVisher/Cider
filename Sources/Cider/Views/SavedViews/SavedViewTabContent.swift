@@ -932,6 +932,7 @@ struct SavedViewTabContent: View {
                     todoCard: todoCard,
                     onOpen: { onOpenTodo?(todoCard) },
                     onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                    onToggleChecklistItem: { itemID in TodoCardStorage.shared.toggleChecklistItem(todoCard.id, checklistItemID: itemID) },
                     folders: folders,
                     onMoveToFolder: { folderID in
                         let oldFolderID = todoCard.folderID

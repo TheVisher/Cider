@@ -243,6 +243,7 @@ struct HomeDashboardView: View {
                 todoCard: todoCard,
                 onOpen: { handleNormalAction { presentTodoDetail(todoCard) } },
                 onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                onToggleChecklistItem: { itemID in TodoCardStorage.shared.toggleChecklistItem(todoCard.id, checklistItemID: itemID) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = todoCard.folderID
@@ -516,6 +517,7 @@ struct HomeDashboardView: View {
                 todoCard: todoCard,
                 onOpen: { handleNormalAction { presentTodoDetail(todoCard) } },
                 onToggleComplete: { TodoCardStorage.shared.markCompleted(todoCard.id, completed: !todoCard.isCompleted) },
+                onToggleChecklistItem: { itemID in TodoCardStorage.shared.toggleChecklistItem(todoCard.id, checklistItemID: itemID) },
                 folders: bookmarksViewModel.folders,
                 onMoveToFolder: { folderID in
                     let oldFolderID = todoCard.folderID

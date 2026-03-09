@@ -14,13 +14,6 @@ struct TodoDetailView: View {
         todoStorage.todoCard(for: todoCard.id) ?? todoCard
     }
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.maximumFractionDigits = 2
-        return f
-    }()
-
     var body: some View {
         let todo = liveTodo
         VStack(alignment: .leading, spacing: Spacing.md) {
@@ -45,7 +38,8 @@ struct TodoDetailView: View {
                             Text(priority.displayName)
                                 .font(CiderFont.caption)
                         }
-                        .foregroundColor(priorityColor(priority))
+                        .foregroundColor(priority.color)
+                        .help("\(priority.displayName) priority")
                     }
 
                     if let dueDate = todo.dueDate {
@@ -87,6 +81,7 @@ struct TodoDetailView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .help(todo.isCompleted ? "Mark incomplete" : "Mark as completed")
             }
 
             // Notes / History
@@ -107,13 +102,12 @@ struct TodoDetailView: View {
                 Button("Edit") {
                     onEdit?()
                 }
-                .buttonStyle(.borderless)
-                .foregroundColor(CiderColors.secondary)
+                .buttonStyle(CiderSecondaryButtonStyle())
 
                 Button("Done") {
                     onDismiss?()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CiderAccentButtonStyle())
             }
         }
     }
@@ -123,9 +117,9 @@ struct TodoDetailView: View {
     private func summaryBar(todo: TodoCard, total: Double) -> some View {
         let unpaid = todo.unpaidAmount ?? 0
         let paid = total - unpaid
-        let totalStr = Self.currencyFormatter.string(from: NSNumber(value: total)) ?? String(format: "%.2f", total)
-        let paidStr = Self.currencyFormatter.string(from: NSNumber(value: paid)) ?? String(format: "%.2f", paid)
-        let remainingStr = Self.currencyFormatter.string(from: NSNumber(value: unpaid)) ?? String(format: "%.2f", unpaid)
+        let totalStr = TodoCard.currencyFormatter.string(from: NSNumber(value: total)) ?? String(format: "%.2f", total)
+        let paidStr = TodoCard.currencyFormatter.string(from: NSNumber(value: paid)) ?? String(format: "%.2f", paid)
+        let remainingStr = TodoCard.currencyFormatter.string(from: NSNumber(value: unpaid)) ?? String(format: "%.2f", unpaid)
 
         return HStack(spacing: Spacing.md) {
             summaryMetric(title: "Total", value: totalStr)
@@ -168,6 +162,7 @@ struct TodoDetailView: View {
                                 .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                         }
                         .buttonStyle(.plain)
+                        .help(item.isCompleted ? "Mark \(item.title) incomplete" : "Mark \(item.title) complete")
 
                         Text(item.title)
                             .font(CiderFont.bodyMedium)
@@ -177,7 +172,7 @@ struct TodoDetailView: View {
                         Spacer(minLength: 0)
 
                         if let amount = item.amount {
-                            Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
+                            Text(TodoCard.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
                                 .font(CiderFont.body)
                                 .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
                         }
@@ -185,7 +180,7 @@ struct TodoDetailView: View {
                         if let itemDue = item.dueDate, !item.isCompleted {
                             Text(itemDue.formatted(.dateTime.month(.abbreviated).day()))
                                 .font(CiderFont.caption)
-                                .foregroundColor(itemDueDateColor(itemDue, isCompleted: item.isCompleted))
+                                .foregroundColor(itemDueDateColor(itemDue))
                         }
 
                         if item.isCompleted, let completedAt = item.completedAt {
@@ -209,6 +204,7 @@ struct TodoDetailView: View {
                                         .lineLimit(1)
                                         .underline()
                                 }
+                                .help("Open \(urlString)")
                             } else {
                                 Text(urlString)
                                     .font(CiderFont.caption)
@@ -232,6 +228,7 @@ struct TodoDetailView: View {
                                             .foregroundColor(subtask.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                                     }
                                     .buttonStyle(.plain)
+                                    .help(subtask.isCompleted ? "Mark \(subtask.title) incomplete" : "Mark \(subtask.title) complete")
 
                                     Text(subtask.title)
                                         .font(CiderFont.caption)
@@ -252,6 +249,7 @@ struct TodoDetailView: View {
     @State private var isNotesExpanded = false
     @State private var draftNotes: String = ""
     @State private var notesInitialized = false
+    @State private var notesSaveTask: Task<Void, Never>?
 
     private func notesSection(todo: TodoCard) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -277,6 +275,7 @@ struct TodoDetailView: View {
                 }
             }
             .buttonStyle(.plain)
+            .help(isNotesExpanded ? "Collapse notes" : "Expand notes")
 
             if isNotesExpanded {
                 TextEditor(text: $draftNotes)
@@ -290,7 +289,7 @@ struct TodoDetailView: View {
                             .fill(CiderColors.surfaceSubtle)
                     )
                     .onChange(of: draftNotes) {
-                        saveNotes(todoID: todo.id)
+                        debouncedSaveNotes(todoID: todo.id)
                     }
             }
         }
@@ -305,6 +304,15 @@ struct TodoDetailView: View {
             if todo.notes != draftNotes {
                 draftNotes = todo.notes
             }
+        }
+    }
+
+    private func debouncedSaveNotes(todoID: UUID) {
+        notesSaveTask?.cancel()
+        notesSaveTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            saveNotes(todoID: todoID)
         }
     }
 
@@ -339,25 +347,11 @@ struct TodoDetailView: View {
             .background(Capsule().fill(bgColor))
     }
 
-    private func priorityColor(_ priority: TodoPriority) -> Color {
-        switch priority {
-        case .high:   CiderColors.destructive
-        case .medium: CiderColors.warning
-        case .low:    CiderColors.controlAccent
-        }
-    }
-
-    private func dueDateColor(_ date: Date, isCompleted: Bool) -> Color {
-        if isCompleted { return CiderColors.tertiary }
+    private func itemDueDateColor(_ date: Date) -> Color {
         let calendar = Calendar.current
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: Date()), to: calendar.startOfDay(for: date)).day ?? 0
         if days < 0 { return CiderColors.destructive }
         if days == 0 { return CiderColors.warning }
         return CiderColors.tertiary
-    }
-
-    private func itemDueDateColor(_ date: Date, isCompleted: Bool) -> Color {
-        if isCompleted { return CiderColors.tertiary }
-        return dueDateColor(date, isCompleted: false)
     }
 }

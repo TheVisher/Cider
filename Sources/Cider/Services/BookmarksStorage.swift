@@ -769,44 +769,18 @@ final class BookmarksStorage: ObservableObject {
             )
         }
 
-        var loadedBookmarks: [Bookmark] = []
-        loadedBookmarks.reserveCapacity(entries.count)
-
-        for entry in entries {
-            guard let normalized = normalizedURL(from: entry.urlString) else { continue }
-            let canonical = normalized.absoluteString
-
-            var bookmark = metadataByURL[canonical.lowercased()] ?? Bookmark(
-                title: resolvedTitle(for: normalized, override: entry.title),
-                urlString: canonical
-            )
-            bookmark.urlString = canonical
-
-            if let title = entry.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-                bookmark.title = title
-            } else if bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                bookmark.title = resolvedTitle(for: normalized, override: nil)
-            }
-
-            if let addDate = entry.addDate {
-                bookmark.createdAt = addDate
-            }
-            if let modifiedDate = entry.lastModified {
-                bookmark.updatedAt = max(bookmark.updatedAt, modifiedDate)
-            }
-
-            loadedBookmarks.append(bookmark)
-        }
+        let loadedBookmarks = deduplicatedBookmarks(from: entries, metadataByURL: metadataByURL)
 
         // Append metadata-only bookmarks that have no URL (e.g. image bookmarks).
         // These aren't represented in the HTML file so they'd be lost without this.
         let loadedIDs = Set(loadedBookmarks.map(\.id))
+        var allBookmarks = loadedBookmarks
         for meta in metadataBookmarks where meta.urlString.isEmpty && !loadedIDs.contains(meta.id) {
-            loadedBookmarks.append(meta)
+            allBookmarks.append(meta)
         }
 
         let sanitizedLoaded = sanitizedBookmarks(
-            from: loadedBookmarks,
+            from: allBookmarks,
             validFolderIDs: Set(metadataFolders.map(\.id))
         )
         return BookmarksDiskSnapshot(
@@ -868,22 +842,56 @@ final class BookmarksStorage: ObservableObject {
             )
         }
 
-        var loadedBookmarks: [Bookmark] = []
-        loadedBookmarks.reserveCapacity(entries.count)
+        let loadedBookmarks = deduplicatedBookmarks(from: entries, metadataByURL: metadataByURL)
+
+        // Append metadata-only bookmarks that have no URL (e.g. image bookmarks).
+        let loadedIDs = Set(loadedBookmarks.map(\.id))
+        var allBookmarks = loadedBookmarks
+        for meta in metadataBookmarks where meta.urlString.isEmpty && !loadedIDs.contains(meta.id) {
+            allBookmarks.append(meta)
+        }
+
+        let sanitizedLoaded = sanitizedBookmarks(
+            from: allBookmarks,
+            validFolderIDs: Set(metadataFolders.map(\.id))
+        )
+        return BookmarksDiskSnapshot(
+            bookmarks: sanitizedLoaded,
+            folders: metadataFolders
+        )
+    }
+
+    /// Parse HTML entries into bookmarks, skipping duplicate URLs.
+    /// First occurrence of each URL wins; metadata is merged from `metadataByURL`.
+    private func deduplicatedBookmarks(
+        from entries: [NetscapeBookmarksCodec.Entry],
+        metadataByURL: [String: Bookmark]
+    ) -> [Bookmark] {
+        var result: [Bookmark] = []
+        result.reserveCapacity(entries.count)
+        var seenURLs = Set<String>()
 
         for entry in entries {
             guard let normalized = normalizedURL(from: entry.urlString) else { continue }
             let canonical = normalized.absoluteString
+            let key = canonical.lowercased()
 
-            var bookmark = metadataByURL[canonical.lowercased()] ?? Bookmark(
+            // Skip duplicate URLs in the HTML file
+            guard seenURLs.insert(key).inserted else { continue }
+
+            var bookmark = metadataByURL[key] ?? Bookmark(
                 title: resolvedTitle(for: normalized, override: entry.title),
                 urlString: canonical
             )
             bookmark.urlString = canonical
 
-            if let title = entry.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-                bookmark.title = title
-            } else if bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let rawTitle = entry.title {
+                let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    bookmark.title = trimmed
+                }
+            }
+            if bookmark.title.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
                 bookmark.title = resolvedTitle(for: normalized, override: nil)
             }
 
@@ -894,23 +902,10 @@ final class BookmarksStorage: ObservableObject {
                 bookmark.updatedAt = max(bookmark.updatedAt, modifiedDate)
             }
 
-            loadedBookmarks.append(bookmark)
+            result.append(bookmark)
         }
 
-        // Append metadata-only bookmarks that have no URL (e.g. image bookmarks).
-        let loadedIDs = Set(loadedBookmarks.map(\.id))
-        for meta in metadataBookmarks where meta.urlString.isEmpty && !loadedIDs.contains(meta.id) {
-            loadedBookmarks.append(meta)
-        }
-
-        let sanitizedLoaded = sanitizedBookmarks(
-            from: loadedBookmarks,
-            validFolderIDs: Set(metadataFolders.map(\.id))
-        )
-        return BookmarksDiskSnapshot(
-            bookmarks: sanitizedLoaded,
-            folders: metadataFolders
-        )
+        return result
     }
 
     private func loadMetadataSnapshot() -> BookmarksMetadataSnapshot {

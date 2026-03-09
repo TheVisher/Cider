@@ -4,6 +4,7 @@ struct TodoCardCardView: View {
     let todoCard: TodoCard
     var onOpen: (() -> Void)? = nil
     var onToggleComplete: (() -> Void)? = nil
+    var onToggleChecklistItem: ((UUID) -> Void)? = nil
     var folders: [Folder] = []
     var onMoveToFolder: ((UUID?) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
@@ -26,15 +27,6 @@ struct TodoCardCardView: View {
         }
     }
 
-    private var priorityColor: Color {
-        switch todoCard.priority {
-        case .high: CiderColors.destructive
-        case .medium: CiderColors.warning
-        case .low: CiderColors.controlAccent
-        case nil: CiderColors.tertiary
-        }
-    }
-
     var body: some View {
         Button {
             handleClick { onOpen?() }
@@ -51,6 +43,7 @@ struct TodoCardCardView: View {
                                 .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                         }
                         .buttonStyle(.plain)
+                        .help(todoCard.isCompleted ? "Mark incomplete" : "Mark complete")
                     }
 
                     Text(todoCard.title)
@@ -63,7 +56,8 @@ struct TodoCardCardView: View {
                     if let priority = todoCard.priority {
                         Image(systemName: priority.icon)
                             .font(CiderFont.captionMedium)
-                            .foregroundColor(priorityColor)
+                            .foregroundColor(priority.color)
+                            .help("\(priority.displayName) priority")
                     }
                 }
 
@@ -84,13 +78,14 @@ struct TodoCardCardView: View {
                                 // Main item row — full todo
                                 HStack(spacing: Spacing.xs) {
                                     Button {
-                                        TodoCardStorage.shared.toggleChecklistItem(todoCard.id, checklistItemID: item.id)
+                                        onToggleChecklistItem?(item.id)
                                     } label: {
                                         Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                                             .font(CiderFont.bodyMedium)
                                             .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                                     }
                                     .buttonStyle(.plain)
+                                    .help(item.isCompleted ? "Mark \(item.title) incomplete" : "Mark \(item.title) complete")
 
                                     Text(item.title)
                                         .font(CiderFont.bodyMedium)
@@ -99,7 +94,7 @@ struct TodoCardCardView: View {
                                         .lineLimit(1)
                                     Spacer(minLength: 0)
                                     if let amount = item.amount {
-                                        Text(Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
+                                        Text(TodoCard.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
                                             .font(CiderFont.body)
                                             .foregroundColor(item.isCompleted ? CiderColors.tertiary : CiderColors.secondary)
                                     }
@@ -154,8 +149,8 @@ struct TodoCardCardView: View {
 
                     if let total = todoCard.totalAmount {
                         let unpaid = todoCard.unpaidAmount ?? 0
-                        let unpaidStr = Self.currencyFormatter.string(from: NSNumber(value: unpaid)) ?? String(format: "%.2f", unpaid)
-                        let totalStr = Self.currencyFormatter.string(from: NSNumber(value: total)) ?? String(format: "%.2f", total)
+                        let unpaidStr = TodoCard.currencyFormatter.string(from: NSNumber(value: unpaid)) ?? String(format: "%.2f", unpaid)
+                        let totalStr = TodoCard.currencyFormatter.string(from: NSNumber(value: total)) ?? String(format: "%.2f", total)
                         Text("\(unpaidStr) / \(totalStr)")
                             .font(CiderFont.caption)
                             .foregroundColor(unpaid > 0 ? CiderColors.primary : CiderColors.tertiary)
@@ -181,6 +176,7 @@ struct TodoCardCardView: View {
             }
         }
         .hoverState($isHovered, animation: .snappy)
+        .help("Todo: \(todoCard.title)")
         .todoCardContextMenu(
             onOpen: { onOpen?() },
             onToggleComplete: { onToggleComplete?() },
@@ -237,13 +233,6 @@ struct TodoCardCardView: View {
         if days == 0 { return CiderColors.warning }
         return CiderColors.tertiary
     }
-
-    private static let currencyFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.maximumFractionDigits = 2
-        return formatter
-    }()
 }
 
 // MARK: - TodoListRow
@@ -260,6 +249,8 @@ struct TodoListRow: View {
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
+
+    @State private var isHovered = false
 
     private func handleClick(normalAction: () -> Void) {
         let flags = NSEvent.modifierFlags
@@ -290,6 +281,7 @@ struct TodoListRow: View {
                             .foregroundColor(todoCard.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                     }
                     .buttonStyle(.plain)
+                    .help(todoCard.isCompleted ? "Mark incomplete" : "Mark complete")
                 }
 
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
@@ -318,7 +310,7 @@ struct TodoListRow: View {
                                 Text(priority.displayName)
                                     .font(CiderFont.body)
                             }
-                            .foregroundColor(priorityColor)
+                            .foregroundColor(priority.color)
                         }
 
                         if !todoCard.details.isEmpty {
@@ -356,6 +348,8 @@ struct TodoListRow: View {
             )
         }
         .buttonStyle(.plain)
+        .hoverState($isHovered, animation: .snappy)
+        .help("Todo: \(todoCard.title)")
         .todoCardContextMenu(
             onOpen: { onOpen?() },
             onToggleComplete: { onToggleComplete?() },
@@ -376,15 +370,6 @@ struct TodoListRow: View {
             isSelected: isSelected,
             onToggleLabelBulk: onToggleLabelBulk
         )
-    }
-
-    private var priorityColor: Color {
-        switch todoCard.priority {
-        case .high: CiderColors.destructive
-        case .medium: CiderColors.warning
-        case .low: CiderColors.controlAccent
-        case nil: CiderColors.tertiary
-        }
     }
 
     @ViewBuilder

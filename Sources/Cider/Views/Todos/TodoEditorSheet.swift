@@ -39,7 +39,7 @@ struct TodoEditorSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text(existingCard == nil ? "New Todo" : "Edit Todo")
-                .font(CiderFont.subheading)
+                .font(CiderFont.headingMedium)
                 .foregroundColor(CiderColors.primary)
 
             ScrollView(.vertical, showsIndicators: true) {
@@ -145,20 +145,20 @@ struct TodoEditorSheet: View {
             // Buttons
             HStack(spacing: Spacing.sm) {
                 if let existingCard {
-                    Button("Delete", role: .destructive) {
+                    Button("Delete") {
                         onDelete?(existingCard)
                         dismiss()
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(CiderDestructiveButtonStyle())
                 }
 
                 Spacer(minLength: 0)
 
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(CiderSecondaryButtonStyle())
 
                 Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(CiderAccentButtonStyle())
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -184,6 +184,7 @@ struct TodoEditorSheet: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(index == 0)
+                    .help("Move up")
 
                     Button {
                         guard index < checklist.count - 1 else { return }
@@ -195,6 +196,7 @@ struct TodoEditorSheet: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(index >= checklist.count - 1)
+                    .help("Move down")
                 }
                 .frame(width: 12)
 
@@ -207,6 +209,7 @@ struct TodoEditorSheet: View {
                         .foregroundColor(item.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                 }
                 .buttonStyle(.plain)
+                .help(item.isCompleted ? "Mark incomplete" : "Mark complete")
 
                 TextField("Item", text: binding(for: index, keyPath: \.title))
                     .textFieldStyle(.roundedBorder)
@@ -220,6 +223,7 @@ struct TodoEditorSheet: View {
                         .foregroundColor(CiderColors.quaternary)
                 }
                 .buttonStyle(.plain)
+                .help("Remove item")
             }
 
             // Optional fields row: due date + amount
@@ -248,6 +252,7 @@ struct TodoEditorSheet: View {
                                 .foregroundColor(CiderColors.quaternary)
                         }
                         .buttonStyle(.plain)
+                        .help("Remove due date")
                     } else {
                         Button("Add date") {
                             checklist[index].dueDate = Date()
@@ -296,6 +301,7 @@ struct TodoEditorSheet: View {
                                 .foregroundColor(subtask.isCompleted ? CiderColors.controlAccent : CiderColors.quaternary)
                         }
                         .buttonStyle(.plain)
+                        .help(subtask.isCompleted ? "Mark sub-task incomplete" : "Mark sub-task complete")
 
                         TextField("Sub-task", text: Binding(
                             get: { checklist[index].subtasks[subIdx].title },
@@ -313,6 +319,7 @@ struct TodoEditorSheet: View {
                                 .foregroundColor(CiderColors.quaternary)
                         }
                         .buttonStyle(.plain)
+                        .help("Remove sub-task")
                     }
                 }
 
@@ -349,7 +356,7 @@ struct TodoEditorSheet: View {
         )
     }
 
-    private func binding(for index: Int, keyPath: WritableKeyPath<TodoChecklistItem, Double?>, format: FloatingPointFormatStyle<Double>? = nil) -> Binding<Double?> {
+    private func binding(for index: Int, keyPath: WritableKeyPath<TodoChecklistItem, Double?>) -> Binding<Double?> {
         Binding(
             get: { checklist[index][keyPath: keyPath] },
             set: { checklist[index][keyPath: keyPath] = $0 }
@@ -404,5 +411,6 @@ struct TodoEditorSheet: View {
                 )
         }
         .buttonStyle(.plain)
+        .help(isOn ? "Remove \(label.name) label" : "Add \(label.name) label")
     }
 }
