@@ -75,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityHelpers.promptIfNeeded()
         StoragePaths.ensureVaultStructure()
 
+        // Ensure Inbox directory exists for unfiled vault items
+        let inboxURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Inbox")
+        StoragePaths.ensureDirectory(inboxURL)
+
         configureSettings()
         configureNotes()
         configureBookmarks()
@@ -96,6 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureClipboardHistory()
         configureClipboardPanel()
         observeClipboardViewerNotifications()
+
+        // Build vault index if empty (first run or rebuild needed)
+        if VaultIndexService.shared.entries.isEmpty {
+            VaultIndexService.shared.rebuildFromCurrentState()
+        }
 
         // Start Cider Web sync if configured
         SyncService.shared.startIfEnabled()
