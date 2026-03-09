@@ -5,8 +5,11 @@ import os
 
 // MARK: - Convex pull response types
 
+private struct SyncAuthResponse: Decodable {
+    let userId: String
+}
+
 private struct SyncChangeSignal: Decodable {
-    let valid: Bool
     let lastChange: Double
 }
 
@@ -143,38 +146,24 @@ final class SyncService: ObservableObject {
         let client = ConvexClient(deploymentUrl: deploymentURL)
         convexClient = client
 
-        // Subscribe to the change signal for real-time updates
-        changeSignalCancellable = client.subscribe(
-            to: "desktopSync:changeSignal",
-            with: ["token": token],
-            yielding: SyncChangeSignal.self
-        )
-        .receive(on: DispatchQueue.main)
-        .sink(
-            receiveCompletion: { [weak self] completion in
-                guard let self else { return }
-                if case .failure(let error) = completion {
-                    self.logger.error("Change signal subscription failed: \(error.localizedDescription)")
-                    self.lastError = error.localizedDescription
-                }
-            },
-            receiveValue: { [weak self] signal in
-                guard let self else { return }
-                guard signal.valid else {
-                    self.logger.error("Sync token rejected by server")
-                    self.lastError = "Sync token is invalid or revoked"
-                    self.stop()
-                    return
-                }
-                if signal.lastChange > self.lastKnownChange {
-                    self.lastKnownChange = signal.lastChange
-                    self.debouncePull(token: token)
-                }
+        // Authenticate first, then subscribe to changeSignal with userId.
+        // This avoids the subscription depending on the syncTokens table.
+        // Capture client before Task to avoid main-actor-isolation send warning.
+        let authClient = client
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let authResult: SyncAuthResponse = try await authClient.action(
+                    "sync:authenticate", with: ["token": token]
+                )
+                self.subscribeToChanges(client: authClient, userId: authResult.userId, token: token)
+                self.performPush(token: token)
+            } catch {
+                self.logger.error("Authentication failed: \(error.localizedDescription)")
+                self.lastError = error.localizedDescription
+                self.stop()
             }
-        )
-
-        // Initial push of any pending local changes, then pull
-        performPush(token: token)
+        }
 
         // Periodic dirty-note check. Notes can't use event-driven push
         // (saveIndex/save paths have async side effects — directory watcher,
@@ -197,6 +186,33 @@ final class SyncService: ObservableObject {
         pullDebounceTask = nil
         convexClient = nil
         logger.info("Sync stopped")
+    }
+
+    // MARK: - Subscription
+
+    private func subscribeToChanges(client: ConvexClient, userId: String, token: String) {
+        changeSignalCancellable = client.subscribe(
+            to: "sync:changeSignal",
+            with: ["userId": userId],
+            yielding: SyncChangeSignal.self
+        )
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { [weak self] completion in
+                guard let self else { return }
+                if case .failure(let error) = completion {
+                    self.logger.error("Change signal subscription failed: \(error.localizedDescription)")
+                    self.lastError = error.localizedDescription
+                }
+            },
+            receiveValue: { [weak self] signal in
+                guard let self else { return }
+                if signal.lastChange > self.lastKnownChange {
+                    self.lastKnownChange = signal.lastChange
+                    self.debouncePull(token: token)
+                }
+            }
+        )
     }
 
     // MARK: - Deletion tracking (public API for BookmarksStorage/NotesStorage)
@@ -324,7 +340,7 @@ final class SyncService: ObservableObject {
                     args["notes"] = noteArgs as [ConvexEncodable?]
                 }
 
-                let result: SyncPushResponse = try await client.action("desktopSync:push", with: args)
+                let result: SyncPushResponse = try await client.action("sync:push", with: args)
 
                 // Clear pending deletions after successful push
                 self.pendingDeletions.removeAll()
@@ -393,7 +409,7 @@ final class SyncService: ObservableObject {
                     "since": config.lastSyncTimestamp,
                 ]
 
-                let result: SyncPullResponse = try await client.action("desktopSync:pull", with: args)
+                let result: SyncPullResponse = try await client.action("sync:pull", with: args)
 
                 self.isApplyingRemoteChanges = true
                 self.applyPullResult(result)
