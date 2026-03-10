@@ -106,6 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             VaultIndexService.shared.rebuildFromCurrentState()
         }
 
+        // Load sidecar metadata from vault
+        SidecarService.shared.loadAll()
+
         // Start Cider Web sync if configured
         SyncService.shared.startIfEnabled()
 

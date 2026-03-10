@@ -30,6 +30,10 @@ struct NoteCardView: View {
     @State private var renamingTitle = ""
     @FocusState private var isRenameFocused: Bool
 
+    private var sidecarMeta: SidecarItemMetadata? {
+        SidecarService.shared.metadata(forNote: note)
+    }
+
     private func handleClick(normalAction: () -> Void) {
         let flags = NSEvent.modifierFlags
         if let onSelect, flags.contains(.command) {
@@ -86,6 +90,15 @@ struct NoteCardView: View {
                     }
                 }
 
+                // AI-generated summary from sidecar metadata
+                if let summary = sidecarMeta?.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 // Footer
                 footer
 
@@ -94,6 +107,11 @@ struct NoteCardView: View {
                         labelIDs: note.labelIDs,
                         labels: CardLabelStorage.shared.labels
                     )
+                }
+
+                // Sidecar metadata tags (from AI tools or .cider-meta.json)
+                if let sidecarTags = sidecarMeta?.tags, !sidecarTags.isEmpty {
+                    SidecarTagsView(tags: sidecarTags)
                 }
             }
             .padding(Spacing.sm)

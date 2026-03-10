@@ -398,7 +398,15 @@ enum SearchService {
     // Note content is loaded off the main actor to avoid blocking the UI.
     static func searchNotes(_ tokens: [String], in notes: [Note]) async -> [SearchResult] {
         let directoryURL = NotesStorage.shared.notesDirectoryURL
-        return await fetchNoteResults(tokens: tokens, notes: notes, directoryURL: directoryURL)
+        // Collect sidecar tags on main actor before dispatching to background
+        var sidecarTags: [UUID: [String]] = [:]
+        for note in notes {
+            if let meta = SidecarService.shared.metadata(forNote: note),
+               let tags = meta.tags, !tags.isEmpty {
+                sidecarTags[note.id] = tags
+            }
+        }
+        return await fetchNoteResults(tokens: tokens, notes: notes, directoryURL: directoryURL, sidecarTags: sidecarTags)
     }
 
     static func searchDateCards(_ tokens: [String], in dateCards: [DateCard]) -> [SearchResult] {
@@ -503,17 +511,19 @@ enum SearchService {
     private nonisolated static func fetchNoteResults(
         tokens: [String],
         notes: [Note],
-        directoryURL: URL
+        directoryURL: URL,
+        sidecarTags: [UUID: [String]] = [:]
     ) async -> [SearchResult] {
         notes.compactMap { note in
-            let fileURL = directoryURL.appendingPathComponent(note.relativePath)
+            let fileURL = note.absoluteFileURL
             let rawContent = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
             let strippedContent = rawContent
                 .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let fields = [note.title, strippedContent]
+            let tagsString = (sidecarTags[note.id] ?? []).joined(separator: " ")
+            let fields = [note.title, strippedContent, tagsString]
             guard matchesAllTokens(tokens, in: fields) else { return nil }
 
             let titleMatch = fieldsMatch(tokens, in: [note.title])
