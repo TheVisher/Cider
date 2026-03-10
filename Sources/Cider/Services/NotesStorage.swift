@@ -869,7 +869,11 @@ final class NotesStorage: ObservableObject {
     func restoreFromTrash(noteID: UUID, filename: String, folderID: UUID?, createdAt: Date) {
         index[noteID] = NoteIndexEntry(filename: filename, folderID: folderID, createdAt: createdAt)
         saveIndex()
-        scanNotes()
+        scanNotes()  // Picks up notes in Notes/ dir
+        // Also load vault-folder notes that scanNotes() can't find
+        if folderID != nil {
+            loadVaultFolderNotes()
+        }
     }
 
     func hasSnapshots(for note: Note) -> Bool {

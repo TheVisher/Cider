@@ -151,13 +151,24 @@ final class TrashStorage {
         let fm = FileManager.default
 
         let srcURL = trashDir.appendingPathComponent(payload.noteFilename)
-        var destURL = notesDir.appendingPathComponent(payload.noteFilename)
+
+        // Determine destination: vault folder if the note had one, otherwise Notes/
+        let destDir: URL
+        if let folderID = payload.folderID,
+           let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            destDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(vaultFolder.relativePath)
+            try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+        } else {
+            destDir = notesDir
+        }
+
+        var destURL = destDir.appendingPathComponent(payload.noteFilename)
 
         // Avoid overwriting a file with the same name
         if fm.fileExists(atPath: destURL.path) {
             let base = (payload.noteFilename as NSString).deletingPathExtension
             let ext = (payload.noteFilename as NSString).pathExtension
-            destURL = notesDir.appendingPathComponent("\(base) Restored.\(ext)")
+            destURL = destDir.appendingPathComponent("\(base) Restored.\(ext)")
         }
 
         if fm.fileExists(atPath: srcURL.path) {
