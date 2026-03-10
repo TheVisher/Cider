@@ -542,9 +542,13 @@ final class VaultFolderService {
         }
     }
 
-    /// Returns true if the path is a known StorageType subdirectory (e.g. "Bookmarks", "Notes/subfolder").
+    /// Directories that are Cider internals, not user-created folders.
+    private static let reservedDirectoryNames: Set<String> = ["Inbox"]
+
+    /// Returns true if the path is a known internal directory (StorageType or reserved name).
     private func isStorageTypeDirectory(_ relativePath: String) -> Bool {
         let topComponent = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
+        if Self.reservedDirectoryNames.contains(topComponent) { return true }
         return StorageType.allCases.contains(where: { $0.rawValue == topComponent })
     }
 

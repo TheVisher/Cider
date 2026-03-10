@@ -75,10 +75,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityHelpers.promptIfNeeded()
         StoragePaths.ensureVaultStructure()
 
-        // Ensure Inbox directory exists for unfiled vault items
-        let inboxURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Inbox")
-        StoragePaths.ensureDirectory(inboxURL)
-
         configureSettings()
         configureNotes()
         configureBookmarks()
