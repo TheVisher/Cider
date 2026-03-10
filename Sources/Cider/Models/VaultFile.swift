@@ -63,6 +63,18 @@ enum VaultFileType: String, Codable, Hashable {
         return .unknown
     }
 
+    var displayName: String {
+        switch self {
+        case .image: return "Image"
+        case .pdf: return "PDF"
+        case .video: return "Video"
+        case .audio: return "Audio"
+        case .document: return "Document"
+        case .archive: return "Archive"
+        case .unknown: return "File"
+        }
+    }
+
     var systemImageName: String {
         switch self {
         case .image: return "photo"

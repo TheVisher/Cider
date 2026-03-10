@@ -104,6 +104,8 @@ struct StackDetailSheet: View {
             "checklist"
         case .externalFile:
             "folder.badge.gear"
+        case .vaultFile:
+            "doc.on.doc"
         }
     }
 
@@ -219,6 +221,8 @@ struct StackDetailSheet: View {
                 object: nil,
                 userInfo: ["fileURL": file.path]
             )
+        case .vaultFile:
+            break
         }
     }
 

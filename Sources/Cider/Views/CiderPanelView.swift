@@ -45,6 +45,7 @@ struct CiderPanelView: View {
     @State private var selectedDateCard: DateCard?
     @State private var selectedContact: ContactCard?
     @State private var selectedTodoCard: TodoCard?
+    @State private var selectedVaultFile: VaultFile?
     @State private var cardScaleSaveTask: Task<Void, Never>?
     @State private var sidebarSearchText: String = ""
     @State private var debouncedSearchText: String = ""
@@ -1017,6 +1018,7 @@ struct CiderPanelView: View {
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
+                onOpenVaultFile: { openVaultFileDetail($0) },
                 onSelectTag: { id in
                     selectedTagIDs = [id]
                 },
@@ -1059,6 +1061,7 @@ struct CiderPanelView: View {
                 onOpenDateCard: { openDateCardDetail($0) },
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
+                onOpenVaultFile: { openVaultFileDetail($0) },
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
@@ -1102,6 +1105,7 @@ struct CiderPanelView: View {
                             onOpenDateCard: { openDateCardDetail($0) },
                             onOpenContact: { openContactDetail($0) },
                             onOpenTodo: { openTodoDetail($0) },
+                            onOpenVaultFile: { openVaultFileDetail($0) },
                             onlyUnassigned: savedView.filterSpec.onlyUnassigned,
                             activeLabelIDs: savedView.filterSpec.labelIDs,
                             onToggleLabelBulk: { toggleTagOnSelected($0) },
@@ -1169,6 +1173,7 @@ struct CiderPanelView: View {
                     onOpenDateCard: { openDateCardDetail($0) },
                     onOpenContact: { openContactDetail($0) },
                     onOpenTodo: { openTodoDetail($0) },
+                    onOpenVaultFile: { openVaultFileDetail($0) },
                     onSelectTag: { id in
                         selectedTagIDs = [id]
                     },
@@ -1406,7 +1411,7 @@ struct CiderPanelView: View {
     }
 
     private var isGenericDetailOpen: Bool {
-        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen
+        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen || selectedVaultFile != nil
     }
 
     private var isAnyDetailOpen: Bool {
@@ -1415,15 +1420,15 @@ struct CiderPanelView: View {
 
     private var isGenericDetailSlideOut: Bool {
         // Todos always use slide-out regardless of detailViewMode
-        isTodoDetailOpen || ((selectedDateCard != nil || selectedContact != nil) && detailViewMode == .slideOut)
+        isTodoDetailOpen || ((selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .slideOut)
     }
 
     private var isGenericDetailFullPanel: Bool {
-        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil) && detailViewMode == .fullPanel
+        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .fullPanel
     }
 
     private var isGenericDetailPageMode: Bool {
-        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil) && detailViewMode == .page
+        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .page
     }
 
     private var isAnyDetailPageMode: Bool {
@@ -1479,6 +1484,7 @@ struct CiderPanelView: View {
         detailsDraft = nil
         detailsErrorMessage = nil
         selectedContact = nil
+        selectedVaultFile = nil
         selectedDateCard = dateCard
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
@@ -1498,6 +1504,7 @@ struct CiderPanelView: View {
         detailsErrorMessage = nil
         selectedDateCard = nil
         selectedTodoCard = nil
+        selectedVaultFile = nil
         selectedContact = contact
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
@@ -1517,8 +1524,29 @@ struct CiderPanelView: View {
         detailsErrorMessage = nil
         selectedDateCard = nil
         selectedContact = nil
+        selectedVaultFile = nil
         selectedTodoCard = todoCard
         if !wasExpanded {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
+    }
+
+    private func openVaultFileDetail(_ file: VaultFile) {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isNoteDetailOpen { closeNoteDetail() }
+        let wasExpanded = isAnyDetailOpen
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        selectedDateCard = nil
+        selectedContact = nil
+        selectedTodoCard = nil
+        selectedVaultFile = file
+        if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,
                 object: nil,
@@ -1532,6 +1560,7 @@ struct CiderPanelView: View {
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
+        selectedVaultFile = nil
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
@@ -1544,6 +1573,7 @@ struct CiderPanelView: View {
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
+        selectedVaultFile = nil
         selectedNote = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
@@ -1769,6 +1799,21 @@ struct CiderPanelView: View {
                     onDismiss: closeGenericDetail
                 )
             }
+        } else if let vaultFile = selectedVaultFile {
+            GenericItemDetailPanel(
+                title: vaultFile.filename,
+                detailViewMode: detailViewMode,
+                width: min(detailSlideOutWidth, maxSlideOutWidth),
+                maxWidth: maxSlideOutWidth,
+                onResize: { newWidth in
+                    let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                    detailSlideOutWidth = clamped
+                },
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
+            }
         }
     }
 
@@ -1816,6 +1861,20 @@ struct CiderPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
             .transition(.opacity)
+        } else if let vaultFile = selectedVaultFile {
+            GenericItemDetailPanel(
+                title: vaultFile.filename,
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
+            }
+            .padding(BookmarksDesign.detailsSlideOutFloatInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+            .transition(.opacity)
         }
     }
 
@@ -1823,7 +1882,7 @@ struct CiderPanelView: View {
     private var detailPageView: some View {
         if let draft = detailsDraft {
             bookmarkDetailPageView(draft: draft)
-        } else if selectedDateCard != nil || selectedContact != nil {
+        } else if selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil {
             genericDetailPageView
         } else if isNoteDetailPageMode {
             noteDetailPageView
@@ -1876,6 +1935,7 @@ struct CiderPanelView: View {
         if let dateCard = selectedDateCard { return dateCard.title }
         if let contact = selectedContact { return contact.displayName }
         if let todoCard = selectedTodoCard { return todoCard.title }
+        if let vaultFile = selectedVaultFile { return vaultFile.filename }
         if isNoteDetailPageMode {
             return notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
         }
@@ -1954,6 +2014,18 @@ struct CiderPanelView: View {
                     },
                     onDismiss: closeGenericDetail
                 )
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        } else if let vaultFile = selectedVaultFile {
+            GenericItemDetailPanel(
+                title: vaultFile.filename,
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode
+            ) {
+                VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
@@ -2500,7 +2572,7 @@ struct CiderPanelView: View {
                         case .dateCard:     return scopeTypes.contains(.dateCard)
                         case .contact:      return scopeTypes.contains(.contact)
                         case .todo:         return scopeTypes.contains(.todo)
-                        case .externalFile: return false
+                        case .externalFile, .vaultFile: return false
                         }
                     }
                 }

@@ -770,6 +770,8 @@ struct SavedViewTabContent: View {
                     onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
                 )
             )
+        case .vaultFile:
+            return AnyView(EmptyView())
         }
     }
 
@@ -965,6 +967,8 @@ struct SavedViewTabContent: View {
                 },
                 onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
             )
+        case .vaultFile:
+            EmptyView()
         }
     }
 
@@ -1040,7 +1044,7 @@ struct SavedViewTabContent: View {
         case .todo:
             // Todos can link to contacts and date cards — placeholder for now
             return []
-        case .bookmark, .note, .externalFile:
+        case .bookmark, .note, .externalFile, .vaultFile:
             return []
         }
     }
@@ -1066,7 +1070,7 @@ struct SavedViewTabContent: View {
             return contact.linkedEntities
         case .todo(let todoCard):
             return todoCard.linkedEntities
-        case .bookmark, .note, .externalFile:
+        case .bookmark, .note, .externalFile, .vaultFile:
             return []
         }
     }
@@ -1083,7 +1087,7 @@ struct SavedViewTabContent: View {
             return contactStorage.contact(for: ref.entityID)?.displayName
         case .todo:
             return TodoCardStorage.shared.todoCard(for: ref.entityID)?.title
-        case .externalFile:
+        case .externalFile, .vaultFile:
             return nil
         }
     }
@@ -1110,7 +1114,7 @@ struct SavedViewTabContent: View {
             if let todoCard = TodoCardStorage.shared.todoCard(for: ref.entityID) {
                 onOpenTodo?(todoCard)
             }
-        case .externalFile:
+        case .externalFile, .vaultFile:
             break
         }
     }
@@ -1154,6 +1158,8 @@ struct SavedViewTabContent: View {
             return LibraryEntityRef(type: .todo, entityID: todoCard.id)
         case .externalFile(let file):
             return LibraryEntityRef(type: .externalFile, entityID: file.id)
+        case .vaultFile(let file):
+            return LibraryEntityRef(type: .vaultFile, entityID: file.id)
         }
     }
 
@@ -1171,6 +1177,8 @@ struct SavedViewTabContent: View {
             return "checklist"
         case .externalFile:
             return "folder.badge.gear"
+        case .vaultFile:
+            return "doc.on.doc"
         }
     }
 
@@ -1188,6 +1196,8 @@ struct SavedViewTabContent: View {
             return todoCard.isCompleted ? "Completed" : "Todo"
         case .externalFile(let file):
             return file.sourceName
+        case .vaultFile(let file):
+            return file.filename
         }
     }
 
@@ -1257,6 +1267,7 @@ private struct GenericLibraryItemCard: View {
         case .contact: "person.crop.circle"
         case .todo: "checklist"
         case .externalFile: "folder.badge.gear"
+        case .vaultFile: "doc.on.doc"
         }
     }
 
@@ -1274,6 +1285,8 @@ private struct GenericLibraryItemCard: View {
             todoCard.isCompleted ? "Completed" : "Todo"
         case .externalFile(let file):
             file.sourceName
+        case .vaultFile(let file):
+            file.filename
         }
     }
 }

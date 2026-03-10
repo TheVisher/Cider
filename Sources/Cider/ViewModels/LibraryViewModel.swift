@@ -33,8 +33,9 @@ final class LibraryViewModel: ObservableObject {
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
         let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }
         let externalFileItems = ExternalSourceRegistry.shared.libraryFiles.map { LibraryItemV2.externalFile($0) }
+        let vaultFileItems = VaultFileService.shared.files.map { LibraryItemV2.vaultFile($0) }
 
-        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + externalFileItems
+        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + externalFileItems + vaultFileItems
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
@@ -65,7 +66,7 @@ final class LibraryViewModel: ObservableObject {
                 case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
                 case .contact:      entityMatch = scopeTypes.contains(.contact)
                 case .todo:         entityMatch = scopeTypes.contains(.todo)
-                case .externalFile: entityMatch = false
+                case .externalFile, .vaultFile: entityMatch = false
                 }
                 guard entityMatch else { return false }
             } else {
@@ -187,6 +188,11 @@ final class LibraryViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildItems() }
             .store(in: &cancellables)
+
+        VaultFileService.shared.$files
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildItems() }
+            .store(in: &cancellables)
     }
 
     /// Token-based search: splits query into words, each must match in at least one field.
@@ -222,6 +228,8 @@ final class LibraryViewModel: ObservableObject {
                 content = loaded
             }
             fields = [file.title, content]
+        case .vaultFile(let file):
+            fields = [file.filename]
         }
 
         // Also match against label names for the item
@@ -367,6 +375,8 @@ final class LibraryViewModel: ObservableObject {
         case .todo(let todo):
             todo.id.uuidString
         case .externalFile(let file):
+            file.id.uuidString
+        case .vaultFile(let file):
             file.id.uuidString
         }
     }

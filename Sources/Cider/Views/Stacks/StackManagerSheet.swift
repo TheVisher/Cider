@@ -527,6 +527,8 @@ struct StackManagerSheet: View {
             return LibraryEntityRef(type: .todo, entityID: todoCard.id)
         case .externalFile(let file):
             return LibraryEntityRef(type: .externalFile, entityID: file.id)
+        case .vaultFile(let file):
+            return LibraryEntityRef(type: .vaultFile, entityID: file.id)
         }
     }
 
@@ -545,6 +547,8 @@ struct StackManagerSheet: View {
                 return ref.type == .todo && ref.entityID == todoCard.id
             case .externalFile(let file):
                 return ref.type == .externalFile && ref.entityID == file.id
+            case .vaultFile(let file):
+                return ref.type == .vaultFile && ref.entityID == file.id
             }
         }) {
             return item.title
@@ -566,6 +570,8 @@ struct StackManagerSheet: View {
             "checklist"
         case .externalFile:
             "folder.badge.gear"
+        case .vaultFile:
+            "doc.on.doc"
         }
     }
 }

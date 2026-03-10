@@ -20,6 +20,7 @@ struct HomeDashboardView: View {
     var onOpenDateCard: (DateCard) -> Void = { _ in }
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onOpenTodo: (TodoCard) -> Void = { _ in }
+    var onOpenVaultFile: (VaultFile) -> Void = { _ in }
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -407,6 +408,15 @@ struct HomeDashboardView: View {
                 },
                 onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
             )
+        case .vaultFile(let vaultFile):
+            VaultFileListRow(
+                file: vaultFile,
+                onOpen: { handleNormalAction { onOpenVaultFile(vaultFile) } },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
+            )
         }
     }
 
@@ -555,6 +565,15 @@ struct HomeDashboardView: View {
                 },
                 onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
             )
+        case .vaultFile(let vaultFile):
+            VaultFileCardView(
+                file: vaultFile,
+                onOpen: { handleNormalAction { onOpenVaultFile(vaultFile) } },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
+            )
         }
     }
 
@@ -668,6 +687,8 @@ struct HomeDashboardView: View {
                 object: nil,
                 userInfo: ["fileURL": file.path]
             )
+        case .vaultFile(let vaultFile):
+            onOpenVaultFile(vaultFile)
         }
     }
 
@@ -675,7 +696,7 @@ struct HomeDashboardView: View {
         switch item {
         case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
         case .note(let note): return noteDragProvider(for: note)
-        case .dateCard, .contact, .todo, .externalFile: return nil
+        case .dateCard, .contact, .todo, .externalFile, .vaultFile: return nil
         }
     }
 

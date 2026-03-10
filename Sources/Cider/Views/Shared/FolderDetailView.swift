@@ -18,12 +18,14 @@ struct FolderDetailView: View {
     var onOpenDateCard: ((DateCard) -> Void)?
     var onOpenContact: ((ContactCard) -> Void)?
     var onOpenTodo: ((TodoCard) -> Void)?
+    var onOpenVaultFile: ((VaultFile) -> Void)?
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
     @Binding var scrollToItemID: String?
     var focusedItemID: String? = nil
 
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
+    @ObservedObject private var vaultFileService = VaultFileService.shared
 
     @State private var selectionAnchorID: String?
     @State private var coverImage: NSImage?
@@ -53,7 +55,9 @@ struct FolderDetailView: View {
             .map { LibraryItemV2.dateCard($0) }
         let contacts = contactStorage.contacts.filter { $0.folderID == folderID }
             .map { LibraryItemV2.contact($0) }
-        var all = (bookmarks + notes + dateCards + contacts)
+        let vaultFiles = vaultFileService.files(inFolder: folderID)
+            .map { LibraryItemV2.vaultFile($0) }
+        var all = (bookmarks + notes + dateCards + contacts + vaultFiles)
             .sorted { $0.createdDate > $1.createdDate }
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -68,6 +72,7 @@ struct FolderDetailView: View {
                     case .contact:      return scopeTypes.contains(.contact)
                     case .todo:         return scopeTypes.contains(.todo)
                     case .externalFile: return false
+                    case .vaultFile:    return false
                     }
                 }
             }
@@ -689,6 +694,15 @@ struct FolderDetailView: View {
             )
         case .externalFile:
             EmptyView()
+        case .vaultFile(let file):
+            VaultFileListRow(
+                file: file,
+                onOpen: { onOpenVaultFile?(file) },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
+            )
         }
     }
 
@@ -823,6 +837,15 @@ struct FolderDetailView: View {
             )
         case .externalFile:
             EmptyView()
+        case .vaultFile(let file):
+            VaultFileCardView(
+                file: file,
+                onOpen: { onOpenVaultFile?(file) },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
+            )
         }
     }
 
@@ -997,7 +1020,7 @@ struct FolderDetailView: View {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
-        case .dateCard, .contact, .todo, .externalFile: return nil
+        case .dateCard, .contact, .todo, .externalFile, .vaultFile: return nil
         }
     }
 }

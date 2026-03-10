@@ -340,13 +340,14 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 #### Milestone 2: Universal Viewing
 > *Cider can display any file type dropped into the vault.*
 
-- [ ] Card type inference from file extension
-- [ ] Image viewer (SwiftUI `Image` / `NSImage`)
-- [ ] PDF viewer (`PDFKit`)
-- [ ] Video/audio player (`AVKit` / `AVPlayer`)
-- [ ] Quick Look fallback for everything else
-- [ ] "Open in..." button for external editing
-- [ ] File icon + metadata card for unknown types
+- [x] Card type inference from file extension
+- [x] Image viewer (SwiftUI `Image` / `NSImage`)
+- [x] PDF viewer (`PDFKit`)
+- [x] Video/audio player (`AVKit` / `AVPlayer`)
+- [x] Quick Look fallback for everything else
+- [x] "Open in..." button for external editing
+- [x] File icon + metadata card for unknown types
+- [ ] Vault file detail panel polish — match the look/feel of bookmark/note detail panels for all file types (image, PDF, video, audio). Toolbar actions, metadata sidebar, consistent layout, proper sizing.
 
 #### Milestone 3: AI Workspace
 > *Power-user AI workspace inside Cider. Users run any CLI tool against the vault.*

@@ -895,6 +895,7 @@ private struct TabCreationForm: View {
         case .contact:      return "Contacts"
         case .todo:         return "Todos"
         case .externalFile: return "Files"
+        case .vaultFile: return "Files"
         }
     }
 
