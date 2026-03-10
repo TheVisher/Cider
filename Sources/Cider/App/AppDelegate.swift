@@ -75,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityHelpers.promptIfNeeded()
         StoragePaths.ensureVaultStructure()
 
+        // Ensure Unsorted directory exists for unfiled items (visible in Finder, hidden in Cider)
+        let unsortedURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Unsorted")
+        StoragePaths.ensureDirectory(unsortedURL)
+
         configureSettings()
         configureNotes()
         configureBookmarks()

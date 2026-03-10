@@ -387,7 +387,8 @@ struct FolderSidebarView: View {
 
     private func rootFolderGroup(_ folder: Folder) -> some View {
         let children = childFolders(of: folder.id)
-        let isExpanded = expandedFolderIDs.contains(folder.id)
+        let hasChildren = !children.isEmpty || subFolderParentID == folder.id
+        let isExpanded = hasChildren && expandedFolderIDs.contains(folder.id)
 
         return VStack(alignment: .leading, spacing: 0) {
             RootFolderHeaderRow(
@@ -395,6 +396,7 @@ struct FolderSidebarView: View {
                 folderIcon: folder.icon,
                 folderIconIsEmoji: folder.iconIsEmoji,
                 itemCount: itemsInFolder(folder.id),
+                hasChildren: hasChildren,
                 isExpanded: isExpanded,
                 isSelected: selectedFolderID == folder.id,
                 isRenaming: renamingFolderID == folder.id,
@@ -828,6 +830,7 @@ struct RootFolderHeaderRow: View {
     let folderIcon: String?
     let folderIconIsEmoji: Bool
     let itemCount: Int
+    let hasChildren: Bool
     let isExpanded: Bool
     let isSelected: Bool
     let isRenaming: Bool
@@ -952,7 +955,7 @@ struct RootFolderHeaderRow: View {
     }
 
     private var shouldShowChevron: Bool {
-        isIconHovered || showChevronIcon
+        hasChildren && (isIconHovered || showChevronIcon)
     }
 
     private func triggerChevronFlash() {
