@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SwiftTerm
 import WebKit
 
 struct CiderPanelView: View {
@@ -2469,6 +2470,16 @@ struct CiderPanelView: View {
         }
     }
 
+    /// Whether the given view is inside a SwiftTerm terminal view.
+    private func isInsideTerminalView(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let v = current {
+            if v is LocalProcessTerminalView { return true }
+            current = v.superview
+        }
+        return false
+    }
+
     /// Whether the first responder is a text field or its field editor
     private var isTextFieldFocused: Bool {
         guard let responder = NSApp.keyWindow?.firstResponder else { return false }
@@ -2510,6 +2521,12 @@ struct CiderPanelView: View {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        // Let the terminal handle all key events when it's focused
+        if isTerminalVisible, let responder = NSApp.keyWindow?.firstResponder as? NSView,
+           isInsideTerminalView(responder) {
+            return event
+        }
+
         let isArrowKey = event.keyCode >= 123 && event.keyCode <= 126
 
         // When a text field has content, let most keys go to it.

@@ -367,7 +367,7 @@ final class VaultFolderService {
         guard let folder = index[folderID] else { return [] }
 
         var chain: [VaultFolder] = []
-        var components = folder.relativePath.split(separator: "/").map(String.init)
+        let components = folder.relativePath.split(separator: "/").map(String.init)
 
         // Build path from root to this folder
         var accumulated = ""

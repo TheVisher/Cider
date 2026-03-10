@@ -132,6 +132,7 @@ private struct TerminalNSViewWrapper: NSViewRepresentable {
         Coordinator(viewModel: viewModel)
     }
 
+    @MainActor
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         let viewModel: TerminalViewModel
 
@@ -139,23 +140,23 @@ private struct TerminalNSViewWrapper: NSViewRepresentable {
             self.viewModel = viewModel
         }
 
-        func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
+        nonisolated func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
             // Terminal resized — no action needed
         }
 
-        func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-            Task { @MainActor in
-                viewModel.title = title
+        nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+            Task { @MainActor [weak viewModel] in
+                viewModel?.title = title
             }
         }
 
-        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
             // Could track current directory if needed
         }
 
-        func processTerminated(source: TerminalView, exitCode: Int32?) {
-            Task { @MainActor in
-                viewModel.markStopped()
+        nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
+            Task { @MainActor [weak viewModel] in
+                viewModel?.markStopped()
             }
         }
     }

@@ -356,6 +356,7 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 - [x] Working directory pre-seeded to vault folder
 - [x] Terminal panel toggle in UI
 - [x] Works with Claude Code, Codex, ChatGPT CLI, custom scripts — anything the user has installed
+- [ ] Terminal visual polish — styling, resize handle, height persistence, acrylic background, proper spacing, toolbar refinement
 
 #### Milestone 4: Data Migration (Personal)
 > *Move existing Cider data into the vault format. Not a user-facing migration tool — just personal data preservation.*
