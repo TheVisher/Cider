@@ -156,7 +156,11 @@ final class AIChatProcessService: @unchecked Sendable {
     private func setupOutputHandlers(stdout: Pipe, stderr: Pipe) {
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
+            guard !data.isEmpty else {
+                // EOF — process closed stdout. Stop the handler to prevent CPU spin.
+                handle.readabilityHandler = nil
+                return
+            }
             if let text = String(data: data, encoding: .utf8) {
                 let cleaned = Self.stripANSI(text)
                 if !cleaned.isEmpty {
@@ -167,7 +171,10 @@ final class AIChatProcessService: @unchecked Sendable {
 
         stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
             if let text = String(data: data, encoding: .utf8) {
                 let cleaned = Self.stripANSI(text)
                 if !cleaned.isEmpty {
