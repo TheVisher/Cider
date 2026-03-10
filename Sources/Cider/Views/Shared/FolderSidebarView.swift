@@ -955,7 +955,7 @@ struct RootFolderHeaderRow: View {
     }
 
     private var shouldShowChevron: Bool {
-        hasChildren && (isIconHovered || showChevronIcon)
+        hasChildren && (isHovered || showChevronIcon)
     }
 
     private func triggerChevronFlash() {
