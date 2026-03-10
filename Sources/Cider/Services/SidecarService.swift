@@ -164,6 +164,32 @@ final class SidecarService: ObservableObject {
         }
     }
 
+    // MARK: - Note Helpers
+
+    /// Syncs sidecar metadata for a note based on its current Cider labels.
+    /// Converts label IDs to human-readable names and writes to the sidecar file.
+    func syncNote(_ note: Note) {
+        let filename = (note.relativePath as NSString).lastPathComponent
+        let dirPath: String
+        if note.relativePath.contains("/") {
+            dirPath = (note.relativePath as NSString).deletingLastPathComponent
+        } else {
+            dirPath = "Notes"
+        }
+
+        var meta = metadata(for: filename, inDirectory: dirPath) ?? SidecarItemMetadata()
+
+        // Convert label IDs to human-readable tag names
+        let labelNames = note.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
+        meta.tags = labelNames.isEmpty ? nil : labelNames.sorted()
+
+        if meta.isEmpty {
+            removeMetadata(for: filename, inDirectory: dirPath)
+        } else {
+            setMetadata(meta, for: filename, inDirectory: dirPath)
+        }
+    }
+
     // MARK: - Private
 
     private func loadSidecarFile(directoryRelativePath: String) -> SidecarFile {

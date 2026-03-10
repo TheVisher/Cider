@@ -587,6 +587,17 @@ final class NotesStorage: ObservableObject {
 
         do {
             try FileManager.default.moveItem(at: oldFileURL, to: newFileURL)
+
+            // Move sidecar metadata from old filename to new filename
+            let oldFilename = (note.relativePath as NSString).lastPathComponent
+            let dirPath = note.relativePath.contains("/")
+                ? (note.relativePath as NSString).deletingLastPathComponent
+                : "Notes"
+            if let existingMeta = SidecarService.shared.metadata(for: oldFilename, inDirectory: dirPath) {
+                SidecarService.shared.removeMetadata(for: oldFilename, inDirectory: dirPath)
+                SidecarService.shared.setMetadata(existingMeta, for: newFilename, inDirectory: dirPath)
+            }
+
             if var entry = index[note.id] {
                 entry.filename = newFilename
                 index[note.id] = entry
@@ -684,6 +695,7 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
@@ -696,6 +708,7 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
