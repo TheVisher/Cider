@@ -327,13 +327,15 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 #### Milestone 1: The Magical Loop
 > *Prove the concept. Drop file → organize → Cider reflects it.*
 
-- [ ] Real vault folder on disk (`~/CiderVault/` or user-configured path)
-- [ ] Cider mirrors vault folder structure (folders = real directories on disk)
-- [ ] FSEvents watching — external changes reflect instantly in Cider UI
-- [ ] Inbox as default landing zone for all new items
-- [ ] Sidecar `.cider-meta.json` reading (tags, summaries, dates rendered in UI)
+- [x] Real vault folder on disk (`~/CiderVault/` or user-configured path)
+- [x] Cider mirrors vault folder structure (folders = real directories on disk)
+- [x] FSEvents watching — external changes reflect instantly in Cider UI
+- [x] Vault index (`.cider-index.json`) for fast item lookup without scanning
+- [x] Notes physically move to vault folders when assigned
+- [x] Unsorted/ directory for unfiled items (hidden from Cider sidebar)
+- [x] Sidecar `.cider-meta.json` reading (tags, summaries, dates rendered in UI)
 - [ ] Sidecar writing from Cider UI (tag/edit metadata → writes to sidecar file)
-- [ ] Adapt existing search to query vault files + sidecar metadata
+- [x] Search includes sidecar metadata tags in matching
 
 #### Milestone 2: Universal Viewing
 > *Cider can display any file type dropped into the vault.*
