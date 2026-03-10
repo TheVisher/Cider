@@ -156,17 +156,14 @@ final class BookmarksViewModel: ObservableObject {
             return ids
         }()
 
-        guard let trashItem = VaultFolderService.shared.deleteFolder(folderID) else {
-            return false
-        }
-
-        // Unassign items that were in the deleted folders
+        // Unassign items BEFORE deleting the folder — notes need to move
+        // their files out of the folder directory before it gets trashed.
         for id in deletedIDs {
-            for bookmark in bookmarks where bookmark.folderID == id {
-                BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
-            }
             for note in NotesStorage.shared.notes where note.folderID == id {
                 NotesStorage.shared.assignNote(note.id, toFolder: nil)
+            }
+            for bookmark in bookmarks where bookmark.folderID == id {
+                BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
             }
             for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
                 TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
@@ -177,6 +174,10 @@ final class BookmarksViewModel: ObservableObject {
             for contact in ContactStorage.shared.contacts where contact.folderID == id {
                 ContactStorage.shared.assignContact(contact.id, toFolder: nil)
             }
+        }
+
+        guard let trashItem = VaultFolderService.shared.deleteFolder(folderID) else {
+            return false
         }
 
         CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFolder, trashItem: trashItem))
