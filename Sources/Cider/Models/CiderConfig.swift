@@ -174,6 +174,7 @@ struct CiderConfig: Codable {
         case syncToken
         case lastSyncTimestamp
         case lastSuccessfulPushAt
+        case aiChatDocked
     }
 
     var showMenuBarIcon: Bool
@@ -237,6 +238,7 @@ struct CiderConfig: Codable {
     var syncToken: String  // Bearer token for authenticating with Cider Web
     var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
     var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)
+    var aiChatDocked: Bool  // Whether AI Chat is docked in the tab bar (false = floating panel)
 
     static let storageKey = "CiderConfig"
 
@@ -296,7 +298,8 @@ struct CiderConfig: Codable {
             syncURL: "",
             syncToken: "",
             lastSyncTimestamp: 0,
-            lastSuccessfulPushAt: 0
+            lastSuccessfulPushAt: 0,
+            aiChatDocked: false
         )
     }
 
@@ -493,6 +496,7 @@ struct CiderConfig: Codable {
         syncToken = try container.decodeIfPresent(String.self, forKey: .syncToken) ?? ""
         lastSyncTimestamp = try container.decodeIfPresent(Double.self, forKey: .lastSyncTimestamp) ?? 0
         lastSuccessfulPushAt = try container.decodeIfPresent(Double.self, forKey: .lastSuccessfulPushAt) ?? 0
+        aiChatDocked = try container.decodeIfPresent(Bool.self, forKey: .aiChatDocked) ?? false
     }
 
     init(
@@ -554,7 +558,8 @@ struct CiderConfig: Codable {
         syncURL: String = "",
         syncToken: String = "",
         lastSyncTimestamp: Double = 0,
-        lastSuccessfulPushAt: Double = 0
+        lastSuccessfulPushAt: Double = 0,
+        aiChatDocked: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -615,5 +620,6 @@ struct CiderConfig: Codable {
         self.syncToken = syncToken
         self.lastSyncTimestamp = lastSyncTimestamp
         self.lastSuccessfulPushAt = lastSuccessfulPushAt
+        self.aiChatDocked = aiChatDocked
     }
 }

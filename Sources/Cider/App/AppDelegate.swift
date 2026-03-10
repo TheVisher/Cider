@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aiChatPanel: AIChatPanel?
     private var aiChatShadowPanel: CiderShadowPanel?
     private var aiChatPanelFrameObservation: NSKeyValueObservation?
+    // AI Chat view model is AIChatViewModel.shared (singleton)
 
     // Services
     private var servicesProvider: CiderServicesProvider?
@@ -1668,9 +1669,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        let contentView = AIChatContentView(frame: .zero)
-        contentView.autoresizingMask = [.width, .height]
-        panel.contentView = contentView
+        // Host the pure SwiftUI chat view in the floating panel
+        let chatView = AIChatView(viewModel: AIChatViewModel.shared, isDocked: false)
+        let hostingView = NSHostingView(rootView: chatView)
+        hostingView.autoresizingMask = [.width, .height]
+        panel.contentView = hostingView
     }
 
     private func observeAIChatNotifications() {
@@ -1693,6 +1696,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: .dockAIChat)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.dockAIChat()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .undockAIChat)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.undockAIChat()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func dockAIChat() {
+        hideAIChatPanel()
+        NotificationCenter.default.post(name: .selectAIChatTab, object: nil)
+        var config = CiderConfig.load()
+        config.aiChatDocked = true
+        config.save()
+    }
+
+    private func undockAIChat() {
+        showAIChatPanel()
+        var config = CiderConfig.load()
+        config.aiChatDocked = false
+        config.save()
     }
 
     private func showAIChatPanel() {

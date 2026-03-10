@@ -1,5 +1,4 @@
 import AppKit
-import SwiftTerm
 import SwiftUI
 
 final class AIChatPanel: NSPanel {
@@ -46,15 +45,8 @@ final class AIChatPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    // MARK: - Terminal Access
-
-    func terminal() -> LocalProcessTerminalView? {
-        (contentView as? AIChatContentView)?.terminalView
-    }
-
     // MARK: - Key Equivalents
 
-    // Route Cmd+Edit shortcuts to the first responder (same as CiderPanel).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.modifierFlags.contains(.command) else {
             return super.performKeyEquivalent(with: event)
@@ -84,11 +76,6 @@ final class AIChatPanel: NSPanel {
         switch event.type {
         case .leftMouseDown:
             makeKey()
-
-            if let hitView = contentView?.hitTest(event.locationInWindow),
-               isTerminalView(hitView) {
-                makeFirstResponder(hitView)
-            }
 
             if isInDraggableArea(event.locationInWindow) {
                 dragStartOrigin = frame.origin
@@ -129,15 +116,6 @@ final class AIChatPanel: NSPanel {
         }
     }
 
-    private func isTerminalView(_ view: NSView) -> Bool {
-        var current: NSView? = view
-        while let v = current {
-            if v is LocalProcessTerminalView { return true }
-            current = v.superview
-        }
-        return false
-    }
-
     private func isInDraggableArea(_ locationInWindow: NSPoint) -> Bool {
         guard let contentView = contentView else { return false }
 
@@ -146,7 +124,6 @@ final class AIChatPanel: NSPanel {
             while let v = view, v !== contentView {
                 if v is NSControl { return false }
                 if v is PanelEdgeResizeNSView { return false }
-                if v is LocalProcessTerminalView { return false }
                 view = v.superview
             }
         }

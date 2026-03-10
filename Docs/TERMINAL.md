@@ -1,51 +1,52 @@
-# Terminal (AI Chat Panel)
+# AI Chat Panel
 
 ## Architecture
 
-The AI Chat panel is a floating `AIChatPanel` (NSPanel subclass) with:
-- **Header**: SwiftUI `AIChatHeaderView` hosted in an `NSHostingView` — title bar + model selector pills (Shell, Claude, ChatGPT, Codex)
-- **Terminal**: Raw AppKit `LocalProcessTerminalView` (SwiftTerm) — NOT inside SwiftUI, added directly as an AppKit subview
-- **Background**: `NSVisualEffectView` (.underWindowBackground) + dark tint overlay for acrylic look
+The AI Chat is a native SwiftUI chat bubble interface that runs CLI tools (Claude, ChatGPT, Codex) as background processes. User messages are piped to stdin, CLI output streams back as chat bubbles.
 
-The content is assembled in `AIChatContentView` (pure AppKit NSView) which holds both the header hosting view and the terminal as sibling subviews.
+### Why Not a Terminal?
+
+The original implementation used SwiftTerm (terminal emulator). This caused key handling nightmares — CiderPanelView's app-wide keyboard monitor intercepted Enter, Space, Tab, arrows for card navigation, making the terminal unusable. The native chat UI avoids this entirely since SwiftUI TextFields handle their own key events through the normal responder chain.
 
 ### Key Files
+
 | File | Purpose |
 |------|---------|
-| `App/AIChatPanel.swift` | NSPanel subclass — window setup, dragging, key equivalents |
-| `Views/Shared/TerminalView.swift` | `AIChatHeaderView`, `TerminalViewModel`, `AIChatContentView`, `TerminalProcessDelegate` |
-| `App/AppDelegate.swift` | Panel lifecycle — `configureAIChatPanel()`, `showAIChatPanel()`, `hideAIChatPanel()` |
+| `Models/AIChatMessage.swift` | Chat message model (role, content, streaming state) |
+| `Models/AIModelOption.swift` | Model definitions (Shell, Claude, ChatGPT, Codex) |
+| `Services/AI/AIChatProcessService.swift` | Manages CLI Process — stdin/stdout pipes, ANSI stripping |
+| `ViewModels/AIChatViewModel.swift` | Message list, process lifecycle, model selection |
+| `Views/AIChat/AIChatView.swift` | Top-level view — header + messages + input |
+| `Views/AIChat/AIChatBubbleView.swift` | Individual message bubble (user/assistant/system) |
+| `Views/AIChat/AIChatInputView.swift` | Text input field with send button |
+| `App/AIChatPanel.swift` | NSPanel subclass for floating mode |
+| `App/AppDelegate.swift` | Panel lifecycle, dock/undock orchestration |
 
-## Critical: Keyboard Event Monitor
+## Dock / Undock
 
-**CiderPanelView has an app-wide `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` keyboard monitor** that intercepts Enter, Space, Tab, arrows, Delete for card navigation. This monitor fires for ALL key events in the app, including when the terminal is focused.
+The AI Chat works in two modes — both observe the **same** `AIChatViewModel`:
 
-**The terminal MUST be exempted.** At the top of `handleKeyDown` in CiderPanelView, there's a guard that checks if the first responder is inside a `LocalProcessTerminalView`. If so, it returns the event untouched (passes it through). **Never remove this check** — without it, those keys get consumed for card navigation and the terminal becomes unusable.
+- **Floating:** Pure SwiftUI `AIChatView` hosted in `NSHostingView` inside `AIChatPanel`
+- **Docked:** Same `AIChatView` rendered directly in CiderPanelView's tab content
 
-```swift
-// CiderPanelView.handleKeyDown — MUST be first check
-if let responder = NSApp.keyWindow?.firstResponder as? NSView,
-   isInsideTerminalView(responder) {
-    return event  // Let terminal handle ALL keys
-}
-```
+Switching modes is trivial — just hide/show the floating panel and select/deselect the `.aiChat` tab. No view reparenting needed. The shared view model preserves conversation state across mode switches.
 
-This was the root cause of a multi-session debugging nightmare. The fix is in CiderPanelView, not in AIChatPanel.
+## Process Management
 
-## Terminal Setup
+- CLI tools are launched via `Foundation.Process` with stdin/stdout pipes
+- `TERM=dumb` and `NO_COLOR=1` are set to suppress terminal formatting
+- Output is stripped of ANSI escape codes before display
+- After 1 second of idle output, the current response is marked as complete
+- The process runs in the vault directory (`StoragePaths.cachedVaultDirectoryURL`)
 
-- Shell: user's `$SHELL` (defaults to `/bin/zsh`), launched with `-l` (login shell)
-- Working directory: vault directory (`StoragePaths.cachedVaultDirectoryURL`)
-- Environment: inherits `PATH` and `HOME` from parent process
-- Term type: `xterm-256color`
-- Background: dark blue-tinted (`0.07, 0.08, 0.12`) to match acrylic aesthetic
-- Model selector can auto-launch CLI tools (e.g. `claude`, `chatgpt`, `codex`) after shell init
+## Keyboard Event Monitor
+
+CiderPanelView has an app-wide keyboard monitor for card navigation. When the `.aiChat` tab is active, the handler short-circuits and passes all events through to the chat input field. This is checked via `isInsideAIChatView()` at the top of `handleKeyDown`.
 
 ## Panel Behavior
 
 - `nonactivatingPanel` — doesn't steal focus from other apps
-- `canBecomeKey = true` — can receive key events when clicked
+- `canBecomeKey = true` — receives key events when clicked
 - Floating level, visible on all spaces
 - Draggable via header region (top 48pt)
-- Positioned next to CiderPanel when visible, otherwise at mouse location
-- Height is persisted across show/hide cycles
+- Height persisted across show/hide cycles

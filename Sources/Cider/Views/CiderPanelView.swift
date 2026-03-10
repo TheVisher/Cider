@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import SwiftTerm
 import WebKit
 
 struct CiderPanelView: View {
@@ -51,6 +50,8 @@ struct CiderPanelView: View {
     @State private var sidebarSearchText: String = ""
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var aiChatDocked: Bool = CiderConfig.load().aiChatDocked
+    @State private var tabBeforeAIChat: CiderTab?
     @State private var selectedNote: Note?
     @State private var isEditingNoteTitle = false
     @State private var newEventEditorContext: DateCardEditorContext?
@@ -276,6 +277,23 @@ struct CiderPanelView: View {
             let config = CiderConfig.load()
             textScale = config.textSize.scale
             enableLinkedSources = config.enableLinkedSources
+            aiChatDocked = config.aiChatDocked
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .selectAIChatTab)) { _ in
+            aiChatDocked = true
+            tabBeforeAIChat = selectedTab
+            // Clear folder/source/tag selection so tabContentBody reaches the .aiChat case
+            selectedFolderID = nil
+            selectedSourceID = nil
+            selectedTagIDs = []
+            selectedTab = .aiChat
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .undockAIChat)) { _ in
+            aiChatDocked = false
+            // Switch back to the previous tab when undocking
+            if selectedTab?.id == CiderTab.aiChat.id {
+                selectedTab = tabBeforeAIChat
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
             if isNoteDetailOpen {
@@ -763,13 +781,29 @@ struct CiderPanelView: View {
                     newItemPickerContent
                 }
 
-                // AI Chat panel toggle
+                // AI Chat toggle — docked mode selects the tab, floating mode toggles the panel
                 Button {
-                    NotificationCenter.default.post(name: .toggleAIChatPanel, object: nil)
+                    if aiChatDocked {
+                        if selectedTab?.id == CiderTab.aiChat.id {
+                            // Already on AI tab — switch back to previous tab
+                            selectedTab = tabBeforeAIChat
+                        } else {
+                            tabBeforeAIChat = selectedTab
+                            selectedFolderID = nil
+                            selectedSourceID = nil
+                            selectedTagIDs = []
+                            selectedTab = .aiChat
+                        }
+                    } else {
+                        NotificationCenter.default.post(name: .toggleAIChatPanel, object: nil)
+                    }
                 } label: {
                     Image(systemName: "sparkles")
                         .font(CiderFont.bodyMedium)
-                        .foregroundColor(CiderColors.secondary)
+                        .foregroundColor(
+                            (aiChatDocked && selectedTab?.id == CiderTab.aiChat.id)
+                            ? CiderColors.controlAccent : CiderColors.secondary
+                        )
                         .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
                         .contentShape(Rectangle())
                 }
@@ -1200,6 +1234,8 @@ struct CiderPanelView: View {
                     scrollToItemID: $scrollToItemID,
                     focusedItemID: focusedItemID
                 )
+            case .aiChat:
+                AIChatView(viewModel: AIChatViewModel.shared, isDocked: true)
             }
         } else {
             noTabsEmptyState
@@ -2464,14 +2500,11 @@ struct CiderPanelView: View {
         }
     }
 
-    /// Whether the given view is inside a SwiftTerm terminal view.
-    private func isInsideTerminalView(_ view: NSView) -> Bool {
-        var current: NSView? = view
-        while let v = current {
-            if v is LocalProcessTerminalView { return true }
-            current = v.superview
-        }
-        return false
+    /// Whether the given view is inside the AI Chat view hierarchy.
+    /// When focused on AI Chat, all key events should pass through to the input field.
+    private func isInsideAIChatView(_ view: NSView) -> Bool {
+        // When the AI Chat tab is active, don't intercept keys for card navigation.
+        selectedTab?.id == CiderTab.aiChat.id
     }
 
     /// Whether the first responder is a text field or its field editor
@@ -2515,11 +2548,9 @@ struct CiderPanelView: View {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-        // If the AI Chat terminal is focused, let ALL key events pass through.
-        // This monitor is app-wide and would otherwise consume Enter, Space,
-        // Tab, arrows, etc. for card navigation.
+        // If the AI Chat tab is active, let all key events pass through to the chat input.
         if let responder = NSApp.keyWindow?.firstResponder as? NSView,
-           isInsideTerminalView(responder) {
+           isInsideAIChatView(responder) {
             return event
         }
 

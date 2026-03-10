@@ -52,6 +52,9 @@ extension Notification.Name {
     static let vaultFoldersChanged = Notification.Name("cider.vaultFoldersChanged")
     static let toggleAIChatPanel = Notification.Name("cider.toggleAIChatPanel")
     static let dismissAIChatPanel = Notification.Name("cider.dismissAIChatPanel")
+    static let dockAIChat = Notification.Name("cider.dockAIChat")
+    static let undockAIChat = Notification.Name("cider.undockAIChat")
+    static let selectAIChatTab = Notification.Name("cider.selectAIChatTab")
 }
 
 // MARK: - Snap Target

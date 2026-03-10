@@ -150,6 +150,7 @@ struct CiderTabBar: View {
         case .search: return 0
         case .externalSource(let id, _): return externalSourceRegistry.files(for: id).count
         case .tag: return 0
+        case .aiChat: return 0
         }
     }
 }
