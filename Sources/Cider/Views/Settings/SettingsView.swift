@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var selectedSubcategory: SettingsSubcategory = .startup
     @State private var importResult: String?
     @State private var exportResult: String?
+    @State private var migrationResult: String?
+    @State private var isMigrating = false
     @State private var automaticallyChecksForUpdates = SparkleUpdaterService.shared.automaticallyChecksForUpdates
 
     var body: some View {
@@ -555,6 +557,39 @@ struct SettingsView: View {
                             Text("\(BookmarksStorage.shared.bookmarks.count) bookmarks")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
+                        }
+                    }
+                }
+
+                SettingsSection(title: "Vault Migration") {
+                    Text("Export all Cider data as portable vault files. Creates .webloc files for bookmarks and writes sidecar metadata (.cider-meta.json) for all items. Safe to run multiple times.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    HStack(spacing: Spacing.sm) {
+                        Button {
+                            isMigrating = true
+                            migrationResult = nil
+                            Task {
+                                let result = await VaultMigrationService.shared.runFullMigration()
+                                migrationResult = result.summary
+                                isMigrating = false
+                            }
+                        } label: {
+                            Label("Export to Vault", systemImage: "shippingbox")
+                        }
+                        .buttonStyle(CiderSecondaryButtonStyle())
+                        .disabled(isMigrating)
+
+                        if isMigrating {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if let migrationResult {
+                            Text(migrationResult)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
                         }
                     }
                 }

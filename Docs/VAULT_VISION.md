@@ -361,10 +361,11 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 #### Milestone 4: Data Migration (Personal)
 > *Move existing Cider data into the vault format. Not a user-facing migration tool — just personal data preservation.*
 
-- [ ] Export bookmarks from current JSON → vault files
-- [ ] Export notes → `.md` files in vault
-- [ ] Export folders → vault directories
-- [ ] Export tags/metadata → sidecar files
+- [x] Export bookmarks from current JSON → vault files (.webloc)
+- [x] Export notes → `.md` files in vault (already native format)
+- [x] Export folders → vault directories (legacy → VaultFolder)
+- [x] Export tags/metadata → sidecar files (.cider-meta.json)
+- [x] Settings UI trigger (Data → Import/Export → "Export to Vault" button)
 
 #### Milestone 5: Convex Sync
 > *Default sync provider. Desktop syncs vault ↔ Convex. Web and iOS consume synced data.*
