@@ -334,7 +334,7 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 - [x] Notes physically move to vault folders when assigned
 - [x] Unsorted/ directory for unfiled items (hidden from Cider sidebar)
 - [x] Sidecar `.cider-meta.json` reading (tags, summaries, dates rendered in UI)
-- [ ] Sidecar writing from Cider UI (tag/edit metadata → writes to sidecar file)
+- [x] Sidecar writing from Cider UI (tag/edit metadata → writes to sidecar file)
 - [x] Search includes sidecar metadata tags in matching
 
 #### Milestone 2: Universal Viewing

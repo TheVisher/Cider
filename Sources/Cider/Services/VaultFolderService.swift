@@ -451,8 +451,9 @@ final class VaultFolderService {
     private func handleFSEvent() {
         guard !isMutating else { return }
         reconcileWithFilesystem()
-        // Reload sidecar metadata in case .cider-meta.json files changed
+        // Reload sidecar metadata and rescan vault files
         SidecarService.shared.loadAll()
+        VaultFileService.shared.scan()
     }
 
     // MARK: - Private: Filesystem Reconciliation
