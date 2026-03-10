@@ -41,6 +41,7 @@ Read the relevant doc BEFORE writing code in that area:
 | Adding settings | `Docs/USER_PREFERENCES.md` |
 | Reusable components | `Docs/SHARED_COMPONENTS.md` |
 | Detail views | `Docs/DETAIL_PANEL_SPEC.md` |
+| Terminal / AI Chat panel | `Docs/TERMINAL.md` |
 | Cider Web sync | `Docs/ARCHITECTURE.md` § Cider Web Sync |
 | Display/perf bugs | `Docs/TROUBLESHOOTING.md` |
 | Code health/debt | `Docs/CODE_HEALTH.md` |

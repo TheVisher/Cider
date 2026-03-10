@@ -65,7 +65,7 @@ struct CiderPanelView: View {
     @State private var selectionAnchorID: String?
     @State private var scrollToItemID: String?
     @State private var keyboardMonitor: Any?
-    @State private var isTerminalVisible = false
+    // Terminal state removed — AI Chat is now a separate slide-out panel
 
     private var allTabs: [CiderTab] {
         savedViewTabs + sourceTabs + dynamicTabs
@@ -763,20 +763,18 @@ struct CiderPanelView: View {
                     newItemPickerContent
                 }
 
-                // Terminal toggle
+                // AI Chat panel toggle
                 Button {
-                    withAnimation(reduceMotion ? .none : .snappy) {
-                        isTerminalVisible.toggle()
-                    }
+                    NotificationCenter.default.post(name: .toggleAIChatPanel, object: nil)
                 } label: {
-                    Image(systemName: "terminal")
+                    Image(systemName: "sparkles")
                         .font(CiderFont.bodyMedium)
-                        .foregroundColor(isTerminalVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                        .foregroundColor(CiderColors.secondary)
                         .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Toggle terminal")
+                .help("Toggle AI Chat")
 
                 Spacer(minLength: 0)
 
@@ -1002,11 +1000,7 @@ struct CiderPanelView: View {
                 }
             }
 
-            if isTerminalVisible {
-                Divider()
-                CiderTerminalView()
-                    .frame(minHeight: 150, maxHeight: 300)
-            }
+            // AI Chat is now a separate slide-out panel (AIChatPanelView)
         }
         .animation(reduceMotion ? .none : .snappy, value: isAnyDetailOpen)
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
@@ -2521,8 +2515,10 @@ struct CiderPanelView: View {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-        // Let the terminal handle all key events when it's focused
-        if isTerminalVisible, let responder = NSApp.keyWindow?.firstResponder as? NSView,
+        // If the AI Chat terminal is focused, let ALL key events pass through.
+        // This monitor is app-wide and would otherwise consume Enter, Space,
+        // Tab, arrows, etc. for card navigation.
+        if let responder = NSApp.keyWindow?.firstResponder as? NSView,
            isInsideTerminalView(responder) {
             return event
         }

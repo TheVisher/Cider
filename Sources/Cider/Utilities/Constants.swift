@@ -50,6 +50,8 @@ extension Notification.Name {
     static let dismissClipboardPanel = Notification.Name("cider.dismissClipboardPanel")
     static let toggleClipboardPanelWidth = Notification.Name("cider.toggleClipboardPanelWidth")
     static let vaultFoldersChanged = Notification.Name("cider.vaultFoldersChanged")
+    static let toggleAIChatPanel = Notification.Name("cider.toggleAIChatPanel")
+    static let dismissAIChatPanel = Notification.Name("cider.dismissAIChatPanel")
 }
 
 // MARK: - Snap Target
@@ -291,6 +293,18 @@ enum ClipboardPanelDesign {
     static let minHeight: CGFloat = 300
     static let defaultHeight: CGFloat = 500
     static let cornerRadius: CGFloat = Radius.lg
+}
+
+enum AIChatPanelDesign {
+    static let defaultWidth: CGFloat = 400
+    static let defaultHeight: CGFloat = 560
+    static let minWidth: CGFloat = 340
+    static let minHeight: CGFloat = 360
+    static let cornerRadius: CGFloat = Radius.lg
+    static let titleBarHeight: CGFloat = 40
+    static let modelSelectorHeight: CGFloat = 32
+    /// Total height of the SwiftUI header (title bar + divider + model selector + padding)
+    static let headerHeight: CGFloat = titleBarHeight + 1 + modelSelectorHeight + Spacing.xs * 2
 }
 
 enum CiderColors {

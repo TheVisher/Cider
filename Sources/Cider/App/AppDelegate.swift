@@ -57,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardShadowPanel: CiderShadowPanel?
     private var clipboardPanelFrameObservation: NSKeyValueObservation?
 
+    // AI Chat
+    private var aiChatPanel: AIChatPanel?
+    private var aiChatShadowPanel: CiderShadowPanel?
+    private var aiChatPanelFrameObservation: NSKeyValueObservation?
+
     // Services
     private var servicesProvider: CiderServicesProvider?
 
@@ -100,6 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureClipboardHistory()
         configureClipboardPanel()
         observeClipboardViewerNotifications()
+        configureAIChatPanel()
+        observeAIChatNotifications()
 
         // Build vault index if empty (first run or rebuild needed)
         if VaultIndexService.shared.entries.isEmpty {
@@ -175,6 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenCaptureToastPanel?.orderOut(nil)
         clipboardShadowPanel?.orderOut(nil)
         clipboardPanel?.orderOut(nil)
+        aiChatShadowPanel?.orderOut(nil)
+        aiChatPanel?.orderOut(nil)
     }
 
     func applicationWillResignActive(_ notification: Notification) {
@@ -1641,6 +1650,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             })
         }
+    }
+
+    // MARK: - AI Chat Panel
+
+    private func configureAIChatPanel() {
+        let panel = AIChatPanel()
+        self.aiChatPanel = panel
+
+        let shadowPanel = CiderShadowPanel()
+        self.aiChatShadowPanel = shadowPanel
+
+        aiChatPanelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
+            guard let frame = change.newValue else { return }
+            DispatchQueue.main.async {
+                self?.aiChatShadowPanel?.updateFrame(for: frame)
+            }
+        }
+
+        let contentView = AIChatContentView(frame: .zero)
+        contentView.autoresizingMask = [.width, .height]
+        panel.contentView = contentView
+    }
+
+    private func observeAIChatNotifications() {
+        NotificationCenter.default.publisher(for: .toggleAIChatPanel)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, let panel = self.aiChatPanel else { return }
+                if panel.isVisible {
+                    self.hideAIChatPanel()
+                } else {
+                    self.showAIChatPanel()
+                }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .dismissAIChatPanel)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.hideAIChatPanel()
+            }
+            .store(in: &cancellables)
+
+    }
+
+    private func showAIChatPanel() {
+        guard let panel = aiChatPanel else { return }
+
+        let width = AIChatPanelDesign.defaultWidth
+        let savedHeight = UserDefaults.standard.double(forKey: "cider.aiChatPanelHeight")
+        let preferredHeight = savedHeight >= AIChatPanelDesign.minHeight ? savedHeight : AIChatPanelDesign.defaultHeight
+
+        // Position next to CiderPanel if visible, otherwise at mouse
+        let frame: NSRect
+        if let ciderFrame = ciderPanel?.frame, ciderPanel?.isVisible == true {
+            // Place to the right of the Cider panel
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(ciderFrame.origin) })
+                ?? NSScreen.main ?? NSScreen.screens.first!
+            let height = min(preferredHeight, screen.visibleFrame.height - Spacing.lg * 2)
+
+            var x = ciderFrame.maxX + Spacing.sm
+            // If it would go off-screen, place to the left instead
+            if x + width > screen.visibleFrame.maxX {
+                x = ciderFrame.minX - width - Spacing.sm
+            }
+            // Clamp to screen
+            x = max(screen.visibleFrame.minX, min(x, screen.visibleFrame.maxX - width))
+
+            // Align top edge with Cider panel
+            let y = max(screen.visibleFrame.minY, ciderFrame.maxY - height)
+            frame = NSRect(x: x, y: y, width: width, height: height)
+        } else {
+            let mouseLocation = NSEvent.mouseLocation
+            guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+                    ?? NSScreen.main else { return }
+            let height = min(preferredHeight, screen.visibleFrame.height - Spacing.lg * 2)
+            let x = max(screen.visibleFrame.minX, min(mouseLocation.x - width / 2, screen.visibleFrame.maxX - width))
+            let y = max(screen.visibleFrame.minY, min(mouseLocation.y - height / 2, screen.visibleFrame.maxY - height))
+            frame = NSRect(x: x, y: y, width: width, height: height)
+        }
+
+        panel.setFrame(frame, display: true)
+        panel.makeKeyAndOrderFront(nil)
+        aiChatShadowPanel?.updateFrame(for: panel.frame)
+        aiChatShadowPanel?.order(.below, relativeTo: panel.windowNumber)
+    }
+
+    private func hideAIChatPanel() {
+        if let panel = aiChatPanel, panel.frame.height >= AIChatPanelDesign.minHeight {
+            let previousSaved = UserDefaults.standard.double(forKey: "cider.aiChatPanelHeight")
+            let toSave = max(panel.frame.height, previousSaved)
+            UserDefaults.standard.set(toSave, forKey: "cider.aiChatPanelHeight")
+        }
+        aiChatPanel?.orderOut(nil)
+        aiChatShadowPanel?.orderOut(nil)
     }
 
     // MARK: - Debug Logging

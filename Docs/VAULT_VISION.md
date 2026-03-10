@@ -245,32 +245,50 @@ Your girlfriend (iOS only)     You (Desktop + iOS + Web)
 
 Shared vaults are harder with CloudKit (`CKShare` is more record-level than workspace-level). This is one reason Convex is the recommended default.
 
-## Embedded Terminal / Chat Window
+## AI Chat Panel
 
-### Concept
+### Current Implementation (Option A: Styled Terminal)
 
-A built-in terminal view inside Cider, pre-seeded into the vault directory. Not a custom AI chat — just a real terminal where users run whatever CLI tool they prefer.
+A slide-out companion panel that opens alongside the main Cider panel. Underneath it's a real PTY-backed terminal (SwiftTerm), but styled to feel like a chat window:
 
-### How It Works
-
-- User opens chat/terminal panel in Cider
-- It's a real PTY-backed terminal (using SwiftTerm or similar)
-- Working directory is automatically set to `CiderVault/`
-- User runs `claude`, `codex`, `chatgpt`, or any CLI tool
-- AI tool has full access to vault files, organizes/tags/summarizes
-- Cider picks up changes instantly via FSEvents
+- **Slide-out panel** — separate `NSPanel` that appears to the right of the main panel, usable simultaneously
+- **Model selector** — dropdown at the top (Claude, ChatGPT, Codex, custom) that auto-launches the selected CLI tool. No need to type commands.
+- **Chat-like styling** — Cider's acrylic aesthetic, rounded corners, warm colors instead of "hacker terminal" look
+- **Working directory** pre-seeded to `CiderVault/`
+- **Toggle** via button in sidebar footer or keyboard shortcut
 
 ### Why This Fits "Bring Your Own AI"
 
-This doesn't lock users into any AI. It's literally just a terminal. Users run whatever they want:
-```
-$ claude "organize my inbox"
-$ codex "tag all photos from last week"
-$ chatgpt "summarize the PDFs in Finance/"
-$ python my_custom_script.py
-```
+This doesn't lock users into any AI. It's a terminal underneath — users run whatever they want. The model selector is just a convenience that runs the right CLI command. Users can also type any command directly.
 
-The terminal is a convenience — same thing as opening Terminal.app and `cd`-ing to the vault, but integrated into Cider's UI.
+### Future: Option B — Chat UI with Hidden Terminal
+
+> **Status:** Backlog. Implement after Option A is proven and user feedback confirms demand.
+
+The ambitious evolution: build a proper chat bubble UI that completely hides the terminal:
+
+**How it would work:**
+- SwiftTerm still runs underneath as the engine (invisible)
+- A custom SwiftUI chat view captures terminal stdout and renders it as "assistant" message bubbles
+- A text input field at the bottom sends keystrokes to the hidden terminal
+- ANSI escape codes are stripped/parsed from output before display
+- Clean conversation flow with user messages on the right, AI responses on the left
+
+**Technical challenges:**
+- **Streaming output parsing** — CLI tools use progress spinners, partial lines, markdown formatting, cursor movement. Reliably parsing this into clean "messages" is hard.
+- **Message boundary detection** — Knowing when the AI is "done" responding vs. still streaming. No universal signal across different CLI tools.
+- **Rich content** — Some CLI tools output tables, code blocks, file trees. Need a markdown renderer for assistant bubbles.
+- **Interactive prompts** — Some tools ask yes/no questions mid-stream. The chat UI needs to handle these gracefully.
+- **Tool-specific adapters** — Each CLI tool (Claude, ChatGPT, Codex) has different output patterns. May need per-tool parsing logic.
+
+**Suggested approach:**
+1. Start with Claude CLI (most structured output, most popular)
+2. Build an output parser that detects message boundaries using prompt patterns (`❯`, `$`, etc.)
+3. Render assistant messages as markdown bubbles
+4. Add adapters for other tools as needed
+5. Keep a "raw terminal" toggle for power users who want the real terminal
+
+**Why wait:** Option A gets 80% of the chat feel with 20% of the complexity. Option B is worth pursuing only if users consistently ask "why does this look like a terminal?" — meaning the styling alone isn't enough.
 
 ## Metadata Strategy
 
@@ -356,7 +374,8 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 - [x] Working directory pre-seeded to vault folder
 - [x] Terminal panel toggle in UI
 - [x] Works with Claude Code, Codex, ChatGPT CLI, custom scripts — anything the user has installed
-- [ ] Terminal visual polish — styling, resize handle, height persistence, acrylic background, proper spacing, toolbar refinement
+- [x] AI Chat slide-out panel — separate floating panel with acrylic background, model selector pills (Shell/Claude/ChatGPT/Codex), auto-launches selected CLI tool, positions next to main panel, height persistence
+- [ ] Additional polish — custom model configuration in settings, keyboard shortcut for toggle
 
 #### Milestone 4: Data Migration (Personal)
 > *Move existing Cider data into the vault format. Not a user-facing migration tool — just personal data preservation.*
