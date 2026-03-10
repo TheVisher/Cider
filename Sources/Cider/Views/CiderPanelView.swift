@@ -64,6 +64,7 @@ struct CiderPanelView: View {
     @State private var selectionAnchorID: String?
     @State private var scrollToItemID: String?
     @State private var keyboardMonitor: Any?
+    @State private var isTerminalVisible = false
 
     private var allTabs: [CiderTab] {
         savedViewTabs + sourceTabs + dynamicTabs
@@ -761,6 +762,21 @@ struct CiderPanelView: View {
                     newItemPickerContent
                 }
 
+                // Terminal toggle
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        isTerminalVisible.toggle()
+                    }
+                } label: {
+                    Image(systemName: "terminal")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(isTerminalVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                        .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Toggle terminal")
+
                 Spacer(minLength: 0)
 
                 // View options
@@ -974,13 +990,21 @@ struct CiderPanelView: View {
     }
 
     private var contentArea: some View {
-        ZStack {
-            tabContentBody
-                .opacity(isAnyDetailPageMode ? 0 : 1)
-                .allowsHitTesting(!isAnyDetailPageMode)
+        VStack(spacing: 0) {
+            ZStack {
+                tabContentBody
+                    .opacity(isAnyDetailPageMode ? 0 : 1)
+                    .allowsHitTesting(!isAnyDetailPageMode)
 
-            if isAnyDetailPageMode {
-                detailPageView
+                if isAnyDetailPageMode {
+                    detailPageView
+                }
+            }
+
+            if isTerminalVisible {
+                Divider()
+                CiderTerminalView()
+                    .frame(minHeight: 150, maxHeight: 300)
             }
         }
         .animation(reduceMotion ? .none : .snappy, value: isAnyDetailOpen)

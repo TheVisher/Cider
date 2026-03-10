@@ -10,6 +10,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
         .package(url: "https://github.com/get-convex/convex-swift", from: "0.8.1"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.11.2"),
     ],
     targets: [
         .target(
@@ -17,6 +18,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "ConvexMobile", package: "convex-swift"),
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
             path: "Sources/Cider",
             exclude: [

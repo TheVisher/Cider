@@ -278,7 +278,7 @@ final class BookmarksStorage: ObservableObject {
     /// Move a bookmark deleted on the web into the desktop trash (so it can be restored).
     func trashFromSync(_ bookmark: Bookmark) {
         cancelEnrichment(for: bookmark.id)
-        TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
+        _ = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()
     }

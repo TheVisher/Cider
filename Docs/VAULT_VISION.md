@@ -352,10 +352,10 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 #### Milestone 3: AI Workspace
 > *Power-user AI workspace inside Cider. Users run any CLI tool against the vault.*
 
-- [ ] SwiftTerm-based terminal view in Cider panel
-- [ ] Working directory pre-seeded to vault folder
-- [ ] Terminal panel toggle in UI
-- [ ] Works with Claude Code, Codex, ChatGPT CLI, custom scripts — anything the user has installed
+- [x] SwiftTerm-based terminal view in Cider panel
+- [x] Working directory pre-seeded to vault folder
+- [x] Terminal panel toggle in UI
+- [x] Works with Claude Code, Codex, ChatGPT CLI, custom scripts — anything the user has installed
 
 #### Milestone 4: Data Migration (Personal)
 > *Move existing Cider data into the vault format. Not a user-facing migration tool — just personal data preservation.*
