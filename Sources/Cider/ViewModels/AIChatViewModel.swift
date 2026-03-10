@@ -16,6 +16,13 @@ final class AIChatViewModel: ObservableObject {
     private let processService = AIChatProcessService()
     private var currentStreamingMessageID: UUID?
 
+    /// Where chat history is persisted — one file per model.
+    private func historyFileURL(for modelID: String) -> URL {
+        StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent("AI Chat")
+            .appendingPathComponent("\(modelID)_session.json")
+    }
+
     init() {
         processService.onOutput = { [weak self] text in
             Task { @MainActor [weak self] in
@@ -28,6 +35,8 @@ final class AIChatViewModel: ObservableObject {
                 self?.handleProcessExit(exitCode)
             }
         }
+
+        loadMessages()
     }
 
     deinit {
@@ -38,11 +47,14 @@ final class AIChatViewModel: ObservableObject {
 
     func selectModel(_ model: AIModelOption) {
         guard selectedModel.id != model.id else { return }
-        selectedModel = model
+        // Save current model's messages before switching
+        saveMessages()
         processService.stop()
         isProcessRunning = false
         currentStreamingMessageID = nil
-        messages.removeAll()
+        selectedModel = model
+        // Load the new model's messages
+        loadMessages()
     }
 
     func sendMessage(_ text: String) {
@@ -60,15 +72,17 @@ final class AIChatViewModel: ObservableObject {
         currentStreamingMessageID = assistantMessage.id
         messages.append(assistantMessage)
 
+        saveMessages()
+
         if model.id == "shell" {
             // Shell mode: persistent process, pipe stdin
             if !isProcessRunning {
                 startShell()
             }
             processService.send(trimmed)
-        } else if let printFlag = model.printFlag {
-            // One-shot mode: run command with print flag per message (e.g. `claude -p "msg"`)
-            processService.runOneShot(command: model.command, arguments: [printFlag, trimmed])
+        } else if !model.printArgs.isEmpty {
+            // One-shot mode with args (e.g. `claude --continue -p "msg"`)
+            processService.runOneShot(command: model.command, arguments: model.printArgs + [trimmed])
             isProcessRunning = true
         } else {
             // Fallback: try one-shot with the message as an argument
@@ -82,6 +96,7 @@ final class AIChatViewModel: ObservableObject {
         isProcessRunning = false
         currentStreamingMessageID = nil
         messages.removeAll()
+        saveMessages()
     }
 
     func stop() {
@@ -120,6 +135,8 @@ final class AIChatViewModel: ObservableObject {
         if selectedModel.id == "shell" || exitCode != 0 {
             addSystemMessage("Session ended (exit code \(exitCode)).")
         }
+
+        saveMessages()
     }
 
     private func finalizeCurrentStream() {
@@ -135,6 +152,50 @@ final class AIChatViewModel: ObservableObject {
         }
 
         currentStreamingMessageID = nil
+    }
+
+    // MARK: - Persistence
+
+    private func saveMessages() {
+        let fileURL = historyFileURL(for: selectedModel.id)
+        let saveable = messages.filter { !$0.isStreaming && !$0.content.isEmpty }
+        guard !saveable.isEmpty else {
+            // Clean up file if no messages
+            try? FileManager.default.removeItem(at: fileURL)
+            return
+        }
+
+        do {
+            let dir = fileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(saveable)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            logger.error("Failed to save chat history: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadMessages() {
+        let fileURL = historyFileURL(for: selectedModel.id)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            messages.removeAll()
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            messages = try decoder.decode([AIChatMessage].self, from: data)
+            logger.info("Loaded \(self.messages.count) messages from history")
+        } catch {
+            logger.error("Failed to load chat history: \(error.localizedDescription)")
+            messages.removeAll()
+        }
     }
 
     // MARK: - Helpers

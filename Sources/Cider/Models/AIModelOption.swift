@@ -5,13 +5,13 @@ struct AIModelOption: Identifiable, Hashable {
     let name: String
     let icon: String
     let command: String
-    /// Argument to pass the user's message in one-shot mode (e.g. "-p" for `claude -p "msg"`)
-    let printFlag: String?
+    /// Arguments for one-shot mode (e.g. ["-p"] for `claude -p "msg"`, ["--continue", "-p"] to resume)
+    let printArgs: [String]
 
     static let builtIn: [AIModelOption] = [
-        AIModelOption(id: "shell", name: "Shell", icon: "terminal", command: "", printFlag: nil),
-        AIModelOption(id: "claude", name: "Claude", icon: "bubble.left.and.text.bubble.right", command: "claude", printFlag: "-p"),
-        AIModelOption(id: "chatgpt", name: "ChatGPT", icon: "bubble.left.and.text.bubble.right", command: "chatgpt", printFlag: nil),
-        AIModelOption(id: "codex", name: "Codex", icon: "chevron.left.forwardslash.chevron.right", command: "codex", printFlag: nil),
+        AIModelOption(id: "shell", name: "Shell", icon: "terminal", command: "", printArgs: []),
+        AIModelOption(id: "claude", name: "Claude", icon: "bubble.left.and.text.bubble.right", command: "claude", printArgs: ["--continue", "-p"]),
+        AIModelOption(id: "chatgpt", name: "ChatGPT", icon: "bubble.left.and.text.bubble.right", command: "chatgpt", printArgs: []),
+        AIModelOption(id: "codex", name: "Codex", icon: "chevron.left.forwardslash.chevron.right", command: "codex", printArgs: []),
     ]
 }

@@ -1,13 +1,13 @@
 import Foundation
 
-struct AIChatMessage: Identifiable {
+struct AIChatMessage: Identifiable, Codable {
     let id: UUID
     let role: Role
     var content: String
     let timestamp: Date
     var isStreaming: Bool
 
-    enum Role {
+    enum Role: String, Codable {
         case user
         case assistant
         case system
