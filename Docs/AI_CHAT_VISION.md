@@ -72,6 +72,12 @@ A `CLAUDE.md` file placed in the vault directory. Claude CLI auto-reads this fil
 - Export any conversation as clean, readable markdown.
 - Share-friendly format: headers for metadata, blockquotes or labels for role attribution.
 
+### System Folder Migration
+- Move `AI Chat/` into a hidden `.cider/` system folder: `~/CiderVault/.cider/AI Chat/`
+- The `.cider/` directory would hold all Cider internal data (chat history, cache, configs) — hidden from the sidebar and Finder by default (dot-prefix)
+- Currently handled by adding "AI Chat" to `reservedDirectoryNames` in `VaultFolderService.swift` — works but doesn't scale if more internal folders are added
+- Migration: move existing `AI Chat/` contents into `.cider/AI Chat/`, update `AIChatViewModel.conversationsDirectory` path, and swap `reservedDirectoryNames` for a single `.cider` prefix check
+
 ### CLAUDE.md Auto-Generation
 - Instead of a static context file, generate `CLAUDE.md` dynamically based on vault contents.
 - Lists folder structure, file counts, recent activity — whatever helps the AI understand the workspace.
@@ -91,6 +97,38 @@ The original approach embedded a SwiftTerm terminal view. Removed it entirely in
 
 ### JSON for history, markdown for export
 Chat history is JSON — it needs session IDs, timestamps, role tags, and metadata to support resumption. Markdown is a lossy export format. Store as JSON, export as markdown when the user wants to share.
+
+---
+
+## Next Major Feature: Execution Modes
+
+### The Problem
+One-shot mode (`-p`) gives clean chat output but can't do multi-step tasks (sorting bookmarks, reorganizing files). Interactive mode can do everything but spams the chat with tool-use noise.
+
+### Solution: Two Modes + CLAUDE.md Guardrails
+
+**One-shot mode (default):**
+- `-p` + `--dangerously-skip-permissions` — lets Claude read files and take actions
+- `CLAUDE.md` in the vault enforces safe behavior: never delete without confirmation, summarize don't dump, plan before executing
+- Clean chat bubble output — 90% of use cases
+- User sees: question → clean response with a plan → approves → action on next message
+
+**Interactive mode (advanced toggle):**
+- Persistent process like Shell mode
+- Full streaming output — tool calls, file reads, diffs, everything
+- Power user mode for complex multi-step tasks
+- Could parse Claude's structured output to show clean summaries and collapse noise (future polish)
+
+**Mode selector:** Add a toggle in the model picker or a per-conversation setting. Default to one-shot.
+
+### CLAUDE.md as the Control Layer
+The vault's `CLAUDE.md` is auto-read by Claude CLI. It sets behavioral rules:
+- Never modify/delete without listing the plan first
+- Keep responses concise for chat bubbles
+- Summarize data in plain language, don't dump JSON
+- Break multi-step tasks into phases
+
+This is better than code-level filtering because it's flexible, user-editable, and works across all conversations.
 
 ---
 

@@ -21,6 +21,8 @@ final class AIChatViewModel: ObservableObject {
 
     private let processService = AIChatProcessService()
     private var currentStreamingMessageID: UUID?
+    /// Tracks whether we've received real output yet (to replace the placeholder).
+    private var hasReceivedOutput = false
 
     // MARK: - File Paths
 
@@ -114,9 +116,11 @@ final class AIChatViewModel: ObservableObject {
         let userMessage = AIChatMessage(role: .user, content: trimmed)
         messages.append(userMessage)
 
-        // Create streaming assistant message
-        let assistantMessage = AIChatMessage(role: .assistant, content: "", isStreaming: true, hideWhileStreaming: model.id == "codex")
+        // Create streaming assistant message with a placeholder while waiting
+        let placeholder = model.id == "shell" ? "" : "Working on it…"
+        let assistantMessage = AIChatMessage(role: .assistant, content: placeholder, isStreaming: true, hideWhileStreaming: model.id == "codex")
         currentStreamingMessageID = assistantMessage.id
+        hasReceivedOutput = false
         messages.append(assistantMessage)
 
         // Auto-title from first user message
@@ -253,7 +257,13 @@ final class AIChatViewModel: ObservableObject {
     private func handleOutput(_ text: String) {
         if let streamID = currentStreamingMessageID,
            let index = messages.firstIndex(where: { $0.id == streamID }) {
-            messages[index].content += text
+            // Replace placeholder with first real output
+            if !hasReceivedOutput {
+                hasReceivedOutput = true
+                messages[index].content = text
+            } else {
+                messages[index].content += text
+            }
         } else {
             let msg = AIChatMessage(role: .assistant, content: text, isStreaming: true)
             currentStreamingMessageID = msg.id

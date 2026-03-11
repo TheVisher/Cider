@@ -144,8 +144,13 @@ struct MultilineInputField: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? InputNSTextView else { return }
         if textView.string != text {
+            context.coordinator.isUpdating = true
             textView.string = text
-            context.coordinator.recalcHeight()
+            context.coordinator.isUpdating = false
+            // Defer height recalc to avoid modifying state during view update
+            DispatchQueue.main.async {
+                context.coordinator.recalcHeight()
+            }
         }
     }
 
@@ -157,13 +162,15 @@ struct MultilineInputField: NSViewRepresentable {
         var parent: MultilineInputField
         weak var textView: InputNSTextView?
         weak var scrollView: NSScrollView?
+        /// Guard to prevent writing state back during updateNSView
+        var isUpdating = false
 
         init(_ parent: MultilineInputField) {
             self.parent = parent
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
+            guard !isUpdating, let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
             recalcHeight()
         }

@@ -546,7 +546,7 @@ final class VaultFolderService {
     }
 
     /// Directories that are Cider internals, not user-created folders.
-    private static let reservedDirectoryNames: Set<String> = ["Inbox", "Unsorted"]
+    private static let reservedDirectoryNames: Set<String> = ["Inbox", "Unsorted", "AI Chat"]
 
     /// Returns true if the path is a known internal directory (StorageType or reserved name).
     private func isStorageTypeDirectory(_ relativePath: String) -> Bool {

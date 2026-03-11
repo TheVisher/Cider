@@ -583,6 +583,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 ### AI & Intelligence
 | Item | Source | Notes |
 |------|--------|-------|
+| AI Chat polish | AI_CHAT_VISION | Popout window broken, streaming markdown rendering, custom agent support, tool use visualization |
 | Conversational AI assistant | AI_VISION | Chat overlay, natural language queries, structured output |
 | BYOAI (bring your own API key) | BETA_ROADMAP | For users without Apple Intelligence |
 | Voice note capture | AI_VISION | Dictate notes via speech-to-text |
