@@ -12,11 +12,12 @@ final class AIChatViewModel: ObservableObject {
     // MARK: - Published State
 
     @Published var messages: [AIChatMessage] = []
-    @Published var selectedModel: AIModelOption = AIModelOption.builtIn[0]
+    @Published var selectedModel: AIModelOption = AIModelOption.aiModels[0]
     @Published var isProcessRunning = false
     @Published var conversations: [ChatConversation] = []
     @Published var currentConversationID: UUID?
     @Published var isSidebarOpen = false
+    @Published var isShellExpanded = false
 
     private let processService = AIChatProcessService()
     private var currentStreamingMessageID: UUID?
@@ -91,6 +92,19 @@ final class AIChatViewModel: ObservableObject {
 
         let model = selectedModel
 
+        // Check CLI availability before running (skip for shell)
+        if model.id != "shell" && !isModelInstalled(model) {
+            if currentConversationID == nil {
+                newConversation(autoTitle: trimmed)
+            }
+            let userMessage = AIChatMessage(role: .user, content: trimmed)
+            messages.append(userMessage)
+            let hint = model.installHint.isEmpty ? model.command : model.installHint
+            addSystemMessage("\(model.name) CLI not found. Install it with:\n\n\(hint)")
+            saveCurrentConversation()
+            return
+        }
+
         // Create a conversation if none active
         if currentConversationID == nil {
             newConversation(autoTitle: trimmed)
@@ -101,7 +115,7 @@ final class AIChatViewModel: ObservableObject {
         messages.append(userMessage)
 
         // Create streaming assistant message
-        let assistantMessage = AIChatMessage(role: .assistant, content: "", isStreaming: true)
+        let assistantMessage = AIChatMessage(role: .assistant, content: "", isStreaming: true, hideWhileStreaming: model.id == "codex")
         currentStreamingMessageID = assistantMessage.id
         messages.append(assistantMessage)
 
@@ -126,10 +140,12 @@ final class AIChatViewModel: ObservableObject {
             if hasHistory && !model.continueArgs.isEmpty {
                 args = model.continueArgs + args
             }
-            processService.runOneShot(command: model.command, arguments: args + [trimmed])
+            let ignoreStderr = model.id == "codex"
+            processService.runOneShot(command: model.command, arguments: args + [trimmed], ignoreStderr: ignoreStderr)
             isProcessRunning = true
         } else {
-            processService.runOneShot(command: model.command, arguments: [trimmed])
+            let ignoreStderr = model.id == "codex"
+            processService.runOneShot(command: model.command, arguments: [trimmed], ignoreStderr: ignoreStderr)
             isProcessRunning = true
         }
     }
@@ -214,6 +230,16 @@ final class AIChatViewModel: ObservableObject {
         isSidebarOpen.toggle()
     }
 
+    func toggleShellExpanded() {
+        isShellExpanded.toggle()
+    }
+
+    /// Check if a model's CLI tool is installed. Always true for shell.
+    func isModelInstalled(_ model: AIModelOption) -> Bool {
+        guard !model.command.isEmpty else { return true }
+        return processService.isCommandAvailable(model.command)
+    }
+
     // MARK: - Process Management
 
     private func startShell() {
@@ -235,6 +261,59 @@ final class AIChatViewModel: ObservableObject {
         }
     }
 
+    /// Strip Codex CLI's verbose header, metadata, and deprecation warnings from complete output.
+    private static let codexNoisePatterns: [String] = [
+        "OpenAI Codex v",
+        "--------",
+        "workdir:",
+        "model:",
+        "provider:",
+        "approval:",
+        "sandbox:",
+        "reasoning effort:",
+        "reasoning summaries:",
+        "session id:",
+        "deprecated:",
+        "Enable it with",
+        "mcp startup:",
+        "tokens used",
+    ]
+
+    private static func stripCodexNoise(_ text: String) -> String {
+        let lines = text.components(separatedBy: "\n")
+        var filtered: [String] = []
+        var skipNextNumber = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+
+            // After a "tokens used" line, skip the next number
+            if skipNextNumber {
+                skipNextNumber = false
+                let digits = trimmed.replacingOccurrences(of: ",", with: "")
+                if Int(digits) != nil { continue }
+            }
+
+            if trimmed == "tokens used" {
+                skipNextNumber = true
+                continue
+            }
+
+            // Drop lines that are just a role label
+            if trimmed == "codex" || trimmed == "user" { continue }
+
+            var isNoise = false
+            for pattern in codexNoisePatterns {
+                if trimmed.hasPrefix(pattern) { isNoise = true; break }
+            }
+            if isNoise { continue }
+
+            filtered.append(line)
+        }
+        return filtered.joined(separator: "\n")
+    }
+
     private func handleProcessExit(_ exitCode: Int32) {
         isProcessRunning = false
         finalizeCurrentStream()
@@ -251,6 +330,12 @@ final class AIChatViewModel: ObservableObject {
               let index = messages.firstIndex(where: { $0.id == streamID }) else { return }
 
         messages[index].isStreaming = false
+
+        // Clean up Codex's verbose metadata from the complete output
+        if selectedModel.id == "codex" {
+            messages[index].content = Self.stripCodexNoise(messages[index].content)
+        }
+
         messages[index].content = messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if messages[index].content.isEmpty {

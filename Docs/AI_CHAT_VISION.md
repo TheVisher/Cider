@@ -6,14 +6,14 @@
 
 ## What It Is
 
-A native chat interface embedded in Cider that talks to CLI-based AI tools (Claude, ChatGPT, Codex) and doubles as a shell. No browser tabs, no separate apps — AI access from a floating panel that's always one double-tap away.
+A native chat interface embedded in Cider that talks to CLI-based AI tools (Claude, Gemini, Codex) and optionally doubles as a shell. No browser tabs, no separate apps — AI access from a floating panel that's always one double-tap away.
 
 ## What's Built (v1)
 
 ### Chat UI
 - Native SwiftUI chat bubble interface. Replaced the earlier SwiftTerm terminal approach entirely — no terminal emulator dependency.
 - User messages on the right, assistant responses on the left, standard chat layout.
-- Model selector pills at the top to switch between backends: Shell, Claude, ChatGPT, Codex.
+- Model selector pills at the bottom to switch between backends: Claude, Gemini, Codex. Shell is accessible via a chevron expander for power users.
 
 ### Two Modes
 1. **One-shot AI mode** — For Claude/ChatGPT/Codex. Runs a single command like `claude -p "message"`, captures stdout, displays it as a chat bubble. Each message is an independent process invocation.
@@ -101,3 +101,4 @@ Chat history is JSON — it needs session IDs, timestamps, role tags, and metada
 - **Cost tracking** — Track token usage or API cost per conversation. Claude CLI may expose this in stdout.
 - **Additional CLI backends** — The model selector is extensible. Any CLI tool that accepts a prompt flag and returns text could be added.
 - **Slash commands** — Considered and rejected. Native UI controls (pills, buttons, menus) are more discoverable and don't conflict with shell syntax. If the user types `/something` in shell mode, it should behave like a normal shell command, not a Cider action.
+- **Custom agent support** — Let users add any CLI-based AI agent to the model picker. Since Cider doesn't bundle any CLIs — it just wraps whatever's installed — users should be able to add agents like Kimi K2, Aider, or any future tool. The "Add Custom Agent" flow would capture: name (pill label), command (CLI binary), icon (SF Symbol picker or default), and argument patterns (print args, continue args). This is essentially a user-editable version of `AIModelOption`. Custom agents would be stored in the vault config and appear alongside the built-in pills.

@@ -31,7 +31,8 @@ final class AIChatProcessService: @unchecked Sendable {
 
     /// Run a command with arguments and stream its output. Process exits when done.
     /// Use this for AI CLIs like `claude -p "message"`.
-    func runOneShot(command: String, arguments: [String]) {
+    /// Set `ignoreStderr` to true for CLIs that duplicate output on stderr (e.g. Codex).
+    func runOneShot(command: String, arguments: [String], ignoreStderr: Bool = false) {
         stop()
 
         guard let executablePath = resolveExecutable(command) else {
@@ -57,7 +58,11 @@ final class AIChatProcessService: @unchecked Sendable {
         self.errorPipe = error
         self.process = proc
 
-        setupOutputHandlers(stdout: output, stderr: error)
+        if ignoreStderr {
+            setupOutputHandlers(stdout: output, stderr: nil)
+        } else {
+            setupOutputHandlers(stdout: output, stderr: error)
+        }
 
         proc.terminationHandler = { [weak self] proc in
             self?.onProcessExit?(proc.terminationStatus)
@@ -147,13 +152,13 @@ final class AIChatProcessService: @unchecked Sendable {
 
     private func buildEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "dumb"
+        env.removeValue(forKey: "TERM")
         env["NO_COLOR"] = "1"
         env["PATH"] = expandedPATH()
         return env
     }
 
-    private func setupOutputHandlers(stdout: Pipe, stderr: Pipe) {
+    private func setupOutputHandlers(stdout: Pipe, stderr: Pipe?) {
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else {
@@ -169,7 +174,7 @@ final class AIChatProcessService: @unchecked Sendable {
             }
         }
 
-        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        stderr?.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else {
                 handle.readabilityHandler = nil
@@ -220,6 +225,12 @@ final class AIChatProcessService: @unchecked Sendable {
         }
 
         return directories.joined(separator: ":")
+    }
+
+    /// Check whether a CLI command can be found in PATH.
+    func isCommandAvailable(_ command: String) -> Bool {
+        guard !command.isEmpty else { return false }
+        return resolveExecutable(command) != nil
     }
 
     private func resolveExecutable(_ command: String) -> String? {

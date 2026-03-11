@@ -39,10 +39,12 @@ struct AIChatBubbleView: View {
     // MARK: - Assistant Bubble
 
     private var assistantBubble: some View {
-        HStack {
+        let showThinking = message.isStreaming && (message.content.isEmpty || message.hideWhileStreaming)
+
+        return HStack {
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                if message.content.isEmpty && message.isStreaming {
-                    streamingIndicator
+                if showThinking {
+                    ThinkingDotsView()
                 } else {
                     Text(message.content)
                         .font(CiderFont.body)
@@ -50,7 +52,7 @@ struct AIChatBubbleView: View {
                         .textSelection(.enabled)
 
                     if message.isStreaming {
-                        streamingIndicator
+                        ThinkingDotsView()
                     }
                 }
             }
@@ -82,18 +84,33 @@ struct AIChatBubbleView: View {
         }
         .padding(.vertical, Spacing.xs)
     }
+}
 
-    // MARK: - Streaming Indicator
+// MARK: - Animated Thinking Dots
 
-    private var streamingIndicator: some View {
+struct ThinkingDotsView: View {
+    @State private var animating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
         HStack(spacing: Spacing.xs) {
             ForEach(0..<3) { i in
                 Circle()
                     .fill(CiderColors.tertiary)
-                    .frame(width: 4, height: 4)
-                    .opacity(0.6)
+                    .frame(width: 5, height: 5)
+                    .offset(y: animating ? -3 : 1)
+                    .animation(
+                        reduceMotion ? .none :
+                            .spring(response: 0.4, dampingFraction: 0.5)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(i) * 0.15),
+                        value: animating
+                    )
             }
         }
         .padding(.vertical, Spacing.xxs)
+        .onAppear {
+            animating = true
+        }
     }
 }

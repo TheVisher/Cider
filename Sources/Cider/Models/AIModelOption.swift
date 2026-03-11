@@ -9,11 +9,19 @@ struct AIModelOption: Identifiable, Hashable {
     let printArgs: [String]
     /// Arguments to prepend when continuing an existing conversation (e.g. ["--continue"])
     let continueArgs: [String]
+    /// Hint shown when the CLI is not installed (e.g. the npm install command).
+    let installHint: String
 
-    static let builtIn: [AIModelOption] = [
-        AIModelOption(id: "shell", name: "Shell", icon: "terminal", command: "", printArgs: [], continueArgs: []),
-        AIModelOption(id: "claude", name: "Claude", icon: "bubble.left.and.text.bubble.right", command: "claude", printArgs: ["-p"], continueArgs: ["--continue"]),
-        AIModelOption(id: "chatgpt", name: "ChatGPT", icon: "bubble.left.and.text.bubble.right", command: "chatgpt", printArgs: [], continueArgs: []),
-        AIModelOption(id: "codex", name: "Codex", icon: "chevron.left.forwardslash.chevron.right", command: "codex", printArgs: [], continueArgs: []),
+    /// AI agent models — shown as primary pills.
+    static let aiModels: [AIModelOption] = [
+        AIModelOption(id: "claude", name: "Claude", icon: "bubble.left.and.text.bubble.right", command: "claude", printArgs: ["-p"], continueArgs: ["--continue"], installHint: "npm install -g @anthropic-ai/claude-code"),
+        AIModelOption(id: "gemini", name: "Gemini", icon: "bubble.left.and.text.bubble.right", command: "gemini", printArgs: ["-p"], continueArgs: [], installHint: "npm install -g @google/gemini-cli"),
+        AIModelOption(id: "codex", name: "Codex", icon: "chevron.left.forwardslash.chevron.right", command: "codex", printArgs: ["exec", "--skip-git-repo-check"], continueArgs: [], installHint: "npm install -g @openai/codex"),
     ]
+
+    /// Shell mode — shown behind a chevron expander.
+    static let shell = AIModelOption(id: "shell", name: "Shell", icon: "terminal", command: "", printArgs: [], continueArgs: [], installHint: "")
+
+    /// All options (AI models + shell). Kept for backward compatibility.
+    static let builtIn: [AIModelOption] = aiModels + [shell]
 }

@@ -128,9 +128,30 @@ struct AIChatView: View {
         VStack(spacing: Spacing.sm) {
             // Model selector pills — left-anchored
             HStack(spacing: Spacing.xs) {
-                ForEach(AIModelOption.builtIn) { model in
+                ForEach(AIModelOption.aiModels) { model in
                     modelPill(model)
                 }
+
+                // Chevron to reveal Shell
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        viewModel.toggleShellExpanded()
+                    }
+                } label: {
+                    Image(systemName: viewModel.isShellExpanded ? "chevron.left" : "chevron.right")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(viewModel.isShellExpanded ? "Hide Shell" : "Show Shell")
+
+                if viewModel.isShellExpanded {
+                    modelPill(AIModelOption.shell)
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
+
                 Spacer()
             }
             .padding(.horizontal, Spacing.md)
@@ -162,6 +183,7 @@ struct AIChatView: View {
 
     private func modelPill(_ model: AIModelOption) -> some View {
         let isSelected = viewModel.selectedModel.id == model.id
+        let isInstalled = model.id == "shell" || viewModel.isModelInstalled(model)
 
         return Button {
             withAnimation(reduceMotion ? .none : .snappy) {
@@ -173,8 +195,13 @@ struct AIChatView: View {
                     .font(CiderFont.captionMedium)
                 Text(model.name)
                     .font(CiderFont.captionMedium)
+                if !isInstalled {
+                    Circle()
+                        .fill(CiderColors.tertiary.opacity(0.5))
+                        .frame(width: 5, height: 5)
+                }
             }
-            .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
+            .foregroundColor(isSelected ? CiderColors.controlAccent : (isInstalled ? CiderColors.secondary : CiderColors.tertiary))
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, Spacing.xs)
             .background(
@@ -187,27 +214,49 @@ struct AIChatView: View {
             )
         }
         .buttonStyle(.plain)
-        .help(model.id == "shell" ? "Plain shell" : "Launch \(model.name)")
+        .help(model.id == "shell" ? "Plain shell" : (isInstalled ? "Launch \(model.name)" : "\(model.name) — not installed"))
     }
 
     // MARK: - Message List
 
+    /// Content fingerprint that changes when we should auto-scroll (new messages or streaming updates).
+    private var scrollTrigger: String {
+        let lastMessage = viewModel.messages.last
+        let contentLen = lastMessage?.content.count ?? 0
+        return "\(viewModel.messages.count)-\(contentLen)"
+    }
+
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: Spacing.sm) {
+                VStack(spacing: Spacing.sm) {
                     ForEach(viewModel.messages) { message in
                         AIChatBubbleView(message: message)
                             .id(message.id)
                     }
+                    // Invisible anchor at the very bottom
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
                 }
                 .padding(Spacing.md)
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
-                if let lastID = viewModel.messages.last?.id {
-                    withAnimation(reduceMotion ? .none : .snappy) {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    }
+            .defaultScrollAnchor(.bottom)
+            .onAppear {
+                // Delay to let layout complete before scrolling
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: viewModel.currentConversationID) { _, _ in
+                // Scroll to bottom when switching conversations
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: scrollTrigger) { _, _ in
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
         }
