@@ -7,32 +7,50 @@ struct AIChatView: View {
     @State private var inputText = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            headerView
+        ZStack(alignment: .leading) {
+            // Main chat area (always full width)
+            VStack(spacing: 0) {
+                headerView
 
-            Divider()
-                .padding(.horizontal, Spacing.md + Spacing.xxs)
+                Divider()
+                    .padding(.horizontal, Spacing.md + Spacing.xxs)
 
-            // Messages
-            messageList
+                messageList
 
-            // Input
-            AIChatInputView(
-                text: $inputText,
-                isEnabled: viewModel.isProcessRunning
-            ) {
-                viewModel.sendMessage(inputText)
-                inputText = ""
+                AIChatInputView(
+                    text: $inputText,
+                    isEnabled: true
+                ) {
+                    viewModel.sendMessage(inputText)
+                    inputText = ""
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
             }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
+
+            // Conversation sidebar overlay
+            if viewModel.isSidebarOpen {
+                // Dimming backdrop
+                Color.black.opacity(0.28)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(reduceMotion ? .none : .snappy) {
+                            viewModel.isSidebarOpen = false
+                        }
+                    }
+                    .transition(.opacity)
+
+                // Sidebar
+                AIChatConversationSidebar(viewModel: viewModel)
+                    .transition(.move(edge: .leading))
+            }
         }
         .background {
             if !isDocked {
                 AcrylicPanelBackground(cornerRadius: AIChatPanelDesign.cornerRadius)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: isDocked ? 0 : AIChatPanelDesign.cornerRadius, style: .continuous))
     }
 
     // MARK: - Header
@@ -66,6 +84,24 @@ struct AIChatView: View {
                 .help("Close")
             }
 
+            // Sidebar toggle
+            Button {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    viewModel.toggleSidebar()
+                }
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .font(CiderFont.body)
+                    .foregroundColor(viewModel.isSidebarOpen ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(
+                        width: CiderPanelDesign.trafficLightTapTarget,
+                        height: CiderPanelDesign.trafficLightTapTarget
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Toggle conversations")
+
             Image(systemName: "sparkles")
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.controlAccent)
@@ -75,6 +111,24 @@ struct AIChatView: View {
                 .foregroundColor(CiderColors.primary)
 
             Spacer()
+
+            // New conversation
+            Button {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    viewModel.newConversation()
+                }
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(
+                        width: CiderPanelDesign.trafficLightTapTarget,
+                        height: CiderPanelDesign.trafficLightTapTarget
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New conversation")
 
             // Dock / Undock toggle
             Button {
@@ -110,7 +164,7 @@ struct AIChatView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Restart session")
+            .help("Clear current chat")
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: AIChatPanelDesign.titleBarHeight)
@@ -119,14 +173,19 @@ struct AIChatView: View {
     // MARK: - Model Selector
 
     private var modelSelector: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Spacing.xs) {
-                ForEach(AIModelOption.builtIn) { model in
-                    modelPill(model)
+        HStack {
+            Spacer()
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(AIModelOption.builtIn) { model in
+                        modelPill(model)
+                    }
                 }
             }
-            .padding(.horizontal, Spacing.md)
+            .fixedSize()
         }
+        .padding(.horizontal, Spacing.md)
         .frame(height: AIChatPanelDesign.modelSelectorHeight)
         .padding(.vertical, Spacing.xs)
     }
@@ -175,7 +234,6 @@ struct AIChatView: View {
                 .padding(Spacing.md)
             }
             .onChange(of: viewModel.messages.count) { _, _ in
-                // Scroll to latest message
                 if let lastID = viewModel.messages.last?.id {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         proxy.scrollTo(lastID, anchor: .bottom)

@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Drives the AI Chat UI. Manages messages, process lifecycle, and model selection.
+/// Drives the AI Chat UI. Manages conversations, process lifecycle, and model selection.
 /// Shared between docked and floating modes — both observe the same instance.
 @MainActor
 final class AIChatViewModel: ObservableObject {
@@ -9,19 +9,33 @@ final class AIChatViewModel: ObservableObject {
 
     private let logger = Logger(subsystem: "com.cider.app", category: "AIChatVM")
 
+    // MARK: - Published State
+
     @Published var messages: [AIChatMessage] = []
     @Published var selectedModel: AIModelOption = AIModelOption.builtIn[0]
     @Published var isProcessRunning = false
+    @Published var conversations: [ChatConversation] = []
+    @Published var currentConversationID: UUID?
+    @Published var isSidebarOpen = false
 
     private let processService = AIChatProcessService()
     private var currentStreamingMessageID: UUID?
 
-    /// Where chat history is persisted — one file per model.
-    private func historyFileURL(for modelID: String) -> URL {
+    // MARK: - File Paths
+
+    /// Directory for a model's conversations: ~/CiderVault/AI Chat/{modelID}/
+    private func conversationsDirectory(for modelID: String) -> URL {
         StoragePaths.cachedVaultDirectoryURL
             .appendingPathComponent("AI Chat")
-            .appendingPathComponent("\(modelID)_session.json")
+            .appendingPathComponent(modelID)
     }
+
+    private func conversationFileURL(for conversation: ChatConversation) -> URL {
+        conversationsDirectory(for: conversation.modelID)
+            .appendingPathComponent("\(conversation.id.uuidString).json")
+    }
+
+    // MARK: - Init
 
     init() {
         processService.onOutput = { [weak self] text in
@@ -36,7 +50,14 @@ final class AIChatViewModel: ObservableObject {
             }
         }
 
-        loadMessages()
+        loadConversations()
+        // Select the most recent conversation, or start a new one
+        if let latest = conversations.first {
+            currentConversationID = latest.id
+            messages = latest.messages
+        }
+
+        migrateOldSessionFiles()
     }
 
     deinit {
@@ -47,14 +68,21 @@ final class AIChatViewModel: ObservableObject {
 
     func selectModel(_ model: AIModelOption) {
         guard selectedModel.id != model.id else { return }
-        // Save current model's messages before switching
-        saveMessages()
+        // Save current conversation before switching
+        saveCurrentConversation()
         processService.stop()
         isProcessRunning = false
         currentStreamingMessageID = nil
         selectedModel = model
-        // Load the new model's messages
-        loadMessages()
+        // Load conversations for the new model
+        loadConversations()
+        if let latest = conversations.first {
+            currentConversationID = latest.id
+            messages = latest.messages
+        } else {
+            currentConversationID = nil
+            messages = []
+        }
     }
 
     func sendMessage(_ text: String) {
@@ -62,6 +90,11 @@ final class AIChatViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         let model = selectedModel
+
+        // Create a conversation if none active
+        if currentConversationID == nil {
+            newConversation(autoTitle: trimmed)
+        }
 
         // Add user message
         let userMessage = AIChatMessage(role: .user, content: trimmed)
@@ -72,22 +105,88 @@ final class AIChatViewModel: ObservableObject {
         currentStreamingMessageID = assistantMessage.id
         messages.append(assistantMessage)
 
-        saveMessages()
+        // Auto-title from first user message
+        if let convIndex = conversations.firstIndex(where: { $0.id == currentConversationID }),
+           conversations[convIndex].messages.isEmpty {
+            let title = String(trimmed.prefix(40))
+            conversations[convIndex].title = title.count < trimmed.count ? title + "…" : title
+        }
+
+        saveCurrentConversation()
 
         if model.id == "shell" {
-            // Shell mode: persistent process, pipe stdin
             if !isProcessRunning {
                 startShell()
             }
             processService.send(trimmed)
         } else if !model.printArgs.isEmpty {
-            // One-shot mode with args (e.g. `claude --continue -p "msg"`)
             processService.runOneShot(command: model.command, arguments: model.printArgs + [trimmed])
             isProcessRunning = true
         } else {
-            // Fallback: try one-shot with the message as an argument
             processService.runOneShot(command: model.command, arguments: [trimmed])
             isProcessRunning = true
+        }
+    }
+
+    /// Start a fresh conversation for the current model.
+    func newConversation(autoTitle: String? = nil) {
+        saveCurrentConversation()
+        processService.stop()
+        isProcessRunning = false
+        currentStreamingMessageID = nil
+
+        let title: String
+        if let autoTitle, !autoTitle.isEmpty {
+            let truncated = String(autoTitle.prefix(40))
+            title = truncated.count < autoTitle.count ? truncated + "…" : truncated
+        } else {
+            title = "New Chat"
+        }
+
+        let conversation = ChatConversation(title: title, modelID: selectedModel.id)
+        conversations.insert(conversation, at: 0)
+        currentConversationID = conversation.id
+        messages = []
+    }
+
+    /// Switch to an existing conversation.
+    func selectConversation(_ conversation: ChatConversation) {
+        guard conversation.id != currentConversationID else { return }
+        saveCurrentConversation()
+        processService.stop()
+        isProcessRunning = false
+        currentStreamingMessageID = nil
+        currentConversationID = conversation.id
+        messages = conversation.messages
+    }
+
+    /// Rename a conversation.
+    func renameConversation(id: UUID, to newTitle: String) {
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        conversations[index].title = newTitle
+        conversations[index].updatedAt = Date()
+        saveConversation(conversations[index])
+    }
+
+    /// Delete a conversation.
+    func deleteConversation(id: UUID) {
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let conversation = conversations[index]
+        let fileURL = conversationFileURL(for: conversation)
+        try? FileManager.default.removeItem(at: fileURL)
+        conversations.remove(at: index)
+
+        if currentConversationID == id {
+            processService.stop()
+            isProcessRunning = false
+            currentStreamingMessageID = nil
+            if let next = conversations.first {
+                currentConversationID = next.id
+                messages = next.messages
+            } else {
+                currentConversationID = nil
+                messages = []
+            }
         }
     }
 
@@ -96,13 +195,17 @@ final class AIChatViewModel: ObservableObject {
         isProcessRunning = false
         currentStreamingMessageID = nil
         messages.removeAll()
-        saveMessages()
+        saveCurrentConversation()
     }
 
     func stop() {
         processService.stop()
         isProcessRunning = false
         finalizeCurrentStream()
+    }
+
+    func toggleSidebar() {
+        isSidebarOpen.toggle()
     }
 
     // MARK: - Process Management
@@ -120,7 +223,6 @@ final class AIChatViewModel: ObservableObject {
            let index = messages.firstIndex(where: { $0.id == streamID }) {
             messages[index].content += text
         } else {
-            // No active stream — create one (e.g. unsolicited output from shell)
             let msg = AIChatMessage(role: .assistant, content: text, isStreaming: true)
             currentStreamingMessageID = msg.id
             messages.append(msg)
@@ -131,12 +233,11 @@ final class AIChatViewModel: ObservableObject {
         isProcessRunning = false
         finalizeCurrentStream()
 
-        // Only show exit message for unexpected exits (non-zero) in one-shot mode
         if selectedModel.id == "shell" || exitCode != 0 {
             addSystemMessage("Session ended (exit code \(exitCode)).")
         }
 
-        saveMessages()
+        saveCurrentConversation()
     }
 
     private func finalizeCurrentStream() {
@@ -146,7 +247,6 @@ final class AIChatViewModel: ObservableObject {
         messages[index].isStreaming = false
         messages[index].content = messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Remove empty assistant messages
         if messages[index].content.isEmpty {
             messages.remove(at: index)
         }
@@ -156,15 +256,31 @@ final class AIChatViewModel: ObservableObject {
 
     // MARK: - Persistence
 
-    private func saveMessages() {
-        let fileURL = historyFileURL(for: selectedModel.id)
+    private func saveCurrentConversation() {
+        guard let id = currentConversationID,
+              let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+
         let saveable = messages.filter { !$0.isStreaming && !$0.content.isEmpty }
-        guard !saveable.isEmpty else {
-            // Clean up file if no messages
+        conversations[index].messages = saveable
+        conversations[index].updatedAt = Date()
+
+        // Remove conversation if empty and it's not the only one
+        if saveable.isEmpty {
+            let fileURL = conversationFileURL(for: conversations[index])
             try? FileManager.default.removeItem(at: fileURL)
+            if conversations.count > 1 {
+                conversations.remove(at: index)
+                currentConversationID = conversations.first?.id
+                messages = conversations.first?.messages ?? []
+            }
             return
         }
 
+        saveConversation(conversations[index])
+    }
+
+    private func saveConversation(_ conversation: ChatConversation) {
+        let fileURL = conversationFileURL(for: conversation)
         do {
             let dir = fileURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -172,29 +288,96 @@ final class AIChatViewModel: ObservableObject {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(saveable)
+            let data = try encoder.encode(conversation)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            logger.error("Failed to save chat history: \(error.localizedDescription)")
+            logger.error("Failed to save conversation: \(error.localizedDescription)")
         }
     }
 
-    private func loadMessages() {
-        let fileURL = historyFileURL(for: selectedModel.id)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            messages.removeAll()
+    private func loadConversations() {
+        let dir = conversationsDirectory(for: selectedModel.id)
+        guard FileManager.default.fileExists(atPath: dir.path) else {
+            conversations = []
             return
         }
 
         do {
-            let data = try Data(contentsOf: fileURL)
+            let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "json" }
+
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            messages = try decoder.decode([AIChatMessage].self, from: data)
-            logger.info("Loaded \(self.messages.count) messages from history")
+
+            var loaded: [ChatConversation] = []
+            for file in files {
+                let data = try Data(contentsOf: file)
+                let conversation = try decoder.decode(ChatConversation.self, from: data)
+                loaded.append(conversation)
+            }
+
+            // Sort by most recent first
+            conversations = loaded.sorted { $0.updatedAt > $1.updatedAt }
+            logger.info("Loaded \(self.conversations.count) conversations for \(self.selectedModel.id)")
         } catch {
-            logger.error("Failed to load chat history: \(error.localizedDescription)")
-            messages.removeAll()
+            logger.error("Failed to load conversations: \(error.localizedDescription)")
+            conversations = []
+        }
+    }
+
+    /// Migrate old single-session files to the new conversation format.
+    private func migrateOldSessionFiles() {
+        let aiChatDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("AI Chat")
+        guard FileManager.default.fileExists(atPath: aiChatDir.path) else { return }
+
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: aiChatDir, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "json" && $0.lastPathComponent.hasSuffix("_session.json") }
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+
+            for file in files {
+                let modelID = file.lastPathComponent.replacingOccurrences(of: "_session.json", with: "")
+                let data = try Data(contentsOf: file)
+                let messages = try decoder.decode([AIChatMessage].self, from: data)
+
+                guard !messages.isEmpty else {
+                    try? FileManager.default.removeItem(at: file)
+                    continue
+                }
+
+                let title: String
+                if let firstUser = messages.first(where: { $0.role == .user })?.content {
+                    let truncated = String(firstUser.prefix(40))
+                    title = truncated.count < firstUser.count ? truncated + "…" : truncated
+                } else {
+                    title = "Imported Chat"
+                }
+
+                let conversation = ChatConversation(
+                    title: title,
+                    modelID: modelID,
+                    createdAt: messages.first?.timestamp ?? Date(),
+                    updatedAt: messages.last?.timestamp ?? Date(),
+                    messages: messages
+                )
+
+                saveConversation(conversation)
+                try FileManager.default.removeItem(at: file)
+                logger.info("Migrated old session file for \(modelID)")
+
+                // If this is the current model, add to loaded conversations
+                if modelID == selectedModel.id {
+                    conversations.insert(conversation, at: 0)
+                    if currentConversationID == nil {
+                        currentConversationID = conversation.id
+                        self.messages = conversation.messages
+                    }
+                }
+            }
+        } catch {
+            logger.error("Migration failed: \(error.localizedDescription)")
         }
     }
 

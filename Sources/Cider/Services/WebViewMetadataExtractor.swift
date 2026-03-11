@@ -18,9 +18,8 @@ struct WebViewExtractionResult {
 final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
     private static let logger = Logger(subsystem: "com.cider.app", category: "Enrichment")
 
-    /// Shared process pool — all headless WebViews reuse one WebContent process,
-    /// avoiding repeated sandbox warning spam in Xcode for each extraction.
-    private static let sharedProcessPool = WKProcessPool()
+    // Process pool removed — WKProcessPool was deprecated in macOS 12.0
+    // and no longer has any effect.
 
     private var webView: WKWebView?
     private var continuation: CheckedContinuation<WebViewExtractionResult, Never>?
@@ -40,7 +39,6 @@ final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
             self.continuation = continuation
 
             let config = WKWebViewConfiguration()
-            config.processPool = Self.sharedProcessPool
             config.suppressesIncrementalRendering = true
             let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1280, height: 720), configuration: config)
             webView.navigationDelegate = self

@@ -1672,6 +1672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Host the pure SwiftUI chat view in the floating panel
         let chatView = AIChatView(viewModel: AIChatViewModel.shared, isDocked: false)
         let hostingView = NSHostingView(rootView: chatView)
+        hostingView.sizingOptions = []  // Prevent hosting view from auto-resizing the window
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
     }

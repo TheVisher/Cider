@@ -17,7 +17,7 @@ final class AIChatPanel: NSPanel {
 
         super.init(
             contentRect: initialFrame,
-            styleMask: [.borderless, .resizable, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
