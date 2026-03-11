@@ -175,6 +175,7 @@ struct CiderConfig: Codable {
         case lastSyncTimestamp
         case lastSuccessfulPushAt
         case aiChatDocked
+        case aiChatVisible
     }
 
     var showMenuBarIcon: Bool
@@ -239,6 +240,7 @@ struct CiderConfig: Codable {
     var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
     var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)
     var aiChatDocked: Bool  // Whether AI Chat is docked in the tab bar (false = floating panel)
+    var aiChatVisible: Bool  // Whether AI Chat is currently open (tab or panel)
 
     static let storageKey = "CiderConfig"
 
@@ -299,7 +301,8 @@ struct CiderConfig: Codable {
             syncToken: "",
             lastSyncTimestamp: 0,
             lastSuccessfulPushAt: 0,
-            aiChatDocked: false
+            aiChatDocked: false,
+            aiChatVisible: false
         )
     }
 
@@ -497,6 +500,7 @@ struct CiderConfig: Codable {
         lastSyncTimestamp = try container.decodeIfPresent(Double.self, forKey: .lastSyncTimestamp) ?? 0
         lastSuccessfulPushAt = try container.decodeIfPresent(Double.self, forKey: .lastSuccessfulPushAt) ?? 0
         aiChatDocked = try container.decodeIfPresent(Bool.self, forKey: .aiChatDocked) ?? false
+        aiChatVisible = try container.decodeIfPresent(Bool.self, forKey: .aiChatVisible) ?? false
     }
 
     init(
@@ -559,7 +563,8 @@ struct CiderConfig: Codable {
         syncToken: String = "",
         lastSyncTimestamp: Double = 0,
         lastSuccessfulPushAt: Double = 0,
-        aiChatDocked: Bool = false
+        aiChatDocked: Bool = false,
+        aiChatVisible: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -621,5 +626,6 @@ struct CiderConfig: Codable {
         self.lastSyncTimestamp = lastSyncTimestamp
         self.lastSuccessfulPushAt = lastSuccessfulPushAt
         self.aiChatDocked = aiChatDocked
+        self.aiChatVisible = aiChatVisible
     }
 }

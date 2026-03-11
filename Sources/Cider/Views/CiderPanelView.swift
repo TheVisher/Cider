@@ -51,6 +51,7 @@ struct CiderPanelView: View {
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var aiChatDocked: Bool = CiderConfig.load().aiChatDocked
+    @State private var aiChatVisible: Bool = CiderConfig.load().aiChatVisible
     @State private var tabBeforeAIChat: CiderTab?
     @State private var selectedNote: Note?
     @State private var isEditingNoteTitle = false
@@ -69,7 +70,11 @@ struct CiderPanelView: View {
     // Terminal state removed — AI Chat is now a separate slide-out panel
 
     private var allTabs: [CiderTab] {
-        savedViewTabs + sourceTabs + dynamicTabs
+        var tabs = savedViewTabs + sourceTabs + dynamicTabs
+        if aiChatVisible && aiChatDocked {
+            tabs.append(.aiChat)
+        }
+        return tabs
     }
 
     private var sourceTabs: [CiderTab] {
@@ -278,22 +283,30 @@ struct CiderPanelView: View {
             textScale = config.textSize.scale
             enableLinkedSources = config.enableLinkedSources
             aiChatDocked = config.aiChatDocked
+            aiChatVisible = config.aiChatVisible
         }
         .onReceive(NotificationCenter.default.publisher(for: .selectAIChatTab)) { _ in
             aiChatDocked = true
+            aiChatVisible = true
             tabBeforeAIChat = selectedTab
-            // Clear folder/source/tag selection so tabContentBody reaches the .aiChat case
             selectedFolderID = nil
             selectedSourceID = nil
             selectedTagIDs = []
             selectedTab = .aiChat
+            var config = CiderConfig.load()
+            config.aiChatDocked = true
+            config.aiChatVisible = true
+            config.save()
         }
         .onReceive(NotificationCenter.default.publisher(for: .undockAIChat)) { _ in
             aiChatDocked = false
-            // Switch back to the previous tab when undocking
+            aiChatVisible = false
             if selectedTab?.id == CiderTab.aiChat.id {
                 selectedTab = tabBeforeAIChat
             }
+            var config = CiderConfig.load()
+            config.aiChatDocked = false
+            config.save()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
             if isNoteDetailOpen {
@@ -781,18 +794,27 @@ struct CiderPanelView: View {
                     newItemPickerContent
                 }
 
-                // AI Chat toggle — docked mode selects the tab, floating mode toggles the panel
+                // AI Chat toggle — reopens in last-used mode (docked tab or floating panel)
                 Button {
                     if aiChatDocked {
-                        if selectedTab?.id == CiderTab.aiChat.id {
-                            // Already on AI tab — switch back to previous tab
+                        if aiChatVisible && selectedTab?.id == CiderTab.aiChat.id {
+                            // Already viewing AI tab — close it
+                            aiChatVisible = false
                             selectedTab = tabBeforeAIChat
+                            var config = CiderConfig.load()
+                            config.aiChatVisible = false
+                            config.save()
                         } else {
+                            // Open/reopen as docked tab
+                            aiChatVisible = true
                             tabBeforeAIChat = selectedTab
                             selectedFolderID = nil
                             selectedSourceID = nil
                             selectedTagIDs = []
                             selectedTab = .aiChat
+                            var config = CiderConfig.load()
+                            config.aiChatVisible = true
+                            config.save()
                         }
                     } else {
                         NotificationCenter.default.post(name: .toggleAIChatPanel, object: nil)
@@ -801,7 +823,7 @@ struct CiderPanelView: View {
                     Image(systemName: "sparkles")
                         .font(CiderFont.bodyMedium)
                         .foregroundColor(
-                            (aiChatDocked && selectedTab?.id == CiderTab.aiChat.id)
+                            (aiChatVisible && aiChatDocked && selectedTab?.id == CiderTab.aiChat.id)
                             ? CiderColors.controlAccent : CiderColors.secondary
                         )
                         .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
@@ -2166,7 +2188,12 @@ struct CiderPanelView: View {
     private func closeTab(_ tab: CiderTab) {
         let wasSelected = selectedTab == tab
 
-        if case .savedView(let id, _) = tab {
+        if case .aiChat = tab {
+            aiChatVisible = false
+            var config = CiderConfig.load()
+            config.aiChatVisible = false
+            config.save()
+        } else if case .savedView(let id, _) = tab {
             savedViewStorage.removeFromTabOrder(id)
         } else if case .externalSource(let id, _) = tab, var source = externalSourceStorage.source(for: id) {
             source.isTabPinned = false

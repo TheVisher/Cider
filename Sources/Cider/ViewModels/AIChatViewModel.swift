@@ -120,7 +120,13 @@ final class AIChatViewModel: ObservableObject {
             }
             processService.send(trimmed)
         } else if !model.printArgs.isEmpty {
-            processService.runOneShot(command: model.command, arguments: model.printArgs + [trimmed])
+            // Only add --continue args when this conversation already has prior messages
+            let hasHistory = messages.filter({ $0.role == .user }).count > 1
+            var args = model.printArgs
+            if hasHistory && !model.continueArgs.isEmpty {
+                args = model.continueArgs + args
+            }
+            processService.runOneShot(command: model.command, arguments: args + [trimmed])
             isProcessRunning = true
         } else {
             processService.runOneShot(command: model.command, arguments: [trimmed])

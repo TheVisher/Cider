@@ -8,29 +8,20 @@ struct AIChatView: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            // Main chat area (always full width)
+            // Main chat area
             VStack(spacing: 0) {
-                headerView
+                headerBar
 
                 Divider()
                     .padding(.horizontal, Spacing.md + Spacing.xxs)
 
                 messageList
 
-                AIChatInputView(
-                    text: $inputText,
-                    isEnabled: true
-                ) {
-                    viewModel.sendMessage(inputText)
-                    inputText = ""
-                }
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
+                bottomBar
             }
 
             // Conversation sidebar overlay
             if viewModel.isSidebarOpen {
-                // Dimming backdrop
                 Color.black.opacity(0.28)
                     .ignoresSafeArea()
                     .onTapGesture {
@@ -40,7 +31,6 @@ struct AIChatView: View {
                     }
                     .transition(.opacity)
 
-                // Sidebar
                 AIChatConversationSidebar(viewModel: viewModel)
                     .transition(.move(edge: .leading))
             }
@@ -53,18 +43,17 @@ struct AIChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: isDocked ? 0 : AIChatPanelDesign.cornerRadius, style: .continuous))
     }
 
-    // MARK: - Header
-
-    private var headerView: some View {
-        VStack(spacing: 0) {
-            titleBar
-            Divider()
-                .padding(.horizontal, Spacing.md + Spacing.xxs)
-            modelSelector
+    private var currentConversationTitle: String {
+        if let id = viewModel.currentConversationID,
+           let conversation = viewModel.conversations.first(where: { $0.id == id }) {
+            return conversation.title
         }
+        return "New Chat"
     }
 
-    private var titleBar: some View {
+    // MARK: - Header (minimal)
+
+    private var headerBar: some View {
         HStack(spacing: Spacing.sm) {
             // Close button — only in floating mode
             if !isDocked {
@@ -102,33 +91,12 @@ struct AIChatView: View {
             .buttonStyle(.plain)
             .help("Toggle conversations")
 
-            Image(systemName: "sparkles")
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.controlAccent)
-
-            Text("AI Chat")
+            Text(currentConversationTitle)
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
 
             Spacer()
-
-            // New conversation
-            Button {
-                withAnimation(reduceMotion ? .none : .snappy) {
-                    viewModel.newConversation()
-                }
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(
-                        width: CiderPanelDesign.trafficLightTapTarget,
-                        height: CiderPanelDesign.trafficLightTapTarget
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("New conversation")
 
             // Dock / Undock toggle
             Button {
@@ -149,46 +117,48 @@ struct AIChatView: View {
             }
             .buttonStyle(.plain)
             .help(isDocked ? "Pop out to floating panel" : "Dock into Cider panel")
-
-            // Restart
-            Button {
-                viewModel.restart()
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(
-                        width: CiderPanelDesign.trafficLightTapTarget,
-                        height: CiderPanelDesign.trafficLightTapTarget
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Clear current chat")
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: AIChatPanelDesign.titleBarHeight)
     }
 
-    // MARK: - Model Selector
+    // MARK: - Bottom Bar (model pills + input)
 
-    private var modelSelector: some View {
-        HStack {
-            Spacer()
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Spacing.xs) {
-                    ForEach(AIModelOption.builtIn) { model in
-                        modelPill(model)
-                    }
+    private var bottomBar: some View {
+        VStack(spacing: Spacing.sm) {
+            // Model selector pills — left-anchored
+            HStack(spacing: Spacing.xs) {
+                ForEach(AIModelOption.builtIn) { model in
+                    modelPill(model)
                 }
+                Spacer()
             }
-            .fixedSize()
+            .padding(.horizontal, Spacing.md)
+
+            // Input field with new chat + clear inside
+            AIChatInputView(
+                text: $inputText,
+                isEnabled: true,
+                onSend: {
+                    viewModel.sendMessage(inputText)
+                    inputText = ""
+                },
+                onNewChat: {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        viewModel.newConversation()
+                    }
+                },
+                onClear: {
+                    viewModel.restart()
+                }
+            )
+            .padding(.horizontal, Spacing.md)
         }
-        .padding(.horizontal, Spacing.md)
-        .frame(height: AIChatPanelDesign.modelSelectorHeight)
-        .padding(.vertical, Spacing.xs)
+        .padding(.top, Spacing.sm)
+        .padding(.bottom, Spacing.md)
     }
+
+    // MARK: - Model Pill
 
     private func modelPill(_ model: AIModelOption) -> some View {
         let isSelected = viewModel.selectedModel.id == model.id

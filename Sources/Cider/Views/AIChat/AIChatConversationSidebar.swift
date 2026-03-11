@@ -5,6 +5,7 @@ struct AIChatConversationSidebar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var renamingID: UUID?
     @State private var renameText = ""
+    @FocusState private var isRenameFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,7 +13,7 @@ struct AIChatConversationSidebar: View {
             HStack {
                 Text("Conversations")
                     .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.primary)
+                    .foregroundColor(CiderColors.secondary)
 
                 Spacer()
 
@@ -34,23 +35,21 @@ struct AIChatConversationSidebar: View {
                 .help("New conversation")
             }
             .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.sm)
-
-            Divider()
-                .padding(.horizontal, Spacing.sm)
+            .padding(.top, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
 
             // Conversation list
             if viewModel.conversations.isEmpty {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVStack(spacing: Spacing.xs) {
+                    LazyVStack(spacing: Spacing.xxs) {
                         ForEach(viewModel.conversations) { conversation in
                             conversationRow(conversation)
                         }
                     }
                     .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
                 }
             }
         }
@@ -62,69 +61,96 @@ struct AIChatConversationSidebar: View {
                 CiderColors.surfaceHighlight
             }
         )
+        .overlay(alignment: .trailing) {
+            // Right-edge border to separate from chat area
+            Rectangle()
+                .fill(CiderColors.borderDefault)
+                .frame(width: 1)
+        }
     }
 
     // MARK: - Conversation Row
 
+    @ViewBuilder
     private func conversationRow(_ conversation: ChatConversation) -> some View {
         let isSelected = conversation.id == viewModel.currentConversationID
         let isRenaming = renamingID == conversation.id
 
-        return Button {
-            withAnimation(reduceMotion ? .none : .snappy) {
-                viewModel.selectConversation(conversation)
-            }
-        } label: {
+        if isRenaming {
+            // Rename mode — standalone text field, not inside a button
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                if isRenaming {
-                    TextField("Title", text: $renameText, onCommit: {
-                        viewModel.renameConversation(id: conversation.id, to: renameText)
-                        renamingID = nil
-                    })
+                TextField("Title", text: $renameText)
                     .textFieldStyle(.plain)
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.primary)
-                } else {
-                    Text(conversation.title)
-                        .font(CiderFont.bodyMedium)
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(1)
-                }
+                    .focused($isRenameFieldFocused)
+                    .onSubmit {
+                        commitRename(conversation.id)
+                    }
 
                 Text(formattedDate(conversation.updatedAt))
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(1)
-
-                if !conversation.preview.isEmpty && !isRenaming {
-                    Text(conversation.preview)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.secondary)
-                        .lineLimit(2)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? CiderColors.selectedFill : Color.clear)
+                    .fill(CiderColors.selectedFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .stroke(isSelected ? CiderColors.selectedBorder : Color.clear, lineWidth: 1)
+                    .stroke(CiderColors.accentBorder, lineWidth: 1)
             )
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Rename") {
-                renameText = conversation.title
-                renamingID = conversation.id
+            .onAppear {
+                isRenameFieldFocused = true
             }
-            Divider()
-            Button("Delete", role: .destructive) {
+            .onExitCommand {
+                renamingID = nil
+            }
+        } else {
+            // Normal row — clickable button
+            Button {
                 withAnimation(reduceMotion ? .none : .snappy) {
-                    viewModel.deleteConversation(id: conversation.id)
+                    viewModel.selectConversation(conversation)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(conversation.title)
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(isSelected ? CiderColors.primary : CiderColors.secondary)
+                        .lineLimit(1)
+
+                    Text(formattedDate(conversation.updatedAt))
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isSelected ? CiderColors.selectedFill : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .stroke(isSelected ? CiderColors.selectedBorder : Color.clear, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button("Rename") {
+                    renameText = conversation.title
+                    renamingID = conversation.id
+                }
+                Divider()
+                Button("Delete", role: .destructive) {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        viewModel.deleteConversation(id: conversation.id)
+                    }
                 }
             }
         }
@@ -147,6 +173,14 @@ struct AIChatConversationSidebar: View {
     }
 
     // MARK: - Helpers
+
+    private func commitRename(_ id: UUID) {
+        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            viewModel.renameConversation(id: id, to: trimmed)
+        }
+        renamingID = nil
+    }
 
     private func formattedDate(_ date: Date) -> String {
         let calendar = Calendar.current
