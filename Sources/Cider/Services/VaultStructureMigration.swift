@@ -86,4 +86,124 @@ enum VaultStructureMigration {
 
         logger.info("Vault → .cider/ migration complete")
     }
+
+    // MARK: - Phase 2: Move content files from .cider/ to Inbox/
+
+    /// Moves .webloc files from .cider/bookmarks/ to Inbox/Bookmarks/ and
+    /// .md files from .cider/notes/ to Inbox/Notes/.
+    /// Metadata files (_cider_bookmarks_metadata.json, _cider_notes_index.json, etc.) stay in .cider/.
+    /// Call after `migrateIfNeeded()` and before storage services initialize.
+    static func migrateContentToInboxIfNeeded() {
+        var config = CiderConfig.load()
+        guard !config.didMigrateContentToInbox else { return }
+
+        let fm = FileManager.default
+        let vaultRoot = StoragePaths.vaultDirectoryURL(config: config)
+        let ciderDir = vaultRoot.appendingPathComponent(StoragePaths.ciderInternalDir)
+        let inboxDir = vaultRoot.appendingPathComponent(StoragePaths.inboxDir)
+
+        logger.info("Starting .cider/ → Inbox/ content migration")
+
+        // --- Bookmarks: move .webloc files + sidecar + assets ---
+        let ciderBookmarksDir = ciderDir.appendingPathComponent(StorageType.bookmarks.ciderSubpath)
+        let inboxBookmarksDir = inboxDir.appendingPathComponent("Bookmarks")
+
+        do {
+            try fm.createDirectory(at: inboxBookmarksDir, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create Inbox/Bookmarks/: \(error.localizedDescription)")
+        }
+
+        // Move .webloc files and per-folder sidecar JSONs from .cider/bookmarks/ → Inbox/Bookmarks/
+        // Keep: _cider_bookmarks_metadata.json (master metadata), .thumbnails/, .originals/, .trash/
+        let bookmarkKeepPrefixes: Set<String> = ["_cider_bookmarks_metadata.json", ".thumbnails", ".originals", ".trash"]
+        if let contents = try? fm.contentsOfDirectory(at: ciderBookmarksDir, includingPropertiesForKeys: nil) {
+            for item in contents {
+                let name = item.lastPathComponent
+                if bookmarkKeepPrefixes.contains(name) { continue }
+
+                let dest = inboxBookmarksDir.appendingPathComponent(name)
+                if fm.fileExists(atPath: dest.path) { continue }
+                do {
+                    try fm.moveItem(at: item, to: dest)
+                } catch {
+                    logger.error("Failed to move bookmark content \(name): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Update bookmark relativePaths in the master metadata JSON
+        updateBookmarkMetadataPaths(
+            metadataURL: ciderBookmarksDir.appendingPathComponent("_cider_bookmarks_metadata.json"),
+            oldPrefix: "\(StoragePaths.ciderInternalDir)/\(StorageType.bookmarks.ciderSubpath)",
+            newPrefix: "\(StoragePaths.inboxDir)/Bookmarks"
+        )
+
+        // --- Notes: move .md files + .attachments/ + .history/ ---
+        let ciderNotesDir = ciderDir.appendingPathComponent(StorageType.notes.ciderSubpath)
+        let inboxNotesDir = inboxDir.appendingPathComponent("Notes")
+
+        do {
+            try fm.createDirectory(at: inboxNotesDir, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create Inbox/Notes/: \(error.localizedDescription)")
+        }
+
+        // Move only .md files from .cider/notes/ → Inbox/Notes/
+        // Keep: index file, .history/ (snapshots), .attachments/, .trash/
+        let noteKeepNames: Set<String> = ["_cider_notes_index.json", ".trash", ".history", ".attachments"]
+        if let contents = try? fm.contentsOfDirectory(at: ciderNotesDir, includingPropertiesForKeys: nil) {
+            for item in contents {
+                let name = item.lastPathComponent
+                if noteKeepNames.contains(name) { continue }
+
+                let dest = inboxNotesDir.appendingPathComponent(name)
+                if fm.fileExists(atPath: dest.path) { continue }
+                do {
+                    try fm.moveItem(at: item, to: dest)
+                } catch {
+                    logger.error("Failed to move note content \(name): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Create remaining Inbox subfolders for future use
+        for typeName in ["Contacts", "Todos", "Date Cards"] {
+            let subdir = inboxDir.appendingPathComponent(typeName)
+            try? fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+        }
+
+        // Invalidate cached paths
+        StoragePaths.invalidateCachedDirectory()
+
+        config.didMigrateContentToInbox = true
+        config.save()
+
+        logger.info(".cider/ → Inbox/ content migration complete")
+    }
+
+    /// Updates bookmark relativePath entries in the master metadata JSON file.
+    /// Bookmarks with paths starting with `oldPrefix` get rewritten to `newPrefix`.
+    private static func updateBookmarkMetadataPaths(metadataURL: URL, oldPrefix: String, newPrefix: String) {
+        guard let data = try? Data(contentsOf: metadataURL) else { return }
+        guard var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        guard var bookmarks = json["bookmarks"] as? [[String: Any]] else { return }
+
+        var changed = false
+        for i in bookmarks.indices {
+            if let path = bookmarks[i]["relativePath"] as? String,
+               path.hasPrefix(oldPrefix) {
+                bookmarks[i]["relativePath"] = newPrefix + path.dropFirst(oldPrefix.count)
+                changed = true
+            }
+        }
+
+        guard changed else { return }
+        json["bookmarks"] = bookmarks
+
+        if let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
+            try? updatedData.write(to: metadataURL, options: .atomic)
+            logger.info("Updated \(bookmarks.count) bookmark paths in metadata")
+        }
+    }
 }

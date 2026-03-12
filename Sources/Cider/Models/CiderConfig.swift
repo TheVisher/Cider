@@ -178,6 +178,7 @@ struct CiderConfig: Codable {
         case aiChatVisible
         case didMigrateBookmarkFiles
         case didMigrateVaultToCiderDir
+        case didMigrateContentToInbox
     }
 
     var showMenuBarIcon: Bool
@@ -245,6 +246,7 @@ struct CiderConfig: Codable {
     var aiChatVisible: Bool  // Whether AI Chat is currently open (tab or panel)
     var didMigrateBookmarkFiles: Bool  // Whether one-time .webloc file migration has run
     var didMigrateVaultToCiderDir: Bool  // Whether one-time vault → .cider/ migration has run
+    var didMigrateContentToInbox: Bool  // Whether one-time .cider/ → Inbox/ content migration has run
 
     static let storageKey = "CiderConfig"
 
@@ -308,7 +310,8 @@ struct CiderConfig: Codable {
             aiChatDocked: false,
             aiChatVisible: false,
             didMigrateBookmarkFiles: false,
-            didMigrateVaultToCiderDir: false
+            didMigrateVaultToCiderDir: false,
+            didMigrateContentToInbox: false
         )
     }
 
@@ -509,6 +512,7 @@ struct CiderConfig: Codable {
         aiChatVisible = try container.decodeIfPresent(Bool.self, forKey: .aiChatVisible) ?? false
         didMigrateBookmarkFiles = try container.decodeIfPresent(Bool.self, forKey: .didMigrateBookmarkFiles) ?? false
         didMigrateVaultToCiderDir = try container.decodeIfPresent(Bool.self, forKey: .didMigrateVaultToCiderDir) ?? false
+        didMigrateContentToInbox = try container.decodeIfPresent(Bool.self, forKey: .didMigrateContentToInbox) ?? false
     }
 
     init(
@@ -574,7 +578,8 @@ struct CiderConfig: Codable {
         aiChatDocked: Bool = false,
         aiChatVisible: Bool = false,
         didMigrateBookmarkFiles: Bool = false,
-        didMigrateVaultToCiderDir: Bool = false
+        didMigrateVaultToCiderDir: Bool = false,
+        didMigrateContentToInbox: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -639,5 +644,6 @@ struct CiderConfig: Codable {
         self.aiChatVisible = aiChatVisible
         self.didMigrateBookmarkFiles = didMigrateBookmarkFiles
         self.didMigrateVaultToCiderDir = didMigrateVaultToCiderDir
+        self.didMigrateContentToInbox = didMigrateContentToInbox
     }
 }

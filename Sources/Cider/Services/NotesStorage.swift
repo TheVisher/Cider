@@ -18,6 +18,8 @@ final class NotesStorage: ObservableObject {
     private var directoryURL: URL
     private var directoryFileDescriptor: Int32 = -1
     private var directorySource: DispatchSourceFileSystemObject?
+    private var inboxFileDescriptor: Int32 = -1
+    private var inboxDirectorySource: DispatchSourceFileSystemObject?
     private var saveWorkItem: DispatchWorkItem?
     private var attachmentCleanupWorkItem: DispatchWorkItem?
     private let indexFileName = "_cider_notes_index.json"
@@ -78,8 +80,13 @@ final class NotesStorage: ObservableObject {
         }
     }
 
-    /// The base directory URL where notes are stored.
+    /// The base directory URL where notes metadata index is stored (.cider/notes/).
     var notesDirectoryURL: URL { directoryURL }
+
+    /// The Inbox/Notes/ directory for unfiled note content files.
+    private var inboxNotesDirectoryURL: URL {
+        StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+    }
 
     /// The vault root directory.
     private var vaultRoot: URL { StoragePaths.cachedVaultDirectoryURL }
@@ -169,9 +176,15 @@ final class NotesStorage: ObservableObject {
     func scanNotes() {
         contentCache.removeAll()
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]) else {
-            notes = []
-            return
+
+        // Scan both .cider/notes/ (legacy) and Inbox/Notes/ for unfiled notes
+        var allFiles: [(url: URL, relativePrefix: String?)] = []
+        if let files = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]) {
+            for f in files { allFiles.append((f, nil)) }
+        }
+        let inboxDir = inboxNotesDirectoryURL
+        if let inboxFiles = try? fm.contentsOfDirectory(at: inboxDir, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]) {
+            for f in inboxFiles { allFiles.append((f, "\(StoragePaths.inboxDir)/Notes")) }
         }
 
         // Build a resilient reverse map (filename -> UUID). If the index was
@@ -185,7 +198,7 @@ final class NotesStorage: ObservableObject {
         }
 
         var scannedNotes: [Note] = []
-        for fileURL in files {
+        for (fileURL, relativePrefix) in allFiles {
             guard fileURL.pathExtension == "md" else { continue }
             let filename = fileURL.lastPathComponent
             guard filename != indexFileName else { continue }
@@ -210,6 +223,14 @@ final class NotesStorage: ObservableObject {
                 index[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate, isPinned: isPinned ? true : nil)
             }
 
+            // Build relativePath: Inbox/Notes/file.md for inbox, plain filename for legacy .cider/notes/
+            let relativePath: String
+            if let prefix = relativePrefix {
+                relativePath = "\(prefix)/\(filename)"
+            } else {
+                relativePath = filename
+            }
+
             // Lazy: don't load content during scan
             scannedNotes.append(Note(
                 id: uuid,
@@ -217,7 +238,7 @@ final class NotesStorage: ObservableObject {
                 content: "",
                 createdAt: createDate,
                 modifiedAt: modDate,
-                relativePath: filename,
+                relativePath: relativePath,
                 labelIDs: labelIDs,
                 folderID: folderID,
                 isPinned: isPinned
@@ -225,10 +246,12 @@ final class NotesStorage: ObservableObject {
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
+        // cleaned up automatically. Index stores just the filename, not the full relativePath.
+        // Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
         let previousIndex = index
         var rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
+            let filename = ($0.relativePath as NSString).lastPathComponent
+            return ($0.id, NoteIndexEntry(filename: filename, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
         })
 
         // Carry forward notes that live in vault folders (not in Notes/ dir).
@@ -339,12 +362,30 @@ final class NotesStorage: ObservableObject {
             }
         }
 
-        // Scan directory
+        // Scan both .cider/notes/ (legacy) and Inbox/Notes/ for unfiled notes
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(
+        var allFiles: [(url: URL, relativePrefix: String?)] = []
+        if let files = try? fm.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
-        ) else {
+        ) {
+            for f in files { allFiles.append((f, nil)) }
+        }
+        // Also scan Inbox/Notes/ — compute from directoryURL's vault root
+        let vaultRoot = directoryURL
+            .deletingLastPathComponent() // .cider/
+            .deletingLastPathComponent() // vault root
+        let inboxNotesDir = vaultRoot
+            .appendingPathComponent(StoragePaths.inboxDir)
+            .appendingPathComponent("Notes")
+        if let inboxFiles = try? fm.contentsOfDirectory(
+            at: inboxNotesDir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+        ) {
+            for f in inboxFiles { allFiles.append((f, "\(StoragePaths.inboxDir)/Notes")) }
+        }
+
+        guard !allFiles.isEmpty else {
             return (index: [:], notes: [], needsSave: false)
         }
 
@@ -359,7 +400,7 @@ final class NotesStorage: ObservableObject {
         var workingIndex = loadedIndex
         var scannedNotes: [Note] = []
 
-        for fileURL in files {
+        for (fileURL, relativePrefix) in allFiles {
             guard fileURL.pathExtension == "md" else { continue }
             let filename = fileURL.lastPathComponent
             guard filename != indexFileName else { continue }
@@ -384,6 +425,14 @@ final class NotesStorage: ObservableObject {
                 workingIndex[uuid] = NoteIndexEntry(filename: filename, folderID: folderID, labelIDs: labelIDs, createdAt: createDate, isPinned: isPinned ? true : nil)
             }
 
+            // Build relativePath: Inbox/Notes/file.md for inbox, plain filename for legacy .cider/notes/
+            let relativePath: String
+            if let prefix = relativePrefix {
+                relativePath = "\(prefix)/\(filename)"
+            } else {
+                relativePath = filename
+            }
+
             // Lazy: don't load content during scan
             scannedNotes.append(Note(
                 id: uuid,
@@ -391,7 +440,7 @@ final class NotesStorage: ObservableObject {
                 content: "",
                 createdAt: createDate,
                 modifiedAt: modDate,
-                relativePath: filename,
+                relativePath: relativePath,
                 labelIDs: labelIDs,
                 folderID: folderID,
                 isPinned: isPinned
@@ -399,9 +448,11 @@ final class NotesStorage: ObservableObject {
         }
 
         // Rebuild the index from scanned files so duplicates/stale entries are
-        // cleaned up automatically. Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
+        // cleaned up automatically. Index stores just the filename, not the full relativePath.
+        // Preserve folderID, labelIDs, createdAt, and isPinned from existing entries.
         let rebuiltIndex = Dictionary(uniqueKeysWithValues: scannedNotes.map {
-            ($0.id, NoteIndexEntry(filename: $0.relativePath, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
+            let filename = ($0.relativePath as NSString).lastPathComponent
+            return ($0.id, NoteIndexEntry(filename: filename, folderID: $0.folderID, labelIDs: $0.labelIDs, createdAt: $0.createdAt, isPinned: $0.isPinned ? true : nil))
         })
 
         // Sort: pinned first, then by newest created
@@ -419,17 +470,22 @@ final class NotesStorage: ObservableObject {
     func createNew() -> Note {
         let title = uniqueTitle("Untitled")
         let filename = "\(title).md"
-        let fileURL = directoryURL.appendingPathComponent(filename)
+        let inboxDir = inboxNotesDirectoryURL
+        let fileURL = inboxDir.appendingPathComponent(filename)
         let uuid = UUID()
         let now = Date()
 
-        // Write empty file
+        // Ensure Inbox/Notes/ exists
+        try? FileManager.default.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+
+        // Write empty file to Inbox/Notes/
         try? "".write(to: fileURL, atomically: true, encoding: .utf8)
 
+        let inboxRelativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
         index[uuid] = NoteIndexEntry(filename: filename, folderID: nil, createdAt: now)
         saveIndex()
 
-        let note = Note(id: uuid, title: title, content: "", createdAt: now, modifiedAt: now, relativePath: filename)
+        let note = Note(id: uuid, title: title, content: "", createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
         return note
     }
@@ -453,9 +509,13 @@ final class NotesStorage: ObservableObject {
         let safeTitle = sanitizedTitle.isEmpty ? "Screen Capture" : sanitizedTitle
         let uniqued = uniqueTitle(safeTitle)
         let filename = "\(uniqued).md"
-        let fileURL = directoryURL.appendingPathComponent(filename)
+        let inboxDir = inboxNotesDirectoryURL
+        let fileURL = inboxDir.appendingPathComponent(filename)
         let uuid = UUID()
         let now = Date()
+
+        // Ensure Inbox/Notes/ exists
+        try? FileManager.default.createDirectory(at: inboxDir, withIntermediateDirectories: true)
 
         // Save screenshot to Attachments if provided
         var screenshotFilename: String?
@@ -488,6 +548,7 @@ final class NotesStorage: ObservableObject {
 
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
 
+        let inboxRelativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
         index[uuid] = NoteIndexEntry(
             filename: filename,
             folderID: nil,
@@ -503,7 +564,7 @@ final class NotesStorage: ObservableObject {
             content: content,
             createdAt: now,
             modifiedAt: now,
-            relativePath: filename
+            relativePath: inboxRelativePath
         )
         notes.insert(note, at: 0)
         return note
@@ -592,7 +653,7 @@ final class NotesStorage: ObservableObject {
             let oldFilename = (note.relativePath as NSString).lastPathComponent
             let dirPath = note.relativePath.contains("/")
                 ? (note.relativePath as NSString).deletingLastPathComponent
-                : "Notes"
+                : "\(StoragePaths.inboxDir)/Notes"
             if let existingMeta = SidecarService.shared.metadata(for: oldFilename, inDirectory: dirPath) {
                 SidecarService.shared.removeMetadata(for: oldFilename, inDirectory: dirPath)
                 SidecarService.shared.setMetadata(existingMeta, for: newFilename, inDirectory: dirPath)
@@ -640,12 +701,15 @@ final class NotesStorage: ObservableObject {
         let filename = (note.relativePath as NSString).lastPathComponent
         let oldFileURL = noteFileURL(for: note)
 
-        // Determine the new directory: vault folder or default Notes/ dir
+        // Determine the new directory: vault folder or Inbox/Notes/
         let newDirURL: URL
+        let newRelativePath: String
         if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
             newDirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+            newRelativePath = "\(vaultFolder.relativePath)/\(filename)"
         } else {
-            newDirURL = directoryURL  // Notes/ directory
+            newDirURL = inboxNotesDirectoryURL
+            newRelativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
         }
 
         let newFileURL = newDirURL.appendingPathComponent(filename)
@@ -661,14 +725,6 @@ final class NotesStorage: ObservableObject {
                 NSLog("[NotesStorage] Failed to move note file: \(error)")
                 return false
             }
-        }
-
-        // Build new relativePath
-        let newRelativePath: String
-        if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
-            newRelativePath = "\(vaultFolder.relativePath)/\(filename)"
-        } else {
-            newRelativePath = filename
         }
 
         notes[idx].folderID = folderID
@@ -729,23 +785,25 @@ final class NotesStorage: ObservableObject {
     func delete(note: Note) -> TrashItem {
         contentCache.removeValue(forKey: note.id)
 
-        // For notes in vault folders, move the file to Notes/ first so trash works correctly
+        // For notes in vault/Inbox folders, move the file to Inbox/Notes/ first so trash works correctly
         var noteForTrash = note
+        let trashNotesDir = inboxNotesDirectoryURL
         if note.relativePath.contains("/") {
             let filename = (note.relativePath as NSString).lastPathComponent
             let vaultFileURL = noteFileURL(for: note)
-            let notesFileURL = directoryURL.appendingPathComponent(filename)
+            let inboxFileURL = trashNotesDir.appendingPathComponent(filename)
             if FileManager.default.fileExists(atPath: vaultFileURL.path) {
-                try? FileManager.default.moveItem(at: vaultFileURL, to: notesFileURL)
+                try? FileManager.default.createDirectory(at: trashNotesDir, withIntermediateDirectories: true)
+                try? FileManager.default.moveItem(at: vaultFileURL, to: inboxFileURL)
             }
             noteForTrash = Note(
                 id: note.id, title: note.title, content: note.content,
                 createdAt: note.createdAt, modifiedAt: note.modifiedAt,
-                relativePath: filename, labelIDs: note.labelIDs,
+                relativePath: "\(StoragePaths.inboxDir)/Notes/\(filename)", labelIDs: note.labelIDs,
                 folderID: note.folderID, isPinned: note.isPinned
             )
         }
-        let trashItem = TrashStorage.shared.trashNote(noteForTrash, notesDir: directoryURL)
+        let trashItem = TrashStorage.shared.trashNote(noteForTrash, notesDir: trashNotesDir)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
         index.removeValue(forKey: note.id)
         saveIndex()
@@ -778,8 +836,20 @@ final class NotesStorage: ObservableObject {
         let safeTitle = sanitizedTitle.isEmpty ? "Untitled" : sanitizedTitle
         let uniqued = uniqueTitle(safeTitle)
         let filename = "\(uniqued).md"
-        let fileURL = directoryURL.appendingPathComponent(filename)
 
+        // Write to Inbox/Notes/ for unfiled, or vault folder for assigned notes
+        let targetDir: URL
+        let relativePath: String
+        if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            targetDir = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+            relativePath = "\(vaultFolder.relativePath)/\(filename)"
+        } else {
+            targetDir = inboxNotesDirectoryURL
+            relativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
+        }
+
+        try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        let fileURL = targetDir.appendingPathComponent(filename)
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
 
         // Set file modification date to match remote updatedAt
@@ -802,7 +872,7 @@ final class NotesStorage: ObservableObject {
             content: content,
             createdAt: createdAt,
             modifiedAt: updatedAt,
-            relativePath: filename,
+            relativePath: relativePath,
             folderID: folderID,
             isPinned: isPinned
         )
@@ -820,7 +890,8 @@ final class NotesStorage: ObservableObject {
     ) {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return }
 
-        let oldFilename = notes[idx].relativePath
+        let note = notes[idx]
+        let oldFileURL = noteFileURL(for: note)
 
         // Handle rename if title changed
         let sanitizedTitle = title.replacingOccurrences(of: "/", with: "-")
@@ -829,19 +900,24 @@ final class NotesStorage: ObservableObject {
         if sanitizedTitle != notes[idx].title && !sanitizedTitle.isEmpty {
             let uniqued = uniqueTitle(sanitizedTitle)
             newFilename = "\(uniqued).md"
-            let oldPath = directoryURL.appendingPathComponent(oldFilename)
-            let newPath = directoryURL.appendingPathComponent(newFilename)
-            if FileManager.default.fileExists(atPath: oldPath.path) {
-                try? FileManager.default.moveItem(at: oldPath, to: newPath)
+            let newFileURL = oldFileURL.deletingLastPathComponent().appendingPathComponent(newFilename)
+            if FileManager.default.fileExists(atPath: oldFileURL.path) {
+                try? FileManager.default.moveItem(at: oldFileURL, to: newFileURL)
             }
             notes[idx].title = uniqued
-            notes[idx].relativePath = newFilename
+            // Update relativePath preserving the directory prefix
+            if note.relativePath.contains("/") {
+                let parentPath = (note.relativePath as NSString).deletingLastPathComponent
+                notes[idx].relativePath = "\(parentPath)/\(newFilename)"
+            } else {
+                notes[idx].relativePath = newFilename
+            }
         } else {
-            newFilename = oldFilename
+            newFilename = (note.relativePath as NSString).lastPathComponent
         }
 
         // Write content
-        let fileURL = directoryURL.appendingPathComponent(newFilename)
+        let fileURL = noteFileURL(for: notes[idx])
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
 
         // Set file modification date to match remote timestamp
@@ -920,6 +996,7 @@ final class NotesStorage: ObservableObject {
     // MARK: - Directory Watcher
 
     private func startDirectoryWatcher() {
+        // Watch .cider/notes/ (metadata index + legacy notes)
         let fd = open(directoryURL.path, O_EVTONLY)
         guard fd >= 0 else { return }
         directoryFileDescriptor = fd
@@ -939,12 +1016,41 @@ final class NotesStorage: ObservableObject {
         }
         source.resume()
         directorySource = source
+
+        // Watch Inbox/Notes/ for external changes to unfiled notes
+        let inboxDir = inboxNotesDirectoryURL
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: inboxDir.path) {
+            try? fm.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+        }
+        let inboxFd = open(inboxDir.path, O_EVTONLY)
+        guard inboxFd >= 0 else { return }
+        inboxFileDescriptor = inboxFd
+
+        let inboxSource = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: inboxFd,
+            eventMask: .write,
+            queue: .main
+        )
+        inboxSource.setEventHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.scanNotes()
+            }
+        }
+        inboxSource.setCancelHandler {
+            close(inboxFd)
+        }
+        inboxSource.resume()
+        inboxDirectorySource = inboxSource
     }
 
     private func stopDirectoryWatcher() {
         directorySource?.cancel()
         directorySource = nil
         directoryFileDescriptor = -1
+        inboxDirectorySource?.cancel()
+        inboxDirectorySource = nil
+        inboxFileDescriptor = -1
     }
 
     // MARK: - Image Storage

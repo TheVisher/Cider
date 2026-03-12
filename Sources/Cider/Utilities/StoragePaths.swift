@@ -33,11 +33,27 @@ enum StorageType: String, CaseIterable {
         case .whiteboards: return "whiteboards"
         }
     }
+
+    /// User-facing subfolder name inside `Inbox/` for content files.
+    /// Only types with per-file content have inbox subfolders.
+    var inboxSubfolderName: String? {
+        switch self {
+        case .bookmarks: return "Bookmarks"
+        case .notes: return "Notes"
+        case .contacts: return "Contacts"
+        case .todos: return "Todos"
+        case .dateCards: return "Date Cards"
+        default: return nil
+        }
+    }
 }
 
 enum StoragePaths {
     /// Hidden directory inside the vault root that holds all app-internal data.
     static let ciderInternalDir = ".cider"
+
+    /// Visible directory for unfiled content files (bookmarks, notes, etc.).
+    static let inboxDir = "Inbox"
 
     /// Lock protecting the mutable cache dictionary from concurrent access.
     /// `cachedDirectoryURL(for:)` is called from background threads (e.g., NoteCardData.load),
@@ -104,6 +120,24 @@ enum StoragePaths {
         _lock.unlock()
     }
 
+    // MARK: - Inbox
+
+    /// Returns the Inbox subdirectory URL for a given storage type (e.g. `~/CiderVault/Inbox/Bookmarks/`).
+    static func inboxSubdirectoryURL(for type: StorageType, config: CiderConfig = CiderConfig.load()) -> URL {
+        let name = type.inboxSubfolderName ?? type.rawValue
+        return vaultDirectoryURL(config: config)
+            .appendingPathComponent(inboxDir)
+            .appendingPathComponent(name)
+    }
+
+    /// Cached Inbox subdirectory URL for a storage type.
+    static func cachedInboxSubdirectoryURL(for type: StorageType) -> URL {
+        let name = type.inboxSubfolderName ?? type.rawValue
+        return cachedVaultDirectoryURL
+            .appendingPathComponent(inboxDir)
+            .appendingPathComponent(name)
+    }
+
     // MARK: - Helpers
 
     static func jsonFileURL(fileName: String, in directoryURL: URL) -> URL {
@@ -124,6 +158,14 @@ enum StoragePaths {
         ensureDirectory(vaultRoot.appendingPathComponent(ciderInternalDir))
         for type in StorageType.allCases {
             ensureDirectory(directoryURL(for: type, config: config))
+        }
+        // Create Inbox/ and its subfolders
+        let inboxRoot = vaultRoot.appendingPathComponent(inboxDir)
+        ensureDirectory(inboxRoot)
+        for type in StorageType.allCases {
+            if type.inboxSubfolderName != nil {
+                ensureDirectory(inboxSubdirectoryURL(for: type, config: config))
+            }
         }
     }
 }

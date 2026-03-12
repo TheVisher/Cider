@@ -80,11 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.accessory)
         AccessibilityHelpers.promptIfNeeded()
         VaultStructureMigration.migrateIfNeeded()
+        VaultStructureMigration.migrateContentToInboxIfNeeded()
         StoragePaths.ensureVaultStructure()
-
-        // Ensure Unsorted directory exists for unfiled items (visible in Finder, hidden in Cider)
-        let unsortedURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("Unsorted")
-        StoragePaths.ensureDirectory(unsortedURL)
 
         configureSettings()
         configureNotes()

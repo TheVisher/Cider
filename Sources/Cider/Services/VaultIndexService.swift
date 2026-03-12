@@ -211,11 +211,19 @@ final class VaultIndexService {
             )
         }
 
-        // Bookmarks
+        // Bookmarks — use the bookmark's actual relativePath when available
         for bookmark in BookmarksStorage.shared.bookmarks {
+            let path: String
+            if let rp = bookmark.relativePath, !rp.isEmpty {
+                // Drop the .webloc filename to get the directory, then add the JSON sidecar path
+                let dirPath = (rp as NSString).deletingLastPathComponent
+                path = "\(dirPath)/\(bookmark.id.uuidString).json"
+            } else {
+                path = "\(StoragePaths.inboxDir)/Bookmarks/\(bookmark.id.uuidString).json"
+            }
             rebuilt[bookmark.id] = VaultIndexEntry(
                 type: "bookmark",
-                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.bookmarks.ciderSubpath)/\(bookmark.id.uuidString).json",
+                path: path,
                 title: bookmark.title,
                 url: bookmark.urlString,
                 tags: bookmark.tags.isEmpty ? nil : bookmark.tags,

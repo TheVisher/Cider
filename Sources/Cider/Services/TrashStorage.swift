@@ -146,20 +146,28 @@ final class TrashStorage {
     func restoreNote(_ trashItem: TrashItem) {
         guard let payload = trashItem.notePayload else { return }
 
-        let notesDir = StoragePaths.directoryURL(for: .notes)
-        let trashDir = notesDir.appendingPathComponent(trashDirName)
+        let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        // Trash is stored in Inbox/Notes/.trash/
+        let trashDir = inboxNotesDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
-        let srcURL = trashDir.appendingPathComponent(payload.noteFilename)
+        // Also check legacy trash location (.cider/notes/.trash/)
+        let legacyTrashDir = StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName)
 
-        // Determine destination: vault folder if the note had one, otherwise Notes/
+        var srcURL = trashDir.appendingPathComponent(payload.noteFilename)
+        if !fm.fileExists(atPath: srcURL.path) {
+            srcURL = legacyTrashDir.appendingPathComponent(payload.noteFilename)
+        }
+
+        // Determine destination: vault folder if the note had one, otherwise Inbox/Notes/
         let destDir: URL
         if let folderID = payload.folderID,
            let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
             destDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(vaultFolder.relativePath)
             try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
         } else {
-            destDir = notesDir
+            destDir = inboxNotesDir
+            try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
         }
 
         var destURL = destDir.appendingPathComponent(payload.noteFilename)
@@ -393,6 +401,11 @@ final class TrashStorage {
         items += loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: dateCardsDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: contactsDir.appendingPathComponent(trashDirName))
+        // Also check Inbox trash locations
+        let inboxBookmarksDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
+        let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        items += loadManifest(trashDir: inboxBookmarksDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: inboxNotesDir.appendingPathComponent(trashDirName))
         items += VaultFolderService.shared.trashedFolders()
         return items.sorted { $0.deletedAt > $1.deletedAt }
     }
@@ -407,6 +420,13 @@ final class TrashStorage {
             purgeExpired(
                 olderThan: cutoff,
                 in: StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
+            )
+        }
+        // Also purge from Inbox trash locations
+        for type in [StorageType.bookmarks, .notes] {
+            purgeExpired(
+                olderThan: cutoff,
+                in: StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
             )
         }
     }
@@ -428,11 +448,11 @@ final class TrashStorage {
     func permanentlyDelete(_ trashItem: TrashItem) {
         switch trashItem.itemType {
         case .bookmark:
-            let trashDir = StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
+            let trashDir = resolveTrashDir(for: .bookmarks, itemID: trashItem.id)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .note:
-            let trashDir = StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName)
+            let trashDir = resolveTrashDir(for: .notes, itemID: trashItem.id)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .folder:
@@ -485,9 +505,26 @@ final class TrashStorage {
             for item in items { deleteFilesForItem(item, trashDir: trashDir) }
             saveManifest([], trashDir: trashDir)
         }
+        // Also empty Inbox trash locations
+        for type in [StorageType.bookmarks, .notes] {
+            let trashDir = StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
+            let items = loadManifest(trashDir: trashDir)
+            for item in items { deleteFilesForItem(item, trashDir: trashDir) }
+            saveManifest([], trashDir: trashDir)
+        }
     }
 
     // MARK: - Private Helpers
+
+    /// Finds the correct trash directory for an item — checks Inbox first, then .cider/.
+    private func resolveTrashDir(for type: StorageType, itemID: UUID) -> URL {
+        let inboxTrashDir = StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
+        let manifest = loadManifest(trashDir: inboxTrashDir)
+        if manifest.contains(where: { $0.id == itemID }) {
+            return inboxTrashDir
+        }
+        return StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
+    }
 
     private func deleteFilesForItem(_ trashItem: TrashItem, trashDir: URL) {
         let fm = FileManager.default

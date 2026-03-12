@@ -320,6 +320,11 @@ final class BookmarksStorage: ObservableObject {
         bookmarks[index].folderID = folderID
         bookmarks[index].updatedAt = remoteUpdatedAt
         persist()
+
+        // If the bookmark has no local thumbnail, kick off enrichment to fetch one
+        if bookmarks[index].thumbnailRelativePath == nil {
+            startEnrichmentIfNeeded(for: bookmarkID)
+        }
     }
 
     /// Remove a bookmark that was deleted on the web, without trashing it locally.
@@ -1113,10 +1118,10 @@ final class BookmarksStorage: ObservableObject {
                 }
             }
         }
-        // Default: .cider/bookmarks/ directory
-        let ciderPath = "\(StoragePaths.ciderInternalDir)/\(StorageType.bookmarks.ciderSubpath)"
-        let dirURL = vaultRoot.appendingPathComponent(ciderPath)
-        return (dirURL, ciderPath)
+        // Default: Inbox/Bookmarks/ directory (visible to user in Finder)
+        let inboxPath = "\(StoragePaths.inboxDir)/\(StorageType.bookmarks.inboxSubfolderName ?? "Bookmarks")"
+        let dirURL = vaultRoot.appendingPathComponent(inboxPath)
+        return (dirURL, inboxPath)
     }
 
     // MARK: - One-time migration
@@ -1179,6 +1184,62 @@ final class BookmarksStorage: ObservableObject {
         for bookmark in bookmarks {
             startEnrichmentIfNeeded(for: bookmark.id)
         }
+        recoverMissingThumbnails()
+    }
+
+    /// Downloads thumbnails for bookmarks that have a known remote URL but no local file.
+    /// This handles cases where the image download previously failed or the local cache was lost.
+    /// Runs independently of the normal enrichment pipeline (no retry throttling).
+    private func recoverMissingThumbnails() {
+        let candidates = bookmarks.filter { bookmark in
+            guard let remoteURLString = bookmark.thumbnailRemoteURLString,
+                  URL(string: remoteURLString) != nil else { return false }
+            return !localThumbnailExists(relativePath: bookmark.thumbnailRelativePath)
+        }
+
+        guard !candidates.isEmpty else { return }
+        let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Cider", category: "ThumbnailRecovery")
+        logger.info("Recovering missing thumbnails for \(candidates.count) bookmark(s)")
+
+        for bookmark in candidates {
+            guard enrichmentTasks[bookmark.id] == nil,
+                  let remoteURLString = bookmark.thumbnailRemoteURLString,
+                  let remoteURL = URL(string: remoteURLString) else { continue }
+
+            let bookmarkID = bookmark.id
+            let task = Task { [weak self] in
+                guard let self else { return }
+                let imageAssets = await self.cacheImageAssets(from: remoteURL, for: bookmarkID)
+                await self.applyRecoveredThumbnail(bookmarkID: bookmarkID, imageAssets: imageAssets)
+            }
+            enrichmentTasks[bookmarkID] = task
+        }
+    }
+
+    /// Applies a recovered thumbnail without re-running the full enrichment pipeline.
+    private func applyRecoveredThumbnail(bookmarkID: UUID, imageAssets: BookmarkImageAssets?) async {
+        defer { enrichmentTasks.removeValue(forKey: bookmarkID) }
+
+        guard let imageAssets,
+              let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+
+        removeImageIfPresent(relativePath: bookmarks[index].thumbnailRelativePath)
+        removeImageIfPresent(relativePath: bookmarks[index].originalImageRelativePath)
+
+        bookmarks[index].thumbnailRelativePath = imageAssets.thumbnailRelativePath
+        bookmarks[index].originalImageRelativePath = imageAssets.originalImageRelativePath
+
+        // Fix stored http:// URLs to https:// so future downloads don't hit ATS again
+        if let remoteURL = bookmarks[index].thumbnailRemoteURLString,
+           remoteURL.hasPrefix("http://") {
+            bookmarks[index].thumbnailRemoteURLString = "https://" + remoteURL.dropFirst(7)
+        }
+
+        bookmarks[index].updatedAt = Date()
+
+        persist()
+        let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Cider", category: "ThumbnailRecovery")
+        logger.info("Recovered thumbnail for bookmark \(bookmarkID)")
     }
 
     private func startEnrichmentIfNeeded(for bookmarkID: UUID, force: Bool = false) {
@@ -1411,7 +1472,19 @@ final class BookmarksStorage: ObservableObject {
 
     private func downloadImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
-        var request = URLRequest(url: remoteURL)
+
+        // Upgrade http:// → https:// to satisfy App Transport Security.
+        // Most CDNs support HTTPS even when og:image tags specify HTTP.
+        var downloadURL = remoteURL
+        if var components = URLComponents(url: remoteURL, resolvingAgainstBaseURL: false),
+           components.scheme == "http" {
+            components.scheme = "https"
+            if let upgraded = components.url {
+                downloadURL = upgraded
+            }
+        }
+
+        var request = URLRequest(url: downloadURL)
         request.timeoutInterval = 8
         Self.applyBrowserHeaders(&request)
         request.setValue("image/gif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
