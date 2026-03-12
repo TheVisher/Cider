@@ -42,10 +42,10 @@ final class VaultIndexService {
     private var cancellables = Set<AnyCancellable>()
     private var rebuildWorkItem: DispatchWorkItem?
 
-    private let indexFileName = ".cider-index.json"
-
     private var indexFileURL: URL {
-        StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(indexFileName)
+        StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("index.json")
     }
 
     private var vaultRoot: URL {
@@ -215,7 +215,7 @@ final class VaultIndexService {
         for bookmark in BookmarksStorage.shared.bookmarks {
             rebuilt[bookmark.id] = VaultIndexEntry(
                 type: "bookmark",
-                path: "Bookmarks/\(bookmark.id.uuidString).json",
+                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.bookmarks.ciderSubpath)/\(bookmark.id.uuidString).json",
                 title: bookmark.title,
                 url: bookmark.urlString,
                 tags: bookmark.tags.isEmpty ? nil : bookmark.tags,
@@ -230,7 +230,7 @@ final class VaultIndexService {
         for todo in TodoCardStorage.shared.todoCards {
             rebuilt[todo.id] = VaultIndexEntry(
                 type: "todo",
-                path: "Todos/\(todo.id.uuidString).json",
+                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.todos.ciderSubpath)/\(todo.id.uuidString).json",
                 title: todo.title,
                 labelIDs: todo.labelIDs.isEmpty ? nil : todo.labelIDs,
                 folderID: todo.folderID,
@@ -243,7 +243,7 @@ final class VaultIndexService {
         for dc in DateCardStorage.shared.dateCards {
             rebuilt[dc.id] = VaultIndexEntry(
                 type: "dateCard",
-                path: "DateCards/\(dc.id.uuidString).json",
+                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.dateCards.ciderSubpath)/\(dc.id.uuidString).json",
                 title: dc.title,
                 labelIDs: dc.labelIDs.isEmpty ? nil : dc.labelIDs,
                 folderID: dc.folderID,
@@ -256,7 +256,7 @@ final class VaultIndexService {
         for contact in ContactStorage.shared.contacts {
             rebuilt[contact.id] = VaultIndexEntry(
                 type: "contact",
-                path: "Contacts/\(contact.id.uuidString).json",
+                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.contacts.ciderSubpath)/\(contact.id.uuidString).json",
                 title: contact.displayName,
                 labelIDs: contact.labelIDs.isEmpty ? nil : contact.labelIDs,
                 folderID: contact.folderID,

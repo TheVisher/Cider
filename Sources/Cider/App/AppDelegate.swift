@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         AccessibilityHelpers.promptIfNeeded()
+        VaultStructureMigration.migrateIfNeeded()
         StoragePaths.ensureVaultStructure()
 
         // Ensure Unsorted directory exists for unfiled items (visible in Finder, hidden in Cider)

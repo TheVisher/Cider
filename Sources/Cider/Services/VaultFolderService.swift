@@ -30,7 +30,7 @@ final class VaultFolderService {
 
     // MARK: - Paths
 
-    private let metaDirName = ".cider-folders"
+    private let metaDirName = ".cider/folders"
     private let indexFileName = "index.json"
     private let coversDirName = "covers"
     private let trashDirName = ".trash"
@@ -545,14 +545,14 @@ final class VaultFolderService {
         }
     }
 
-    /// Directories that are Cider internals, not user-created folders.
-    private static let reservedDirectoryNames: Set<String> = ["Inbox", "Unsorted", "AI Chat"]
+    /// Directories that are Cider internals or reserved, not user-created folders.
+    /// All StorageType dirs now live inside `.cider/` (hidden, auto-skipped by .skipsHiddenFiles).
+    private static let reservedDirectoryNames: Set<String> = ["Inbox", "Unsorted"]
 
-    /// Returns true if the path is a known internal directory (StorageType or reserved name).
+    /// Returns true if the path is a reserved directory that should not appear as a vault folder.
     private func isStorageTypeDirectory(_ relativePath: String) -> Bool {
         let topComponent = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
-        if Self.reservedDirectoryNames.contains(topComponent) { return true }
-        return StorageType.allCases.contains(where: { $0.rawValue == topComponent })
+        return Self.reservedDirectoryNames.contains(topComponent)
     }
 
     // MARK: - Private: Index Persistence

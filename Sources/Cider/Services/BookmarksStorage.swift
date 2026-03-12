@@ -58,6 +58,7 @@ final class BookmarksStorage: ObservableObject {
                 self.folders = snapshot.folders
                 self.normalizeBookmarkImageAssetsIfNeeded()
                 self.scheduleEnrichmentForIncompleteBookmarks()
+                self.runBookmarkFileMigrationIfNeeded()
                 return
             }
 
@@ -67,11 +68,64 @@ final class BookmarksStorage: ObservableObject {
                 self.normalizeBookmarkImageAssetsIfNeeded()
                 self.persist()
                 self.scheduleEnrichmentForIncompleteBookmarks()
+                self.runBookmarkFileMigrationIfNeeded()
                 return
             }
 
             self.bookmarks = []
             self.folders = []
+        }
+    }
+
+    /// Reloads bookmarks and folders from disk. Call after external tools (e.g. AI Chat)
+    /// may have modified the JSON files. Reconciles JSON folder UUIDs with VaultFolder UUIDs
+    /// so bookmarks appear in the correct sidebar folders.
+    func reloadFromDisk() {
+        load()
+        reconcileJSONFoldersWithVaultFolders()
+    }
+
+    /// Maps JSON folder IDs to VaultFolder IDs by matching folder names to directory paths.
+    /// External tools (AI Chat) create folders in JSON with their own UUIDs, but the sidebar
+    /// uses VaultFolderService UUIDs. This bridges the two by remapping bookmark folderIDs.
+    private func reconcileJSONFoldersWithVaultFolders() {
+        guard !folders.isEmpty else { return }
+
+        // Build a lookup: JSON folder UUID → relative path (e.g. "Entertainment/Sports")
+        let foldersByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
+        var jsonIDToPath: [UUID: String] = [:]
+        for folder in folders {
+            var pathParts: [String] = [folder.name]
+            var current = folder
+            while let parentID = current.parentID, let parent = foldersByID[parentID] {
+                pathParts.insert(parent.name, at: 0)
+                current = parent
+            }
+            jsonIDToPath[folder.id] = pathParts.joined(separator: "/")
+        }
+
+        // Build remap: JSON folder UUID → VaultFolder UUID
+        var remap: [UUID: UUID] = [:]
+        for (jsonID, relativePath) in jsonIDToPath {
+            if let vaultID = VaultFolderService.shared.folderID(for: relativePath),
+               vaultID != jsonID {
+                remap[jsonID] = vaultID
+            }
+        }
+
+        guard !remap.isEmpty else { return }
+
+        // Remap bookmark folderIDs
+        var changed = false
+        for i in bookmarks.indices {
+            if let oldID = bookmarks[i].folderID, let newID = remap[oldID] {
+                bookmarks[i].folderID = newID
+                changed = true
+            }
+        }
+
+        if changed {
+            persist()
         }
     }
 
@@ -964,6 +1018,149 @@ final class BookmarksStorage: ObservableObject {
         }
 
         SyncService.shared.pushAfterLocalChange()
+
+        // Dual-write: also update .webloc files + sidecars if migration has run
+        if CiderConfig.load().didMigrateBookmarkFiles {
+            persistBookmarkFiles()
+        }
+    }
+
+    // MARK: - File-based persistence (dual-write)
+
+    /// Writes all bookmarks as .webloc files + per-folder sidecars alongside the monolithic JSON.
+    /// Only creates new .webloc files for bookmarks that don't already have one on disk.
+    /// Always rewrites sidecar JSON to keep it in sync.
+    private func persistBookmarkFiles() {
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        let fileService = BookmarkFileService.shared
+        let fm = FileManager.default
+
+        // Group bookmarks by their target directory
+        var byDirectory: [String: [(Bookmark, String)]] = [:] // dirRelativePath → [(bookmark, filename)]
+
+        for var bookmark in bookmarks {
+            let (dirURL, dirRelativePath) = resolveBookmarkDirectory(bookmark.folderID, vaultRoot: vaultRoot)
+
+            // Determine filename
+            let baseName = fileService.sanitizedFilename(bookmark.title.isEmpty ? "Untitled" : bookmark.title)
+            let filename: String
+
+            if let existingPath = bookmark.relativePath,
+               !existingPath.isEmpty,
+               fm.fileExists(atPath: vaultRoot.appendingPathComponent(existingPath).path) {
+                // Use existing file
+                filename = (existingPath as NSString).lastPathComponent
+            } else {
+                // Create new .webloc file
+                let newFilename = fileService.uniqueFilename(for: baseName, extension: "webloc", in: dirURL)
+                let fileURL = dirURL.appendingPathComponent(newFilename)
+
+                if bookmark.hasURL, let url = bookmark.url {
+                    let plist: [String: String] = ["URL": url.absoluteString]
+                    if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
+                        try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+                        try? data.write(to: fileURL, options: .atomic)
+                    }
+                }
+                filename = newFilename
+
+                // Update relativePath on the in-memory bookmark
+                let relativePath = dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
+                if let idx = bookmarks.firstIndex(where: { $0.id == bookmark.id }) {
+                    bookmarks[idx].relativePath = relativePath
+                }
+                bookmark.relativePath = relativePath
+            }
+
+            byDirectory[dirRelativePath, default: []].append((bookmark, filename))
+        }
+
+        // Write sidecar JSON for each directory (one atomic write per folder)
+        for (dirRelativePath, entries) in byDirectory {
+            let dirURL = dirRelativePath.isEmpty
+                ? vaultRoot
+                : vaultRoot.appendingPathComponent(dirRelativePath)
+
+            var sidecar = BookmarkFileService.BookmarkFolderSidecar()
+            for (bookmark, filename) in entries {
+                sidecar.items[filename] = fileService.sidecarEntry(from: bookmark)
+            }
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            if let data = try? encoder.encode(sidecar) {
+                let sidecarURL = dirURL.appendingPathComponent(BookmarkFileService.sidecarFileName)
+                try? data.write(to: sidecarURL, options: .atomic)
+            }
+        }
+    }
+
+    /// Maps a folderID to a vault directory URL and its relative path.
+    private func resolveBookmarkDirectory(_ folderID: UUID?, vaultRoot: URL) -> (URL, String) {
+        if let folderID {
+            // Try VaultFolder (real directory)
+            if let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+                let dirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+                return (dirURL, vaultFolder.relativePath)
+            }
+            // Try legacy Folder → match to VaultFolder by name
+            if let legacyFolder = folders.first(where: { $0.id == folderID }) {
+                let name = VaultFolderService.sanitizeDirectoryName(legacyFolder.name)
+                if let vaultFolder = VaultFolderService.shared.folders.first(where: { $0.relativePath == name }) {
+                    let dirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
+                    return (dirURL, vaultFolder.relativePath)
+                }
+            }
+        }
+        // Default: .cider/bookmarks/ directory
+        let ciderPath = "\(StoragePaths.ciderInternalDir)/\(StorageType.bookmarks.ciderSubpath)"
+        let dirURL = vaultRoot.appendingPathComponent(ciderPath)
+        return (dirURL, ciderPath)
+    }
+
+    // MARK: - One-time migration
+
+    /// Runs the one-time migration from monolithic JSON to individual .webloc files.
+    /// Creates vault directories for legacy folders, writes .webloc + sidecar for each bookmark,
+    /// and sets the migration flag so it doesn't run again.
+    func runBookmarkFileMigrationIfNeeded() {
+        var config = CiderConfig.load()
+        guard !config.didMigrateBookmarkFiles else { return }
+        guard !bookmarks.isEmpty else {
+            config.didMigrateBookmarkFiles = true
+            config.save()
+            return
+        }
+
+        let logger = Logger(
+            subsystem: Bundle.main.bundleIdentifier ?? "Cider",
+            category: "BookmarkFileMigration"
+        )
+        logger.info("Starting bookmark file migration for \(self.bookmarks.count) bookmarks…")
+
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        let fm = FileManager.default
+
+        // Step 1: Ensure vault directories exist for legacy folders
+        for folder in folders {
+            let name = VaultFolderService.sanitizeDirectoryName(folder.name)
+            guard !name.isEmpty else { continue }
+            let dirURL = vaultRoot.appendingPathComponent(name)
+            try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        }
+
+        // VaultFolderService will pick up new directories via FSEvents automatically
+
+        // Step 2: Write .webloc + sidecar for all bookmarks
+        persistBookmarkFiles()
+
+        // Step 3: Set migration flag
+        config.didMigrateBookmarkFiles = true
+        config.save()
+
+        let fileCount = bookmarks.filter { $0.relativePath != nil }.count
+        logger.info("Bookmark file migration complete: \(fileCount) files written")
     }
 
     private func cancelAllEnrichmentTasks() {

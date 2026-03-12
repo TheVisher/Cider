@@ -108,7 +108,7 @@ final class VaultMigrationService {
 
         for bookmark in bookmarks {
             // Determine target directory
-            let (dirURL, dirRelativePath) = resolveDirectory(for: bookmark.folderID, fallback: "Bookmarks")
+            let (dirURL, dirRelativePath) = resolveDirectory(for: bookmark.folderID, fallback: StorageType.bookmarks.ciderSubpath)
 
             // Create .webloc file if bookmark has a URL
             if bookmark.hasURL, let url = bookmark.url {
@@ -188,7 +188,7 @@ final class VaultMigrationService {
 
         for todo in todos {
             let filename = "\(todo.id).json"
-            let dirRelativePath = "Todos"
+            let dirRelativePath = "\(StoragePaths.ciderInternalDir)/\(StorageType.todos.ciderSubpath)"
 
             var meta = SidecarItemMetadata()
             let labelNames = todo.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
@@ -235,9 +235,10 @@ final class VaultMigrationService {
                 }
             }
         }
-        // Fallback to type directory
-        let dirURL = vaultRoot.appendingPathComponent(fallback)
-        return (dirURL, fallback)
+        // Fallback to type directory inside .cider/
+        let ciderPath = "\(StoragePaths.ciderInternalDir)/\(fallback)"
+        let dirURL = vaultRoot.appendingPathComponent(ciderPath)
+        return (dirURL, ciderPath)
     }
 
     /// Sanitizes a string for use as a filename (removes invalid characters).

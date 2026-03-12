@@ -26,10 +26,11 @@ final class AIChatViewModel: ObservableObject {
 
     // MARK: - File Paths
 
-    /// Directory for a model's conversations: ~/CiderVault/AI Chat/{modelID}/
+    /// Directory for a model's conversations: ~/CiderVault/.cider/ai-chat/{modelID}/
     private func conversationsDirectory(for modelID: String) -> URL {
         StoragePaths.cachedVaultDirectoryURL
-            .appendingPathComponent("AI Chat")
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("ai-chat")
             .appendingPathComponent(modelID)
     }
 
@@ -333,6 +334,9 @@ final class AIChatViewModel: ObservableObject {
         }
 
         saveCurrentConversation()
+
+        // Reload bookmarks in case the AI modified vault files
+        BookmarksStorage.shared.reloadFromDisk()
     }
 
     private func finalizeCurrentStream() {
@@ -428,7 +432,9 @@ final class AIChatViewModel: ObservableObject {
 
     /// Migrate old single-session files to the new conversation format.
     private func migrateOldSessionFiles() {
-        let aiChatDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent("AI Chat")
+        let aiChatDir = StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("ai-chat")
         guard FileManager.default.fileExists(atPath: aiChatDir.path) else { return }
 
         do {

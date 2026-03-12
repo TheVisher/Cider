@@ -48,7 +48,7 @@ final class SidecarService: ObservableObject {
         if note.relativePath.contains("/") {
             dirPath = (note.relativePath as NSString).deletingLastPathComponent
         } else {
-            dirPath = "Notes"
+            dirPath = "\(StoragePaths.ciderInternalDir)/\(StorageType.notes.ciderSubpath)"
         }
         return metadata(for: filename, inDirectory: dirPath)
     }
@@ -174,7 +174,7 @@ final class SidecarService: ObservableObject {
         if note.relativePath.contains("/") {
             dirPath = (note.relativePath as NSString).deletingLastPathComponent
         } else {
-            dirPath = "Notes"
+            dirPath = "\(StoragePaths.ciderInternalDir)/\(StorageType.notes.ciderSubpath)"
         }
 
         var meta = metadata(for: filename, inDirectory: dirPath) ?? SidecarItemMetadata()

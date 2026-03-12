@@ -15,9 +15,30 @@ enum StorageType: String, CaseIterable {
     case todos = "Todos"
     case clipboard = "Clipboard"
     case whiteboards = "Whiteboards"
+
+    /// Lowercase/hyphenated subdirectory name inside `.cider/`.
+    var ciderSubpath: String {
+        switch self {
+        case .bookmarks: return "bookmarks"
+        case .notes: return "notes"
+        case .contacts: return "contacts"
+        case .dateCards: return "date-cards"
+        case .tags: return "tags"
+        case .stacks: return "stacks"
+        case .labels: return "labels"
+        case .savedViews: return "saved-views"
+        case .sources: return "sources"
+        case .todos: return "todos"
+        case .clipboard: return "clipboard"
+        case .whiteboards: return "whiteboards"
+        }
+    }
 }
 
 enum StoragePaths {
+    /// Hidden directory inside the vault root that holds all app-internal data.
+    static let ciderInternalDir = ".cider"
+
     /// Lock protecting the mutable cache dictionary from concurrent access.
     /// `cachedDirectoryURL(for:)` is called from background threads (e.g., NoteCardData.load),
     /// so the dictionary needs synchronization. Simple `URL?` optionals are practically atomic
@@ -53,7 +74,9 @@ enum StoragePaths {
             let expanded = NSString(string: override).expandingTildeInPath
             return URL(fileURLWithPath: expanded)
         }
-        return vaultDirectoryURL(config: config).appendingPathComponent(type.rawValue)
+        return vaultDirectoryURL(config: config)
+            .appendingPathComponent(ciderInternalDir)
+            .appendingPathComponent(type.ciderSubpath)
     }
 
     /// Cached per-type directory URL — avoids repeated config loads in render paths.
@@ -96,6 +119,9 @@ enum StoragePaths {
 
     /// Ensures all vault subdirectories exist (called on launch).
     static func ensureVaultStructure(config: CiderConfig = CiderConfig.load()) {
+        let vaultRoot = vaultDirectoryURL(config: config)
+        // Create .cider/ parent first
+        ensureDirectory(vaultRoot.appendingPathComponent(ciderInternalDir))
         for type in StorageType.allCases {
             ensureDirectory(directoryURL(for: type, config: config))
         }

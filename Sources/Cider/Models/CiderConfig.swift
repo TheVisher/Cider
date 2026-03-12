@@ -176,6 +176,8 @@ struct CiderConfig: Codable {
         case lastSuccessfulPushAt
         case aiChatDocked
         case aiChatVisible
+        case didMigrateBookmarkFiles
+        case didMigrateVaultToCiderDir
     }
 
     var showMenuBarIcon: Bool
@@ -241,6 +243,8 @@ struct CiderConfig: Codable {
     var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)
     var aiChatDocked: Bool  // Whether AI Chat is docked in the tab bar (false = floating panel)
     var aiChatVisible: Bool  // Whether AI Chat is currently open (tab or panel)
+    var didMigrateBookmarkFiles: Bool  // Whether one-time .webloc file migration has run
+    var didMigrateVaultToCiderDir: Bool  // Whether one-time vault → .cider/ migration has run
 
     static let storageKey = "CiderConfig"
 
@@ -302,7 +306,9 @@ struct CiderConfig: Codable {
             lastSyncTimestamp: 0,
             lastSuccessfulPushAt: 0,
             aiChatDocked: false,
-            aiChatVisible: false
+            aiChatVisible: false,
+            didMigrateBookmarkFiles: false,
+            didMigrateVaultToCiderDir: false
         )
     }
 
@@ -501,6 +507,8 @@ struct CiderConfig: Codable {
         lastSuccessfulPushAt = try container.decodeIfPresent(Double.self, forKey: .lastSuccessfulPushAt) ?? 0
         aiChatDocked = try container.decodeIfPresent(Bool.self, forKey: .aiChatDocked) ?? false
         aiChatVisible = try container.decodeIfPresent(Bool.self, forKey: .aiChatVisible) ?? false
+        didMigrateBookmarkFiles = try container.decodeIfPresent(Bool.self, forKey: .didMigrateBookmarkFiles) ?? false
+        didMigrateVaultToCiderDir = try container.decodeIfPresent(Bool.self, forKey: .didMigrateVaultToCiderDir) ?? false
     }
 
     init(
@@ -564,7 +572,9 @@ struct CiderConfig: Codable {
         lastSyncTimestamp: Double = 0,
         lastSuccessfulPushAt: Double = 0,
         aiChatDocked: Bool = false,
-        aiChatVisible: Bool = false
+        aiChatVisible: Bool = false,
+        didMigrateBookmarkFiles: Bool = false,
+        didMigrateVaultToCiderDir: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -627,5 +637,7 @@ struct CiderConfig: Codable {
         self.lastSuccessfulPushAt = lastSuccessfulPushAt
         self.aiChatDocked = aiChatDocked
         self.aiChatVisible = aiChatVisible
+        self.didMigrateBookmarkFiles = didMigrateBookmarkFiles
+        self.didMigrateVaultToCiderDir = didMigrateVaultToCiderDir
     }
 }

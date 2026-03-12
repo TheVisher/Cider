@@ -23,12 +23,9 @@ final class VaultFileService: ObservableObject {
     private static let excludedExtensions: Set<String> = ["md", "json", "webloc"]
 
     /// Directories that contain Cider internal data, not user files.
+    /// All StorageType dirs now live inside `.cider/` (hidden, auto-skipped by .skipsHiddenFiles).
     private static let excludedDirectoryPrefixes: Set<String> = [
-        ".cider-folders", ".history", ".attachments", ".thumbnails",
-        ".originals", ".folder-covers", ".trash", ".ai",
-        "Bookmarks", "Contacts", "DateCards", "Labels", "SavedViews",
-        "Sources", "Stacks", "Tags", "Todos", "Whiteboards", "Clipboard",
-        "Notes", "Unsorted", "Inbox"
+        "Unsorted", "Inbox"
     ]
 
     private init() {}

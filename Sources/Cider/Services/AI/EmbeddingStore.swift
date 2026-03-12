@@ -23,7 +23,9 @@ final class EmbeddingStore {
 
     private var storeFileURL: URL {
         let dir = StoragePaths.vaultDirectoryURL()
-        let aiDir = dir.appendingPathComponent(".ai", isDirectory: true)
+        let aiDir = dir
+            .appendingPathComponent(StoragePaths.ciderInternalDir, isDirectory: true)
+            .appendingPathComponent("ai", isDirectory: true)
         StoragePaths.ensureDirectory(aiDir)
         return aiDir.appendingPathComponent("embeddings.json")
     }

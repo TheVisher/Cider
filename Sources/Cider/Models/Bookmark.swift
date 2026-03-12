@@ -225,6 +225,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var carouselImagePaths: [String]? // relative paths into .originals/ for multi-image bookmarks
     var readerUnavailable: Bool?      // true when Readability.js fails to extract content
     var preferredHeroMode: String?    // "thumbnail", "reader", or "web" — last used hero mode
+    var relativePath: String?         // vault-relative path, e.g. "Entertainment/YouTube - Some Video.webloc"
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -248,6 +249,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case carouselImagePaths
         case readerUnavailable
         case preferredHeroMode
+        case relativePath
     }
 
     init(
@@ -272,7 +274,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         mediaType: BookmarkMediaType? = nil,
         carouselImagePaths: [String]? = nil,
         readerUnavailable: Bool? = nil,
-        preferredHeroMode: String? = nil
+        preferredHeroMode: String? = nil,
+        relativePath: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -296,6 +299,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.carouselImagePaths = carouselImagePaths
         self.readerUnavailable = readerUnavailable
         self.preferredHeroMode = preferredHeroMode
+        self.relativePath = relativePath
     }
 
     init(from decoder: Decoder) throws {
@@ -321,6 +325,7 @@ struct Bookmark: Identifiable, Hashable, Codable {
         carouselImagePaths = try container.decodeIfPresent([String].self, forKey: .carouselImagePaths)
         readerUnavailable = try container.decodeIfPresent(Bool.self, forKey: .readerUnavailable)
         preferredHeroMode = try container.decodeIfPresent(String.self, forKey: .preferredHeroMode)
+        relativePath = try container.decodeIfPresent(String.self, forKey: .relativePath)
     }
 
     var url: URL? {
