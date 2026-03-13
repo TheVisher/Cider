@@ -20,7 +20,7 @@ final class VaultFileService: ObservableObject {
 
     /// File extensions that are Cider-native and handled by other services.
     /// These are excluded from vault file scanning.
-    private static let excludedExtensions: Set<String> = ["md", "json", "webloc"]
+    private static let excludedExtensions: Set<String> = ["md", "json", "webloc", "ics", "vcf"]
 
     /// Directories that contain Cider internal data, not user files.
     /// All StorageType dirs now live inside `.cider/` (hidden, auto-skipped by .skipsHiddenFiles).

@@ -207,3 +207,21 @@ Each type migrates independently. Steps:
 5. Set flag in CiderConfig
 
 Called from `AppDelegate` after `VaultStructureMigration` and before storage singletons initialize.
+
+## Future: File Watching (External Edit Detection)
+
+Currently, if a user (or an external tool like Apple Contacts or a text editor) modifies a `.vcf`, `.ics`, or `.md` file on disk, Cider won't notice until the next app restart. The in-memory state and the file can drift apart.
+
+**Goal:** Use macOS `FSEvents` or `DispatchSource` to watch content directories (`Inbox/{Type}/` and user folders) for changes. When a file is created, modified, or deleted externally, the relevant storage service should detect it and reload.
+
+**What this enables:**
+- Edit a `.vcf` in Apple Contacts → Cider updates instantly
+- AI tool creates a new `.ics` in the vault → appears in Cider without restart
+- User deletes a file in Finder → card disappears from Cider
+- True "filesystem is the source of truth" behavior
+
+**Implementation notes:**
+- The vault vision doc (`Docs/VAULT_VISION.md`) already describes FSEvents integration
+- Debounce rapid changes (file saves trigger multiple events)
+- Compare file modification dates against index `updatedAt` to detect actual changes
+- Orphan adoption already handles "new file appeared" — file watching just triggers it live
