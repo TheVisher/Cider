@@ -88,6 +88,9 @@ final class SyncService: ObservableObject {
     /// When the signal reports a newer value, we trigger a pull.
     private var lastKnownChange: Double = 0
 
+    /// Whether the initial post-startup pull has been performed.
+    private var hasPerformedInitialPull = false
+
     /// Consecutive failure count for backoff.
     private var consecutiveFailures = 0
 
@@ -107,6 +110,11 @@ final class SyncService: ObservableObject {
     private var pendingFolderDeletions: [String] = []
     /// Notes deleted locally that need to be pushed as deletions to the web.
     private var pendingNoteDeletions: [String] = []
+
+    // MARK: - Reconciliation
+
+    private let reconciliationInterval: TimeInterval = 60 * 60
+    private var isReconciling = false
 
     private let pendingDeletionsKey = "CiderSyncPendingDeletions"
     private let pendingFolderDeletionsKey = "CiderSyncPendingFolderDeletions"
@@ -185,6 +193,8 @@ final class SyncService: ObservableObject {
         pullDebounceTask?.cancel()
         pullDebounceTask = nil
         convexClient = nil
+        isReconciling = false
+        hasPerformedInitialPull = false
         logger.info("Sync stopped")
     }
 
@@ -328,8 +338,14 @@ final class SyncService: ObservableObject {
 
         guard !bookmarkArgs.isEmpty || !folderArgs.isEmpty || !noteArgs.isEmpty else {
             logger.debug("Push: nothing to push")
-            // Still do initial pull after startup
-            performPull(token: token)
+            // Pull once after startup to catch up; after that, the WebSocket
+            // changeSignal handles pulls reactively — no need to poll.
+            if !hasPerformedInitialPull {
+                hasPerformedInitialPull = true
+                performPull(token: token, nothingWasPushed: true)
+            } else {
+                maybeReconcile(token: token)
+            }
             return
         }
 
@@ -406,7 +422,7 @@ final class SyncService: ObservableObject {
         }
     }
 
-    private func performPull(token: String) {
+    private func performPull(token: String, nothingWasPushed: Bool = false) {
         guard !isSyncing, let client = convexClient else { return }
 
         isSyncing = true
@@ -440,6 +456,15 @@ final class SyncService: ObservableObject {
                 self.lastError = nil
                 self.consecutiveFailures = 0
                 self.logger.info("Pull succeeded: \(result.bookmarks.count) bookmark(s), \(result.folders.count) folder(s), \(result.notes.count) note(s)")
+
+                // If nothing was pushed and nothing was pulled, sync is idle — good time to reconcile
+                if nothingWasPushed
+                    && result.bookmarks.isEmpty
+                    && result.folders.isEmpty
+                    && result.notes.isEmpty
+                {
+                    self.maybeReconcile(token: token)
+                }
             } catch {
                 self.consecutiveFailures += 1
                 self.lastError = error.localizedDescription
@@ -590,6 +615,179 @@ final class SyncService: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - Reconciliation
+
+    private func maybeReconcile(token: String) {
+        guard !isReconciling else { return }
+        let config = CiderConfig.load()
+        let elapsed = Date().timeIntervalSince1970 - config.lastReconciliationAt
+        guard elapsed >= reconciliationInterval else {
+            logger.debug("Reconcile: skipping, last ran \(Int(elapsed))s ago")
+            return
+        }
+        performReconciliation(token: token)
+    }
+
+    private func performReconciliation(token: String) {
+        guard let client = convexClient else { return }
+        isReconciling = true
+        logger.info("Reconcile: starting full inventory check")
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isReconciling = false }
+
+            do {
+                // Full pull (since: 0) to get complete server state
+                let args: [String: ConvexEncodable?] = [
+                    "token": token,
+                    "since": 0.0,
+                ]
+                let result: SyncPullResponse = try await client.action("sync:pull", with: args)
+
+                // Build local inventories
+                let localBookmarks = BookmarksStorage.shared.bookmarks
+                let localFolders = VaultFolderService.shared.legacyFolders
+                let localNotes = NotesStorage.shared.notes
+
+                let localBookmarkIDs = Set(localBookmarks.map { $0.id.uuidString.lowercased() })
+                let localFolderIDs = Set(localFolders.map { $0.id.uuidString.lowercased() })
+                let localNoteIDs = Set(localNotes.map { $0.id.uuidString.lowercased() })
+
+                // Build server dictionaries (non-deleted items only)
+                var serverBookmarks: [String: SyncPulledBookmark] = [:]
+                for b in result.bookmarks {
+                    guard let syncId = b.ciderSyncId, !(b.deleted ?? false) else { continue }
+                    serverBookmarks[syncId.lowercased()] = b
+                }
+                var serverFolders: [String: SyncPulledFolder] = [:]
+                for f in result.folders {
+                    guard let syncId = f.ciderSyncId, !(f.deleted ?? false) else { continue }
+                    serverFolders[syncId.lowercased()] = f
+                }
+                var serverNotes: [String: SyncPulledNote] = [:]
+                for n in result.notes {
+                    guard let syncId = n.ciderSyncId, !(n.deleted ?? false) else { continue }
+                    serverNotes[syncId.lowercased()] = n
+                }
+
+                let nowMs = Date().timeIntervalSince1970 * 1000
+                var corrections: [[String: ConvexEncodable?]] = []
+                var folderCorrections: [[String: ConvexEncodable?]] = []
+                var noteCorrections: [[String: ConvexEncodable?]] = []
+
+                // Server has, Desktop doesn't → push deletion tombstone (ghost cleanup)
+                for (syncId, _) in serverBookmarks where !localBookmarkIDs.contains(syncId) {
+                    guard !self.pendingDeletions.contains(syncId) else { continue }
+                    self.logger.info("Reconcile: ghost bookmark \(syncId) — pushing deletion")
+                    corrections.append(Self.deletionTombstone(syncId: syncId, nowMs: nowMs))
+                }
+                for (syncId, _) in serverFolders where !localFolderIDs.contains(syncId) {
+                    guard !self.pendingFolderDeletions.contains(syncId) else { continue }
+                    self.logger.info("Reconcile: ghost folder \(syncId) — pushing deletion")
+                    folderCorrections.append(Self.folderDeletionTombstone(syncId: syncId, nowMs: nowMs))
+                }
+                for (syncId, _) in serverNotes where !localNoteIDs.contains(syncId) {
+                    guard !self.pendingNoteDeletions.contains(syncId) else { continue }
+                    self.logger.info("Reconcile: ghost note \(syncId) — pushing deletion")
+                    noteCorrections.append(Self.noteDeletionTombstone(syncId: syncId, nowMs: nowMs))
+                }
+
+                // Desktop has, server doesn't → push full item (missed push recovery)
+                for bookmark in localBookmarks where serverBookmarks[bookmark.id.uuidString.lowercased()] == nil {
+                    self.logger.info("Reconcile: missing bookmark \(bookmark.id) — pushing to server")
+                    corrections.append(Self.bookmarkPayload(from: bookmark))
+                }
+                for folder in localFolders where serverFolders[folder.id.uuidString.lowercased()] == nil {
+                    self.logger.info("Reconcile: missing folder \(folder.id) — pushing to server")
+                    folderCorrections.append(Self.folderPayload(from: folder))
+                }
+                for note in localNotes where serverNotes[note.id.uuidString.lowercased()] == nil {
+                    self.logger.info("Reconcile: missing note \(note.id) — pushing to server")
+                    noteCorrections.append(Self.notePayload(from: note))
+                }
+
+                // Both have, Desktop newer → push Desktop's version
+                // Compare at millisecond precision to avoid sub-ms floating-point drift
+                // (local Date has nanosecond precision, server stores whole milliseconds)
+                for bookmark in localBookmarks {
+                    let syncId = bookmark.id.uuidString.lowercased()
+                    guard let serverItem = serverBookmarks[syncId] else { continue }
+                    let localMs = floor(bookmark.updatedAt.timeIntervalSince1970 * 1000)
+                    if localMs > serverItem.updatedAt {
+                        self.logger.info("Reconcile: bookmark \(syncId) newer locally — pushing update")
+                        corrections.append(Self.bookmarkPayload(from: bookmark))
+                    }
+                }
+                for folder in localFolders {
+                    let syncId = folder.id.uuidString.lowercased()
+                    guard let serverItem = serverFolders[syncId] else { continue }
+                    let localMs = floor(folder.updatedAt.timeIntervalSince1970 * 1000)
+                    if localMs > serverItem.updatedAt {
+                        self.logger.info("Reconcile: folder \(syncId) newer locally — pushing update")
+                        folderCorrections.append(Self.folderPayload(from: folder))
+                    }
+                }
+                for note in localNotes {
+                    let syncId = note.id.uuidString.lowercased()
+                    guard let serverItem = serverNotes[syncId] else { continue }
+                    let localMs = floor(note.modifiedAt.timeIntervalSince1970 * 1000)
+                    if localMs > serverItem.updatedAt {
+                        self.logger.info("Reconcile: note \(syncId) newer locally — pushing update")
+                        noteCorrections.append(Self.notePayload(from: note))
+                    }
+                }
+
+                // Push corrections if any
+                if corrections.isEmpty && folderCorrections.isEmpty && noteCorrections.isEmpty {
+                    self.logger.info("Reconcile: no drift detected")
+                } else {
+                    self.logger.info("Reconcile: pushing \(corrections.count) bookmark, \(folderCorrections.count) folder, \(noteCorrections.count) note correction(s)")
+                    // Safe: corrections are value-type dicts built on MainActor and
+                    // not accessed again after being sent to the nonisolated action.
+                    nonisolated(unsafe) let bookmarksCopy = corrections
+                    nonisolated(unsafe) let foldersCopy = folderCorrections
+                    nonisolated(unsafe) let notesCopy = noteCorrections
+                    try await self.pushReconciliationCorrections(
+                        client: client, token: token,
+                        bookmarks: bookmarksCopy, folders: foldersCopy, notes: notesCopy
+                    )
+                    self.logger.info("Reconcile: corrections pushed successfully")
+                }
+
+                self.saveReconciliationTimestamp()
+            } catch {
+                self.logger.error("Reconcile failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private nonisolated func pushReconciliationCorrections(
+        client: ConvexClient,
+        token: String,
+        bookmarks: [[String: ConvexEncodable?]],
+        folders: [[String: ConvexEncodable?]],
+        notes: [[String: ConvexEncodable?]]
+    ) async throws {
+        var args: [String: ConvexEncodable?] = [
+            "token": token,
+            "bookmarks": bookmarks as [ConvexEncodable?],
+        ]
+        if !folders.isEmpty {
+            args["folders"] = folders as [ConvexEncodable?]
+        }
+        if !notes.isEmpty {
+            args["notes"] = notes as [ConvexEncodable?]
+        }
+        let _: SyncPushResponse = try await client.action("sync:push", with: args)
+    }
+
+    private func saveReconciliationTimestamp() {
+        var config = CiderConfig.load()
+        config.lastReconciliationAt = Date().timeIntervalSince1970
+        config.save()
     }
 
     // MARK: - Payload builders

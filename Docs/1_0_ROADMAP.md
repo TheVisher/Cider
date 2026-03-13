@@ -699,6 +699,9 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | JSON full backup/restore | BETA_ROADMAP | Single-file export of everything |
 | OPML format support | BETA_ROADMAP | RSS reader compatibility |
 | Docs status audit | CODE_HEALTH | CH-D06: Multiple docs disagree on shipped status |
+| Sync: lightweight inventory endpoint | SYNC_OPT 2026-03 | New `sync:inventory` Convex function returning only `[{syncId, updatedAt}]` for reconciliation — avoids pulling full content (titles, notes, HTML) every hour |
+| Sync: thumbnail cleanup on delete | SYNC_OPT 2026-03 | Cider Web delete/trash logic should call `ctx.storage.delete(thumbnailStorageId)` — currently orphans files in Convex file storage |
+| Sync: thumbnail compression cap | SYNC_OPT 2026-03 | Enrichment downloads og:image at full size (seen 3.29MB). Resize/compress to ~200KB max before `ctx.storage.store()` |
 
 ---
 

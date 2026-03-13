@@ -497,6 +497,7 @@ Key considerations:
 - Should Cider ship a default "organize" prompt/script that users can run with any AI tool?
 - How to handle the transition for existing users with proprietary vault data?
 - Thumbnail generation strategy for Convex sync (pre-generate on capture? on-demand?)
+- Thumbnail size cap — enrichment downloads og:image at full size with no limit (seen 3.29MB for a single product photo). Should resize/compress to ~200KB max before storing in Convex file storage to keep bandwidth and storage costs down at scale.
 - SQLite cache schema for fast search across large vaults
 - `FileProvider` implementation details for iOS Files app integration
 - Shared vault permission model — granular sharing (by folder? by type?) vs. all-or-nothing
