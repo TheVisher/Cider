@@ -341,6 +341,14 @@ The headless metadata extraction path still uses a standard `WKWebViewConfigurat
 
 - File refs: `Sources/Cider/Services/WebViewMetadataExtractor.swift`
 
+### CH-D16 — List view and display modes are inconsistent across card types
+
+**Severity:** Medium
+
+Source detail views don't respond well to view option changes (grid, masonry, list). List view in particular needs significant work and standardization across ALL card types — bookmarks, notes, contacts, todos, date cards, and sources each have inconsistent list row layouts. Need a shared `ListRowContainer` pattern with consistent column alignment, hover states, and information density. Grid and masonry modes also have minor inconsistencies between card types.
+
+- File refs: `Sources/Cider/Views/Sources/SourceDetailView.swift`, `Sources/Cider/Views/SavedViews/SavedViewTabContent.swift`, `Sources/Cider/Views/Shared/FolderDetailView.swift`
+
 ### CH-D15 — `AppDelegate` remains a high-coupling coordinator
 
 **Severity:** Low

@@ -260,6 +260,23 @@ Right-click context menu:
 
 ## Future Ideas
 
+### Sidebar Header Navigation Targets
+
+Clicking the section text in sidebar headers (e.g. "Sources", "Folders") could navigate to dedicated overview views:
+
+- **"All Sources" overview** — all linked sources as cards, each showing name, path, file count, last modified date, and a preview of recent files.
+- **"All Folders" overview** — all folders as a grid with cover images, item counts, and last updated dates.
+
+Neither exists yet because the sidebar already serves as navigation. These become valuable if users accumulate many sources/folders and want a visual overview in the main content area rather than scrolling the sidebar. Low priority — add when a real use case emerges.
+
+### Source View Options (Display Modes)
+
+Source detail views currently don't respond well to view option changes (grid, masonry, list). Source cards need the same display mode treatment as bookmarks and notes — especially list view, which needs standardization across all card types. This is part of a broader list view overhaul (see below).
+
+### List View Standardization
+
+List view needs significant work across ALL card types (bookmarks, notes, contacts, todos, date cards, sources). Each type currently has inconsistent list row layouts. Need a shared `ListRowContainer` pattern with consistent column alignment, hover states, and density. This is a cross-cutting UI task, not source-specific.
+
 ### Diff View — Changes Since Last Opened
 
 Show what changed in a file since you last viewed it in Cider. Effort: **\~1.5 days**.

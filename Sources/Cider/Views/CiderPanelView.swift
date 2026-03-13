@@ -535,14 +535,6 @@ struct CiderPanelView: View {
             }
             .help("Clipboard history (\u{2325}V)")
 
-        if selectedFolderID != nil && folderHasSubFolders {
-            SectionCollapseToggle(
-                label: "Folders",
-                isCollapsed: $subFoldersCollapsed,
-                collapsedHelp: "Show sub-folders",
-                expandedHelp: "Hide sub-folders"
-            )
-        }
     }
 
     @ViewBuilder
