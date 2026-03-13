@@ -440,14 +440,17 @@ final class ContactStorage: ObservableObject {
 
         // Adopt orphan .vcf files in vault folders (user-dropped files)
         let allLoadedIDs = Set(loadedContacts.map(\.id))
+        // Build O(1) lookup for known folder+filename pairs
+        let knownFolderFiles: Set<String> = Set(index.values.compactMap { entry in
+            guard let fid = entry.folderID else { return nil }
+            return "\(fid.uuidString):\(entry.filename)"
+        })
         for folder in VaultFolderService.shared.folders {
             let folderDir = vaultRoot.appendingPathComponent(folder.relativePath)
             guard let files = try? fm.contentsOfDirectory(at: folderDir, includingPropertiesForKeys: nil) else { continue }
             for file in files where file.pathExtension == fileExtension {
-                // Skip files we already loaded from the index
                 let filename = file.lastPathComponent
-                let knownInThisFolder = index.values.contains { $0.filename == filename && $0.folderID == folder.id }
-                if knownInThisFolder { continue }
+                if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
 
                 if let contact = adoptOrphanVCard(at: file, folderID: folder.id),
                    !allLoadedIDs.contains(contact.id) {

@@ -428,13 +428,17 @@ final class TodoCardStorage: ObservableObject {
 
         // Adopt orphan .ics files in vault folders
         let allLoadedIDs = Set(loadedCards.map(\.id))
+        // Build O(1) lookup for known folder+filename pairs
+        let knownFolderFiles: Set<String> = Set(index.values.compactMap { entry in
+            guard let fid = entry.folderID else { return nil }
+            return "\(fid.uuidString):\(entry.filename)"
+        })
         for folder in VaultFolderService.shared.folders {
             let folderDir = vaultRoot.appendingPathComponent(folder.relativePath)
             guard let files = try? fm.contentsOfDirectory(at: folderDir, includingPropertiesForKeys: nil) else { continue }
             for file in files where file.pathExtension == fileExtension {
                 let filename = file.lastPathComponent
-                let knownInThisFolder = index.values.contains { $0.filename == filename && $0.folderID == folder.id }
-                if knownInThisFolder { continue }
+                if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
 
                 // Only adopt VTODO files, not VEVENT (date cards share .ics extension)
                 if let todo = adoptOrphanICS(at: file, folderID: folder.id),
