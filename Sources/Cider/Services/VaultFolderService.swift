@@ -417,6 +417,149 @@ final class VaultFolderService {
         folders.map { toLegacyFolder($0) }
     }
 
+    // MARK: - Sync Operations
+
+    /// Creates a folder from sync data, creating the directory on disk.
+    /// Uses the provided UUID so local and remote IDs match.
+    @discardableResult
+    func addFolderFromSync(
+        id: UUID,
+        name: String,
+        icon: String?,
+        parentID: UUID?,
+        createdAt: Date,
+        updatedAt: Date
+    ) -> VaultFolder? {
+        guard index[id] == nil else { return index[id] }
+
+        let sanitized = Self.sanitizeDirectoryName(name)
+        guard !sanitized.isEmpty else { return nil }
+
+        let parentPath: String?
+        if let parentID {
+            parentPath = index[parentID]?.relativePath
+        } else {
+            parentPath = nil
+        }
+
+        let resolvedName = uniqueName(baseName: sanitized, parentPath: parentPath)
+        let relativePath = parentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
+        let directoryURL = vaultRoot.appendingPathComponent(relativePath)
+
+        isMutating = true
+        defer { isMutating = false }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            logger.error("addFolderFromSync: failed to create directory: \(error.localizedDescription)")
+            return nil
+        }
+
+        let folder = VaultFolder(
+            id: id,
+            relativePath: relativePath,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            icon: icon
+        )
+        index[folder.id] = folder
+        saveIndex()
+        rebuildFolders()
+
+        logger.info("Sync: created folder '\(resolvedName)' at \(relativePath)")
+        NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+        return folder
+    }
+
+    /// Updates an existing folder from sync data. Renames directory if name changed.
+    func updateFolderFromSync(
+        folderID: UUID,
+        name: String,
+        icon: String?,
+        parentID: UUID?,
+        remoteUpdatedAt: Date
+    ) {
+        guard var folder = index[folderID] else { return }
+
+        isMutating = true
+        defer { isMutating = false }
+
+        // Check if name changed — requires directory rename
+        let sanitized = Self.sanitizeDirectoryName(name)
+        if !sanitized.isEmpty && sanitized != folder.name {
+            let parentPath = folder.parentRelativePath
+            let resolvedName = uniqueName(baseName: sanitized, parentPath: parentPath, excludingID: folderID)
+            let newRelativePath = parentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
+            let oldURL = vaultRoot.appendingPathComponent(folder.relativePath)
+            let newURL = vaultRoot.appendingPathComponent(newRelativePath)
+
+            do {
+                try FileManager.default.moveItem(at: oldURL, to: newURL)
+                // Update this folder and all descendants
+                let oldPrefix = folder.relativePath + "/"
+                for (id, var entry) in index {
+                    if id == folderID {
+                        entry.relativePath = newRelativePath
+                        index[id] = entry
+                    } else if entry.relativePath.hasPrefix(oldPrefix) {
+                        entry.relativePath = newRelativePath + "/" + entry.relativePath.dropFirst(oldPrefix.count)
+                        index[id] = entry
+                    }
+                }
+                folder = index[folderID]!
+            } catch {
+                logger.error("updateFolderFromSync: rename failed: \(error.localizedDescription)")
+            }
+        }
+
+        // Update metadata
+        folder.icon = icon
+        folder.updatedAt = remoteUpdatedAt
+        index[folderID] = folder
+        saveIndex()
+        rebuildFolders()
+
+        NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+    }
+
+    /// Deletes a folder from sync. Removes the directory from disk permanently
+    /// (sync deletions are not recoverable via local trash).
+    func deleteFolderFromSync(_ folderID: UUID) {
+        guard let folder = index[folderID] else { return }
+
+        let directoryURL = vaultRoot.appendingPathComponent(folder.relativePath)
+
+        isMutating = true
+        defer { isMutating = false }
+
+        // Remove all descendants from index
+        let prefix = folder.relativePath + "/"
+        let descendantIDs = index.filter { $0.value.relativePath.hasPrefix(prefix) }.map(\.key)
+        for id in descendantIDs {
+            index.removeValue(forKey: id)
+        }
+        index.removeValue(forKey: folderID)
+
+        // Remove directory (contains all sub-folders and filed cards)
+        if FileManager.default.fileExists(atPath: directoryURL.path) {
+            do {
+                try FileManager.default.removeItem(at: directoryURL)
+            } catch {
+                logger.error("deleteFolderFromSync: failed to remove directory: \(error.localizedDescription)")
+            }
+        }
+
+        saveIndex()
+        rebuildFolders()
+
+        logger.info("Sync: deleted folder '\(folder.name)'")
+        NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+    }
+
     // MARK: - FSEvents
 
     func startWatching() {

@@ -292,7 +292,7 @@ final class SyncService: ObservableObject {
 
         // Dirty items
         let dirtyBookmarks = storage.bookmarks.filter { $0.updatedAt > lastPushDate }
-        let dirtyFolders = storage.folders.filter { $0.updatedAt > lastPushDate }
+        let dirtyFolders = VaultFolderService.shared.legacyFolders.filter { $0.updatedAt > lastPushDate }
         let dirtyNotes = notesStorage.notes.filter { $0.modifiedAt > lastPushDate }
 
         // Build combined bookmark payload (dirty + deletion tombstones)
@@ -443,6 +443,8 @@ final class SyncService: ObservableObject {
         let storage = BookmarksStorage.shared
 
         // --- Folders first (bookmarks/notes may reference them) ---
+        let folderService = VaultFolderService.shared
+        let localFolders = folderService.legacyFolders
         for folder in result.folders {
             guard let syncId = folder.ciderSyncId else { continue }
 
@@ -452,24 +454,23 @@ final class SyncService: ObservableObject {
             let parentSyncId = folder.parentSyncId?.lowercased()
 
             let parentID: UUID? = if let parentSyncId {
-                storage.folders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id
+                localFolders.first(where: { $0.id.uuidString.lowercased() == parentSyncId })?.id
             } else {
                 nil
             }
 
-            if let localIndex = storage.folders.firstIndex(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
-                let local = storage.folders[localIndex]
+            if let local = localFolders.first(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
                 if isDeleted {
-                    storage.deleteFolderFromSync(local.id)
+                    folderService.deleteFolderFromSync(local.id)
                 } else if remoteUpdatedAt > local.updatedAt {
-                    storage.updateFolderFromSync(
+                    folderService.updateFolderFromSync(
                         folderID: local.id, name: folder.name, icon: folder.icon,
                         parentID: parentID, remoteUpdatedAt: remoteUpdatedAt
                     )
                 }
             } else if !isDeleted {
                 if let uuid = UUID(uuidString: syncId) {
-                    storage.addFolderFromSync(
+                    folderService.addFolderFromSync(
                         id: uuid, name: folder.name, icon: folder.icon,
                         parentID: parentID,
                         createdAt: Date(timeIntervalSince1970: folder.createdAt / 1000),
@@ -488,7 +489,7 @@ final class SyncService: ObservableObject {
             let isDeleted = bookmark.deleted ?? false
 
             let folderID: UUID? = if let folderSyncId = bookmark.folderSyncId?.lowercased() {
-                storage.folders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
+                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
             } else {
                 nil
             }
@@ -540,7 +541,7 @@ final class SyncService: ObservableObject {
             let isPinned = note.isPinned ?? false
 
             let folderID: UUID? = if let folderSyncId = note.folderSyncId?.lowercased() {
-                storage.folders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
+                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
             } else {
                 nil
             }
