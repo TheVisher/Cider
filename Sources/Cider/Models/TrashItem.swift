@@ -31,11 +31,39 @@ struct NoteTrashPayload: Codable {
 /// Payload stored alongside a trashed date card.
 struct DateCardTrashPayload: Codable {
     let dateCard: DateCard
+    /// The .ics filename moved to `.trash/`, if any.
+    let trashICSFilename: String?
+
+    /// Backward-compatible decoder: trashICSFilename may not exist in older payloads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dateCard = try c.decode(DateCard.self, forKey: .dateCard)
+        trashICSFilename = try c.decodeIfPresent(String.self, forKey: .trashICSFilename)
+    }
+
+    init(dateCard: DateCard, trashICSFilename: String? = nil) {
+        self.dateCard = dateCard
+        self.trashICSFilename = trashICSFilename
+    }
 }
 
 /// Payload stored alongside a trashed todo card.
 struct TodoCardTrashPayload: Codable {
     let todoCard: TodoCard
+    /// The .ics filename moved to `.trash/`, if any.
+    let trashICSFilename: String?
+
+    /// Backward-compatible decoder: trashICSFilename may not exist in older payloads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        todoCard = try c.decode(TodoCard.self, forKey: .todoCard)
+        trashICSFilename = try c.decodeIfPresent(String.self, forKey: .trashICSFilename)
+    }
+
+    init(todoCard: TodoCard, trashICSFilename: String? = nil) {
+        self.todoCard = todoCard
+        self.trashICSFilename = trashICSFilename
+    }
 }
 
 /// Payload stored alongside a trashed whiteboard canvas.
@@ -46,10 +74,28 @@ struct WhiteboardTrashPayload: Codable {
 /// Payload stored alongside a trashed contact.
 struct ContactTrashPayload: Codable {
     let contact: ContactCard
+    /// The .vcf filename moved to `.trash/`, if any.
+    let trashVCFFilename: String?
     /// Avatar path relative to `.trash/` if avatar was moved there.
     let trashAvatarRelativePath: String?
     /// IDs of birthday date cards trashed as part of this contact deletion.
     let cascadedDateCardTrashIDs: [UUID]
+
+    /// Backward-compatible decoder: trashVCFFilename may not exist in older payloads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        contact = try c.decode(ContactCard.self, forKey: .contact)
+        trashVCFFilename = try c.decodeIfPresent(String.self, forKey: .trashVCFFilename)
+        trashAvatarRelativePath = try c.decodeIfPresent(String.self, forKey: .trashAvatarRelativePath)
+        cascadedDateCardTrashIDs = (try c.decodeIfPresent([UUID].self, forKey: .cascadedDateCardTrashIDs)) ?? []
+    }
+
+    init(contact: ContactCard, trashVCFFilename: String? = nil, trashAvatarRelativePath: String?, cascadedDateCardTrashIDs: [UUID]) {
+        self.contact = contact
+        self.trashVCFFilename = trashVCFFilename
+        self.trashAvatarRelativePath = trashAvatarRelativePath
+        self.cascadedDateCardTrashIDs = cascadedDateCardTrashIDs
+    }
 }
 
 /// Represents a single item that has been moved to the trash.

@@ -198,16 +198,26 @@ final class TrashStorage {
 
     // MARK: - Date Card Trash
 
-    func trashDateCard(_ dateCard: DateCard, dateCardsDir: URL) -> TrashItem {
+    func trashDateCard(_ dateCard: DateCard, dateCardsDir: URL, icsFileURL: URL? = nil) -> TrashItem {
         let trashDir = dateCardsDir.appendingPathComponent(trashDirName)
-        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
-        let payload = DateCardTrashPayload(dateCard: dateCard)
+        // Move the .ics content file to trash if provided
+        if let icsFileURL, fm.fileExists(atPath: icsFileURL.path) {
+            let destURL = trashDir.appendingPathComponent(icsFileURL.lastPathComponent)
+            try? fm.moveItem(at: icsFileURL, to: destURL)
+        }
+
+        let payload = DateCardTrashPayload(
+            dateCard: dateCard,
+            trashICSFilename: icsFileURL?.lastPathComponent
+        )
         let trashItem = TrashItem(
             itemID: dateCard.id,
             itemType: .dateCard,
             title: dateCard.title,
-            originalFolderID: nil,
+            originalFolderID: dateCard.folderID,
             dateCardPayload: payload
         )
 
@@ -227,16 +237,26 @@ final class TrashStorage {
 
     // MARK: - Todo Card Trash
 
-    func trashTodoCard(_ todoCard: TodoCard, todoCardsDir: URL) -> TrashItem {
+    func trashTodoCard(_ todoCard: TodoCard, todoCardsDir: URL, icsFileURL: URL? = nil) -> TrashItem {
         let trashDir = todoCardsDir.appendingPathComponent(trashDirName)
-        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
-        let payload = TodoCardTrashPayload(todoCard: todoCard)
+        // Move the .ics content file to trash if provided
+        if let icsFileURL, fm.fileExists(atPath: icsFileURL.path) {
+            let destURL = trashDir.appendingPathComponent(icsFileURL.lastPathComponent)
+            try? fm.moveItem(at: icsFileURL, to: destURL)
+        }
+
+        let payload = TodoCardTrashPayload(
+            todoCard: todoCard,
+            trashICSFilename: icsFileURL?.lastPathComponent
+        )
         let trashItem = TrashItem(
             itemID: todoCard.id,
             itemType: .todo,
             title: todoCard.title,
-            originalFolderID: nil,
+            originalFolderID: todoCard.folderID,
             todoCardPayload: payload
         )
 
@@ -285,10 +305,16 @@ final class TrashStorage {
 
     // MARK: - Contact Trash
 
-    func trashContact(_ contact: ContactCard, contactsDir: URL) -> TrashItem {
+    func trashContact(_ contact: ContactCard, contactsDir: URL, vcfFileURL: URL? = nil) -> TrashItem {
         let trashDir = contactsDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
         try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        // Move the .vcf content file to trash if provided
+        if let vcfFileURL, fm.fileExists(atPath: vcfFileURL.path) {
+            let destURL = trashDir.appendingPathComponent(vcfFileURL.lastPathComponent)
+            try? fm.moveItem(at: vcfFileURL, to: destURL)
+        }
 
         // Move avatar file to trash if it exists
         let contactAvatarsDirName = "contact-avatars"
@@ -314,6 +340,7 @@ final class TrashStorage {
 
         let payload = ContactTrashPayload(
             contact: contact,
+            trashVCFFilename: vcfFileURL?.lastPathComponent,
             trashAvatarRelativePath: trashAvatarRelPath,
             cascadedDateCardTrashIDs: cascadedIDs
         )
@@ -322,7 +349,7 @@ final class TrashStorage {
             itemID: contact.id,
             itemType: .contact,
             title: contact.displayName,
-            originalFolderID: nil,
+            originalFolderID: contact.folderID,
             contactPayload: payload
         )
 
@@ -461,9 +488,11 @@ final class TrashStorage {
             }
         case .dateCard:
             let trashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
+            deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .todo:
             let trashDir = StoragePaths.directoryURL(for: .todos).appendingPathComponent(trashDirName)
+            deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .whiteboard:
             let trashDir = StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
@@ -547,16 +576,27 @@ final class TrashStorage {
                 deleteFilesForItem(content, trashDir: trashDir)
             }
         case .dateCard:
-            break // No files to delete — data is in the manifest payload
+            if let payload = trashItem.dateCardPayload,
+               let icsFilename = payload.trashICSFilename {
+                try? fm.removeItem(at: trashDir.appendingPathComponent(icsFilename))
+            }
         case .todo:
-            break // No files to delete — data is in the manifest payload
+            if let payload = trashItem.todoCardPayload,
+               let icsFilename = payload.trashICSFilename {
+                try? fm.removeItem(at: trashDir.appendingPathComponent(icsFilename))
+            }
         case .whiteboard:
             let trashDir = StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
             let trashSceneURL = trashDir.appendingPathComponent("\(trashItem.itemID.uuidString).excalidraw")
             try? FileManager.default.removeItem(at: trashSceneURL)
         case .contact:
-            if let payload = trashItem.contactPayload, let avatarRelPath = payload.trashAvatarRelativePath {
-                try? fm.removeItem(at: trashDir.appendingPathComponent(avatarRelPath))
+            if let payload = trashItem.contactPayload {
+                if let vcfFilename = payload.trashVCFFilename {
+                    try? fm.removeItem(at: trashDir.appendingPathComponent(vcfFilename))
+                }
+                if let avatarRelPath = payload.trashAvatarRelativePath {
+                    try? fm.removeItem(at: trashDir.appendingPathComponent(avatarRelPath))
+                }
             }
         case .vaultFolder:
             break // Handled by permanentlyDelete above

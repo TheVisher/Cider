@@ -234,11 +234,17 @@ final class VaultIndexService {
             )
         }
 
-        // Todos
+        // Todos — use actual .ics file path from TodoCardStorage
         for todo in TodoCardStorage.shared.todoCards {
+            let path: String
+            if let fileURL = TodoCardStorage.shared.resolveFileURL(for: todo.id) {
+                path = fileURL.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
+            } else {
+                path = "\(StoragePaths.inboxDir)/Todos/\(todo.id.uuidString).ics"
+            }
             rebuilt[todo.id] = VaultIndexEntry(
                 type: "todo",
-                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.todos.ciderSubpath)/\(todo.id.uuidString).json",
+                path: path,
                 title: todo.title,
                 labelIDs: todo.labelIDs.isEmpty ? nil : todo.labelIDs,
                 folderID: todo.folderID,
@@ -247,11 +253,17 @@ final class VaultIndexService {
             )
         }
 
-        // Date Cards
+        // Date Cards — use actual .ics file path from DateCardStorage
         for dc in DateCardStorage.shared.dateCards {
+            let path: String
+            if let fileURL = DateCardStorage.shared.resolveFileURL(for: dc.id) {
+                path = fileURL.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
+            } else {
+                path = "\(StoragePaths.inboxDir)/Date Cards/\(dc.id.uuidString).ics"
+            }
             rebuilt[dc.id] = VaultIndexEntry(
                 type: "dateCard",
-                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.dateCards.ciderSubpath)/\(dc.id.uuidString).json",
+                path: path,
                 title: dc.title,
                 labelIDs: dc.labelIDs.isEmpty ? nil : dc.labelIDs,
                 folderID: dc.folderID,
@@ -260,11 +272,17 @@ final class VaultIndexService {
             )
         }
 
-        // Contacts
+        // Contacts — use actual .vcf file path from ContactStorage
         for contact in ContactStorage.shared.contacts {
+            let path: String
+            if let fileURL = ContactStorage.shared.resolveFileURL(for: contact.id) {
+                path = fileURL.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
+            } else {
+                path = "\(StoragePaths.inboxDir)/Contacts/\(contact.id.uuidString).vcf"
+            }
             rebuilt[contact.id] = VaultIndexEntry(
                 type: "contact",
-                path: "\(StoragePaths.ciderInternalDir)/\(StorageType.contacts.ciderSubpath)/\(contact.id.uuidString).json",
+                path: path,
                 title: contact.displayName,
                 labelIDs: contact.labelIDs.isEmpty ? nil : contact.labelIDs,
                 folderID: contact.folderID,

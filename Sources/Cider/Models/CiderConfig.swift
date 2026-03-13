@@ -179,6 +179,9 @@ struct CiderConfig: Codable {
         case didMigrateBookmarkFiles
         case didMigrateVaultToCiderDir
         case didMigrateContentToInbox
+        case didMigrateContactsToPerFile
+        case didMigrateTodosToPerFile
+        case didMigrateDateCardsToPerFile
     }
 
     var showMenuBarIcon: Bool
@@ -247,6 +250,9 @@ struct CiderConfig: Codable {
     var didMigrateBookmarkFiles: Bool  // Whether one-time .webloc file migration has run
     var didMigrateVaultToCiderDir: Bool  // Whether one-time vault → .cider/ migration has run
     var didMigrateContentToInbox: Bool  // Whether one-time .cider/ → Inbox/ content migration has run
+    var didMigrateContactsToPerFile: Bool  // Whether one-time contacts JSON → .vcf migration has run
+    var didMigrateTodosToPerFile: Bool  // Whether one-time todos JSON → .ics migration has run
+    var didMigrateDateCardsToPerFile: Bool  // Whether one-time date cards JSON → .ics migration has run
 
     static let storageKey = "CiderConfig"
 
@@ -311,7 +317,10 @@ struct CiderConfig: Codable {
             aiChatVisible: false,
             didMigrateBookmarkFiles: false,
             didMigrateVaultToCiderDir: false,
-            didMigrateContentToInbox: false
+            didMigrateContentToInbox: false,
+            didMigrateContactsToPerFile: false,
+            didMigrateTodosToPerFile: false,
+            didMigrateDateCardsToPerFile: false
         )
     }
 
@@ -513,6 +522,9 @@ struct CiderConfig: Codable {
         didMigrateBookmarkFiles = try container.decodeIfPresent(Bool.self, forKey: .didMigrateBookmarkFiles) ?? false
         didMigrateVaultToCiderDir = try container.decodeIfPresent(Bool.self, forKey: .didMigrateVaultToCiderDir) ?? false
         didMigrateContentToInbox = try container.decodeIfPresent(Bool.self, forKey: .didMigrateContentToInbox) ?? false
+        didMigrateContactsToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateContactsToPerFile) ?? false
+        didMigrateTodosToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateTodosToPerFile) ?? false
+        didMigrateDateCardsToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateDateCardsToPerFile) ?? false
     }
 
     init(
@@ -579,7 +591,10 @@ struct CiderConfig: Codable {
         aiChatVisible: Bool = false,
         didMigrateBookmarkFiles: Bool = false,
         didMigrateVaultToCiderDir: Bool = false,
-        didMigrateContentToInbox: Bool = false
+        didMigrateContentToInbox: Bool = false,
+        didMigrateContactsToPerFile: Bool = false,
+        didMigrateTodosToPerFile: Bool = false,
+        didMigrateDateCardsToPerFile: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -645,5 +660,8 @@ struct CiderConfig: Codable {
         self.didMigrateBookmarkFiles = didMigrateBookmarkFiles
         self.didMigrateVaultToCiderDir = didMigrateVaultToCiderDir
         self.didMigrateContentToInbox = didMigrateContentToInbox
+        self.didMigrateContactsToPerFile = didMigrateContactsToPerFile
+        self.didMigrateTodosToPerFile = didMigrateTodosToPerFile
+        self.didMigrateDateCardsToPerFile = didMigrateDateCardsToPerFile
     }
 }

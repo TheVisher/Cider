@@ -38,6 +38,7 @@ Read the relevant doc BEFORE writing code in that area:
 | SwiftUI + NSPanel pitfalls | `Docs/SWIFTUI_GOTCHAS.md` |
 | TipTap/notes editor | `Docs/TIPTAP_EDITOR.md` |
 | Concurrency/storage patterns | `Docs/TECH_STACK.md` |
+| Adding/modifying card storage | `Docs/PER_FILE_STORAGE.md` |
 | Adding settings | `Docs/USER_PREFERENCES.md` |
 | Reusable components | `Docs/SHARED_COMPONENTS.md` |
 | Detail views | `Docs/DETAIL_PANEL_SPEC.md` |

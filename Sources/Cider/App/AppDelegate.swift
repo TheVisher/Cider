@@ -81,6 +81,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityHelpers.promptIfNeeded()
         VaultStructureMigration.migrateIfNeeded()
         VaultStructureMigration.migrateContentToInboxIfNeeded()
+        VaultStructureMigration.migrateContactsToPerFileIfNeeded()
+        VaultStructureMigration.migrateTodosToPerFileIfNeeded()
+        VaultStructureMigration.migrateDateCardsToPerFileIfNeeded()
         StoragePaths.ensureVaultStructure()
 
         configureSettings()

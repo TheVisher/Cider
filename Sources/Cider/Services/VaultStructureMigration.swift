@@ -182,6 +182,358 @@ enum VaultStructureMigration {
         logger.info(".cider/ → Inbox/ content migration complete")
     }
 
+    // MARK: - Phase 3: Migrate contacts from single JSON to per-file .vcf
+
+    /// Reads the old _cider_contacts.json, writes individual .vcf files to Inbox/Contacts/,
+    /// builds the contacts index, and renames the old JSON as a backup.
+    static func migrateContactsToPerFileIfNeeded() {
+        var config = CiderConfig.load()
+        guard !config.didMigrateContactsToPerFile else { return }
+
+        let fm = FileManager.default
+        let vaultRoot = StoragePaths.vaultDirectoryURL(config: config)
+        let contactsDir = vaultRoot
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent(StorageType.contacts.ciderSubpath)
+        let oldJSONURL = contactsDir.appendingPathComponent("_cider_contacts.json")
+
+        // Nothing to migrate if the old file doesn't exist
+        guard fm.fileExists(atPath: oldJSONURL.path) else {
+            config.didMigrateContactsToPerFile = true
+            config.save()
+            return
+        }
+
+        logger.info("Starting contacts → per-file .vcf migration")
+
+        // Read old snapshot
+        guard let data = try? Data(contentsOf: oldJSONURL) else {
+            config.didMigrateContactsToPerFile = true
+            config.save()
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let snapshot = try? decoder.decode(ContactsSnapshot.self, from: data) else {
+            logger.error("Failed to decode old contacts JSON")
+            config.didMigrateContactsToPerFile = true
+            config.save()
+            return
+        }
+
+        // Ensure Inbox/Contacts/ exists
+        let inboxContactsDir = vaultRoot
+            .appendingPathComponent(StoragePaths.inboxDir)
+            .appendingPathComponent("Contacts")
+        try? fm.createDirectory(at: inboxContactsDir, withIntermediateDirectories: true)
+
+        // Write individual .vcf files and build the index
+        var indexEntries: [String: ContactPerFileIndexEntry] = [:]
+        var usedFilenames: Set<String> = []
+
+        for contact in snapshot.contacts {
+            // During migration, write all .vcf files to Inbox/Contacts/.
+            // The index preserves each contact's folderID, so when ContactStorage loads
+            // and the user assigns a contact to a folder, the file will be moved then.
+            let destDir = inboxContactsDir
+
+            // Generate unique filename
+            let baseName = sanitizeContactFilename(contact.displayName)
+            var filename = "\(baseName).vcf"
+            var counter = 2
+            while usedFilenames.contains(filename) || fm.fileExists(atPath: destDir.appendingPathComponent(filename).path) {
+                filename = "\(baseName) (\(counter)).vcf"
+                counter += 1
+            }
+            usedFilenames.insert(filename)
+
+            // Write the .vcf file
+            let vcardString = VCardSerializer.serialize(contact)
+            let destURL = destDir.appendingPathComponent(filename)
+            do {
+                try vcardString.write(to: destURL, atomically: true, encoding: .utf8)
+                logger.info("Wrote \(filename)")
+            } catch {
+                logger.error("Failed to write \(filename): \(error.localizedDescription)")
+                continue
+            }
+
+            indexEntries[contact.id.uuidString] = ContactPerFileIndexEntry(
+                filename: filename,
+                folderID: contact.folderID,
+                labelIDs: contact.labelIDs.isEmpty ? nil : contact.labelIDs,
+                createdAt: contact.createdAt
+            )
+        }
+
+        // Write the index
+        let indexURL = contactsDir.appendingPathComponent("_cider_contacts_index.json")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let indexData = try? encoder.encode(indexEntries) {
+            try? indexData.write(to: indexURL, options: .atomic)
+        }
+
+        // Rename old JSON as backup
+        let backupURL = contactsDir.appendingPathComponent("_cider_contacts_legacy.json")
+        try? fm.moveItem(at: oldJSONURL, to: backupURL)
+
+        config.didMigrateContactsToPerFile = true
+        config.save()
+
+        logger.info("Contacts → per-file .vcf migration complete: \(snapshot.contacts.count) contacts")
+    }
+
+    // MARK: - Phase 4: Migrate todos from single JSON to per-file .ics
+
+    /// Reads the old _cider_todo_cards.json, writes individual .ics files to Inbox/Todos/,
+    /// builds the todos index, and renames the old JSON as a backup.
+    static func migrateTodosToPerFileIfNeeded() {
+        var config = CiderConfig.load()
+        guard !config.didMigrateTodosToPerFile else { return }
+
+        let fm = FileManager.default
+        let vaultRoot = StoragePaths.vaultDirectoryURL(config: config)
+        let todosDir = vaultRoot
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent(StorageType.todos.ciderSubpath)
+        let oldJSONURL = todosDir.appendingPathComponent("_cider_todo_cards.json")
+
+        // Nothing to migrate if the old file doesn't exist
+        guard fm.fileExists(atPath: oldJSONURL.path) else {
+            config.didMigrateTodosToPerFile = true
+            config.save()
+            return
+        }
+
+        logger.info("Starting todos → per-file .ics migration")
+
+        guard let data = try? Data(contentsOf: oldJSONURL) else {
+            config.didMigrateTodosToPerFile = true
+            config.save()
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let snapshot = try? decoder.decode(TodoCardsSnapshot.self, from: data) else {
+            logger.error("Failed to decode old todos JSON")
+            config.didMigrateTodosToPerFile = true
+            config.save()
+            return
+        }
+
+        // Ensure Inbox/Todos/ exists
+        let inboxTodosDir = vaultRoot
+            .appendingPathComponent(StoragePaths.inboxDir)
+            .appendingPathComponent("Todos")
+        try? fm.createDirectory(at: inboxTodosDir, withIntermediateDirectories: true)
+
+        // Write individual .ics files and build the index
+        var indexEntries: [String: TodoPerFileIndexEntry] = [:]
+        var usedFilenames: Set<String> = []
+
+        for todo in snapshot.todoCards {
+            let destDir = inboxTodosDir
+            let baseName = sanitizeTodoFilename(todo.title)
+            var filename = "\(baseName).ics"
+            var counter = 2
+            while usedFilenames.contains(filename) || fm.fileExists(atPath: destDir.appendingPathComponent(filename).path) {
+                filename = "\(baseName) (\(counter)).ics"
+                counter += 1
+            }
+            usedFilenames.insert(filename)
+
+            let icsString = ICalendarSerializer.serializeTodo(todo)
+            let destURL = destDir.appendingPathComponent(filename)
+            do {
+                try icsString.write(to: destURL, atomically: true, encoding: .utf8)
+                logger.info("Wrote \(filename)")
+            } catch {
+                logger.error("Failed to write \(filename): \(error.localizedDescription)")
+                continue
+            }
+
+            indexEntries[todo.id.uuidString] = TodoPerFileIndexEntry(
+                filename: filename,
+                folderID: todo.folderID,
+                labelIDs: todo.labelIDs.isEmpty ? nil : todo.labelIDs,
+                createdAt: todo.createdAt,
+                isCompleted: todo.isCompleted,
+                dueDate: todo.dueDate,
+                priority: todo.priority
+            )
+        }
+
+        // Write the index
+        let indexURL = todosDir.appendingPathComponent("_cider_todos_index.json")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let indexData = try? encoder.encode(indexEntries) {
+            try? indexData.write(to: indexURL, options: .atomic)
+        }
+
+        // Rename old JSON as backup
+        let backupURL = todosDir.appendingPathComponent("_cider_todo_cards_legacy.json")
+        try? fm.moveItem(at: oldJSONURL, to: backupURL)
+
+        config.didMigrateTodosToPerFile = true
+        config.save()
+
+        logger.info("Todos → per-file .ics migration complete: \(snapshot.todoCards.count) todos")
+    }
+
+    // MARK: - Phase 5: Migrate date cards from single JSON to per-file .ics
+
+    /// Reads the old _cider_date_cards.json, writes individual .ics files to Inbox/Date Cards/,
+    /// builds the date cards index, and renames the old JSON as a backup.
+    static func migrateDateCardsToPerFileIfNeeded() {
+        var config = CiderConfig.load()
+        guard !config.didMigrateDateCardsToPerFile else { return }
+
+        let fm = FileManager.default
+        let vaultRoot = StoragePaths.vaultDirectoryURL(config: config)
+        let dateCardsDir = vaultRoot
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent(StorageType.dateCards.ciderSubpath)
+        let oldJSONURL = dateCardsDir.appendingPathComponent("_cider_date_cards.json")
+
+        guard fm.fileExists(atPath: oldJSONURL.path) else {
+            config.didMigrateDateCardsToPerFile = true
+            config.save()
+            return
+        }
+
+        logger.info("Starting date cards → per-file .ics migration")
+
+        guard let data = try? Data(contentsOf: oldJSONURL) else {
+            config.didMigrateDateCardsToPerFile = true
+            config.save()
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let snapshot = try? decoder.decode(DateCardsSnapshot.self, from: data) else {
+            logger.error("Failed to decode old date cards JSON")
+            config.didMigrateDateCardsToPerFile = true
+            config.save()
+            return
+        }
+
+        let inboxDateCardsDir = vaultRoot
+            .appendingPathComponent(StoragePaths.inboxDir)
+            .appendingPathComponent("Date Cards")
+        try? fm.createDirectory(at: inboxDateCardsDir, withIntermediateDirectories: true)
+
+        var indexEntries: [String: DateCardPerFileIndexEntry] = [:]
+        var usedFilenames: Set<String> = []
+
+        for dc in snapshot.dateCards {
+            let baseName = sanitizeDateCardFilename(dc.title)
+            var filename = "\(baseName).ics"
+            var counter = 2
+            while usedFilenames.contains(filename) || fm.fileExists(atPath: inboxDateCardsDir.appendingPathComponent(filename).path) {
+                filename = "\(baseName) (\(counter)).ics"
+                counter += 1
+            }
+            usedFilenames.insert(filename)
+
+            let icsString = ICalendarSerializer.serializeDateCard(dc)
+            let destURL = inboxDateCardsDir.appendingPathComponent(filename)
+            do {
+                try icsString.write(to: destURL, atomically: true, encoding: .utf8)
+                logger.info("Wrote \(filename)")
+            } catch {
+                logger.error("Failed to write \(filename): \(error.localizedDescription)")
+                continue
+            }
+
+            indexEntries[dc.id.uuidString] = DateCardPerFileIndexEntry(
+                filename: filename,
+                folderID: dc.folderID,
+                labelIDs: dc.labelIDs.isEmpty ? nil : dc.labelIDs,
+                createdAt: dc.createdAt,
+                isCompleted: dc.isCompleted,
+                startAt: dc.startAt
+            )
+        }
+
+        let indexURL = dateCardsDir.appendingPathComponent("_cider_date_cards_index.json")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let indexData = try? encoder.encode(indexEntries) {
+            try? indexData.write(to: indexURL, options: .atomic)
+        }
+
+        let backupURL = dateCardsDir.appendingPathComponent("_cider_date_cards_legacy.json")
+        try? fm.moveItem(at: oldJSONURL, to: backupURL)
+
+        config.didMigrateDateCardsToPerFile = true
+        config.save()
+
+        logger.info("Date cards → per-file .ics migration complete: \(snapshot.dateCards.count) date cards")
+    }
+
+    private struct DateCardPerFileIndexEntry: Codable {
+        var filename: String
+        var folderID: UUID?
+        var labelIDs: [UUID]?
+        var createdAt: Date?
+        var isCompleted: Bool?
+        var startAt: Date?
+    }
+
+    private static func sanitizeDateCardFilename(_ title: String) -> String {
+        let invalid = CharacterSet(charactersIn: ":/\\?*\"<>|")
+        var sanitized = title.components(separatedBy: invalid).joined(separator: "-")
+        while sanitized.hasPrefix(".") { sanitized = String(sanitized.dropFirst()) }
+        sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        if sanitized.count > 200 { sanitized = String(sanitized.prefix(200)) }
+        return sanitized.isEmpty ? "Untitled Date Card" : sanitized
+    }
+
+    /// Minimal index entry for migration (matches TodoCardStorage.IndexEntry).
+    private struct TodoPerFileIndexEntry: Codable {
+        var filename: String
+        var folderID: UUID?
+        var labelIDs: [UUID]?
+        var createdAt: Date?
+        var isCompleted: Bool?
+        var dueDate: Date?
+        var priority: TodoPriority?
+    }
+
+    private static func sanitizeTodoFilename(_ title: String) -> String {
+        let invalid = CharacterSet(charactersIn: ":/\\?*\"<>|")
+        var sanitized = title.components(separatedBy: invalid).joined(separator: "-")
+        while sanitized.hasPrefix(".") { sanitized = String(sanitized.dropFirst()) }
+        sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        if sanitized.count > 200 { sanitized = String(sanitized.prefix(200)) }
+        return sanitized.isEmpty ? "Untitled Todo" : sanitized
+    }
+
+    /// Minimal index entry for migration (matches ContactStorage.IndexEntry).
+    private struct ContactPerFileIndexEntry: Codable {
+        var filename: String
+        var folderID: UUID?
+        var labelIDs: [UUID]?
+        var createdAt: Date?
+    }
+
+    private static func sanitizeContactFilename(_ title: String) -> String {
+        let invalid = CharacterSet(charactersIn: ":/\\?*\"<>|")
+        var sanitized = title.components(separatedBy: invalid).joined(separator: "-")
+        while sanitized.hasPrefix(".") { sanitized = String(sanitized.dropFirst()) }
+        sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        if sanitized.count > 200 { sanitized = String(sanitized.prefix(200)) }
+        return sanitized.isEmpty ? "Untitled Contact" : sanitized
+    }
+
     /// Updates bookmark relativePath entries in the master metadata JSON file.
     /// Bookmarks with paths starting with `oldPrefix` get rewritten to `newPrefix`.
     private static func updateBookmarkMetadataPaths(metadataURL: URL, oldPrefix: String, newPrefix: String) {
