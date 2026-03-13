@@ -48,6 +48,11 @@ struct FolderSidebarView: View {
     @State private var renamingFolderID: UUID?
     @State private var renamingFolderName = ""
     @State private var tagsExpanded = false
+    @State private var foldersCollapsed = false
+    @State private var sourcesCollapsed = false
+    @State private var foldersHeaderHovered = false
+    @State private var sourcesHeaderHovered = false
+    @State private var tagsHeaderHovered = false
 
     private var topLevelFolders: [Folder] {
         childFolders(of: nil)
@@ -107,52 +112,82 @@ struct FolderSidebarView: View {
                     .fill(CiderColors.separatorLight)
             )
 
-            Label("Folders", systemImage: "folder")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.secondary)
-                .padding(.top, Spacing.xs)
-
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: Spacing.sm) {
-                    ForEach(topLevelFolders) { folder in
-                        rootFolderGroup(folder)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    // MARK: Folders
+                    HStack(spacing: Spacing.xs) {
+                        ZStack {
+                            Image(systemName: "folder")
+                                .font(CiderFont.bodySemibold)
+                                .foregroundColor(CiderColors.secondary)
+                                .opacity(foldersHeaderHovered ? 0 : 1)
+
+                            Image(systemName: "chevron.down")
+                                .font(CiderFont.captionBold)
+                                .foregroundColor(CiderColors.secondary)
+                                .rotationEffect(.degrees(foldersCollapsed ? -90 : 0))
+                                .opacity(foldersHeaderHovered ? 1 : 0)
+                        }
+                        .animation(reduceMotion ? .none : .smooth, value: foldersHeaderHovered)
+
+                        Text("Folders")
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.secondary)
+
+                        Spacer(minLength: 0)
                     }
-                }
-                .padding(.horizontal, CiderBorder.innerStrokeInset)
-                .padding(.bottom, Spacing.xs)
-            }
+                    .padding(.top, Spacing.xs)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(reduceMotion ? .none : .snappy) {
+                            foldersCollapsed.toggle()
+                        }
+                    }
+                    .hoverState($foldersHeaderHovered)
 
-            if topLevelFolders.isEmpty {
-                Text("No folders yet. Create one to organize your items.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.tertiary)
-                    .padding(.horizontal, Spacing.xs)
-                    .padding(.bottom, Spacing.xs)
-            }
-
-            tagsSection
-
-            if isFolderCreationFieldVisible {
-                HStack(spacing: Spacing.sm) {
-                    TextField("New folder name", text: $draftFolderName)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            commitFolderCreation()
+                    if !foldersCollapsed {
+                        if topLevelFolders.isEmpty {
+                            Text("No folders yet. Create one to organize your items.")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                                .padding(.horizontal, Spacing.xs)
+                                .padding(.bottom, Spacing.xs)
+                        } else {
+                            VStack(alignment: .leading, spacing: Spacing.sm) {
+                                ForEach(topLevelFolders) { folder in
+                                    rootFolderGroup(folder)
+                                }
+                            }
+                            .padding(.horizontal, CiderBorder.innerStrokeInset)
+                            .padding(.bottom, Spacing.xs)
                         }
 
-                    Button("Create") {
-                        commitFolderCreation()
+                        if isFolderCreationFieldVisible {
+                            HStack(spacing: Spacing.sm) {
+                                TextField("New folder name", text: $draftFolderName)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit {
+                                        commitFolderCreation()
+                                    }
+
+                                Button("Create") {
+                                    commitFolderCreation()
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundColor(CiderColors.controlAccent)
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(CiderColors.controlAccent)
+
+                    // MARK: Sources
+                    if enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
+                        sourcesSection
+                    }
+
+                    // MARK: Tags
+                    tagsSection
                 }
             }
-
-            if enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
-                sourcesSection
-            }
-
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
@@ -193,10 +228,24 @@ struct FolderSidebarView: View {
                 .padding(.vertical, Spacing.xxs)
 
             HStack(spacing: Spacing.xs) {
+                ZStack {
+                    Image(systemName: "tag")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .opacity(tagsHeaderHovered ? 0 : 1)
+
+                    Image(systemName: "chevron.down")
+                        .font(CiderFont.captionBold)
+                        .foregroundColor(CiderColors.secondary)
+                        .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+                        .opacity(tagsHeaderHovered ? 1 : 0)
+                }
+                .animation(reduceMotion ? .none : .smooth, value: tagsHeaderHovered)
+
                 Button {
                     onOpenTagManager?()
                 } label: {
-                    Label("Tags", systemImage: "tag")
+                    Text("Tags")
                         .font(CiderFont.bodySemibold)
                         .foregroundColor(CiderColors.secondary)
                 }
@@ -214,19 +263,14 @@ struct FolderSidebarView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                Button {
-                    withAnimation(reduceMotion ? .none : .snappy) {
-                        tagsCollapsed.wrappedValue.toggle()
-                    }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.quaternary)
-                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                }
-                .buttonStyle(.plain)
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    tagsCollapsed.wrappedValue.toggle()
+                }
+            }
+            .hoverState($tagsHeaderHovered)
 
             if !isCollapsed {
                 if labels.isEmpty {
@@ -280,7 +324,21 @@ struct FolderSidebarView: View {
                 .padding(.vertical, Spacing.xs)
 
             HStack(spacing: Spacing.xs) {
-                Label("Sources", systemImage: "folder.badge.gear")
+                ZStack {
+                    Image(systemName: "folder.badge.gear")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .opacity(sourcesHeaderHovered ? 0 : 1)
+
+                    Image(systemName: "chevron.down")
+                        .font(CiderFont.captionBold)
+                        .foregroundColor(CiderColors.secondary)
+                        .rotationEffect(.degrees(sourcesCollapsed ? -90 : 0))
+                        .opacity(sourcesHeaderHovered ? 1 : 0)
+                }
+                .animation(reduceMotion ? .none : .smooth, value: sourcesHeaderHovered)
+
+                Text("Sources")
                     .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.secondary)
 
@@ -298,16 +356,25 @@ struct FolderSidebarView: View {
                     .help("Add linked source folder")
                 }
             }
-
-            ForEach(sources) { source in
-                sourceSidebarRow(source)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    sourcesCollapsed.toggle()
+                }
             }
+            .hoverState($sourcesHeaderHovered)
 
-            if sources.isEmpty {
-                Text("No sources linked.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.tertiary)
-                    .padding(.horizontal, Spacing.xs)
+            if !sourcesCollapsed {
+                ForEach(sources) { source in
+                    sourceSidebarRow(source)
+                }
+
+                if sources.isEmpty {
+                    Text("No sources linked.")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.xs)
+                }
             }
         }
     }
