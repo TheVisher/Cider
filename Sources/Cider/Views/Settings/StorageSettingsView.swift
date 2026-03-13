@@ -4,7 +4,6 @@ import AppKit
 struct StorageSettingsView: View {
     @EnvironmentObject private var viewModel: SettingsViewModel
     @State private var trashItems: [TrashItem] = []
-    @State private var showEmptyTrashConfirm = false
 
     private let retentionOptions: [(label: String, days: Int)] = [
         ("7 days", 7),
@@ -27,19 +26,6 @@ struct StorageSettingsView: View {
         .onAppear { loadTrashItems() }
         .onReceive(NotificationCenter.default.publisher(for: .trashContentsChanged)) { _ in
             loadTrashItems()
-        }
-        .confirmationDialog(
-            "Empty Trash?",
-            isPresented: $showEmptyTrashConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Empty Trash", role: .destructive) {
-                TrashStorage.shared.emptyTrash()
-                loadTrashItems()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("All items in the trash will be permanently deleted. This cannot be undone.")
         }
     }
 
@@ -84,76 +70,34 @@ struct StorageSettingsView: View {
             }
         } else {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                let bookmarkItems = trashItems.filter { $0.itemType == .bookmark }
-                let noteItems = trashItems.filter { $0.itemType == .note }
-                let dateCardItems = trashItems.filter { $0.itemType == .dateCard }
-                let contactItems = trashItems.filter { $0.itemType == .contact }
+                let groupOrder: [(TrashItemType, String)] = [
+                    (.bookmark, "Bookmarks"),
+                    (.note, "Notes"),
+                    (.dateCard, "Date Cards"),
+                    (.contact, "Contacts"),
+                    (.todo, "Todos"),
+                    (.whiteboard, "Whiteboards"),
+                    (.folder, "Folders"),
+                    (.vaultFolder, "Folders"),
+                ]
 
-                if !bookmarkItems.isEmpty {
-                    Text("Bookmarks")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.secondary)
-                        .padding(.top, Spacing.xs)
+                ForEach(groupOrder, id: \.0) { itemType, label in
+                    let items = trashItems.filter { $0.itemType == itemType }
+                    if !items.isEmpty {
+                        Text(label)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.secondary)
+                            .padding(.top, Spacing.xs)
 
-                    ForEach(bookmarkItems) { item in
-                        TrashItemRow(item: item, onRestore: {
-                            TrashStorage.shared.restore(item)
-                            loadTrashItems()
-                        }, onDelete: {
-                            TrashStorage.shared.permanentlyDelete(item)
-                            loadTrashItems()
-                        })
-                    }
-                }
-
-                if !noteItems.isEmpty {
-                    Text("Notes")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.secondary)
-                        .padding(.top, Spacing.xs)
-
-                    ForEach(noteItems) { item in
-                        TrashItemRow(item: item, onRestore: {
-                            TrashStorage.shared.restore(item)
-                            loadTrashItems()
-                        }, onDelete: {
-                            TrashStorage.shared.permanentlyDelete(item)
-                            loadTrashItems()
-                        })
-                    }
-                }
-
-                if !dateCardItems.isEmpty {
-                    Text("Date Cards")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.secondary)
-                        .padding(.top, Spacing.xs)
-
-                    ForEach(dateCardItems) { item in
-                        TrashItemRow(item: item, onRestore: {
-                            TrashStorage.shared.restore(item)
-                            loadTrashItems()
-                        }, onDelete: {
-                            TrashStorage.shared.permanentlyDelete(item)
-                            loadTrashItems()
-                        })
-                    }
-                }
-
-                if !contactItems.isEmpty {
-                    Text("Contacts")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.secondary)
-                        .padding(.top, Spacing.xs)
-
-                    ForEach(contactItems) { item in
-                        TrashItemRow(item: item, onRestore: {
-                            TrashStorage.shared.restore(item)
-                            loadTrashItems()
-                        }, onDelete: {
-                            TrashStorage.shared.permanentlyDelete(item)
-                            loadTrashItems()
-                        })
+                        ForEach(items) { item in
+                            TrashItemRow(item: item, onRestore: {
+                                TrashStorage.shared.restore(item)
+                                loadTrashItems()
+                            }, onDelete: {
+                                TrashStorage.shared.permanentlyDelete(item)
+                                loadTrashItems()
+                            })
+                        }
                     }
                 }
 
@@ -165,7 +109,7 @@ struct StorageSettingsView: View {
                     Spacer()
 
                     Button("Empty Trash") {
-                        showEmptyTrashConfirm = true
+                        viewModel.showEmptyTrashConfirm = true
                     }
                     .buttonStyle(CiderDestructiveButtonStyle())
                 }

@@ -226,6 +226,11 @@ final class VaultFolderService {
         saveIndex()
         rebuildFolders()
 
+        // Notify sync service of all deleted folders (root + descendants)
+        for deleted in deletedFolders {
+            SyncService.shared.trackFolderDeletion(of: deleted.id)
+        }
+
         logger.info("Trashed folder '\(folder.name)' and \(deletedFolders.count - 1) subfolder(s)")
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
         return trashItem
@@ -254,8 +259,10 @@ final class VaultFolderService {
             return
         }
 
-        // Re-add to index
-        index[folder.id] = folder
+        // Re-add to index with updated timestamp so sync picks it up
+        var restoredFolder = folder
+        restoredFolder.updatedAt = Date()
+        index[folder.id] = restoredFolder
 
         // Re-scan for any subdirectories that were inside the restored folder
         scanSubdirectories(of: folder.relativePath)
@@ -264,6 +271,10 @@ final class VaultFolderService {
 
         saveIndex()
         rebuildFolders()
+
+        // Cancel any pending sync deletion and trigger a push so the folder reappears on web
+        SyncService.shared.cancelFolderDeletion(of: folder.id)
+        SyncService.shared.pushAfterLocalChange()
 
         logger.info("Restored folder '\(folder.name)'")
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
@@ -751,6 +762,19 @@ final class VaultFolderService {
     /// Returns all trashed vault folders (for Settings → Trash display).
     func trashedFolders() -> [TrashItem] {
         loadTrashManifest()
+    }
+
+    /// Permanently deletes all trashed vault folders.
+    func emptyFolderTrash() {
+        let items = loadTrashManifest()
+        let fm = FileManager.default
+        for item in items {
+            if let payload = item.vaultFolderPayload {
+                let trashFolderURL = trashDir.appendingPathComponent(payload.folder.name)
+                try? fm.removeItem(at: trashFolderURL)
+            }
+        }
+        saveTrashManifest([])
     }
 
     // MARK: - Private: Helpers

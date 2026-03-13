@@ -434,10 +434,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] notification in
                 self?.showSettings()
                 if let category = notification.userInfo?["category"] as? String {
+                    var info: [String: String] = ["category": category]
+                    if let subcategory = notification.userInfo?["subcategory"] as? String {
+                        info["subcategory"] = subcategory
+                    }
                     NotificationCenter.default.post(
                         name: .settingsNavigate,
                         object: nil,
-                        userInfo: ["category": category]
+                        userInfo: info
                     )
                 }
             }
@@ -589,7 +593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onViewTrash: { [weak self] in
                 self?.dismissUndoToast()
                 NotificationCenter.default.post(name: .openCiderSettings, object: nil,
-                    userInfo: ["category": "data"])
+                    userInfo: ["category": "data", "subcategory": "trash"])
             },
             onHoverChanged: { [weak self] hovering in
                 guard let self else { return }

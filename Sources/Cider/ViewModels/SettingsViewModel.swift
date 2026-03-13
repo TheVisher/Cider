@@ -6,6 +6,9 @@ import os
 final class SettingsViewModel: ObservableObject {
     private let logger = Logger(subsystem: "com.cider.app", category: "SettingsViewModel")
 
+    // Confirmation dialogs (rendered at SettingsView level to avoid system alert shadow issues)
+    @Published var showEmptyTrashConfirm = false
+
     // General settings
     @Published var launchAtLogin: Bool {
         didSet { updateLaunchAtLogin() }

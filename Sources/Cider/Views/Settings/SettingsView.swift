@@ -10,7 +10,9 @@ struct SettingsView: View {
     @State private var exportResult: String?
     @State private var migrationResult: String?
     @State private var isMigrating = false
+    @State private var pendingSubcategory: SettingsSubcategory?
     @State private var automaticallyChecksForUpdates = SparkleUpdaterService.shared.automaticallyChecksForUpdates
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -48,8 +50,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .clipShape(RoundedRectangle(cornerRadius: SettingsDesign.cornerRadius, style: .continuous))
+
+            if viewModel.showEmptyTrashConfirm {
+                emptyTrashConfirmOverlay
+            }
         }
         .frame(width: SettingsDesign.width, height: SettingsDesign.height)
+        .animation(reduceMotion ? .none : .snappy, value: viewModel.showEmptyTrashConfirm)
         .environmentObject(viewModel)
         .onAppear {
             syncSelectedSubcategory(reset: true)
@@ -62,6 +69,13 @@ struct SettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .settingsNavigate)) { notification in
             guard let category = notification.userInfo?["category"] as? String else { return }
+            if let sub = notification.userInfo?["subcategory"] as? String {
+                switch sub {
+                case "trash": pendingSubcategory = .dataTrash
+                case "directories": pendingSubcategory = .dataDirectories
+                default: break
+                }
+            }
             switch category {
             case "data": selectedCategory = .data
             case "general": selectedCategory = .general
@@ -620,9 +634,60 @@ struct SettingsView: View {
         let options = selectedCategory.subcategories
         guard let first = options.first else { return }
 
-        if reset || !options.contains(selectedSubcategory) {
+        if let pending = pendingSubcategory, options.contains(pending) {
+            selectedSubcategory = pending
+            pendingSubcategory = nil
+        } else if reset || !options.contains(selectedSubcategory) {
             selectedSubcategory = first
         }
+    }
+
+    @ViewBuilder
+    private var emptyTrashConfirmOverlay: some View {
+        RoundedRectangle(cornerRadius: SettingsDesign.cornerRadius, style: .continuous)
+            .fill(Color.black.opacity(0.55))
+            .onTapGesture { viewModel.showEmptyTrashConfirm = false }
+
+        VStack(spacing: Spacing.lg) {
+            VStack(spacing: Spacing.sm) {
+                Text("Empty Trash?")
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Text("All items in the trash will be permanently deleted. This cannot be undone.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: Spacing.sm) {
+                Button("Cancel") {
+                    viewModel.showEmptyTrashConfirm = false
+                }
+                .buttonStyle(CiderSecondaryButtonStyle())
+
+                Button("Empty Trash") {
+                    TrashStorage.shared.emptyTrash()
+                    NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
+                    viewModel.showEmptyTrashConfirm = false
+                }
+                .buttonStyle(CiderDestructiveButtonStyle())
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 320)
+        .background {
+            ZStack {
+                VisualEffectView(material: .popover, blendingMode: .withinWindow)
+                Color.black.opacity(0.4)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .transition(.opacity.combined(with: .scale(scale: 0.95)))
     }
 
     private var overrideableTypes: [StorageType] {

@@ -963,6 +963,9 @@ final class NotesStorage: ObservableObject {
         if folderID != nil {
             loadVaultFolderNotes()
         }
+        // Cancel pending sync deletion and push so the note reappears on web
+        SyncService.shared.cancelNoteDeletion(of: noteID)
+        SyncService.shared.pushAfterLocalChange()
     }
 
     func hasSnapshots(for note: Note) -> Bool {

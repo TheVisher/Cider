@@ -239,12 +239,24 @@ final class SyncService: ObservableObject {
         pushAfterLocalChange()
     }
 
+    func cancelNoteDeletion(of noteID: UUID) {
+        let syncId = noteID.uuidString.lowercased()
+        pendingNoteDeletions.removeAll { $0 == syncId }
+        UserDefaults.standard.set(pendingNoteDeletions, forKey: pendingNoteDeletionsKey)
+    }
+
     func trackFolderDeletion(of folderID: UUID) {
         let syncId = folderID.uuidString.lowercased()
         guard !pendingFolderDeletions.contains(syncId) else { return }
         pendingFolderDeletions.append(syncId)
         UserDefaults.standard.set(pendingFolderDeletions, forKey: pendingFolderDeletionsKey)
         pushAfterLocalChange()
+    }
+
+    func cancelFolderDeletion(of folderID: UUID) {
+        let syncId = folderID.uuidString.lowercased()
+        pendingFolderDeletions.removeAll { $0 == syncId }
+        UserDefaults.standard.set(pendingFolderDeletions, forKey: pendingFolderDeletionsKey)
     }
 
     // MARK: - Manual trigger

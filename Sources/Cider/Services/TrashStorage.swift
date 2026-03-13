@@ -119,14 +119,15 @@ final class TrashStorage {
         let fm = FileManager.default
         try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
-        let srcURL = notesDir.appendingPathComponent(note.relativePath)
-        let destURL = trashDir.appendingPathComponent(note.relativePath)
+        let filename = (note.relativePath as NSString).lastPathComponent
+        let srcURL = notesDir.appendingPathComponent(filename)
+        let destURL = trashDir.appendingPathComponent(filename)
         if fm.fileExists(atPath: srcURL.path) {
             try? fm.moveItem(at: srcURL, to: destURL)
         }
 
         let payload = NoteTrashPayload(
-            noteFilename: note.relativePath,
+            noteFilename: filename,
             folderID: note.folderID,
             createdAt: note.createdAt
         )
@@ -541,6 +542,8 @@ final class TrashStorage {
             for item in items { deleteFilesForItem(item, trashDir: trashDir) }
             saveManifest([], trashDir: trashDir)
         }
+        // Empty vault folder trash
+        VaultFolderService.shared.emptyFolderTrash()
     }
 
     // MARK: - Private Helpers
