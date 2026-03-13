@@ -11,10 +11,10 @@ final class SpotlightIndexer {
     private var indexedIDs = Set<String>()
     private var debounceTask: Task<Void, Never>?
 
-    static let bookmarkDomain = "com.cider.bookmarks"
-    static let noteDomain = "com.cider.notes"
-    static let dateCardDomain = "com.cider.datecards"
-    static let contactDomain = "com.cider.contacts"
+    nonisolated static let bookmarkDomain = "com.cider.bookmarks"
+    nonisolated static let noteDomain = "com.cider.notes"
+    nonisolated static let dateCardDomain = "com.cider.datecards"
+    nonisolated static let contactDomain = "com.cider.contacts"
 
     private init() {}
 
@@ -23,6 +23,9 @@ final class SpotlightIndexer {
             deleteAll()
             return
         }
+        // Clear any existing subscriptions to avoid stacking on repeated start() calls
+        cancellables.removeAll()
+        debounceTask?.cancel()
         bindStorages()
         reindexAll()
     }
@@ -71,11 +74,64 @@ final class SpotlightIndexer {
     private func reindexAll() {
         guard CiderConfig.load().enableSpotlightIndexing else { return }
 
+        // Snapshot data on main actor, then load heavy data (thumbnails, note content)
+        // off-main to avoid blocking the UI. Index items are built on main after.
+        let bookmarks = BookmarksStorage.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let dateCards = DateCardStorage.shared.dateCards
+        let contacts = ContactStorage.shared.contacts
+
+        // Load note content on main actor (string reads, fast)
+        let noteContents: [UUID: String] = Dictionary(
+            notes.map { ($0.id, NotesStorage.shared.loadContent(for: $0)) },
+            uniquingKeysWith: { _, b in b }
+        )
+
+        // Collect thumbnail URLs for off-main disk I/O
+        let thumbURLs: [UUID: URL] = Dictionary(
+            bookmarks.compactMap { b in b.thumbnailFileURL.map { (b.id, $0) } },
+            uniquingKeysWith: { _, b in b }
+        )
+
+        Task { [weak self] in
+            // Load thumbnail data off main thread (disk I/O)
+            let thumbDataMap: [UUID: Data] = await Task.detached(priority: .utility) {
+                var result: [UUID: Data] = [:]
+                for (id, url) in thumbURLs {
+                    if let data = try? Data(contentsOf: url) {
+                        result[id] = data
+                    }
+                }
+                return result
+            }.value
+
+            guard let self else { return }
+
+            // Build and submit index items on main actor
+            self.buildAndSubmitIndex(
+                bookmarks: bookmarks,
+                notes: notes,
+                dateCards: dateCards,
+                contacts: contacts,
+                thumbDataMap: thumbDataMap,
+                noteContents: noteContents
+            )
+        }
+    }
+
+    private func buildAndSubmitIndex(
+        bookmarks: [Bookmark],
+        notes: [Note],
+        dateCards: [DateCard],
+        contacts: [ContactCard],
+        thumbDataMap: [UUID: Data],
+        noteContents: [UUID: String]
+    ) {
         var items: [CSSearchableItem] = []
         var newIDs = Set<String>()
 
         // Bookmarks
-        for bookmark in BookmarksStorage.shared.bookmarks {
+        for bookmark in bookmarks {
             let uniqueID = "cider.bookmark.\(bookmark.id.uuidString)"
             newIDs.insert(uniqueID)
 
@@ -84,11 +140,7 @@ final class SpotlightIndexer {
             attrs.contentURL = URL(string: bookmark.urlString)
             attrs.contentDescription = bookmark.notes.isEmpty ? nil : bookmark.notes
             attrs.keywords = bookmark.tags.isEmpty ? nil : bookmark.tags
-
-            if let thumbURL = bookmark.thumbnailFileURL,
-               let data = try? Data(contentsOf: thumbURL) {
-                attrs.thumbnailData = data
-            }
+            attrs.thumbnailData = thumbDataMap[bookmark.id]
 
             let item = CSSearchableItem(
                 uniqueIdentifier: uniqueID,
@@ -99,13 +151,13 @@ final class SpotlightIndexer {
         }
 
         // Notes
-        for note in NotesStorage.shared.notes {
+        for note in notes {
             let uniqueID = "cider.note.\(note.id.uuidString)"
             newIDs.insert(uniqueID)
 
             let attrs = CSSearchableItemAttributeSet(contentType: .text)
             attrs.title = note.title
-            let content = NotesStorage.shared.loadContent(for: note)
+            let content = noteContents[note.id] ?? ""
             let stripped = NoteCardData.stripMarkup(content)
             attrs.contentDescription = String(stripped.prefix(500))
 
@@ -118,7 +170,7 @@ final class SpotlightIndexer {
         }
 
         // Date Cards
-        for dateCard in DateCardStorage.shared.dateCards {
+        for dateCard in dateCards {
             let uniqueID = "cider.datecard.\(dateCard.id.uuidString)"
             newIDs.insert(uniqueID)
 
@@ -140,7 +192,7 @@ final class SpotlightIndexer {
         }
 
         // Contacts
-        for contact in ContactStorage.shared.contacts {
+        for contact in contacts {
             let uniqueID = "cider.contact.\(contact.id.uuidString)"
             newIDs.insert(uniqueID)
 

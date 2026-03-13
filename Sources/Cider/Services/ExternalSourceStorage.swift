@@ -30,6 +30,11 @@ final class ExternalSourceStorage: ObservableObject {
 
     @discardableResult
     func addSource(path: String, displayName: String) -> ExternalSource {
+        // Deduplicate by path — return existing source if already linked
+        if let existing = sources.first(where: { $0.path == path }) {
+            return existing
+        }
+
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : trimmed
         let source = ExternalSource(path: path, displayName: finalName)

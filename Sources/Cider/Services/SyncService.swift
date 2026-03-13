@@ -102,6 +102,9 @@ final class SyncService: ObservableObject {
     /// the changeSignal fires on every keystroke. We wait for it to stabilize.
     private var pullDebounceTask: Task<Void, Never>?
 
+    /// The auth + initial subscription task, tracked so stop() can cancel it.
+    private var authTask: Task<Void, Never>?
+
     // MARK: - Deletion tracking
 
     /// Bookmarks deleted locally that need to be pushed as deletions to the web.
@@ -158,15 +161,17 @@ final class SyncService: ObservableObject {
         // This avoids the subscription depending on the syncTokens table.
         // Capture client before Task to avoid main-actor-isolation send warning.
         let authClient = client
-        Task { @MainActor [weak self] in
+        authTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let authResult: SyncAuthResponse = try await authClient.action(
                     "sync:authenticate", with: ["token": token]
                 )
+                guard !Task.isCancelled else { return }
                 self.subscribeToChanges(client: authClient, userId: authResult.userId, token: token)
                 self.performPush(token: token)
             } catch {
+                guard !Task.isCancelled else { return }
                 self.logger.error("Authentication failed: \(error.localizedDescription)")
                 self.lastError = error.localizedDescription
                 self.stop()
@@ -186,12 +191,16 @@ final class SyncService: ObservableObject {
     }
 
     func stop() {
+        authTask?.cancel()
+        authTask = nil
         changeSignalCancellable?.cancel()
         changeSignalCancellable = nil
         dirtyNoteCheckTimer?.invalidate()
         dirtyNoteCheckTimer = nil
         pullDebounceTask?.cancel()
         pullDebounceTask = nil
+        pushDebounceTask?.cancel()
+        pushDebounceTask = nil
         convexClient = nil
         isReconciling = false
         hasPerformedInitialPull = false
