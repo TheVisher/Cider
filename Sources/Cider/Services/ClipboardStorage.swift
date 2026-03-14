@@ -333,6 +333,7 @@ final class ClipboardStorage: ObservableObject {
                 guard let httpResponse = response as? HTTPURLResponse,
                       httpResponse.statusCode == 200,
                       data.count > 100,
+                      data.count < 2_000_000,
                       CGImageSourceCreateWithData(data as CFData, nil) != nil else { continue }
                 try data.write(to: fileURL, options: .atomic)
                 objectWillChange.send()

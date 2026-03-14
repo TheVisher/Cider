@@ -38,7 +38,10 @@ struct BookmarkReaderView: NSViewRepresentable {
 
     private func loadStyledArticle(_ article: DetailWebViewStore.ReaderArticle, into wv: WKWebView, bookmarkID: UUID?) {
         let css = Self.readerCSS ?? ""
-        let bylineHTML = article.byline.isEmpty ? "" : "<p class='reader-byline'>\(article.byline)</p>"
+        // Escape title and byline to prevent XSS from malicious page metadata.
+        // Content is already sanitized HTML from Readability.js and must render as-is.
+        let escapedTitle = Self.htmlEscape(article.title)
+        let escapedByline = article.byline.isEmpty ? "" : "<p class='reader-byline'>\(Self.htmlEscape(article.byline))</p>"
         let html = """
         <!DOCTYPE html>
         <html>
@@ -50,8 +53,8 @@ struct BookmarkReaderView: NSViewRepresentable {
         </head>
         <body>
             <div class="reader-container">
-                <h1 class="reader-title">\(article.title)</h1>
-                \(bylineHTML)
+                <h1 class="reader-title">\(escapedTitle)</h1>
+                \(escapedByline)
                 <div class="reader-content">\(article.content)</div>
             </div>
         </body>
@@ -71,6 +74,15 @@ struct BookmarkReaderView: NSViewRepresentable {
                 }
             }
         }
+    }
+
+    private static func htmlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#x27;")
     }
 
     private static let readerCSS: String? = {

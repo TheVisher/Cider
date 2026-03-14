@@ -561,18 +561,22 @@ enum BookmarkMetadataParser {
 
     static func oEmbedEndpointURL(for pageURL: URL) -> URL? {
         let host = normalizedHost(for: pageURL)
-        let encoded = pageURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? pageURL.absoluteString
+        let baseString: String?
 
         if host.contains("tiktok.com") {
-            return URL(string: "https://www.tiktok.com/oembed?url=\(encoded)")
+            baseString = "https://www.tiktok.com/oembed"
+        } else if host.contains("instagram.com") {
+            baseString = "https://api.instagram.com/oembed"
+        } else if host.contains("spotify.com") {
+            baseString = "https://open.spotify.com/oembed"
+        } else {
+            return nil
         }
-        if host.contains("instagram.com") {
-            return URL(string: "https://api.instagram.com/oembed?url=\(encoded)")
-        }
-        if host.contains("spotify.com") {
-            return URL(string: "https://open.spotify.com/oembed?url=\(encoded)")
-        }
-        return nil
+
+        guard let baseString,
+              var components = URLComponents(string: baseString) else { return nil }
+        components.queryItems = [URLQueryItem(name: "url", value: pageURL.absoluteString)]
+        return components.url
     }
 
     static func fetchOEmbedPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {

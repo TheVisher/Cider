@@ -249,10 +249,13 @@ final class AIChatProcessService: @unchecked Sendable {
     }
 
     private func resolveViaShell(_ command: String) -> String? {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        // Validate command is a simple name (no shell metacharacters)
+        let allowedChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        guard command.unicodeScalars.allSatisfy({ allowedChars.contains($0) }) else { return nil }
+
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: shell)
-        proc.arguments = ["-lc", "which \(command)"]
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        proc.arguments = [command]
 
         let pipe = Pipe()
         proc.standardOutput = pipe
