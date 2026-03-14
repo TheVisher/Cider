@@ -82,7 +82,10 @@ struct TableColumnConfig: Codable, Equatable {
     }
 
     var visibleColumns: [TableColumnID] {
-        columnOrder.filter { !hiddenColumns.contains($0) }
+        // Include columns in persisted order, plus any new columns not yet in the order
+        let ordered = columnOrder.filter { !hiddenColumns.contains($0) }
+        let missing = TableColumnID.allCases.filter { !columnOrder.contains($0) && !hiddenColumns.contains($0) }
+        return ordered + missing
     }
 
     /// Total fixed width of all visible non-flexible columns
@@ -100,6 +103,10 @@ struct TableColumnConfig: Codable, Equatable {
         guard column.canHide else { return }
         if hiddenColumns.contains(column) {
             hiddenColumns.remove(column)
+            // Ensure column is in the order array
+            if !columnOrder.contains(column) {
+                columnOrder.append(column)
+            }
         } else {
             hiddenColumns.insert(column)
         }
