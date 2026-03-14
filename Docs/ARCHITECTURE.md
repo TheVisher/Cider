@@ -92,9 +92,26 @@ LibraryDisplayMode: .list | .grid | .masonry
 
 Card sizing: Continuous slider (0-3 scale) via LibraryCardSizing struct
 - Delegates to CardSizing (bookmarks) and NoteCardSizing (notes)
-- Mixed content: BookmarkCard/BookmarkListRow + NoteCardView/NoteListRow + DateCardCardView + ContactCardCardView
+- Grid/Masonry: BookmarkCard + NoteCardView + DateCardCardView + ContactCardCardView + TodoCardCardView
+- List: Unified LibraryTableView — all item types share the same table row layout
 - Continue section: sticky 8-item recents, two-column, collapsible
 - Library feed: scrollable mixed feed, filters by folder selection
+
+### Unified Table List View (list mode)
+When displayMode == .list, HomeDashboardView/FolderDetailView/SavedViewTabContent
+use the shared table component instead of per-type list rows:
+
+- LibraryTableView — self-contained table with sticky header + scrollable rows
+- LibraryTableRows — embeddable rows for views with existing ScrollViews
+- LibraryTableHeader — column headers with draggable resize handles + column picker
+- LibraryTableRow — single row rendering any LibraryItemV2 uniformly
+
+9 columns: Name (flexible), Type, Tags, Folder, Created, Modified, URL, Words, Priority
+- Name column fills remaining space; other columns have fixed widths
+- Column widths, order, and visibility persisted in CiderConfig.tableColumnConfig
+- TableColumnConfig stored as JSON in UserDefaults (backward-compatible)
+- Default visible: Name, Type, Tags, Created, Modified
+- Hidden by default: Folder, URL, Words, Priority (toggled via + button)
 
 LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard(DateCard) | .contact(ContactCard)
 - dateAnchor: Date? — key property for calendar projection; dateCards use startAt, contacts use birthday, bookmarks/notes nil

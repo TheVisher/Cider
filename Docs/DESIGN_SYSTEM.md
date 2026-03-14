@@ -899,6 +899,32 @@ Border priority (highest wins): `isSelected` → `isDropTargeted` → `isHovered
 
 ---
 
+## 16b. Table List View Contract
+
+When `displayMode == .list`, all item types render through the unified **LibraryTableView** instead of per-type list rows. This replaces `BookmarkListRow`, `NoteListRow`, `TodoListRow`, `DateCardListRow`, `ContactListRow`, and `VaultFileListRow` in list mode.
+
+**Key files:**
+- `Views/Shared/LibraryTableHeader.swift` — column headers + resize handles + column picker
+- `Views/Shared/LibraryTableRow.swift` — unified row for any `LibraryItemV2`
+- `Views/Shared/LibraryTableView.swift` — `LibraryTableView` (self-contained) + `LibraryTableRows` (embeddable)
+- `Models/TableColumn.swift` — `TableColumnID` enum + `TableColumnConfig` (persisted widths/visibility)
+
+**Row styling:**
+- Row height: 40pt
+- Checkbox (40pt) appears on hover/selection
+- Background: `selectedFill` when selected, `surfaceInput` on hover, `clear` default
+- Focus ring: `controlAccent` stroke (1.5pt)
+- All fonts use `CiderFont.*` tokens, all colors use `CiderColors.*`
+- Name column icon: 20×20 (favicon for bookmarks, SF Symbol for other types)
+- Tag pills: compact inline capsules with colored dot
+
+**Integration pattern:**
+- `HomeDashboardView`: uses `LibraryTableView` (owns its own scroll)
+- `FolderDetailView`: uses `LibraryTableHeader` + `LibraryTableRows` (inside existing scroll)
+- `SavedViewTabContent`: same as FolderDetailView
+
+---
+
 ## 17. Implementation Checklist
 
 When building or modifying any UI component, verify:

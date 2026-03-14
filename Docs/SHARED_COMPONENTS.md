@@ -31,11 +31,17 @@ When building a new feature, check this doc first. If a component or pattern alr
 - **What:** Visual card for bookmarks with thumbnail, title, domain, timestamp. Supports `.grid` and `.masonry` modes.
 - **Note:** Extracted from BookmarksBrowserView to enable reuse from Home tab's mixed-content library feed
 
-### BookmarkListRow
+### BookmarkListRow (legacy — superseded by LibraryTableRow in list mode)
 - **File:** `Views/Bookmarks/BookmarkListRow.swift`
-- **Used by:** Bookmarks (list mode), Home (library feed list mode)
+- **Used by:** Bookmarks (list mode — legacy, may still be referenced in BookmarksTabContent)
 - **What:** Compact list row for bookmarks with optional thumbnail, title, domain, timestamp, hover delete
-- **Note:** Extracted from BookmarksBrowserView to enable reuse from Home tab's mixed-content library feed
+- **Note:** Superseded by the unified table list view. Grid/masonry modes still use per-type card views.
+
+### LibraryTableView / LibraryTableRows
+- **Files:** `Views/Shared/LibraryTableView.swift`, `Views/Shared/LibraryTableRow.swift`, `Views/Shared/LibraryTableHeader.swift`, `Models/TableColumn.swift`
+- **Used by:** HomeDashboardView, FolderDetailView, SavedViewTabContent (all in list mode)
+- **What:** Unified table list view — all item types (bookmarks, notes, todos, events, contacts, files) render in the same row with column headers. 9 columns: Name (flexible), Type, Tags, Folder, Created, Modified, URL, Words, Priority. Resizable column dividers, column visibility toggling via `+` button. Config persisted in `CiderConfig.tableColumnConfig`.
+- **Note:** `LibraryTableView` owns its own scroll (used by HomeDashboardView). `LibraryTableRows` is embeddable inside existing ScrollViews (used by FolderDetailView, SavedViewTabContent).
 
 ### FolderContentView / RootFolderOverviewView
 - **Files:** `Views/Shared/FolderContentView.swift`, `Views/Shared/RootFolderOverviewView.swift`

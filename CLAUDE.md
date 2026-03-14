@@ -110,7 +110,7 @@ withAnimation(reduceMotion ? .none : .spring()) { }
 ```
 Sources/Cider/
 ├── App/              # AppDelegate, Panels (CiderPanel, DetailPopover, Settings)
-├── Models/           # Bookmark, Note, Folder, CiderConfig, TrashItem, CiderTab
+├── Models/           # Bookmark, Note, Folder, CiderConfig, TrashItem, CiderTab, TableColumn
 ├── Services/         # Storage, DoubleTapDetector, TrashStorage, CiderUndoManager, SyncService, AI/
 ├── Utilities/        # Constants, CiderFont, ButtonStyles, ContainerStyles, HoverState
 ├── ViewModels/       # BookmarksViewModel, NotesViewModel, SettingsViewModel
@@ -120,5 +120,5 @@ Sources/Cider/
     ├── Notes/        # TipTap editor, cards, list rows
     ├── Search/       # Search palette and tab
     ├── Settings/     # Settings views
-    └── Shared/       # TabBar, Sidebar, FolderDetail, ViewOptions, Masonry
+    └── Shared/       # TabBar, Sidebar, FolderDetail, ViewOptions, Masonry, LibraryTable*
 ```
