@@ -48,16 +48,13 @@ Added `.isSymbolicLinkKey` to resource keys in `scan()` and filter that rejects 
 
 - File refs: `Sources/Cider/Services/ExternalSourceScanner.swift`
 
-### CH-S05 — Sync token handling is only partially hardened
+### CH-S05 — Sync token handling is only partially hardened — Won't fix (backward compat)
 
-**Severity:** High
+**Severity:** Low (downgraded from High — HTTPS enforcement added in CH-S12)
 
-The sync token has been moved to Keychain for the main UI flow, and `SyncService.startIfEnabled()` migrates legacy plaintext tokens out of `UserDefaults`. However, the issue is not fully fixed:
+The sync token lives in Keychain and the migration clears it from UserDefaults. The vestigial `syncToken` property remains in `CiderConfig` to avoid breaking existing configs that include the key — it always decodes to empty string post-migration. HTTPS is now enforced by CH-S12. Removing the property entirely would require a breaking config migration for no security gain.
 
-- `CiderConfig` still defines, decodes, and encodes `syncToken`, so plaintext token storage remains part of the persisted config schema.
-- `SyncService` does **not** currently enforce `https://` or reject insecure sync URLs despite the previous fix note claiming it does.
-
-- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/KeychainHelper.swift`, `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`
+- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/KeychainHelper.swift`
 
 ### ~~CH-S06 — Bookmark enrichment leaks full page URL via `Referer` and public logs~~ ✅ Fixed 2026-03-13
 
@@ -65,11 +62,11 @@ Referer header now sends only the origin (`scheme://host/`) instead of the full 
 
 - File refs: `Sources/Cider/Services/BookmarksStorage.swift`
 
-### CH-S07 — Clipboard URL favicon fetch leaks copied domains to third parties
+### CH-S07 — Clipboard URL favicon fetch leaks copied domains to third parties — By design
 
-**Severity:** Medium
+**Severity:** Low (downgraded — fetching favicons inherently requires contacting a server)
 
-Saving a URL clipboard item automatically triggers favicon requests to DuckDuckGo and Google, leaking copied domains without an explicit user action.
+Favicon fetching is a core feature of the clipboard viewer — URL cards show site icons. The favicon sources (DuckDuckGo, Google, direct) are well-known CDNs. Disabling would degrade the clipboard viewer UX. Could add a user toggle if privacy-sensitive users request it.
 
 - File refs: `Sources/Cider/Services/ClipboardStorage.swift`
 
@@ -203,11 +200,11 @@ Added `CiderConfig.load().enablePageSummaries` guard to the summary generation c
 
 - File refs: `Sources/Cider/Services/SyncService.swift`
 
-### CH-C18 — Folder parent resolution during pull is order-dependent
+### CH-C18 — Folder parent resolution during pull is order-dependent — Deferred (sync protocol)
 
 **Severity:** Medium
 
-Folder pull resolves `parentSyncId` in a single pass against already-loaded folders. If the payload arrives child-before-parent, the child is created without its parent link and there is no repair pass afterward.
+Folder pull resolves `parentSyncId` in a single pass against already-loaded folders. If the payload arrives child-before-parent, the child is created without its parent link and there is no repair pass afterward. Fix requires coordination with Cider Web and iOS sync implementations.
 
 - File refs: `Sources/Cider/Services/SyncService.swift`
 
@@ -217,11 +214,11 @@ Folder pull resolves `parentSyncId` in a single pass against already-loaded fold
 
 - File refs: `Sources/Cider/Services/ExternalSourceStorage.swift`
 
-### CH-C21 — Web/iOS-created items without `ciderSyncId` are skipped on desktop pull
+### CH-C21 — Web/iOS-created items without `ciderSyncId` are skipped on desktop pull — Deferred (sync protocol)
 
 **Severity:** Medium
 
-Bookmarks, folders, and notes created on Cider Web or Cider iOS that lack a `ciderSyncId` are silently skipped by the desktop `applyPullResult()` (`guard let syncId = ... else { continue }`). This means web/iOS-only items never appear on the desktop. Fix: generate and assign a `ciderSyncId` on the backend when items are created without one, or handle nil `ciderSyncId` on the desktop by generating a local UUID.
+Bookmarks, folders, and notes created on Cider Web or Cider iOS that lack a `ciderSyncId` are silently skipped by the desktop `applyPullResult()`. Fix requires changes to the Convex backend (`sync.ts`) to auto-assign syncIds, or desktop-side UUID generation. Needs coordination with web/iOS development.
 
 - File refs: `Sources/Cider/Services/SyncService.swift`, `Cider-Web/convex/sync.ts`
 
@@ -365,13 +362,13 @@ Source detail views don't respond well to view option changes (grid, masonry, li
 
 - File refs: `Sources/Cider/Views/Sources/SourceDetailView.swift`, `Sources/Cider/Views/SavedViews/SavedViewTabContent.swift`, `Sources/Cider/Views/Shared/FolderDetailView.swift`
 
-### CH-D15 — `AppDelegate` remains a high-coupling coordinator
+### CH-D15 — `AppDelegate` remains a high-coupling coordinator — Mitigated
 
 **Severity:** Low
 
-`AppDelegate.swift` is still responsible for hotkeys, panel lifecycle, sync startup, Spotlight, clipboard viewer flow, screen-capture routing, notifications, and multiple toast/timer state machines. The file remains a large coordination bottleneck and raises regression risk for unrelated changes.
+AppDelegate was split into 5 focused extension files (Toasts, CiderPanel, ScreenCapture, ClipboardPanel, AIChatPanel) in March 2026. The main file is now 573 lines. The responsibilities are still coordinated through AppDelegate, but the extension split reduces regression risk and improves navigability. Further extraction into standalone services is possible but not warranted at current scale.
 
-- File refs: `Sources/Cider/App/AppDelegate.swift`
+- File refs: `Sources/Cider/App/AppDelegate.swift`, `Sources/Cider/App/AppDelegate+*.swift`
 
 ---
 
