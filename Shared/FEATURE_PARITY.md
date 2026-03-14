@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-13
+> **Last updated**: 2026-03-14
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -11,7 +11,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | Bookmark CRUD | Yes | Yes | Yes |
-| Notes CRUD | Yes | Yes (plain text) | Yes |
+| Notes CRUD | Yes | Yes (rich text) | Yes |
 | Bookmark sync (push/pull) | Yes | Yes (direct mutations) | Yes |
 | Folder sync | Yes | Yes | Yes |
 | Soft delete / trash | Yes | Yes | Yes |
@@ -111,9 +111,9 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
-| Standalone notes | Yes | No | No |
-| Rich text editor (TipTap) | Yes | Planned | No |
-| Notes on bookmarks | Yes | Yes (plain text) | Yes |
+| Standalone notes | Yes | Yes | No |
+| Rich text editor (TipTap) | Yes | Yes | No |
+| Notes on bookmarks | Yes | Yes (rich text) | Yes |
 | Notes sync | Yes | Yes | Yes |
 | Whiteboard (Excalidraw) | Yes | No | No |
 
