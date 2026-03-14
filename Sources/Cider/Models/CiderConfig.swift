@@ -183,6 +183,7 @@ struct CiderConfig: Codable {
         case didMigrateTodosToPerFile
         case didMigrateDateCardsToPerFile
         case lastReconciliationAt
+        case tableColumnConfig
     }
 
     var showMenuBarIcon: Bool
@@ -255,6 +256,7 @@ struct CiderConfig: Codable {
     var didMigrateTodosToPerFile: Bool  // Whether one-time todos JSON → .ics migration has run
     var didMigrateDateCardsToPerFile: Bool  // Whether one-time date cards JSON → .ics migration has run
     var lastReconciliationAt: Double  // Epoch seconds of last full reconciliation check
+    var tableColumnConfig: TableColumnConfig  // Persisted table list view column widths, order, visibility
 
     static let storageKey = "CiderConfig"
 
@@ -323,7 +325,8 @@ struct CiderConfig: Codable {
             didMigrateContactsToPerFile: false,
             didMigrateTodosToPerFile: false,
             didMigrateDateCardsToPerFile: false,
-            lastReconciliationAt: 0
+            lastReconciliationAt: 0,
+            tableColumnConfig: .default
         )
     }
 
@@ -529,6 +532,7 @@ struct CiderConfig: Codable {
         didMigrateTodosToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateTodosToPerFile) ?? false
         didMigrateDateCardsToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateDateCardsToPerFile) ?? false
         lastReconciliationAt = try container.decodeIfPresent(Double.self, forKey: .lastReconciliationAt) ?? 0
+        tableColumnConfig = try container.decodeIfPresent(TableColumnConfig.self, forKey: .tableColumnConfig) ?? .default
     }
 
     init(
@@ -599,7 +603,8 @@ struct CiderConfig: Codable {
         didMigrateContactsToPerFile: Bool = false,
         didMigrateTodosToPerFile: Bool = false,
         didMigrateDateCardsToPerFile: Bool = false,
-        lastReconciliationAt: Double = 0
+        lastReconciliationAt: Double = 0,
+        tableColumnConfig: TableColumnConfig = .default
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -669,5 +674,6 @@ struct CiderConfig: Codable {
         self.didMigrateTodosToPerFile = didMigrateTodosToPerFile
         self.didMigrateDateCardsToPerFile = didMigrateDateCardsToPerFile
         self.lastReconciliationAt = lastReconciliationAt
+        self.tableColumnConfig = tableColumnConfig
     }
 }

@@ -29,6 +29,8 @@ struct HomeDashboardView: View {
     var focusedItemID: String? = nil
 
     @State private var config = CiderConfig.load()
+    @State private var tableColumnConfig: TableColumnConfig = CiderConfig.load().tableColumnConfig
+    @ObservedObject private var labelStorage = CardLabelStorage.shared
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -126,25 +128,47 @@ struct HomeDashboardView: View {
                     comingUpSection
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        libraryFeed
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                if displayMode == .list {
+                    // Table view manages its own scroll + sticky header
+                    LibraryTableView(
+                        items: libraryItems,
+                        labels: labelStorage.labels,
+                        folders: bookmarksViewModel.folders,
+                        columnConfig: $tableColumnConfig,
+                        selectedItemIDs: selectedItemIDs,
+                        focusedItemID: focusedItemID,
+                        onOpen: { item in handleNormalAction { handleContinueOpen(item) } },
+                        onSelect: { item in handleSelect(item: item) },
+                        onShiftSelect: { item in handleShiftSelect(item: item) },
+                        onSelectAll: { selectedItemIDs = Set(libraryItems.map(\.id)) },
+                        onDeselectAll: { selectedItemIDs.removeAll() },
+                        scrollToItemID: $scrollToItemID
+                    )
+                    .onChange(of: tableColumnConfig) { _, newConfig in
+                        config.tableColumnConfig = newConfig
+                        config.save()
                     }
-                    .scrollIndicators(.hidden)
-                    .onChange(of: scrollToItemID) { _, id in
-                        if let id {
-                            withAnimation(reduceMotion ? .none : .snappy) {
-                                proxy.scrollTo(id, anchor: .center)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            libraryFeed
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .scrollIndicators(.hidden)
+                        .onChange(of: scrollToItemID) { _, id in
+                            if let id {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    proxy.scrollTo(id, anchor: .center)
+                                }
+                                scrollToItemID = nil
                             }
-                            scrollToItemID = nil
                         }
                     }
+                    .padding(Spacing.xxs)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.md)
+                    .padding(.bottom, Spacing.md)
                 }
-                .padding(Spacing.xxs)
-                .padding(.horizontal, Spacing.md)
-                .padding(.top, Spacing.md)
-                .padding(.bottom, Spacing.md)
             }
         }
     }
@@ -155,12 +179,8 @@ struct HomeDashboardView: View {
     private var libraryFeed: some View {
         switch displayMode {
         case .list:
-            LazyVStack(spacing: Spacing.xxs) {
-                ForEach(libraryItems) { item in
-                    libraryListRow(item)
-                        .id(item.id)
-                }
-            }
+            // Handled separately in body — this branch should not be reached
+            EmptyView()
 
         case .grid:
             let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]

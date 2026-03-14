@@ -31,6 +31,9 @@ struct FolderDetailView: View {
     @State private var coverImage: NSImage?
     @State private var coverOffsetY: Double = 0.5
     @State private var isHoveringCover = false
+    @State private var folderConfig = CiderConfig.load()
+    @State private var tableColumnConfig: TableColumnConfig = CiderConfig.load().tableColumnConfig
+    @ObservedObject private var labelStorage = CardLabelStorage.shared
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -123,11 +126,28 @@ struct FolderDetailView: View {
                             folderHeaderSection
 
                             if !folderItems.isEmpty {
+                                if displayMode == .list {
+                                    LibraryTableHeader(
+                                        columnConfig: $tableColumnConfig,
+                                        allSelected: !folderItems.isEmpty && folderItems.allSatisfy { selectedItemIDs.contains($0.id) },
+                                        onToggleSelectAll: {
+                                            if folderItems.allSatisfy({ selectedItemIDs.contains($0.id) }) {
+                                                selectedItemIDs.removeAll()
+                                            } else {
+                                                selectedItemIDs = Set(folderItems.map(\.id))
+                                            }
+                                        }
+                                    )
+                                    .onChange(of: tableColumnConfig) { _, newConfig in
+                                        folderConfig.tableColumnConfig = newConfig
+                                        folderConfig.save()
+                                    }
+                                }
                                 libraryFeed
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(Spacing.xxs)
-                                    .padding(.horizontal, Spacing.md)
-                                    .padding(.vertical, Spacing.md)
+                                    .padding(displayMode == .list ? 0 : Spacing.xxs)
+                                    .padding(.horizontal, displayMode == .list ? 0 : Spacing.md)
+                                    .padding(.vertical, displayMode == .list ? 0 : Spacing.md)
                             } else {
                                 EmptyStateView(
                                     icon: "tray",
@@ -535,12 +555,17 @@ struct FolderDetailView: View {
     private var libraryFeed: some View {
         switch displayMode {
         case .list:
-            LazyVStack(spacing: Spacing.xxs) {
-                ForEach(folderItems) { item in
-                    libraryListRow(item)
-                        .id(item.id)
-                }
-            }
+            LibraryTableRows(
+                items: folderItems,
+                labels: labelStorage.labels,
+                folders: bookmarksViewModel.folders,
+                columnConfig: tableColumnConfig,
+                selectedItemIDs: selectedItemIDs,
+                focusedItemID: focusedItemID,
+                onOpen: { item in handleNormalAction { openItem(item) } },
+                onSelect: { item in handleSelect(item: item) },
+                onShiftSelect: { item in handleShiftSelect(item: item) }
+            )
 
         case .grid:
             let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
@@ -901,6 +926,18 @@ struct FolderDetailView: View {
             selectedItemIDs.removeAll()
         } else {
             action()
+        }
+    }
+
+    private func openItem(_ item: LibraryItemV2) {
+        switch item {
+        case .bookmark(let bookmark): onShowBookmarkDetails?(bookmark)
+        case .note(let note): openNoteInPanel(note)
+        case .dateCard(let dateCard): onOpenDateCard?(dateCard)
+        case .contact(let contact): onOpenContact?(contact)
+        case .todo(let todoCard): onOpenTodo?(todoCard)
+        case .externalFile: break
+        case .vaultFile(let vaultFile): onOpenVaultFile?(vaultFile)
         }
     }
 

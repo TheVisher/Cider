@@ -32,6 +32,8 @@ struct SavedViewTabContent: View {
     @State private var stackManagerInitialSelectionID: UUID?
     @State private var selectedStackSurfaceID: StackSurfaceSelection?
     @State private var selectedStackSurfaceSnapshot: StackSurfaceResult?
+    @State private var savedViewConfig = CiderConfig.load()
+    @State private var tableColumnConfig: TableColumnConfig = CiderConfig.load().tableColumnConfig
 
     private var cardSizing: LibraryCardSizing {
         LibraryCardSizing(scale: savedView.layoutSpec.cardSizeScale)
@@ -815,12 +817,25 @@ struct SavedViewTabContent: View {
         } else {
             switch savedView.layoutSpec.displayMode {
             case .list:
-                ForEach(filteredItems) { item in
-                    itemRow(item)
-                        .modifier(CardContextMenuModifier {
-                            contextMenuItems(for: item)
-                        })
+                LibraryTableHeader(
+                    columnConfig: $tableColumnConfig,
+                    allSelected: false,
+                    onToggleSelectAll: { }
+                )
+                .onChange(of: tableColumnConfig) { _, newConfig in
+                    savedViewConfig.tableColumnConfig = newConfig
+                    savedViewConfig.save()
                 }
+                LibraryTableRows(
+                    items: filteredItems,
+                    labels: labelStorage.labels,
+                    folders: folders,
+                    columnConfig: tableColumnConfig,
+                    selectedItemIDs: [],
+                    onOpen: { item in openSavedViewItem(item) },
+                    onSelect: { _ in },
+                    onShiftSelect: { _ in }
+                )
             case .grid:
                 let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
                 LazyVGrid(columns: columns, spacing: Spacing.md) {
@@ -1223,6 +1238,17 @@ struct SavedViewTabContent: View {
     private func folderName(for note: Note) -> String? {
         guard let folderID = note.folderID else { return nil }
         return folders.first(where: { $0.id == folderID })?.name
+    }
+
+    private func openSavedViewItem(_ item: LibraryItemV2) {
+        switch item {
+        case .bookmark(let bookmark): onOpenBookmark?(bookmark)
+        case .note(let note): onOpenNote?(note)
+        case .dateCard(let dateCard): onOpenDateCard?(dateCard)
+        case .contact(let contact): onOpenContact?(contact)
+        case .todo(let todoCard): onOpenTodo?(todoCard)
+        case .externalFile, .vaultFile: break
+        }
     }
 }
 
