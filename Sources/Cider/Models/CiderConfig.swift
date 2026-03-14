@@ -290,7 +290,7 @@ struct CiderConfig: Codable {
             undoToastPosition: .bottomRightPanel,
             homeSort: .createdDescending,
             homeEntityFilter: Set(LibraryEntityType.allCases),
-            enableSpotlightIndexing: true,
+            enableSpotlightIndexing: false,
             enableSoundEffects: false,
             enableAutoTagging: true,
             enableEmbeddings: true,
@@ -306,7 +306,7 @@ struct CiderConfig: Codable {
             showDragModeHints: true,
             enableClipboardHistory: true,
             enableClipboardHotkey: true,
-            clipboardRetentionDays: 0,
+            clipboardRetentionDays: 30,
             clipboardImageRetentionDays: 7,
             clipboardMaxImageStorageMB: 500,
             clipboardPanelPosition: .followMouse,
@@ -488,7 +488,7 @@ struct CiderConfig: Codable {
         enableSpotlightIndexing = try container.decodeIfPresent(
             Bool.self,
             forKey: .enableSpotlightIndexing
-        ) ?? true
+        ) ?? false
         enableSoundEffects = try container.decodeIfPresent(
             Bool.self,
             forKey: .enableSoundEffects
@@ -511,7 +511,7 @@ struct CiderConfig: Codable {
         showDragModeHints = try container.decodeIfPresent(Bool.self, forKey: .showDragModeHints) ?? true
         enableClipboardHistory = try container.decodeIfPresent(Bool.self, forKey: .enableClipboardHistory) ?? true
         enableClipboardHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableClipboardHotkey) ?? true
-        clipboardRetentionDays = try container.decodeIfPresent(Int.self, forKey: .clipboardRetentionDays) ?? 0
+        clipboardRetentionDays = try container.decodeIfPresent(Int.self, forKey: .clipboardRetentionDays) ?? 30
         clipboardImageRetentionDays = try container.decodeIfPresent(Int.self, forKey: .clipboardImageRetentionDays) ?? 7
         clipboardMaxImageStorageMB = try container.decodeIfPresent(Int.self, forKey: .clipboardMaxImageStorageMB) ?? 500
         clipboardPanelPosition = try container.decodeIfPresent(ClipboardPanelPosition.self, forKey: .clipboardPanelPosition) ?? .followMouse
@@ -566,7 +566,7 @@ struct CiderConfig: Codable {
         undoToastPosition: ToastPosition = .bottomRightPanel,
         homeSort: LibrarySortMode = .createdDescending,
         homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases),
-        enableSpotlightIndexing: Bool = true,
+        enableSpotlightIndexing: Bool = false,
         enableSoundEffects: Bool = false,
         enableAutoTagging: Bool = true,
         enableEmbeddings: Bool = true,
@@ -582,7 +582,7 @@ struct CiderConfig: Codable {
         showDragModeHints: Bool = true,
         enableClipboardHistory: Bool = true,
         enableClipboardHotkey: Bool = true,
-        clipboardRetentionDays: Int = 0,
+        clipboardRetentionDays: Int = 30,
         clipboardImageRetentionDays: Int = 7,
         clipboardMaxImageStorageMB: Int = 500,
         clipboardPanelPosition: ClipboardPanelPosition = .followMouse,

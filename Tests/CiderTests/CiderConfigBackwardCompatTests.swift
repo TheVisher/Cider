@@ -25,7 +25,7 @@ struct CiderConfigBackwardCompatTests {
         #expect(config.bookmarksDefaultViewMode == .masonry)
         #expect(config.detailViewMode == .slideOut)
         #expect(config.trashRetentionDays == 30)
-        #expect(config.enableSpotlightIndexing == true)
+        #expect(config.enableSpotlightIndexing == false)
         #expect(config.enableSoundEffects == false)
         #expect(config.enableAutoTagging == true)
         #expect(config.enableClipboardHistory == true)
@@ -70,7 +70,7 @@ struct CiderConfigBackwardCompatTests {
 
         #expect(config.enableClipboardHistory == true)
         #expect(config.enableClipboardHotkey == true)
-        #expect(config.clipboardRetentionDays == 0)
+        #expect(config.clipboardRetentionDays == 30)
         #expect(config.clipboardImageRetentionDays == 7)
         #expect(config.clipboardMaxImageStorageMB == 500)
         #expect(config.clipboardPanelPosition == .followMouse)

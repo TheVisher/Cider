@@ -332,21 +332,17 @@ Three instances of `.foregroundColor(.white)` on text/icons over colored backgro
 
 - File refs: `Sources/Cider/Views/Shared/SelectionCheckmark.swift`, `Sources/Cider/Views/Shared/NewItemPopover.swift`, `Sources/Cider/Views/Shared/FolderDetailView.swift`
 
-### CH-D12 — Spotlight indexing is enabled by default for user content
+### ~~CH-D12 — Spotlight indexing is enabled by default for user content~~ ✅ Fixed 2026-03-13
 
-**Severity:** Medium
+`enableSpotlightIndexing` default changed from `true` to `false`. Users must opt in via Settings. Existing users who already have the setting saved are unaffected.
 
-`enableSpotlightIndexing` defaults to `true`, which means bookmark notes, note snippets, and contact metadata are published into the system search index unless the user opts out after launch.
+- File refs: `Sources/Cider/Models/CiderConfig.swift`
 
-- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/SpotlightIndexer.swift`
+### ~~CH-D13 — Clipboard history defaults are too aggressive for sensitive data~~ ✅ Fixed 2026-03-13
 
-### CH-D13 — Clipboard history defaults are too aggressive for sensitive data
+`clipboardRetentionDays` default changed from `0` (infinite) to `30` days. Users can still set it to 0 for infinite retention via Settings. Existing users who already have the setting saved are unaffected.
 
-**Severity:** Medium
-
-Clipboard history is enabled by default and text retention defaults to `0` (infinite). The app therefore stores copied content persistently unless the user explicitly changes the setting.
-
-- File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/ClipboardStorage.swift`, `Sources/Cider/Services/ClipboardHistoryService.swift`
+- File refs: `Sources/Cider/Models/CiderConfig.swift`
 
 ### ~~CH-D14 — WebView metadata extraction uses persistent website data by default~~ ✅ Fixed 2026-03-13
 
