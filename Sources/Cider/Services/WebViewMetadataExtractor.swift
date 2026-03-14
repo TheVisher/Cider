@@ -40,6 +40,9 @@ final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
 
             let config = WKWebViewConfiguration()
             config.suppressesIncrementalRendering = true
+            // Use ephemeral data store so cookies/storage from one extraction
+            // don't leak into subsequent runs or persist on disk.
+            config.websiteDataStore = .nonPersistent()
             let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1280, height: 720), configuration: config)
             webView.navigationDelegate = self
             webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15"

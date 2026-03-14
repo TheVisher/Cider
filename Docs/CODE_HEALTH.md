@@ -59,13 +59,11 @@ The sync token has been moved to Keychain for the main UI flow, and `SyncService
 
 - File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/KeychainHelper.swift`, `Sources/Cider/Services/SyncService.swift`, `Sources/Cider/Views/Settings/SyncSettingsView.swift`
 
-### CH-S06 — Bookmark enrichment leaks full page URL via `Referer` and public logs
+### ~~CH-S06 — Bookmark enrichment leaks full page URL via `Referer` and public logs~~ ✅ Fixed 2026-03-13
 
-**Severity:** Medium
+Referer header now sends only the origin (`scheme://host/`) instead of the full page URL, preventing query params and path tokens from leaking to image hosts. Error logs redacted from full URL to host-only.
 
-Remote thumbnail downloads still forward `pageURL.absoluteString` as the `Referer`, which can leak sensitive query params/tokens to third-party image hosts. Enrichment and WebView extraction also log titles, hosts, and image URLs with `privacy: .public`.
-
-- File refs: `Sources/Cider/Services/BookmarksStorage.swift`, `Sources/Cider/Services/WebViewMetadataExtractor.swift`
+- File refs: `Sources/Cider/Services/BookmarksStorage.swift`
 
 ### CH-S07 — Clipboard URL favicon fetch leaks copied domains to third parties
 
@@ -227,13 +225,11 @@ Bookmarks, folders, and notes created on Cider Web or Cider iOS that lack a `cid
 
 - File refs: `Sources/Cider/Services/SyncService.swift`, `Cider-Web/convex/sync.ts`
 
-### CH-C20 — `screenCaptureDefaultAction` setting is currently non-functional
+### ~~CH-C20 — `screenCaptureDefaultAction` setting is currently non-functional~~ Deferred (design decision)
 
-**Severity:** Medium
+The setting exists in CiderConfig but has no UI and no implementation. Auto-executing an action (create note/dateCard/contact) on toast timeout would be surprising behavior — the 8-second timeout gives users time to choose. The setting is kept for potential future use but intentionally not wired up.
 
-When the screen-capture toast timer expires, `executeScreenCaptureDefaultAction()` is called, but it only dismisses the toast and optionally restores the panel. It does not branch on `CiderConfig.screenCaptureDefaultAction`.
-
-- File refs: `Sources/Cider/App/AppDelegate.swift`, `Sources/Cider/Models/CiderConfig.swift`
+- File refs: `Sources/Cider/App/AppDelegate+ScreenCapture.swift`, `Sources/Cider/Models/CiderConfig.swift`
 
 ---
 
@@ -355,11 +351,9 @@ Clipboard history is enabled by default and text retention defaults to `0` (infi
 
 - File refs: `Sources/Cider/Models/CiderConfig.swift`, `Sources/Cider/Services/ClipboardStorage.swift`, `Sources/Cider/Services/ClipboardHistoryService.swift`
 
-### CH-D14 — WebView metadata extraction uses persistent website data by default
+### ~~CH-D14 — WebView metadata extraction uses persistent website data by default~~ ✅ Fixed 2026-03-13
 
-**Severity:** Low
-
-The headless metadata extraction path still uses a standard `WKWebViewConfiguration` with shared process state instead of an ephemeral website data store, increasing cookie/storage bleed across enrichment runs.
+`WebViewMetadataExtractor` now uses `.nonPersistent()` website data store so cookies and storage from one extraction don't persist or leak into subsequent runs.
 
 - File refs: `Sources/Cider/Services/WebViewMetadataExtractor.swift`
 

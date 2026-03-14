@@ -1488,8 +1488,10 @@ final class BookmarksStorage: ObservableObject {
         request.timeoutInterval = 8
         Self.applyBrowserHeaders(&request)
         request.setValue("image/gif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        if let pageURL {
-            request.setValue(pageURL.absoluteString, forHTTPHeaderField: "Referer")
+        // Send only the origin (scheme + host) as Referer to satisfy CDN anti-hotlinking
+        // without leaking the full page path and query parameters to image hosts.
+        if let pageURL, let scheme = pageURL.scheme, let host = pageURL.host {
+            request.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
         }
 
         do {
@@ -1507,7 +1509,7 @@ final class BookmarksStorage: ObservableObject {
                 preferredFileExtension: fileExtension
             )
         } catch {
-            enrichLog.warning("Image download error \(remoteURL.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            enrichLog.warning("Image download error \(remoteURL.host ?? "?", privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
