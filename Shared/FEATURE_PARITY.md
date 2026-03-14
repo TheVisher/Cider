@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-14
+> **Last updated**: 2026-03-13
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -11,11 +11,11 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | Bookmark CRUD | Yes | Yes | Yes |
-| Notes CRUD | Yes | Yes (plain text) | No |
+| Notes CRUD | Yes | Yes (plain text) | Yes |
 | Bookmark sync (push/pull) | Yes | Yes (direct mutations) | Yes |
-| Folder sync | Yes | Yes | No |
-| Soft delete / trash | Yes | Yes | Yes (swipe-to-delete) |
-| Trash view / restore | Yes | Yes | Planned (M8) |
+| Folder sync | Yes | Yes | Yes |
+| Soft delete / trash | Yes | Yes | Yes |
+| Trash view / restore | Yes | Yes | Yes |
 | Permanent delete (purge) | Yes | Yes (30-day cron) | No |
 | Search | Yes | Yes | Yes (local filter) |
 | Tags | Yes | Yes | Yes (display only) |
@@ -25,10 +25,10 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
-| Folders / collections | Yes | Yes | No |
-| Nested folders (tree) | Yes | Yes | No |
-| Folder icons | Yes (SF Symbols) | Yes (Lucide) | No |
-| Move to folder | Yes | Yes (context menu + drag-and-drop) | No |
+| Folders / collections | Yes | Yes | Yes |
+| Nested folders (tree) | Yes | Yes | Yes |
+| Folder icons | Yes (SF Symbols) | Yes (Lucide) | Yes (SF Symbols + emoji) |
+| Move to folder | Yes | Yes (context menu + drag-and-drop) | Yes (context menu + detail) |
 | Tag management (rename/merge) | Yes | Planned | No |
 | Tag filtering | Yes | Yes | Planned |
 | Saved views / smart filters | Yes | Yes (tabs) | Planned (M16) |
@@ -37,12 +37,12 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
-| Grid view | Yes | Yes | No |
+| Grid view | Yes | Yes | Yes |
 | List view | Yes | Yes | Yes (default) |
-| Masonry view | Yes | Yes | No |
-| Card size slider | Yes | Yes (per-view, debounced) | No |
-| Sidebar | Yes | Yes (collapsible) | No |
-| Detail panel (slide-out) | Yes | Yes | No |
+| Masonry view | Yes | Yes | Yes |
+| Card size slider | Yes | Yes (per-view, debounced) | Yes (3 levels) |
+| Sidebar | Yes | Yes (collapsible) | Yes (tab bar) |
+| Detail panel (slide-out) | Yes | Yes | Yes (sheet) |
 | Keyboard shortcuts | Yes | Partial (Cmd+K, Cmd+B) | No |
 
 ## Capture & Input
@@ -62,7 +62,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
-| Thumbnails | Yes (local + remote) | Yes (Convex storage + remote) | Yes (remote only) |
+| Thumbnails | Yes (local + remote) | Yes (Convex storage + remote) | Yes (remote + disk cache) |
 | Thumbnail upload to Convex | Planned | Endpoint exists | No |
 | Favicon display | Yes | Yes | Yes |
 | Gradient fallbacks | Yes | Yes | Yes |
@@ -75,7 +75,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | AI summaries (generate) | Yes (local) | Planned (needs API key) | No |
-| AI summaries (display) | Yes | Yes | No |
+| AI summaries (display) | Yes | Yes | Yes |
 | AI chat | Yes | No | No |
 | Auto-enrichment pipeline | Yes | Partial (server action) | No |
 
@@ -87,8 +87,8 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Account-based auth | No | Yes (email/password) | No |
 | OAuth (Google/GitHub/Apple) | No | Planned | No |
 | Account-based sync (replace tokens) | Planned | Planned | Planned |
-| Background sync | Yes (5s poll) | Yes (real-time subscriptions) | No (foreground only) |
-| Dirty-only push | Yes | N/A | Yes |
+| Background sync | Yes (5s poll) | Yes (real-time subscriptions) | Yes (30s poll + offline queue) |
+| Dirty-only push | Yes | N/A | Yes (offline queue + immediate push) |
 | Failure handling / retry | Yes (pause after 3) | N/A (Convex retries) | Yes (user-facing errors) |
 | Reconciliation (drift detection) | Yes | Yes (endpoint exists) | No |
 
@@ -96,7 +96,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
-| Undo delete | Yes | Yes (toast) | Planned (M9) |
+| Undo delete | Yes | Yes (toast) | Yes (toast) |
 | Pull to refresh | N/A | N/A | Yes |
 | Context menus | Yes | Yes (right-click) | Yes (long-press) |
 | Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Planned (M12) |
@@ -113,8 +113,8 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 |---------|---------|-----|-----|
 | Standalone notes | Yes | No | No |
 | Rich text editor (TipTap) | Yes | Planned | No |
-| Notes on bookmarks | Yes | Yes (plain text) | No |
-| Notes sync | Yes | Yes | No |
+| Notes on bookmarks | Yes | Yes (plain text) | Yes |
+| Notes sync | Yes | Yes | Yes |
 | Whiteboard (Excalidraw) | Yes | No | No |
 
 ## Deployment & Distribution
