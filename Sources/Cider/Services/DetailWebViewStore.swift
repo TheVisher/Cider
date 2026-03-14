@@ -141,8 +141,16 @@ final class DetailWebViewStore: ObservableObject {
             }
             DispatchQueue.main.async {
                 if let html {
+                    // Strip <script> tags from the page HTML before loading to prevent
+                    // untrusted page JavaScript from executing. Our Readability.js is
+                    // injected separately via evaluateJavaScript after load.
+                    let sanitized = html.replacingOccurrences(
+                        of: #"(?is)<script\b[^>]*>.*?</script>"#,
+                        with: "",
+                        options: .regularExpression
+                    )
                     delegate.phase = .loadedHTML
-                    wv.loadHTMLString(html, baseURL: url)
+                    wv.loadHTMLString(sanitized, baseURL: url)
                 } else {
                     delegate.reportFailure()
                 }
@@ -237,7 +245,7 @@ private final class WebLoadDelegate: NSObject, WKNavigationDelegate {
     ) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if action.navigationType == .linkActivated {
-            NSWorkspace.shared.open(url)
+            openURLSafely(url)
             return .cancel
         }
         return .allow

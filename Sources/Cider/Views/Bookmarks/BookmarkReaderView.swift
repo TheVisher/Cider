@@ -106,7 +106,7 @@ struct BookmarkReaderView: NSViewRepresentable {
         ) async -> WKNavigationActionPolicy {
             guard let url = action.request.url else { return .cancel }
             if action.navigationType == .linkActivated {
-                NSWorkspace.shared.open(url)
+                openURLSafely(url)
                 return .cancel
             }
             return .allow

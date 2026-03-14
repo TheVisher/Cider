@@ -75,6 +75,36 @@ Saving a URL clipboard item automatically triggers favicon requests to DuckDuckG
 
 - File refs: `Sources/Cider/Services/ClipboardStorage.swift`
 
+### ~~CH-S08 — Reader extraction executes untrusted page JavaScript during preload~~ ✅ Fixed 2026-03-13
+
+Fetched HTML is now stripped of all `<script>` tags before being loaded into the extraction `WKWebView`. Readability.js is injected separately via `evaluateJavaScript` after load, so it still works. Untrusted page scripts no longer execute during preload.
+
+- File refs: `Sources/Cider/Services/DetailWebViewStore.swift`
+
+### ~~CH-S09 — Reader mode renders extracted article fields as trusted HTML~~ ✅ Fixed 2026-03-13
+
+`BookmarkReaderView` now HTML-escapes `article.title` and `article.byline` before interpolation into the reader template. `article.content` is left as-is since it's sanitized HTML from Readability.js meant to render as HTML.
+
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`
+
+### ~~CH-S10 — Editor and whiteboard webviews still expose the entire home directory to local web content~~ ✅ Fixed 2026-03-13
+
+`allowingReadAccessTo` in both `NotesViewModel` and `WhiteboardViewModel` changed from `NSHomeDirectory()` to `StoragePaths.cachedVaultDirectoryURL` — the vault directory where notes, attachments, and whiteboards actually live.
+
+- File refs: `Sources/Cider/ViewModels/NotesViewModel.swift`, `Sources/Cider/ViewModels/WhiteboardViewModel.swift`
+
+### ~~CH-S11 — External URL launches are not scheme-restricted~~ ✅ Fixed 2026-03-13
+
+Added `openURLSafely()` utility that only allows `http`/`https` schemes. Applied to all webview navigation delegates handling untrusted content: `BookmarkReaderView`, `BookmarkWebView`, `TipTapEditorView` (link clicks and navigation), and `DetailWebViewStore` (web load delegate). User-initiated "Open in Browser" actions from trusted UI buttons are unchanged.
+
+- File refs: `Sources/Cider/Utilities/Constants.swift`, `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`, `Sources/Cider/Views/Bookmarks/BookmarkWebView.swift`, `Sources/Cider/Views/Notes/TipTapEditorView.swift`, `Sources/Cider/Services/DetailWebViewStore.swift`
+
+### ~~CH-S12 — Sync endpoint validation is still missing before token use~~ ✅ Fixed 2026-03-13
+
+`SyncService.startIfEnabled()` now enforces that `syncURL` starts with `https://` before deriving the deployment URL or sending the sync token. Non-HTTPS URLs are rejected with a log error and sync is stopped.
+
+- File refs: `Sources/Cider/Services/SyncService.swift`
+
 ---
 
 ## Correctness / Data
@@ -169,11 +199,9 @@ Added `CiderConfig.load().enablePageSummaries` guard to the summary generation c
 
 - File refs: `Sources/Cider/Services/BookmarksStorage.swift`
 
-### CH-C17 — Sync stop/reconfigure does not cancel in-flight work
+### ~~CH-C17 — Sync stop/reconfigure does not cancel in-flight work~~ ✅ Fixed 2026-03-13
 
-**Severity:** Medium
-
-`SyncService.stop()` invalidates the timer but does not cancel the active async sync task. A sync cycle can continue mutating local state after sync is disabled or reconfigured.
+`SyncService.stop()` now cancels the auth task, push debounce task, and pull debounce task. The auth flow checks `Task.isCancelled` before proceeding after authentication.
 
 - File refs: `Sources/Cider/Services/SyncService.swift`
 
@@ -185,11 +213,9 @@ Folder pull resolves `parentSyncId` in a single pass against already-loaded fold
 
 - File refs: `Sources/Cider/Services/SyncService.swift`
 
-### CH-C19 — Duplicate external sources are allowed by path
+### ~~CH-C19 — Duplicate external sources are allowed by path~~ ✅ Fixed 2026-03-13
 
-**Severity:** Medium
-
-`ExternalSourceStorage.addSource(path:displayName:)` does not deduplicate on `path`, so the same directory can be added multiple times, creating duplicate source records and duplicate scans.
+`ExternalSourceStorage.addSource()` now checks for an existing source with the same path and returns it instead of creating a duplicate.
 
 - File refs: `Sources/Cider/Services/ExternalSourceStorage.swift`
 
@@ -241,19 +267,15 @@ When the screen-capture toast timer expires, `executeScreenCaptureDefaultAction(
 
 `_cachedScale` (`nonisolated(unsafe) static var`) is set once at startup. `invalidateScale()` re-reads config and updates the cache; called at the top of `AppDelegate.handleConfigChanged()`. Font tokens now read the cached value with no UserDefaults decode per access.
 
-### CH-P07 — SpotlightIndexer duplicates subscriptions on repeated `start()`
+### ~~CH-P07 — SpotlightIndexer duplicates subscriptions on repeated `start()`~~ ✅ Fixed 2026-03-13
 
-**Severity:** Medium
+`SpotlightIndexer.start()` now clears existing subscriptions (`cancellables.removeAll()`) and cancels the debounce task before re-binding, preventing stacked subscriptions.
 
-`SpotlightIndexer.start()` always calls `bindStorages()` without guarding against existing subscriptions. Repeated calls while indexing remains enabled stack Combine sinks in `cancellables` and multiply reindex triggers.
+- File refs: `Sources/Cider/Services/SpotlightIndexer.swift`
 
-- File refs: `Sources/Cider/Services/SpotlightIndexer.swift`, `Sources/Cider/App/AppDelegate.swift`
+### ~~CH-P08 — Spotlight reindex still performs blocking disk I/O on the main actor~~ ✅ Fixed 2026-03-13
 
-### CH-P08 — Spotlight reindex still performs blocking disk I/O on the main actor
-
-**Severity:** Medium
-
-`SpotlightIndexer` is `@MainActor`, and `reindexAll()` still reads thumbnail files and note content synchronously during indexing. Larger libraries can stall the UI during reindex cycles.
+`SpotlightIndexer.reindexAll()` now loads thumbnail data off the main thread via `Task.detached(priority: .utility)`, then builds and submits index items back on the main actor.
 
 - File refs: `Sources/Cider/Services/SpotlightIndexer.swift`
 

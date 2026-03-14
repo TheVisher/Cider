@@ -88,7 +88,7 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
             case "linkClicked":
                 if let urlString = message.body as? String,
                    let url = URL(string: urlString) {
-                    NSWorkspace.shared.open(url)
+                    openURLSafely(url)
                 }
 
             case "editorError":
@@ -122,7 +122,7 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
         }
 
         if navigationAction.navigationType == .linkActivated {
-            NSWorkspace.shared.open(url)
+            openURLSafely(url)
         }
         return .cancel
     }

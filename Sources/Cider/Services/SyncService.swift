@@ -140,6 +140,13 @@ final class SyncService: ObservableObject {
             return
         }
 
+        // Enforce HTTPS before sending the sync token
+        guard config.syncURL.lowercased().hasPrefix("https://") else {
+            logger.error("Sync URL must use HTTPS: \(config.syncURL)")
+            stop()
+            return
+        }
+
         // Derive Convex deployment URL from the site URL
         let deploymentURL = Self.deploymentURL(from: config.syncURL)
         guard !deploymentURL.isEmpty else {

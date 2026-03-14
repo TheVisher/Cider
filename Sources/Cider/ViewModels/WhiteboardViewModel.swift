@@ -47,7 +47,8 @@ final class WhiteboardViewModel: ObservableObject {
             withExtension: "html",
             subdirectory: "ExcalidrawEditor"
         ) {
-            let readAccessRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            // Scope file access to the vault directory instead of the entire home directory.
+            let readAccessRoot = StoragePaths.cachedVaultDirectoryURL
             webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
         } else {
             Self.logger.error("ExcalidrawEditor/index.html not found in bundle")
