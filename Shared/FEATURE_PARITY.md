@@ -38,7 +38,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | Grid view | Yes | Yes | Yes |
-| List view (table) | Yes (unified table w/ columns) | Yes | Yes (default) |
+| List view (table) | Yes (unified table w/ columns) | Yes (table w/ configurable columns) | Yes (default) |
 | Masonry view | Yes | Yes | Yes |
 | Card size slider | Yes | Yes (per-view, debounced) | Yes (3 levels) |
 | Sidebar | Yes | Yes (collapsible) | Yes (tab bar) |
