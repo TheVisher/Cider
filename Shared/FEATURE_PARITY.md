@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-13
+> **Last updated**: 2026-03-14
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -28,7 +28,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Folders / collections | Yes | Yes | No |
 | Nested folders (tree) | Yes | Yes | No |
 | Folder icons | Yes (SF Symbols) | Yes (Lucide) | No |
-| Move to folder | Yes | Planned | No |
+| Move to folder | Yes | Yes (context menu + drag-and-drop) | No |
 | Tag management (rename/merge) | Yes | Planned | No |
 | Tag filtering | Yes | Yes | Planned |
 | Saved views / smart filters | Yes | Yes (tabs) | Planned (M16) |
@@ -40,7 +40,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Grid view | Yes | Yes | No |
 | List view | Yes | Yes | Yes (default) |
 | Masonry view | Yes | Yes | No |
-| Card size slider | Yes | Planned | No |
+| Card size slider | Yes | Yes (per-view, debounced) | No |
 | Sidebar | Yes | Yes (collapsible) | No |
 | Detail panel (slide-out) | Yes | Yes | No |
 | Keyboard shortcuts | Yes | Partial (Cmd+K, Cmd+B) | No |
@@ -56,7 +56,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Bookmarklet | N/A | Yes | N/A |
 | PWA share target | N/A | Yes | N/A |
 | Browser extension | N/A | Planned | N/A |
-| Clipboard detection | Yes | No | Planned (M10) |
+| Clipboard detection | Yes | Yes (global paste-to-capture) | Planned (M10) |
 
 ## Visual & Media
 
@@ -99,7 +99,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Undo delete | Yes | Yes (toast) | Planned (M9) |
 | Pull to refresh | N/A | N/A | Yes |
 | Context menus | Yes | Yes (right-click) | Yes (long-press) |
-| Multi-select / bulk ops | Yes | Planned | Planned (M12) |
+| Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Planned (M12) |
 | Export (Netscape HTML) | Yes | Yes | Planned (M15) |
 | Import (Netscape HTML) | Yes | Planned | No |
 | Reader mode | Yes (Readability.js) | No | Planned (M11) |

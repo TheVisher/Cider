@@ -1,6 +1,8 @@
-# Per-File Storage Standard
+# Storage Standard
 
-This is the definitive reference for how Cider stores card data on disk. **Every card type** must follow this pattern. No exceptions.
+> This is the definitive reference for how Cider stores ALL data on disk — user content (standard files) and internal app data (hidden `.cider/` directory). **Every card type** must follow the per-file pattern. No exceptions.
+>
+> *Consolidates the former PER_FILE_STORAGE.md and VAULT_STORAGE.md.*
 
 ## Core Principle
 
@@ -207,6 +209,47 @@ Each type migrates independently. Steps:
 5. Set flag in CiderConfig
 
 Called from `AppDelegate` after `VaultStructureMigration` and before storage singletons initialize.
+
+## Internal App Data (`.cider/` Directory)
+
+All app-internal data lives inside `~/CiderVault/.cider/`, a hidden directory that macOS auto-hides from Finder. The vault root is reserved for user-visible folders only.
+
+```
+~/CiderVault/.cider/
+├── bookmarks/           # Bookmark metadata + index
+├── notes/               # Note metadata + index
+├── contacts/            # Contact metadata
+├── date-cards/          # Calendar-linked cards
+├── labels/              # Label definitions
+├── saved-views/         # Saved filter/sort configs
+├── sources/             # Linked source definitions
+├── stacks/              # Grouped collections
+├── tags/                # Tag definitions
+├── todos/               # Task items
+├── clipboard/           # Clipboard history
+├── whiteboards/         # Freeform canvas boards
+├── folders/             # Folder metadata: index.json, covers/, .trash/
+├── ai-chat/             # AI Chat conversation history per model
+├── ai/                  # NL embedding vectors (embeddings.json)
+└── index.json           # Vault-wide item index
+```
+
+### How Paths Resolve
+
+`StoragePaths.directoryURL(for:)` builds paths as `vaultRoot/.cider/{StorageType.ciderSubpath}`. The `ciderSubpath` property on `StorageType` maps each case to a lowercase, hyphenated name (e.g. `.dateCards` → `"date-cards"`, `.savedViews` → `"saved-views"`).
+
+If a user has set a `directoryOverrides` entry in CiderConfig for a StorageType, that override takes precedence (absolute path).
+
+### Why `.cider/`?
+
+- macOS hides dotfiles from Finder by default — zero filtering code needed
+- The vault root becomes purely user content
+- VaultFolderService no longer needs a hardcoded list of internal directory names
+- Adding new internal directories requires no code changes to filtering logic
+
+### Vault Structure Migration
+
+On first launch after the update, `VaultStructureMigration.migrateIfNeeded()` moves old top-level internal directories into `.cider/`. The migration is idempotent — skips sources that don't exist or destinations that already exist. Gated by `didMigrateVaultToCiderDir` flag in CiderConfig.
 
 ## Future: File Watching (External Edit Detection)
 

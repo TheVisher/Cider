@@ -1,16 +1,19 @@
 # Cider - Claude Context Guide
 
+> **Start here**: Read `Shared/ECOSYSTEM.md` for cross-platform context (sync protocol, data model, feature parity). This CLAUDE.md covers Desktop-specific concerns only.
+
 Cider is a native macOS floating panel app for bookmarks, notes, and projects. Double-tap Option to activate. SwiftUI + AppKit, macOS 14+.
 
 ## 1.0 Roadmap
 
 **Read:** `Docs/1_0_ROADMAP.md` every session. Also check `Docs/USER_FEEDBACK.md`.
 
-- Point to next `Not Started` item when asked "what should we work on?"
+- Point to next `Not Started` item when asked "what should we work on?" — also check `Shared/FEATURE_PARITY.md` to see if iOS or Web are missing something Desktop already has.
 - Redirect post-1.0 ideas to roadmap backlog
 - Never mark features Complete — only the user does that after testing
 - Run code review after implementing any feature
 - Update roadmap doc after gate transitions
+- After user confirms a feature is complete, update `Shared/FEATURE_PARITY.md` to reflect the change
 
 ## Critical Rules
 
@@ -30,6 +33,11 @@ Read the relevant doc BEFORE writing code in that area:
 
 | When... | Read |
 |---------|------|
+| Cross-platform context | `Shared/ECOSYSTEM.md` |
+| Sync work | `Shared/SYNC_PROTOCOL.md` |
+| Schema / data model | `Shared/DATA_MODEL.md` |
+| Cross-platform design | `Shared/DESIGN_LANGUAGE.md` |
+| Feature parity check | `Shared/FEATURE_PARITY.md` |
 | Any UI work | `Docs/DESIGN_SYSTEM.md` |
 | Acrylic/materials | `Docs/ACRYLIC_STYLE.md` |
 | Any Swift code | `Docs/CONVENTIONS.md` |
@@ -38,19 +46,19 @@ Read the relevant doc BEFORE writing code in that area:
 | SwiftUI + NSPanel pitfalls | `Docs/SWIFTUI_GOTCHAS.md` |
 | TipTap/notes editor | `Docs/TIPTAP_EDITOR.md` |
 | Concurrency/storage patterns | `Docs/TECH_STACK.md` |
-| Adding/modifying card storage | `Docs/PER_FILE_STORAGE.md` |
+| Adding/modifying card storage | `Docs/STORAGE.md` |
 | Adding settings | `Docs/USER_PREFERENCES.md` |
 | Reusable components | `Docs/SHARED_COMPONENTS.md` |
 | Detail views | `Docs/DETAIL_PANEL_SPEC.md` |
-| AI Chat features & architecture | `Docs/AI_CHAT_VISION.md` |
+| AI features & chat | `Docs/AI.md` |
 | Terminal / AI Chat panel | `Docs/TERMINAL.md` |
-| Cider Web sync | `Docs/ARCHITECTURE.md` § Cider Web Sync |
+| Cider Web sync | `Shared/SYNC_PROTOCOL.md` |
 | Display/perf bugs | `Docs/TROUBLESHOOTING.md` |
 | Code health/debt | `Docs/CODE_HEALTH.md` |
 | Pre-release QA | `Docs/RELEASE_CHECKLIST.md` |
-| Full docs map | `Docs/DOCS_INDEX.md` |
 
-Tab vision docs: `Docs/{TAB_NAME}_VISION.md` (HOME, BOOKMARKS, NOTES, WHITEBOARD, DOCUMENTS, BOOKS, TODOS, CLIPBOARD, LINKED_SOURCES)
+Tab vision docs: `Docs/{TAB_NAME}_VISION.md` (HOME, BOOKMARKS, NOTES, WHITEBOARD, CLIPBOARD, LINKED_SOURCES)
+Future tabs (Books, Todos, Documents): `Docs/FUTURE_TABS.md`
 Long-term vault direction: `Docs/VAULT_VISION.md`
 
 ## Quick Reference
