@@ -131,6 +131,12 @@ final class DoubleTapDetector: @unchecked Sendable {
             if !event.modifierFlags.intersection(otherModifiers).isEmpty {
                 usedAsModifier = true
             }
+        } else if isKeyDown && wasKeyDown {
+            // Option still held — another modifier was added (e.g., pressed Shift while holding Option)
+            let otherModifiers: NSEvent.ModifierFlags = [.command, .control, .shift]
+            if !event.modifierFlags.intersection(otherModifiers).isEmpty {
+                usedAsModifier = true
+            }
         } else if wasKeyDown && !isKeyDown {
             // Option key just released — fire only if:
             // 1. Not used as a modifier
