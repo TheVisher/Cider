@@ -60,21 +60,21 @@ struct SettingsPrimarySidebar: View {
             Button(action: onSelectAccount) {
                 HStack(spacing: Spacing.sm) {
                     Circle()
-                        .fill(CiderColors.accentMedium)
+                        .fill(AuthService.shared.isLoggedIn ? CiderColors.accentMedium : CiderColors.separatorMedium)
                         .frame(width: 36, height: 36)
                         .overlay {
                             Image(systemName: "person.fill")
                                 .font(CiderFont.navTitle)
-                                .foregroundColor(CiderColors.controlAccent)
+                                .foregroundColor(AuthService.shared.isLoggedIn ? CiderColors.controlAccent : CiderColors.tertiary)
                         }
 
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text("Local Account")
+                        Text(AuthService.shared.isLoggedIn ? AuthService.shared.accountEmail : "Sign In")
                             .font(CiderFont.labelSemibold)
                             .foregroundColor(CiderColors.primary)
                             .lineLimit(1)
 
-                        Text("Profile settings")
+                        Text(AuthService.shared.isLoggedIn ? "Signed in" : "Sync across devices")
                             .font(CiderFont.body)
                             .foregroundColor(CiderColors.secondary)
                             .lineLimit(1)
@@ -235,7 +235,28 @@ struct SettingsSubcategoryChip: View {
 // MARK: - Account Overview
 
 struct SettingsAccountOverviewView: View {
+    @ObservedObject private var authService = AuthService.shared
+    @ObservedObject private var syncService = SyncService.shared
+
+    @State private var isSignUp = false
+    @State private var email = ""
+    @State private var password = ""
+    @State private var confirmPassword = ""
+
     var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            if authService.isLoggedIn {
+                loggedInView
+            } else {
+                loggedOutView
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Logged In
+
+    private var loggedInView: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             SettingsSection(title: "Account") {
                 HStack(spacing: Spacing.md) {
@@ -249,35 +270,193 @@ struct SettingsAccountOverviewView: View {
                         }
 
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text("Local Account")
+                        Text(authService.accountEmail)
                             .font(CiderFont.headingSemibold)
                             .foregroundColor(CiderColors.primary)
 
-                        Text("Not signed in")
+                        Text("Signed in")
                             .font(CiderFont.label)
-                            .foregroundColor(CiderColors.secondary)
+                            .foregroundColor(CiderColors.success)
                     }
-                }
 
-                Text("Account sync, profile details, and connected services will appear here.")
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
+                    Spacer()
 
-                HStack(spacing: Spacing.sm) {
-                    Button(action: {}) {
-                        Label("Sign In", systemImage: "person.crop.circle.badge.plus")
+                    Button("Sign Out") {
+                        authService.signOut()
                     }
-                    .buttonStyle(CiderAccentButtonStyle())
-
-                    Button(action: {}) {
-                        Label("Manage Account", systemImage: "slider.horizontal.3")
-                    }
-                    .buttonStyle(CiderAccentButtonStyle())
-                    .disabled(true)
-                    .opacity(CiderColors.disabledOpacity)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
-            Spacer(minLength: 0)
+
+            SettingsSection(title: "Sync") {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    HStack(spacing: Spacing.sm) {
+                        if syncService.isSyncing {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Syncing...")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                        } else if let error = syncService.lastError {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 12))
+                            Text(error)
+                                .font(CiderFont.caption)
+                                .foregroundColor(.orange)
+                        } else if let lastSync = syncService.lastSyncedAt {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 12))
+                            Text("Last synced \(lastSync.formatted(.relative(presentation: .named)))")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundColor(CiderColors.tertiary)
+                                .font(.system(size: 12))
+                            Text("Sync is active")
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+
+                        Spacer()
+
+                        Button("Sync Now") {
+                            syncService.syncNow()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(syncService.isSyncing)
+                    }
+
+                    Text("Bookmarks, notes, and folders sync automatically across all your devices.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Logged Out
+
+    private var loggedOutView: some View {
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            SettingsSection(title: isSignUp ? "Create Account" : "Sign In") {
+                VStack(spacing: Spacing.sm) {
+                    HStack(spacing: Spacing.md) {
+                        Circle()
+                            .fill(CiderColors.separatorMedium)
+                            .frame(width: 52, height: 52)
+                            .overlay {
+                                Image(systemName: "person.fill")
+                                    .font(CiderFont.displaySemibold)
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            Text(isSignUp ? "Create Account" : "Sign In")
+                                .font(CiderFont.headingSemibold)
+                                .foregroundColor(CiderColors.primary)
+
+                            Text("Sync bookmarks, notes, and folders across all your devices")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+
+                    VStack(spacing: Spacing.xs) {
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            Text("Email")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.secondary)
+                            TextField("you@example.com", text: $email)
+                                .textFieldStyle(.roundedBorder)
+                                .font(CiderFont.body)
+                                .frame(maxWidth: 320)
+                                .textContentType(.emailAddress)
+                                .onSubmit(submit)
+                        }
+
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            Text("Password")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.secondary)
+                            SecureField("••••••••", text: $password)
+                                .textFieldStyle(.roundedBorder)
+                                .font(CiderFont.body)
+                                .frame(maxWidth: 320)
+                                .onSubmit(submit)
+                        }
+
+                        if isSignUp {
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                Text("Confirm Password")
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.secondary)
+                                SecureField("••••••••", text: $confirmPassword)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(CiderFont.body)
+                                    .frame(maxWidth: 320)
+                                    .onSubmit(submit)
+                            }
+                        }
+                    }
+
+                    if let error = authService.errorMessage {
+                        Text(error)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.destructive)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    HStack(spacing: Spacing.sm) {
+                        Button(action: submit) {
+                            if authService.isLoading {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text(isSignUp ? "Create Account" : "Sign In")
+                            }
+                        }
+                        .buttonStyle(CiderAccentButtonStyle())
+                        .disabled(authService.isLoading || email.isEmpty || password.isEmpty)
+
+                        Spacer()
+
+                        Button(isSignUp ? "Already have an account? Sign in" : "Don't have an account? Sign up") {
+                            isSignUp.toggle()
+                            authService.errorMessage = nil
+                            confirmPassword = ""
+                        }
+                        .buttonStyle(.plain)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.controlAccent)
+                    }
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        if isSignUp {
+            guard password == confirmPassword else {
+                authService.errorMessage = "Passwords don't match"
+                return
+            }
+        }
+        Task {
+            if isSignUp {
+                await authService.signUp(email: email, password: password)
+            } else {
+                await authService.login(email: email, password: password)
+            }
+            if authService.isLoggedIn {
+                email = ""
+                password = ""
+                confirmPassword = ""
+            }
         }
     }
 }
