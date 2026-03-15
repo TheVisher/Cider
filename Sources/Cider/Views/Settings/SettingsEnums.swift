@@ -2,63 +2,45 @@ import SwiftUI
 
 enum SettingsCategory: String, CaseIterable {
     case general = "General"
-    case notes = "Notes"
-    case bookmarks = "Bookmarks"
+    case content = "Content"
+    case capture = "Capture"
     case appearance = "Appearance"
-    case clipboard = "Clipboard"
-    case data = "Data"
     case intelligence = "Intelligence"
-    case advanced = "Advanced"
+    case data = "Data"
     case about = "About"
     case account = "Account"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .notes, .bookmarks, .appearance, .clipboard, .intelligence, .data, .advanced, .about]
+        [.general, .content, .capture, .appearance, .intelligence, .data, .about]
     }
 
     var icon: String {
         switch self {
-        case .general:
-            "gearshape"
-        case .notes:
-            "note.text"
-        case .bookmarks:
-            "square.grid.2x2"
-        case .appearance:
-            "paintbrush"
-        case .clipboard:
-            "doc.on.clipboard"
-        case .intelligence:
-            "sparkles"
-        case .data:
-            "externaldrive"
-        case .advanced:
-            "slider.horizontal.3"
-        case .about:
-            "info.circle"
-        case .account:
-            "person.crop.circle"
+        case .general: "gearshape"
+        case .content: "square.stack"
+        case .capture: "arrow.down.to.line"
+        case .appearance: "paintbrush"
+        case .intelligence: "sparkles"
+        case .data: "externaldrive"
+        case .about: "info.circle"
+        case .account: "person.crop.circle"
         }
     }
 
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation, .panelBehavior, .features, .shortcuts]
-        case .notes:
-            [.notesBehavior, .notesEditor]
-        case .bookmarks:
-            [.bookmarksBehavior]
+            [.startup, .activation, .panelBehavior, .shortcuts]
+        case .content:
+            [.contentBookmarks, .contentNotes]
+        case .capture:
+            [.captureBookmarks, .captureClipboard, .captureStorage]
         case .appearance:
-            [.appearanceText, .appearanceMenuBar, .appearanceSounds]
-        case .clipboard:
-            [.clipboardBehavior, .clipboardStorage]
+            [.appearanceText, .appearanceSounds, .appearanceToasts]
         case .intelligence:
             [.intelligenceFeatures]
         case .data:
             [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport]
-        case .advanced:
-            [.advancedAccessibility, .advancedReset]
         case .about:
             [.aboutOverview]
         case .account:
@@ -68,78 +50,66 @@ enum SettingsCategory: String, CaseIterable {
 }
 
 enum SettingsSubcategory: Hashable {
+    // General
     case startup
     case activation
     case panelBehavior
-    case features
-    case notesBehavior
-    case notesEditor
-    case bookmarksBehavior
+    case shortcuts
+
+    // Content
+    case contentBookmarks
+    case contentNotes
+
+    // Capture
+    case captureBookmarks
+    case captureClipboard
+    case captureStorage
+
+    // Appearance
     case appearanceText
-    case appearanceMenuBar
     case appearanceSounds
-    case clipboardBehavior
-    case clipboardStorage
+    case appearanceToasts
+
+    // Intelligence
+    case intelligenceFeatures
+
+    // Data
     case dataDirectories
     case dataTrash
     case dataNotifications
     case dataImportExport
-    case intelligenceFeatures
-    case shortcuts
-    case advancedAccessibility
-    case advancedReset
-    case syncSettings
+
+    // About
     case aboutOverview
+
+    // Account
     case accountOverview
+
+    // Legacy (kept for compile compat, unused in sidebar)
+    case syncSettings
 
     var title: String {
         switch self {
-        case .startup:
-            "Startup"
-        case .activation:
-            "Activation"
-        case .panelBehavior:
-            "Panel"
-        case .features:
-            "Features"
-        case .shortcuts:
-            "Shortcuts"
-        case .notesBehavior:
-            "Behavior"
-        case .notesEditor:
-            "Editor"
-        case .bookmarksBehavior:
-            "Behavior"
-        case .appearanceText:
-            "Text"
-        case .appearanceMenuBar:
-            "Menu Bar"
-        case .appearanceSounds:
-            "Sounds"
-        case .clipboardBehavior:
-            "Behavior"
-        case .clipboardStorage:
-            "Storage"
-        case .dataDirectories:
-            "Directories"
-        case .dataTrash:
-            "Trash"
-        case .dataNotifications:
-            "Notifications"
-        case .dataImportExport:
-            "Import & Export"
-        case .intelligenceFeatures:
-            "Features"
-        case .syncSettings:
-            "Cider Web Sync"
-        case .advancedAccessibility:
-            "Accessibility"
-        case .advancedReset:
-            "Reset"
-        case .aboutOverview:
-            "Overview"
-        case .accountOverview:
-            "Profile"
+        case .startup: "Startup"
+        case .activation: "Activation"
+        case .panelBehavior: "Panel"
+        case .shortcuts: "Shortcuts"
+        case .contentBookmarks: "Bookmarks"
+        case .contentNotes: "Notes"
+        case .captureBookmarks: "Bookmarks"
+        case .captureClipboard: "Clipboard"
+        case .captureStorage: "Storage"
+        case .appearanceText: "Text & Menu Bar"
+        case .appearanceSounds: "Sounds"
+        case .appearanceToasts: "Toasts"
+        case .intelligenceFeatures: "Features"
+        case .dataDirectories: "Directories"
+        case .dataTrash: "Trash"
+        case .dataNotifications: "Notifications"
+        case .dataImportExport: "Import & Export"
+        case .aboutOverview: "Overview"
+        case .accountOverview: "Profile"
+        case .syncSettings: "Sync"
         }
     }
 }

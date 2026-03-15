@@ -5,6 +5,9 @@ extension SettingsView {
     @ViewBuilder
     var selectedSubcategoryContent: some View {
         switch selectedSubcategory {
+
+        // MARK: - General
+
         case .startup:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Startup") {
@@ -89,85 +92,14 @@ extension SettingsView {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .notesBehavior:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Notes Behavior") {
-                    SettingsToggleRow(
-                        title: "Option+N to create note",
-                        subtitle: "Open the panel and start a new note",
-                        isOn: $viewModel.enableNotesHotkey
-                    )
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .notesEditor:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Notes Editor") {
-                    SettingsPickerRow(
-                        title: "Default note text size",
-                        subtitle: "Sets the base display size for note content",
-                        selection: $viewModel.notesEditorTextSize,
-                        options: NotesEditorTextSize.allCases,
-                        label: { $0.displayName }
-                    )
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .features:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Features") {
-                    SettingsToggleRow(
-                        title: "Linked Sources",
-                        subtitle: "Watch external folders and surface their .md files in Cider",
-                        isOn: $viewModel.enableLinkedSources
-                    )
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
         case .shortcuts:
             KeyboardShortcutsReferenceView()
 
-        case .bookmarksBehavior:
+        // MARK: - Content
+
+        case .contentBookmarks:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Bookmarks") {
-                    SettingsToggleRow(
-                        title: "Option+B to capture bookmark",
-                        subtitle: "Capture the current browser tab as a bookmark",
-                        isOn: $viewModel.enableBookmarksHotkey
-                    )
-
-                    SettingsToggleRow(
-                        title: "Option+Shift+B to capture active tab",
-                        subtitle: "Save the current browser tab instantly",
-                        isOn: $viewModel.enableBookmarksCaptureHotkey
-                    )
-
-                    SettingsToggleRow(
-                        title: "Auto-save copied URLs",
-                        subtitle: "Whenever you copy a web link, save it as a bookmark",
-                        isOn: $viewModel.autoCaptureCopiedURLs
-                    )
-
-                    SettingsToggleRow(
-                        title: "Review copied URLs before save",
-                        subtitle: "Show Save/Discard toast; auto-discard if ignored",
-                        isOn: $viewModel.confirmCopiedURLBeforeSave
-                    )
-                    .disabled(!viewModel.autoCaptureCopiedURLs)
-                    .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : CiderColors.disabledOpacity)
-
-                    SettingsToggleRow(
-                        title: "Detect copied images",
-                        subtitle: "When you copy an image, offer to save it as a bookmark",
-                        isOn: $viewModel.autoCaptureCopiedImages
-                    )
-
                     SettingsPickerRow(
                         title: "Default view mode",
                         subtitle: "Choose how bookmarks are shown by default",
@@ -194,52 +126,79 @@ extension SettingsView {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .appearanceText:
+        case .contentNotes:
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Text Size") {
-                    HStack(spacing: Spacing.md) {
-                        ForEach(TextSize.allCases, id: \.self) { size in
-                            SettingsSizeOptionButton(
-                                title: size.displayName,
-                                preview: "Aa",
-                                previewSize: 14 * size.scale,
-                                isSelected: viewModel.textSize == size,
-                                action: { viewModel.textSize = size }
-                            )
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .appearanceMenuBar:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Menu Bar") {
-                    SettingsToggleRow(
-                        title: "Show in menu bar",
-                        subtitle: "Display Cider icon in the system menu bar",
-                        isOn: $viewModel.showMenuBarIcon
+                SettingsSection(title: "Notes") {
+                    SettingsPickerRow(
+                        title: "Default note text size",
+                        subtitle: "Sets the base display size for note content",
+                        selection: $viewModel.notesEditorTextSize,
+                        options: NotesEditorTextSize.allCases,
+                        label: { $0.displayName }
                     )
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .appearanceSounds:
+        // MARK: - Capture
+
+        case .captureBookmarks:
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Sounds") {
+                SettingsSection(title: "Bookmark Capture") {
                     SettingsToggleRow(
-                        title: "Sound effects",
-                        subtitle: "Play sounds for saves, captures, and deletes",
-                        isOn: $viewModel.enableSoundEffects
+                        title: "Option+B to capture bookmark",
+                        subtitle: "Capture the current browser tab as a bookmark",
+                        isOn: $viewModel.enableBookmarksHotkey
+                    )
+
+                    SettingsToggleRow(
+                        title: "Option+Shift+B to capture active tab",
+                        subtitle: "Save the current browser tab instantly",
+                        isOn: $viewModel.enableBookmarksCaptureHotkey
+                    )
+
+                    SettingsToggleRow(
+                        title: "Option+N to create note",
+                        subtitle: "Open the panel and start a new note",
+                        isOn: $viewModel.enableNotesHotkey
+                    )
+                }
+
+                SettingsSection(title: "Auto-Capture") {
+                    SettingsToggleRow(
+                        title: "Auto-save copied URLs",
+                        subtitle: "Whenever you copy a web link, save it as a bookmark",
+                        isOn: $viewModel.autoCaptureCopiedURLs
+                    )
+
+                    SettingsToggleRow(
+                        title: "Review copied URLs before save",
+                        subtitle: "Show Save/Discard toast; auto-discard if ignored",
+                        isOn: $viewModel.confirmCopiedURLBeforeSave
+                    )
+                    .disabled(!viewModel.autoCaptureCopiedURLs)
+                    .opacity(viewModel.autoCaptureCopiedURLs ? 1.0 : CiderColors.disabledOpacity)
+
+                    SettingsToggleRow(
+                        title: "Detect copied images",
+                        subtitle: "When you copy an image, offer to save it as a bookmark",
+                        isOn: $viewModel.autoCaptureCopiedImages
+                    )
+                }
+
+                SettingsSection(title: "Sources") {
+                    SettingsToggleRow(
+                        title: "Linked Sources",
+                        subtitle: "Watch external folders and surface their .md files in Cider",
+                        isOn: $viewModel.enableLinkedSources
                     )
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .clipboardBehavior:
+        case .captureClipboard:
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Clipboard Monitor") {
                     SettingsToggleRow(
@@ -266,45 +225,82 @@ extension SettingsView {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .clipboardStorage:
+        case .captureStorage:
             ClipboardStorageSettingsView()
                 .environmentObject(viewModel)
 
-        case .advancedAccessibility:
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Accessibility") {
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        Button(action: openAccessibilityPreferences) {
-                            Label("Open Accessibility Settings", systemImage: "hand.raised")
-                        }
-                        .buttonStyle(CiderAccentButtonStyle())
+        // MARK: - Appearance
 
-                        Text("Cider requires accessibility permissions to manage windows.")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
+        case .appearanceText:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Text Size") {
+                    HStack(spacing: Spacing.md) {
+                        ForEach(TextSize.allCases, id: \.self) { size in
+                            SettingsSizeOptionButton(
+                                title: size.displayName,
+                                preview: "Aa",
+                                previewSize: 14 * size.scale,
+                                isSelected: viewModel.textSize == size,
+                                action: { viewModel.textSize = size }
+                            )
+                        }
                     }
+                }
+
+                SettingsSection(title: "Menu Bar") {
+                    SettingsToggleRow(
+                        title: "Show in menu bar",
+                        subtitle: "Display Cider icon in the system menu bar",
+                        isOn: $viewModel.showMenuBarIcon
+                    )
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .advancedReset:
+        case .appearanceSounds:
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Reset") {
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        Button(action: {}) {
-                            Label("Reset All Settings", systemImage: "arrow.counterclockwise")
-                        }
-                        .buttonStyle(CiderDestructiveButtonStyle())
-
-                        Text("This will reset all settings to their default values.")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
+                SettingsSection(title: "Sounds") {
+                    SettingsToggleRow(
+                        title: "Sound effects",
+                        subtitle: "Play sounds for saves, captures, and deletes",
+                        isOn: $viewModel.enableSoundEffects
+                    )
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .appearanceToasts:
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                SettingsSection(title: "Toast Notifications") {
+                    SettingsPickerRow(
+                        title: "Capture toast position",
+                        subtitle: "Where the bookmark capture confirmation appears",
+                        selection: $viewModel.captureToastPosition,
+                        options: ToastPosition.allCases,
+                        label: { $0.displayName }
+                    )
+
+                    SettingsPickerRow(
+                        title: "Undo toast position",
+                        subtitle: "Where the undo action toast appears",
+                        selection: $viewModel.undoToastPosition,
+                        options: ToastPosition.allCases,
+                        label: { $0.displayName }
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        // MARK: - Intelligence
+
+        case .intelligenceFeatures:
+            IntelligenceSettingsView()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+        // MARK: - Data
 
         case .dataDirectories:
             VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -395,24 +391,6 @@ extension SettingsView {
 
         case .dataNotifications:
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                SettingsSection(title: "Toast Notifications") {
-                    SettingsPickerRow(
-                        title: "Capture toast position",
-                        subtitle: "Where the bookmark capture confirmation appears",
-                        selection: $viewModel.captureToastPosition,
-                        options: ToastPosition.allCases,
-                        label: { $0.displayName }
-                    )
-
-                    SettingsPickerRow(
-                        title: "Undo toast position",
-                        subtitle: "Where the undo action toast appears",
-                        selection: $viewModel.undoToastPosition,
-                        options: ToastPosition.allCases,
-                        label: { $0.displayName }
-                    )
-                }
-
                 SettingsSection(title: "Date Card Notifications") {
                     SettingsToggleRow(
                         title: "Enable notifications",
@@ -534,13 +512,43 @@ extension SettingsView {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .intelligenceFeatures:
-            IntelligenceSettingsView()
-                .frame(maxWidth: .infinity, alignment: .leading)
+        // MARK: - About
 
         case .aboutOverview:
-            AboutSettingsView()
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                AboutSettingsView()
+
+                SettingsSection(title: "Accessibility") {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Button(action: openAccessibilityPreferences) {
+                            Label("Open Accessibility Settings", systemImage: "hand.raised")
+                        }
+                        .buttonStyle(CiderAccentButtonStyle())
+
+                        Text("Cider requires accessibility permissions to manage windows.")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+
+                SettingsSection(title: "Reset") {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        Button(action: {}) {
+                            Label("Reset All Settings", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(CiderDestructiveButtonStyle())
+
+                        Text("This will reset all settings to their default values.")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        // MARK: - Legacy / Other
 
         case .syncSettings:
             SyncSettingsView()

@@ -80,7 +80,8 @@ struct SettingsView: View {
             case "data": selectedCategory = .data
             case "general": selectedCategory = .general
             case "appearance": selectedCategory = .appearance
-            case "clipboard": selectedCategory = .clipboard
+            case "capture": selectedCategory = .capture
+            case "content": selectedCategory = .content
             default: break
             }
         }
