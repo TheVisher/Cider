@@ -222,6 +222,22 @@ Bookmarks, folders, and notes created on Cider Web or Cider iOS that lack a `cid
 
 - File refs: `Sources/Cider/Services/SyncService.swift`, `Cider-Web/convex/sync.ts`
 
+### CH-C22 — Note editor sandboxing broke local attachment rendering
+
+**Severity:** High
+
+The TipTap editor webview now only has `file://` read access to the bundled `TipTapEditor` directory, but note content is still rewritten to absolute attachment/image paths under the notes directory. Existing note attachments and newly dropped images therefore no longer render reliably inside the editor.
+
+- File refs: `Sources/Cider/Services/NotesMarkdownPathCodec.swift`, `Sources/Cider/ViewModels/NotesViewModel.swift`
+
+### CH-C23 — Sync-driven note deletes bypass orphan attachment cleanup
+
+**Severity:** Medium
+
+`deleteFromSync(_:)` removes the note file and snapshots but does not schedule orphan attachment cleanup. Attachments referenced only by remotely deleted notes can therefore persist indefinitely until some unrelated local edit triggers cleanup.
+
+- File refs: `Sources/Cider/Services/NotesStorage.swift`
+
 ### ~~CH-C20 — `screenCaptureDefaultAction` setting is currently non-functional~~ Deferred (design decision)
 
 The setting exists in CiderConfig but has no UI and no implementation. Auto-executing an action (create note/dateCard/contact) on toast timeout would be surprising behavior — the 8-second timeout gives users time to choose. The setting is kept for potential future use but intentionally not wired up.
@@ -358,6 +374,22 @@ Source detail views don't respond well to view option changes (grid, masonry, li
 
 - File refs: `Sources/Cider/Views/Sources/SourceDetailView.swift`, `Sources/Cider/Views/SavedViews/SavedViewTabContent.swift`, `Sources/Cider/Views/Shared/FolderDetailView.swift`
 
+### CH-D17 — “Per-display” panel position memory is keyed only by resolution
+
+**Severity:** Medium
+
+The new panel-position persistence uses only backing pixel dimensions as the per-screen key. Two identical monitors therefore overwrite each other's saved frame, so the feature is not actually per-display on common multi-monitor setups.
+
+- File refs: `Sources/Cider/Services/CiderPanelPositionStore.swift`, `Sources/Cider/App/AppDelegate+CiderPanel.swift`
+
+### ~~CH-D18 — `Docs/ARCHITECTURE.md` no longer matches the current panel and sync architecture~~ Resolved
+
+**Severity:** Low
+
+The architecture reference previously described removed UI concepts (Projects section, `BookmarksTabContent`, `NotesTabContent`) and the old bookmark-only REST polling sync model. `Docs/ARCHITECTURE.md` has now been updated to reflect the current saved-view/source tab model and Convex-based sync for bookmarks, folders, and notes.
+
+- File refs: `Docs/ARCHITECTURE.md`, `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Services/SyncService.swift`
+
 ### CH-D15 — `AppDelegate` remains a high-coupling coordinator — Mitigated
 
 **Severity:** Low
@@ -460,3 +492,84 @@ Removed 16+ unused AX window-management methods (appElement, windows, title, win
 | `print()` → `Logger` in SettingsViewModel | SMAppService error logging |
 | `"cider.openExternalFile"` → typed constant | Raw string literal used in 7+ files; now `.openExternalFile` in Constants.swift |
 | Renamed `BookmarkDetailsSheet.swift` → `BookmarkDetailsDraft.swift` | File contains `BookmarkDetailsDraft`, `BookmarkMetadataSidebar`, `BookmarkDetailsHeroPreview` — not a "details sheet" |
+
+---
+
+## Weekly Code Health Scan — 2026-03-15
+
+### Summary
+
+| Metric | Desktop | iOS | Web | Total |
+|---|---|---|---|---|
+| Source files | 218 (.swift) | 45 (.swift) | 79 (.ts/.tsx) | 342 |
+| Lines of code | 60,012 | 10,117 | 14,951 | 85,080 |
+| TODO comments | 0 | 0 | 0 | 0 |
+| FIXME comments | 0 | 0 | 0 | 0 |
+| HACK comments | 0 | 0 | 0 | 0 |
+| Files >500 lines | 19 | 5 | 7 | 31 |
+| TypeScript errors | — | — | 0 | 0 |
+| Swift build | N/A (no toolchain) | N/A | — | — |
+
+### TODO/FIXME/HACK Comments
+
+All three repos are clean — zero actionable TODO, FIXME, or HACK comments in project-owned source code. (Desktop's `ICalendarSerializer.swift` and `TodoCardStorage.swift` contain `VTODO`/`TodoCard` references which are iCalendar protocol terms, not code health markers.)
+
+### TypeScript Health (Cider-Web)
+
+`tsc --noEmit` passes with zero errors. The web codebase is type-clean.
+
+### Large Files Needing Attention
+
+Files over 500 lines are candidates for decomposition. Sorted by severity:
+
+**Desktop — 19 files >500 lines (top concerns):**
+
+| File | Lines | Suggested Action |
+|---|---|---|
+| `Services/BookmarksStorage.swift` | 2,416 | **Critical.** Extract import/export codecs, enrichment logic, and folder operations into focused files. |
+| `Views/Notes/InlineNoteEditorView.swift` | 1,390 | Extract toolbar, formatting helpers, and drag-drop handling. |
+| `Views/SavedViews/SavedViewTabContent.swift` | 1,332 | Extract card/row builders per entity type into shared components. |
+| `Views/Shared/FolderSidebarView.swift` | 1,319 | Extract folder tree rendering and drag-drop logic. |
+| `Services/NotesStorage.swift` | 1,287 | Extract scan/index logic, attachment cleanup, and sync helpers. |
+| `ViewModels/NotesViewModel.swift` | 1,242 | Extract WebView bridge, HTML generation, and attachment handling. |
+| `Views/Shared/FolderDetailView.swift` | 1,227 | Extract grid/masonry/list renderers. |
+| `Views/Shared/NewItemPopover.swift` | 1,136 | Extract individual item-creation cards. |
+| `Views/Bookmarks/BookmarkDetailsDraft.swift` | 1,047 | Extract `BookmarkMetadataSidebar` and `BookmarkDetailsHeroPreview` to own files. |
+| `Services/SyncService.swift` | 950 | Extract push/pull/auth into sub-services. |
+
+**iOS — 5 files >500 lines:**
+
+| File | Lines | Suggested Action |
+|---|---|---|
+| `Views/BookmarkListView.swift` | 939 | Extract row builders and filter logic. |
+| `Views/BookmarkDetailView.swift` | 725 | Extract metadata sections. |
+| `Views/SidebarView.swift` | 614 | Extract navigation items and folder tree. |
+| `Views/FolderBrowserView.swift` | 605 | Extract folder card components. |
+| `Views/NoteEditorToolbar.swift` | 546 | Extract formatting button groups. |
+
+**Web — 7 files >500 lines:**
+
+| File | Lines | Suggested Action |
+|---|---|---|
+| `components/bookmarks/bookmark-detail.tsx` | 1,080 | Extract metadata panel, action bar, and reader sub-components. |
+| `components/landing/landing-page.tsx` | 844 | Extract individual landing sections. |
+| `components/layout/sidebar.tsx` | 812 | Extract nav groups and folder tree. |
+| `components/notes/note-editor.tsx` | 770 | Extract toolbar and formatting helpers. |
+| `components/notes/note-detail.tsx` | 592 | Extract metadata sidebar. |
+| `components/bookmarks/library-table-view.tsx` | 592 | Extract column renderers and sort logic. |
+| `convex/syncInternal.ts` | 504 | Extract push/pull handlers into separate modules. |
+
+### Open Issues from Previous Scans
+
+These items remain unresolved from prior reviews:
+
+| ID | Severity | Summary |
+|---|---|---|
+| CH-C18 | Medium | Folder parent resolution during pull is order-dependent (deferred — sync protocol) |
+| CH-C21 | Medium | Web/iOS-created items without `ciderSyncId` skipped on desktop pull (deferred — sync protocol) |
+| CH-C22 | **High** | Note editor sandboxing broke local attachment rendering |
+| CH-C23 | Medium | Sync-driven note deletes bypass orphan attachment cleanup |
+| CH-D16 | Medium | List view and display modes inconsistent across card types |
+| CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
+
+**Priority recommendation:** CH-C22 (High) — note editor attachment rendering — is the only open High-severity item and directly impacts user-facing functionality. This should be the next fix target.

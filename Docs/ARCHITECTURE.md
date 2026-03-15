@@ -14,18 +14,31 @@ CiderPanelView
 │   │   ├── FolderSidebarView(showBackground: false)
 │   │   │   ├── Search field (top aligned with divider line)
 │   │   │   ├── Folders section (hierarchical tree)
-│   │   │   └── Projects section
+│   │   │   ├── Tags section (filter chips / collapsible)
+│   │   │   └── Pinned sources section (when linked sources are enabled)
 │   │   └── sidebarFooter (gear + "New" pill menu + view options)
 │   └── VStack (right column, top padding aligns title bar center with traffic lights)
 │       ├── titleBar (animated sidebar toggle + CiderTabBar + capture button)
 │       ├── Divider (14pt horizontal inset, aligned with card content edges)
 │       └── contentArea (switches by selectedTab)
-│           ├── FolderDetailView (when folder selected — tab-independent, deselects tabs)
-│           ├── HomeDashboardView (Continue section + Library feed)
-│           ├── BookmarksTabContent → BookmarksBrowserView
-│           └── NotesTabContent → NotesBrowserView
+│           ├── TagDetailView (when tag filters are active or Tag tab is selected)
+│           ├── SourceDetailView (when a linked source is selected)
+│           ├── FolderDetailView (when folder selected — overrides tab content)
+│           ├── Saved view tabs
+│           │   ├── HomeDashboardView (standard saved/library views)
+│           │   ├── WhiteboardTabView
+│           │   ├── OnboardingTabView
+│           │   └── Blank-tab welcome state
+│           ├── SearchTabContent (spawned searches)
+│           ├── Tag manager tab
+│           ├── AIChatView (when docked as a tab)
+│           └── Empty state (when no tabs exist)
 ├── compactOverlaySidebar (< 680pt, slides over content)
 ├── SearchPaletteView (overlay)
+├── Detail overlays
+│   ├── bookmark detail (full-panel / slide-out / page)
+│   ├── generic card detail (date/contact/todo/file/session)
+│   └── note detail/editor (full-panel / slide-out / page)
 └── PanelEdgeResizeView (all-edge resize handles)
 ```
 
@@ -162,37 +175,41 @@ Two search systems: **SearchService** (search palette / search tab) and **Librar
 
 ## Settings Architecture
 
-Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Notes, Bookmarks, Appearance, Data, Advanced, About. Data subcategories: Directories (vault root + per-type override pickers), Trash (`StorageSettingsView`), Notifications (toast position pickers), Cider Web Sync (`SyncSettingsView`). Notes subcategories: Behavior, Editor. Bookmarks subcategory: Behavior (no directory picker — moved to Data → Directories). Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category).
+Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Notes, Bookmarks, Appearance, Data, Advanced, About. Data subcategories: Directories (vault root + per-type override pickers), Trash (`StorageSettingsView`), Notifications (toast position pickers), Cider Web Sync (`SyncSettingsView`). Notes subcategories: Behavior, Editor. Bookmarks subcategory: Behavior (no directory picker — moved to Data → Directories). Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category). The sync token field is persisted through `SyncService.saveSyncToken()` into Keychain; `CiderConfig.syncToken` remains as a legacy migration path, not the primary storage location.
 
 ## Cider Web Sync
 
 Cider Web is a companion web app that lets users capture bookmarks from their phone and sync them to the desktop app. Sync is entirely optional — disabled by default.
 
 **Architecture:**
-- `SyncService` (`Services/SyncService.swift`) — `@MainActor` singleton, polls every 5 seconds when enabled
-- Bidirectional: pushes all local bookmarks to web, pulls new/updated bookmarks from web
+- `SyncService` (`Services/SyncService.swift`) — `@MainActor` singleton using `ConvexClient`
+- Authenticates once via `sync:authenticate`, then subscribes to `sync:changeSignal` over the Convex client
+- Pushes local changes with `sync:push`; pulls remote changes with `sync:pull`
+- Reactive by default: remote edits trigger a debounced pull when the change signal advances
+- Local notes still use a 30-second dirty-note timer because editor/file-save side effects make fully event-driven push unsafe
 - Conflict resolution: last-write-wins based on `updatedAt` timestamps
-- Deletion tracking: `BookmarksStorage.remove()` calls `SyncService.shared.trackDeletion()`, pending deletions persisted in UserDefaults and pushed on next sync cycle
-- Authentication: Bearer token in `Authorization` header, configured per-user in Settings → Data → Cider Web Sync
+- Deletion tracking: bookmark, folder, and note deletions are queued in UserDefaults and pushed on the next sync pass
+- Authentication: user enters a Convex site URL plus sync token in Settings → Data → Cider Web Sync; token is stored in Keychain
+- Transport guardrails: desktop sync refuses to start unless the configured site URL is HTTPS and can be converted into a Convex deployment URL
 
 **Sync flow:**
-1. **Push** — serializes all local bookmarks as JSON, POSTs to `/api/sync/push`
-2. **Push deletions** — sends tombstone records for locally-deleted bookmarks
-3. **Pull** — POSTs to `/api/sync/pull` with `since` timestamp, receives new/updated/deleted bookmarks
-4. Pull creates new bookmarks via `BookmarksStorage.addFromSync()` (preserves the web-assigned UUID)
-5. Pull updates existing bookmarks via `BookmarksStorage.updateFromSync()` (only if remote is newer)
-6. Pull removes bookmarks via `BookmarksStorage.removeSynced()` (no trash, no undo — web is authoritative)
-7. Server timestamp saved to `CiderConfig.lastSyncTimestamp` for incremental pulls
+1. **Startup/auth** — `SyncService.startIfEnabled()` migrates any legacy token to Keychain, validates config, creates one `ConvexClient`, authenticates with `sync:authenticate`, and installs the reactive change subscription
+2. **Push** — local bookmarks, folders, notes, and pending deletion tombstones are serialized into Convex action arguments and sent with `sync:push`
+3. **Pull** — `sync:pull` is called with the last known server timestamp to fetch new/updated/deleted bookmarks, folders, and notes
+4. **Apply** — pull handlers create or update local models from sync IDs, remove server-deleted models, and advance `lastSyncTimestamp`
+5. **Steady state** — remote edits trigger debounced pulls; local edits call `pushAfterLocalChange()`; notes also get a periodic dirty check every 30 seconds
+6. Server timestamp saved to `CiderConfig.lastSyncTimestamp` for incremental pulls
 
-**CiderConfig properties:** `syncEnabled`, `syncURL`, `syncToken`, `lastSyncTimestamp`
+**CiderConfig properties:** `syncEnabled`, `syncURL`, `lastSyncTimestamp`
 
-**BookmarksStorage sync methods:**
+**Storage sync methods:**
 - `addFromSync(id:title:urlString:...)` — creates bookmark with specific UUID, triggers enrichment
 - `updateFromSync(bookmarkID:title:...)` — updates fields, sets `updatedAt` to now
 - `removeSynced(_:)` — removes without trashing (no undo toast)
+- Folders and notes have equivalent sync-specific create/update/remove paths keyed by sync IDs
 
 **Settings UI:** `SyncSettingsView` under Data → Cider Web Sync. Fields: Convex site URL, sync token (SecureField), enable toggle, status indicator (syncing/error/last synced), Sync Now button.
 
-**Backend:** Convex (convex.dev) — the web app URL is a Convex HTTP site URL (e.g. `https://foo-123.convex.site`). The desktop app doesn't need to know about Convex internals — it just hits REST endpoints.
+**Backend:** Convex (convex.dev). The desktop app derives a deployment URL from the configured `.convex.site` URL, then uses the Convex Swift SDK for actions and subscriptions rather than direct REST polling.
 
-**Important:** Only bookmarks sync currently. Notes, date cards, contacts, folders, and tags are local-only.
+**Important:** Sync currently covers bookmarks, folders, and notes. Date cards, contacts, todos, vault files, sessions, and tags remain local-only.

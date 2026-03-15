@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-14
+> **Last updated**: 2026-03-15
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -29,8 +29,8 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Nested folders (tree) | Yes | Yes | Yes |
 | Folder icons | Yes (SF Symbols) | Yes (Lucide) | Yes (SF Symbols + emoji) |
 | Move to folder | Yes | Yes (context menu + drag-and-drop) | Yes (context menu + detail) |
-| Tag management (rename/merge) | Yes | Planned | No |
-| Tag filtering | Yes | Yes | Planned |
+| Tag management (rename/merge/delete) | Yes | Yes | No |
+| Tag filtering | Yes | Yes (AND/OR toggle) | Yes (multi-tag filter panel) |
 | Saved views / smart filters | Yes | Yes (tabs) | Planned (M16) |
 
 ## Display & Layout
@@ -38,7 +38,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | Grid view | Yes | Yes | Yes |
-| List view (table) | Yes (unified table w/ columns) | Yes (table w/ configurable columns) | Yes (default) |
+| List view (table) | Yes (unified table w/ columns) | Yes (table w/ configurable columns) | Yes (configurable columns) |
 | Masonry view | Yes | Yes | Yes |
 | Card size slider | Yes | Yes (per-view, debounced) | Yes (3 levels) |
 | Sidebar | Yes | Yes (collapsible) | Yes (tab bar) |
@@ -87,9 +87,9 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | Sync token auth | Yes | Yes (generates tokens) | Yes |
-| Account-based auth | No | Yes (email/password) | No |
+| Account-based auth | Yes (email/password) | Yes (email/password) | No |
 | OAuth (Google/GitHub/Apple) | No | Planned | No |
-| Account-based sync (replace tokens) | Planned | Planned | Planned |
+| Account-based sync (replace tokens) | Yes (login returns sync token) | Planned | Planned |
 | Background sync | Yes (5s poll) | Yes (real-time subscriptions) | Yes (30s poll + offline queue) |
 | Dirty-only push | Yes | N/A | Yes (offline queue + immediate push) |
 | Failure handling / retry | Yes (pause after 3) | N/A (Convex retries) | Yes (user-facing errors) |
@@ -102,7 +102,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Undo delete | Yes | Yes (toast) | Yes (toast) |
 | Pull to refresh | N/A | N/A | Yes |
 | Context menus | Yes | Yes (right-click) | Yes (long-press) |
-| Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Planned (M12) |
+| Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Yes (filter panel multi-select) |
 | Export (Netscape HTML) | Yes | Yes | Planned (M15) |
 | Import (Netscape HTML) | Yes | Planned | No |
 | Reader mode | Yes (Readability.js) | Yes (Readability.js) | Yes (Readability.js) |
