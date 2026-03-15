@@ -541,8 +541,9 @@ final class SyncService: ObservableObject {
             let remoteUpdatedAt = Date(timeIntervalSince1970: bookmark.updatedAt / 1000)
             let isDeleted = bookmark.deleted ?? false
 
-            let folderID: UUID? = if let folderSyncId = bookmark.folderSyncId?.lowercased() {
-                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
+            let remoteFolderSyncId = bookmark.folderSyncId?.lowercased()
+            let resolvedFolderID: UUID? = if let remoteFolderSyncId {
+                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == remoteFolderSyncId })?.id
             } else {
                 nil
             }
@@ -552,6 +553,18 @@ final class SyncService: ObservableObject {
                 if isDeleted {
                     storage.trashFromSync(local)
                 } else if remoteUpdatedAt > local.updatedAt {
+                    // Determine the folder to set:
+                    // - Remote has no folder (nil syncId) → clear local folder
+                    // - Remote has folder and it resolves → use resolved ID
+                    // - Remote has folder but can't resolve → keep local folder (don't wipe)
+                    let syncFolderID: UUID?
+                    if remoteFolderSyncId == nil {
+                        syncFolderID = nil  // remote explicitly has no folder
+                    } else if let resolvedFolderID {
+                        syncFolderID = resolvedFolderID  // resolved successfully
+                    } else {
+                        syncFolderID = local.folderID  // can't resolve — preserve local
+                    }
                     storage.updateFromSync(
                         bookmarkID: local.id, title: bookmark.title,
                         urlString: bookmark.urlString,
@@ -560,7 +573,7 @@ final class SyncService: ObservableObject {
                         thumbnailRemoteURLString: bookmark.thumbnailRemoteUrl,
                         aiSummary: bookmark.aiSummary,
                         dominantColors: bookmark.dominantColors,
-                        folderID: folderID,
+                        folderID: syncFolderID,
                         remoteUpdatedAt: remoteUpdatedAt
                     )
                 }
@@ -576,7 +589,7 @@ final class SyncService: ObservableObject {
                         dominantColors: bookmark.dominantColors,
                         createdAt: Date(timeIntervalSince1970: bookmark.createdAt / 1000),
                         updatedAt: remoteUpdatedAt,
-                        folderID: folderID
+                        folderID: resolvedFolderID
                     )
                 }
             }
@@ -593,8 +606,9 @@ final class SyncService: ObservableObject {
             let content = note.content ?? ""
             let isPinned = note.isPinned ?? false
 
-            let folderID: UUID? = if let folderSyncId = note.folderSyncId?.lowercased() {
-                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == folderSyncId })?.id
+            let remoteFolderSyncId = note.folderSyncId?.lowercased()
+            let resolvedFolderID: UUID? = if let remoteFolderSyncId {
+                folderService.legacyFolders.first(where: { $0.id.uuidString.lowercased() == remoteFolderSyncId })?.id
             } else {
                 nil
             }
@@ -604,19 +618,27 @@ final class SyncService: ObservableObject {
                 if isDeleted {
                     notesStorage.deleteFromSync(local)
                 } else if remoteUpdatedAt > local.modifiedAt {
+                    let syncFolderID: UUID?
+                    if remoteFolderSyncId == nil {
+                        syncFolderID = nil
+                    } else if let resolvedFolderID {
+                        syncFolderID = resolvedFolderID
+                    } else {
+                        syncFolderID = local.folderID
+                    }
                     // Skip no-op updates — pulling back what we just pushed
                     // would trigger the editor's contentChanged and loop.
                     let localContent = local.content.isEmpty ? notesStorage.loadContent(for: local) : local.content
                     if localContent == content
                         && local.title == note.title
-                        && local.folderID == folderID
+                        && local.folderID == syncFolderID
                         && local.isPinned == isPinned
                     {
                         continue
                     }
                     notesStorage.updateFromSync(
                         noteID: local.id, title: note.title, content: content,
-                        folderID: folderID, isPinned: isPinned,
+                        folderID: syncFolderID, isPinned: isPinned,
                         remoteUpdatedAt: remoteUpdatedAt
                     )
                 }
@@ -624,7 +646,7 @@ final class SyncService: ObservableObject {
                 if let uuid = UUID(uuidString: syncId) {
                     notesStorage.addFromSync(
                         id: uuid, title: note.title, content: content,
-                        folderID: folderID, isPinned: isPinned,
+                        folderID: resolvedFolderID, isPinned: isPinned,
                         createdAt: Date(timeIntervalSince1970: note.createdAt / 1000),
                         updatedAt: remoteUpdatedAt
                     )
