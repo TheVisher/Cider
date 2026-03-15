@@ -130,22 +130,30 @@ extension AppDelegate {
         panel.setCollapsed(false, animated: false)
 
         let config = CiderConfig.load()
-        if config.rememberPanelPosition, let savedFrame = ciderPanelPositionStore.frame() {
+        if config.rememberPanelPosition {
             if config.openOnMouseScreen {
-                // Move saved frame to the screen where the mouse cursor is
+                // Find the screen where the mouse is and use its saved frame
                 let mouseLocation = NSEvent.mouseLocation
-                if let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }),
-                   !NSMouseInRect(NSPoint(x: savedFrame.midX, y: savedFrame.midY), mouseScreen.frame, false) {
-                    // Panel center is on a different screen — reposition to mouse screen
-                    let visible = mouseScreen.visibleFrame
-                    let x = max(visible.minX, min(mouseLocation.x - savedFrame.width / 2, visible.maxX - savedFrame.width))
-                    let y = max(visible.minY, min(mouseLocation.y - savedFrame.height / 2, visible.maxY - savedFrame.height))
-                    panel.show(frame: NSRect(x: x, y: y, width: savedFrame.width, height: savedFrame.height))
+                let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+                if let savedFrame = ciderPanelPositionStore.frame(for: mouseScreen) {
+                    // Check if the saved frame is on the mouse's screen
+                    if let mouseScreen,
+                       !NSMouseInRect(NSPoint(x: savedFrame.midX, y: savedFrame.midY), mouseScreen.frame, false) {
+                        // Saved frame is for a different screen — center on mouse screen
+                        let visible = mouseScreen.visibleFrame
+                        let x = max(visible.minX, min(mouseLocation.x - savedFrame.width / 2, visible.maxX - savedFrame.width))
+                        let y = max(visible.minY, min(mouseLocation.y - savedFrame.height / 2, visible.maxY - savedFrame.height))
+                        panel.show(frame: NSRect(x: x, y: y, width: savedFrame.width, height: savedFrame.height))
+                    } else {
+                        panel.show(frame: savedFrame)
+                    }
                 } else {
-                    panel.show(frame: savedFrame)
+                    panel.showAtMouse()
                 }
-            } else {
+            } else if let savedFrame = ciderPanelPositionStore.frame() {
                 panel.show(frame: savedFrame)
+            } else {
+                panel.showAtMouse()
             }
         } else {
             panel.showAtMouse()
