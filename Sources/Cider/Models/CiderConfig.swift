@@ -183,6 +183,7 @@ struct CiderConfig: Codable {
         case didMigrateTodosToPerFile
         case didMigrateDateCardsToPerFile
         case lastReconciliationAt
+        case sessionRestoreBrowserBundleID
         case tableColumnConfig
     }
 
@@ -256,6 +257,7 @@ struct CiderConfig: Codable {
     var didMigrateTodosToPerFile: Bool  // Whether one-time todos JSON → .ics migration has run
     var didMigrateDateCardsToPerFile: Bool  // Whether one-time date cards JSON → .ics migration has run
     var lastReconciliationAt: Double  // Epoch seconds of last full reconciliation check
+    var sessionRestoreBrowserBundleID: String?  // Bundle ID of preferred browser for restoring session tabs (nil = system default)
     var tableColumnConfig: TableColumnConfig  // Persisted table list view column widths, order, visibility
 
     static let storageKey = "CiderConfig"
@@ -326,6 +328,7 @@ struct CiderConfig: Codable {
             didMigrateTodosToPerFile: false,
             didMigrateDateCardsToPerFile: false,
             lastReconciliationAt: 0,
+            sessionRestoreBrowserBundleID: nil,
             tableColumnConfig: .default
         )
     }
@@ -532,6 +535,7 @@ struct CiderConfig: Codable {
         didMigrateTodosToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateTodosToPerFile) ?? false
         didMigrateDateCardsToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateDateCardsToPerFile) ?? false
         lastReconciliationAt = try container.decodeIfPresent(Double.self, forKey: .lastReconciliationAt) ?? 0
+        sessionRestoreBrowserBundleID = try container.decodeIfPresent(String.self, forKey: .sessionRestoreBrowserBundleID)
         tableColumnConfig = try container.decodeIfPresent(TableColumnConfig.self, forKey: .tableColumnConfig) ?? .default
     }
 
@@ -604,6 +608,7 @@ struct CiderConfig: Codable {
         didMigrateTodosToPerFile: Bool = false,
         didMigrateDateCardsToPerFile: Bool = false,
         lastReconciliationAt: Double = 0,
+        sessionRestoreBrowserBundleID: String? = nil,
         tableColumnConfig: TableColumnConfig = .default
     ) {
         self.showMenuBarIcon = showMenuBarIcon
@@ -674,6 +679,7 @@ struct CiderConfig: Codable {
         self.didMigrateTodosToPerFile = didMigrateTodosToPerFile
         self.didMigrateDateCardsToPerFile = didMigrateDateCardsToPerFile
         self.lastReconciliationAt = lastReconciliationAt
+        self.sessionRestoreBrowserBundleID = sessionRestoreBrowserBundleID
         self.tableColumnConfig = tableColumnConfig
     }
 }

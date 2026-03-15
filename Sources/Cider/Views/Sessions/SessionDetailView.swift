@@ -11,6 +11,7 @@ struct SessionDetailView: View {
     @State private var draftName = ""
     @State private var restoreBrowserBundleID: String?
     @State private var isRestoring = false
+    @State private var savedTabIDs: Set<UUID> = []
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -117,23 +118,27 @@ struct SessionDetailView: View {
             Divider().background(CiderColors.separator)
 
             // MARK: - Actions
-            HStack(spacing: Spacing.sm) {
-                restoreButton(current)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.sm) {
+                    restoreButton(current)
 
-                Spacer(minLength: 0)
+                    browserPicker
 
-                Button(role: .destructive) {
-                    if let trashItem = sessionStorage.delete(session.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
+                    Spacer(minLength: 0)
+
+                    Button(role: .destructive) {
+                        if let trashItem = sessionStorage.delete(session.id) {
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
+                        }
+                        onDismiss?()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.destructive)
                     }
-                    onDismiss?()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.destructive)
+                    .buttonStyle(.plain)
+                    .help("Delete session")
                 }
-                .buttonStyle(.plain)
-                .help("Delete session")
             }
         }
     }
@@ -141,10 +146,11 @@ struct SessionDetailView: View {
     // MARK: - Tab Row
 
     private func tabRow(_ tab: BrowserSessionTab) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "globe")
+        let isSaved = savedTabIDs.contains(tab.id)
+        return HStack(spacing: Spacing.sm) {
+            Image(systemName: isSaved ? "bookmark.fill" : "globe")
                 .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.quaternary)
+                .foregroundColor(isSaved ? CiderColors.controlAccent : CiderColors.quaternary)
                 .frame(width: 14)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -160,6 +166,19 @@ struct SessionDetailView: View {
             }
 
             Spacer(minLength: Spacing.xs)
+
+            if !isSaved {
+                Button {
+                    BookmarksStorage.shared.add(urlString: tab.urlString, title: tab.title)
+                    savedTabIDs.insert(tab.id)
+                } label: {
+                    Image(systemName: "bookmark.badge.plus")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Save as bookmark")
+            }
 
             if let url = tab.url {
                 Button {
@@ -229,6 +248,57 @@ struct SessionDetailView: View {
         .buttonStyle(.plain)
         .disabled(urls.isEmpty || isRestoring)
         .help(urls.isEmpty ? "No URLs to restore" : "Open all \(urls.count) tabs in browser")
+    }
+
+    // MARK: - Browser Picker
+
+    private var browserPicker: some View {
+        let browsers = BrowserTabCaptureService.runningBrowsers()
+        return Menu {
+            Button {
+                restoreBrowserBundleID = nil
+                var config = CiderConfig.load()
+                config.sessionRestoreBrowserBundleID = nil
+                config.save()
+            } label: {
+                HStack {
+                    Text("Default Browser")
+                    if restoreBrowserBundleID == nil {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            if !browsers.isEmpty {
+                Divider()
+                ForEach(browsers, id: \.bundleID) { browser in
+                    Button {
+                        restoreBrowserBundleID = browser.bundleID
+                        var config = CiderConfig.load()
+                        config.sessionRestoreBrowserBundleID = browser.bundleID
+                        config.save()
+                    } label: {
+                        HStack {
+                            Text(browser.appName)
+                            if restoreBrowserBundleID == browser.bundleID {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "globe")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Choose browser for restore")
+        .onAppear {
+            restoreBrowserBundleID = CiderConfig.load().sessionRestoreBrowserBundleID
+        }
     }
 
     // MARK: - Helpers
