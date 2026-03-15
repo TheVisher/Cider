@@ -598,6 +598,9 @@ These shipped in the beta launch and are maintained, not re-implemented:
 - First-run onboarding
 - Distribution pipeline (code signing, notarization confirmed 2026-03-02, .dmg, GitHub Releases)
 - Standard Edit key equivalents (Cmd+C/V/X/A/Z routed in non-activating panels)
+- Per-display panel position memory (each screen remembers its own position/size)
+- Open on active display setting (panel follows mouse cursor to current screen)
+- Note title in all detail view modes (slide-out, full panel, page) with double-click rename
 
 ---
 
@@ -747,4 +750,5 @@ Track issues found during review and testing. Reference the feature ID.
 
 | Issue | Feature | Found During | Severity | Status | Notes |
 |-------|---------|-------------|----------|--------|-------|
-| | | | | | |
+| Note editor blank — WKWebView sandbox | R-09 | R-22 testing | Critical | ✅ Fixed | S10 security fix (a0b9f23) restricted readAccessRoot to vault dir, breaking TipTap bundle loading |
+| +New note content not in editor | R-09 | R-22 testing | High | ✅ Fixed | save(note:) after rename wrote to wrong path; fixed by adding initialContent to createNew() |
