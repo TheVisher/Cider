@@ -19,6 +19,7 @@ struct FolderDetailView: View {
     var onOpenContact: ((ContactCard) -> Void)?
     var onOpenTodo: ((TodoCard) -> Void)?
     var onOpenVaultFile: ((VaultFile) -> Void)?
+    var onOpenSession: ((BrowserSession) -> Void)?
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
     @Binding var scrollToItemID: String?
     var focusedItemID: String? = nil
@@ -60,7 +61,9 @@ struct FolderDetailView: View {
             .map { LibraryItemV2.contact($0) }
         let vaultFiles = vaultFileService.files(inFolder: folderID)
             .map { LibraryItemV2.vaultFile($0) }
-        var all = (bookmarks + notes + dateCards + contacts + vaultFiles)
+        let sessions = BrowserSessionStorage.shared.sessions.filter { $0.folderID == folderID }
+            .map { LibraryItemV2.session($0) }
+        var all = (bookmarks + notes + dateCards + contacts + vaultFiles + sessions)
             .sorted { $0.createdDate > $1.createdDate }
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,6 +79,7 @@ struct FolderDetailView: View {
                     case .todo:         return scopeTypes.contains(.todo)
                     case .externalFile: return false
                     case .vaultFile:    return false
+                    case .session:      return scopeTypes.contains(.session)
                     }
                 }
             }
@@ -728,6 +732,31 @@ struct FolderDetailView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
+        case .session(let session):
+            SessionListRow(
+                session: session,
+                onOpen: { onOpenSession?(session) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = session.folderID
+                    BrowserSessionStorage.shared.assignSession(session.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .session, itemID: session.id, title: session.name,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = BrowserSessionStorage.shared.delete(session.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
+            )
         }
     }
 
@@ -871,6 +900,31 @@ struct FolderDetailView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
+        case .session(let session):
+            SessionCardCardView(
+                session: session,
+                onOpen: { onOpenSession?(session) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = session.folderID
+                    BrowserSessionStorage.shared.assignSession(session.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .session, itemID: session.id, title: session.name,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    if let trashItem = BrowserSessionStorage.shared.delete(session.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
+                    }
+                },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) },
+                onToggleLabelBulk: onToggleLabelBulk
+            )
         }
     }
 
@@ -938,6 +992,7 @@ struct FolderDetailView: View {
         case .todo(let todoCard): onOpenTodo?(todoCard)
         case .externalFile: break
         case .vaultFile(let vaultFile): onOpenVaultFile?(vaultFile)
+        case .session(let session): onOpenSession?(session)
         }
     }
 
@@ -1057,7 +1112,7 @@ struct FolderDetailView: View {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
-        case .dateCard, .contact, .todo, .externalFile, .vaultFile: return nil
+        case .dateCard, .contact, .todo, .externalFile, .vaultFile, .session: return nil
         }
     }
 }

@@ -819,7 +819,7 @@ private struct TabCreationForm: View {
     @State private var errorMessage = ""
 
     // Entity types shown as content filter pills (excludes externalFile — edge case)
-    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact, .todo]
+    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact, .todo, .session]
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -896,6 +896,7 @@ private struct TabCreationForm: View {
         case .todo:         return "Todos"
         case .externalFile: return "Files"
         case .vaultFile: return "Files"
+        case .session: return "Sessions"
         }
     }
 

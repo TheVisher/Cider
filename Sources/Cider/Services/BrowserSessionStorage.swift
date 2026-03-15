@@ -53,11 +53,18 @@ final class BrowserSessionStorage: ObservableObject {
     @discardableResult
     func delete(_ id: UUID) -> TrashItem? {
         guard let session = sessions.first(where: { $0.id == id }) else { return nil }
-        let sessionsDir = StoragePaths.cachedDirectoryURL(for: .sessions)
+        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
         let trashItem = TrashStorage.shared.trashSession(session, sessionsDir: sessionsDir)
         sessions.removeAll { $0.id == id }
         persist()
         return trashItem
+    }
+
+    func assignSession(_ id: UUID, toFolder folderID: UUID?) {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].folderID = folderID
+        sessions[idx].updatedAt = Date()
+        persist()
     }
 
     func restoreFromTrash(_ session: BrowserSession) {

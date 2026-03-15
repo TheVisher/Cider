@@ -123,6 +123,8 @@ struct SearchTabContent: View {
                 if let todoCard = result.todoCard {
                     onOpenTodo?(todoCard)
                 }
+            case .session:
+                break
             }
         } label: {
             HStack(spacing: Spacing.sm) {
@@ -173,6 +175,7 @@ struct SearchTabContent: View {
         case .dateCard:  return "calendar"
         case .contact:   return "person"
         case .todo:      return "checklist"
+        case .session:   return "rectangle.stack"
         }
     }
 

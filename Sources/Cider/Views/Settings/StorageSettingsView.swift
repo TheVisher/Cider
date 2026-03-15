@@ -79,6 +79,7 @@ struct StorageSettingsView: View {
                     (.whiteboard, "Whiteboards"),
                     (.folder, "Folders"),
                     (.vaultFolder, "Folders"),
+                    (.session, "Sessions"),
                 ]
 
                 ForEach(groupOrder, id: \.0) { itemType, label in

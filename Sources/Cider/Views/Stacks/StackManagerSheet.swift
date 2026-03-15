@@ -529,6 +529,8 @@ struct StackManagerSheet: View {
             return LibraryEntityRef(type: .externalFile, entityID: file.id)
         case .vaultFile(let file):
             return LibraryEntityRef(type: .vaultFile, entityID: file.id)
+        case .session(let session):
+            return LibraryEntityRef(type: .session, entityID: session.id)
         }
     }
 
@@ -549,6 +551,8 @@ struct StackManagerSheet: View {
                 return ref.type == .externalFile && ref.entityID == file.id
             case .vaultFile(let file):
                 return ref.type == .vaultFile && ref.entityID == file.id
+            case .session(let session):
+                return ref.type == .session && ref.entityID == session.id
             }
         }) {
             return item.title
@@ -572,6 +576,8 @@ struct StackManagerSheet: View {
             "folder.badge.gear"
         case .vaultFile:
             "doc.on.doc"
+        case .session:
+            "rectangle.stack"
         }
     }
 }

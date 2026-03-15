@@ -46,6 +46,7 @@ struct CiderPanelView: View {
     @State var selectedContact: ContactCard?
     @State var selectedTodoCard: TodoCard?
     @State var selectedVaultFile: VaultFile?
+    @State var selectedSession: BrowserSession?
     @State var cardScaleSaveTask: Task<Void, Never>?
     @State var sidebarSearchText: String = ""
     @State var debouncedSearchText: String = ""

@@ -106,6 +106,8 @@ struct StackDetailSheet: View {
             "folder.badge.gear"
         case .vaultFile:
             "doc.on.doc"
+        case .session:
+            "rectangle.stack"
         }
     }
 
@@ -222,6 +224,9 @@ struct StackDetailSheet: View {
                 userInfo: ["fileURL": file.path]
             )
         case .vaultFile:
+            break
+        case .session:
+            // Sessions don't have an open callback in stacks yet
             break
         }
     }

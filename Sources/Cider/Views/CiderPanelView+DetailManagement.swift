@@ -32,8 +32,12 @@ extension CiderPanelView {
         selectedTodoCard != nil
     }
 
+    var isSessionDetailOpen: Bool {
+        selectedSession != nil
+    }
+
     var isGenericDetailOpen: Bool {
-        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen || selectedVaultFile != nil
+        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen || selectedVaultFile != nil || isSessionDetailOpen
     }
 
     var isAnyDetailOpen: Bool {
@@ -41,16 +45,16 @@ extension CiderPanelView {
     }
 
     var isGenericDetailSlideOut: Bool {
-        // Todos always use slide-out regardless of detailViewMode
-        isTodoDetailOpen || ((selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .slideOut)
+        // Todos and sessions always use slide-out regardless of detailViewMode
+        isTodoDetailOpen || isSessionDetailOpen || ((selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .slideOut)
     }
 
     var isGenericDetailFullPanel: Bool {
-        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .fullPanel
+        !isTodoDetailOpen && !isSessionDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .fullPanel
     }
 
     var isGenericDetailPageMode: Bool {
-        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .page
+        !isTodoDetailOpen && !isSessionDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .page
     }
 
     var isAnyDetailPageMode: Bool {
@@ -107,6 +111,7 @@ extension CiderPanelView {
         detailsErrorMessage = nil
         selectedContact = nil
         selectedVaultFile = nil
+        selectedSession = nil
         selectedDateCard = dateCard
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
@@ -127,6 +132,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        selectedSession = nil
         selectedContact = contact
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
@@ -147,6 +153,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedContact = nil
         selectedVaultFile = nil
+        selectedSession = nil
         selectedTodoCard = todoCard
         if !wasExpanded {
             NotificationCenter.default.post(
@@ -167,8 +174,30 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
+        selectedSession = nil
         selectedVaultFile = file
         if !wasExpanded, detailViewMode == .slideOut {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
+    }
+
+    func openSessionDetail(_ session: BrowserSession) {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isNoteDetailOpen { closeNoteDetail() }
+        let wasExpanded = isAnyDetailOpen
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        selectedDateCard = nil
+        selectedContact = nil
+        selectedTodoCard = nil
+        selectedVaultFile = nil
+        selectedSession = session
+        if !wasExpanded {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,
                 object: nil,
@@ -183,6 +212,7 @@ extension CiderPanelView {
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        selectedSession = nil
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
@@ -196,6 +226,7 @@ extension CiderPanelView {
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        selectedSession = nil
         selectedNote = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false

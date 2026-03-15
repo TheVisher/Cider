@@ -97,7 +97,9 @@ final class CiderUndoManager {
                 ContactStorage.shared.assignContact(itemID, toFolder: fromFolderID)
             case .todo:
                 TodoCardStorage.shared.assignTodoCard(itemID, toFolder: fromFolderID)
-            case .whiteboard, .folder, .vaultFolder, .session:
+            case .session:
+                BrowserSessionStorage.shared.assignSession(itemID, toFolder: fromFolderID)
+            case .whiteboard, .folder, .vaultFolder:
                 break
             }
 
@@ -114,7 +116,9 @@ final class CiderUndoManager {
                     ContactStorage.shared.assignContact(item.itemID, toFolder: item.fromFolderID)
                 case .todo:
                     TodoCardStorage.shared.assignTodoCard(item.itemID, toFolder: item.fromFolderID)
-                case .whiteboard, .folder, .vaultFolder, .session:
+                case .session:
+                    BrowserSessionStorage.shared.assignSession(item.itemID, toFolder: item.fromFolderID)
+                case .whiteboard, .folder, .vaultFolder:
                     break
                 }
             }

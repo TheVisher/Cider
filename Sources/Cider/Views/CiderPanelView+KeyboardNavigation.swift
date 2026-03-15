@@ -159,7 +159,7 @@ extension CiderPanelView {
                         case .dateCard:     return scopeTypes.contains(.dateCard)
                         case .contact:      return scopeTypes.contains(.contact)
                         case .todo:         return scopeTypes.contains(.todo)
-                        case .externalFile, .vaultFile: return false
+                        case .externalFile, .vaultFile, .session: return false
                         }
                     }
                 }
@@ -296,6 +296,12 @@ extension CiderPanelView {
             if let uuid = UUID(uuidString: uuidString),
                let contact = ContactStorage.shared.contact(for: uuid) {
                 openContactDetail(contact)
+            }
+        } else if id.hasPrefix("session-") {
+            let uuidString = String(id.dropFirst("session-".count))
+            if let uuid = UUID(uuidString: uuidString),
+               let session = BrowserSessionStorage.shared.sessions.first(where: { $0.id == uuid }) {
+                openSessionDetail(session)
             }
         }
     }

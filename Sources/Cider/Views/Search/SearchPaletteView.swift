@@ -306,6 +306,8 @@ struct SearchPaletteView: View {
                 if let todoCard = result.todoCard {
                     onOpenTodo?(todoCard)
                 }
+            case .session:
+                break
             }
             onDismiss()
         }
@@ -906,6 +908,7 @@ struct SearchPaletteView: View {
         case .dateCard:  return "calendar"
         case .contact:   return "person"
         case .todo:      return "checklist"
+        case .session:   return "rectangle.stack"
         }
     }
 

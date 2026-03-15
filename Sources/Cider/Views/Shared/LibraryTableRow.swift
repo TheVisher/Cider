@@ -202,6 +202,7 @@ struct LibraryTableRow: View {
         case .todo: "Todo"
         case .externalFile: "File"
         case .vaultFile: "File"
+        case .session: "Session"
         }
     }
 
@@ -252,6 +253,10 @@ struct LibraryTableRow: View {
                 .foregroundColor(CiderColors.secondary)
         case .vaultFile(let file):
             Image(systemName: file.fileType.systemImageName)
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(CiderColors.secondary)
+        case .session:
+            Image(systemName: "rectangle.stack")
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.secondary)
         }
