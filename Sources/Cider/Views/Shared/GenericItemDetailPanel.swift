@@ -75,33 +75,38 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
 
     @ViewBuilder
     private var toolbar: some View {
-        HStack(spacing: Spacing.sm) {
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Close")
-
-            if showTitle {
-                EditableTitleLabel(
-                    title: title,
-                    onRename: onRenameTitle
-                )
-            }
-
+        ZStack {
+            // Center layer: toolbar extras (always centered)
             toolbarExtra()
 
-            Spacer(minLength: 0)
+            // Edge layer: close button + title (left), trailing extras + view modes (right)
+            HStack(spacing: Spacing.sm) {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close")
 
-            trailingExtra()
+                if showTitle {
+                    EditableTitleLabel(
+                        title: title,
+                        onRename: onRenameTitle
+                    )
+                    .layoutPriority(-1)
+                }
 
-            DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
+                Spacer(minLength: 0)
+
+                trailingExtra()
+
+                DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
+            }
         }
     }
 
