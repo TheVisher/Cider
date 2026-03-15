@@ -664,6 +664,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Sidebar folder drag reorder & nesting | WORKSPACES_VISION | Drag to reorder siblings, nest under other folders |
 | Folder breadcrumb path | WORKSPACES_VISION | "Work > Internal Tools > APIs" in folder header |
 | Folder inline rename | WORKSPACES_VISION | Right-click context menu + inline editing in sidebar |
+| Private/locked folders | USER_IDEA 2026-03 | Folders marked as private are hidden from the library feed, search, and Continue section. Items only visible when you open the folder directly. Optional password/biometric lock — folder contents are completely inaccessible until unlocked. Could use `isPrivate: Bool` + `lockPassword: String?` on Folder model. Private folders excluded from sync push (stay local-only) or encrypted before sync. |
 
 ### Full Systems (card type expansions)
 | Item | Source | Notes |
