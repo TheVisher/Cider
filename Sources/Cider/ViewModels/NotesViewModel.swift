@@ -231,9 +231,9 @@ final class NotesViewModel: ObservableObject {
         }
 
         if let resourceURL = Bundle.main.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
-            // Scope file access to the vault directory (where notes and attachments live)
-            // instead of the entire home directory.
-            let readAccessRoot = StoragePaths.cachedVaultDirectoryURL
+            // Grant read access to the TipTapEditor bundle directory (for JS/CSS)
+            // Note content is loaded via JS bridge (pushContentToEditor), not direct file access.
+            let readAccessRoot = resourceURL.deletingLastPathComponent()
             webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
         }
 
