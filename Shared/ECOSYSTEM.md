@@ -51,6 +51,7 @@ These conventions must be identical across all three apps:
 | Doc | What it covers |
 |-----|----------------|
 | `ECOSYSTEM.md` | You're reading it. How the apps relate, universal rules. |
+| `AUTH.md` | Authentication: login/signup flow, token management, password hashing, connected devices, per-platform details. |
 | `SYNC_PROTOCOL.md` | REST endpoints, request/response schemas, push/pull contract, conflict resolution details, known edge cases. |
 | `DATA_MODEL.md` | Canonical Convex schema — every table, every field, every index. |
 | `DESIGN_LANGUAGE.md` | Cross-platform design principles shared by all three apps. |
