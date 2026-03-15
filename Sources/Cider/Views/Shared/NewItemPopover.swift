@@ -100,6 +100,11 @@ struct NewItemPopover: View {
                         onDismiss()
                     }
                 )
+            case .session:
+                SessionCaptureForm(
+                    onBack: back,
+                    onDismiss: onDismiss
+                )
             }
         }
         // No animation on step changes: animating popover content size via ViewBridge
@@ -134,6 +139,7 @@ struct NewItemPopover: View {
                 typeCard(.tab)
                 typeCard(.whiteboard)
                 typeCard(.tag)
+                typeCard(.session)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
@@ -175,6 +181,7 @@ struct NewItemPopover: View {
         case .tab:        step = .tab
         case .whiteboard: step = .whiteboard
         case .tag:        step = .tag
+        case .session:    step = .session
         }
     }
 }
@@ -182,13 +189,13 @@ struct NewItemPopover: View {
 // MARK: - Step
 
 private enum NewItemStep: Equatable {
-    case picker, bookmark, note, event, contact, todo, folder, tab, whiteboard, tag
+    case picker, bookmark, note, event, contact, todo, folder, tab, whiteboard, tag, session
 }
 
 // MARK: - Item Types
 
 enum NewItemType: String, CaseIterable, Identifiable {
-    case bookmark, note, event, contact, todo, folder, tab, whiteboard, tag
+    case bookmark, note, event, contact, todo, folder, tab, whiteboard, tag, session
 
     var id: String { rawValue }
 
@@ -203,6 +210,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .tab:        "Tab"
         case .whiteboard: "Whiteboard"
         case .tag:        "Tag"
+        case .session:    "Session"
         }
     }
 
@@ -217,6 +225,7 @@ enum NewItemType: String, CaseIterable, Identifiable {
         case .tab:        "rectangle.badge.plus"
         case .whiteboard: "scribble"
         case .tag:        "tag"
+        case .session:    "rectangle.stack"
         }
     }
 }
@@ -1032,5 +1041,96 @@ private struct WhiteboardCreationForm: View {
             return
         }
         onCreate(trimmedName)
+    }
+}
+
+// MARK: - Session Capture Form
+
+private struct SessionCaptureForm: View {
+    let onBack: () -> Void
+    let onDismiss: () -> Void
+
+    @State private var name = ""
+    @State private var isCapturing = false
+    @State private var errorMessage = ""
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            FormHeader(title: "Capture Session", onBack: onBack)
+
+            VStack(spacing: Spacing.xs) {
+                TextField(
+                    "Session name (optional)",
+                    text: $name
+                )
+                .textFieldStyle(.plain)
+                .font(CiderFont.body)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .onSubmit(capture)
+
+                Text("Captures all open tabs from running browsers")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, Spacing.md)
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+            }
+
+            Button(action: capture) {
+                HStack(spacing: Spacing.xs) {
+                    if isCapturing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(isCapturing ? "Capturing..." : "Capture Session")
+                        .font(CiderFont.bodyMedium)
+                }
+                .foregroundColor(CiderColors.textOnColor)
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isCapturing ? CiderColors.separatorMedium : CiderColors.controlAccent)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isCapturing)
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        }
+    }
+
+    private func capture() {
+        guard !isCapturing else { return }
+        isCapturing = true
+        errorMessage = ""
+
+        let sessionName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = sessionName.isEmpty
+            ? "Session \(Date().formatted(.dateTime.month(.abbreviated).day().hour().minute()))"
+            : sessionName
+
+        Task {
+            let vm = BrowserSessionsViewModel()
+            await vm.captureAndSave(name: finalName)
+            isCapturing = false
+            if let error = vm.captureError {
+                errorMessage = error
+            } else {
+                onDismiss()
+            }
+        }
     }
 }
