@@ -158,7 +158,7 @@ private struct EditableTitleLabel: View {
 
     var body: some View {
         if isEditing, onRename != nil {
-            TextField("Title", text: $draftName, onCommit: commit)
+            TextField("Title", text: $draftName)
                 .textFieldStyle(.plain)
                 .font(CiderFont.labelMedium(scale: textScale))
                 .foregroundColor(CiderColors.primary)
@@ -168,7 +168,13 @@ private struct EditableTitleLabel: View {
                     RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                         .fill(CiderColors.surfaceInput)
                 )
-                .onExitCommand { isEditing = false }
+                .fixedSize()
+                .frame(maxWidth: 200, alignment: .leading)
+                .onSubmit { commit() }
+                .onKeyPress(.escape) {
+                    isEditing = false
+                    return .handled
+                }
                 .lineLimit(1)
         } else {
             Text(title)
