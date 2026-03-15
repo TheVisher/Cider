@@ -140,8 +140,8 @@ Password verification runs in a `"use node"` Convex action (`nativeAuthNode.ts`)
 The "Connected Devices" view shows all devices with active sync tokens. Users can remove devices (revokes their token — that device will need to sign in again).
 
 - Desktop: `Views/Settings/ConnectedDevicesView.swift`
-- Web: To be implemented (can use `syncTokens.list` query or `/api/auth/devices` endpoint)
-- iOS: To be implemented
+- Web: `src/components/settings/connected-devices.tsx` (uses `syncTokens.list` query + `syncTokens.revoke` mutation)
+- iOS: `CiderApp/Views/DevicesView.swift` (DevicesSection in Settings)
 
 ## Security Notes
 
