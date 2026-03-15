@@ -138,6 +138,7 @@ private struct TrashItemRow: View {
         case .whiteboard: return "scribble"
         case .folder: return "folder"
         case .vaultFolder: return "folder"
+        case .session: return "globe"
         }
     }
 

@@ -392,6 +392,35 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
+    // MARK: - Session Trash
+
+    func trashSession(_ session: BrowserSession, sessionsDir: URL) -> TrashItem {
+        let trashDir = sessionsDir.appendingPathComponent(trashDirName)
+        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        let payload = BrowserSessionTrashPayload(session: session)
+        let trashItem = TrashItem(
+            itemID: session.id,
+            itemType: .session,
+            title: session.name,
+            originalFolderID: nil,
+            sessionPayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        return trashItem
+    }
+
+    func restoreSession(_ trashItem: TrashItem) {
+        guard let payload = trashItem.sessionPayload else { return }
+
+        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
+        let trashDir = sessionsDir.appendingPathComponent(trashDirName)
+
+        BrowserSessionStorage.shared.restoreFromTrash(payload.session)
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+    }
+
     // MARK: - Generic Restore
 
     func restore(_ trashItem: TrashItem) {
@@ -414,6 +443,8 @@ final class TrashStorage {
             restoreContact(trashItem)
         case .vaultFolder:
             VaultFolderService.shared.restoreFolder(trashItem)
+        case .session:
+            restoreSession(trashItem)
         }
     }
 
@@ -434,6 +465,8 @@ final class TrashStorage {
         let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
         items += loadManifest(trashDir: inboxBookmarksDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: inboxNotesDir.appendingPathComponent(trashDirName))
+        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
+        items += loadManifest(trashDir: sessionsDir.appendingPathComponent(trashDirName))
         items += VaultFolderService.shared.trashedFolders()
         return items.sorted { $0.deletedAt > $1.deletedAt }
     }
@@ -443,7 +476,7 @@ final class TrashStorage {
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions]
         for type in trashTypes {
             purgeExpired(
                 olderThan: cutoff,
@@ -524,11 +557,14 @@ final class TrashStorage {
                 try? FileManager.default.removeItem(at: trashFolderURL)
                 removeFromManifest(trashItem.id, trashDir: trashDir)
             }
+        case .session:
+            let trashDir = StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName)
+            removeFromManifest(trashItem.id, trashDir: trashDir)
         }
     }
 
     func emptyTrash() {
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions]
         for type in trashTypes {
             let trashDir = StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
             let items = loadManifest(trashDir: trashDir)
@@ -603,6 +639,8 @@ final class TrashStorage {
             }
         case .vaultFolder:
             break // Handled by permanentlyDelete above
+        case .session:
+            break // Sessions are metadata-only, no separate files to delete
         }
     }
 

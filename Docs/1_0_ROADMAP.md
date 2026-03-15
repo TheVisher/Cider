@@ -511,6 +511,8 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | Web archival | .webarchive snapshots for offline access |
 | Related links per bookmark | Multiple URLs for one entity (App Store + GitHub + docs) |
 | Quick-capture inline text field | Type and hit Enter to create note/bookmark from Home |
+| Browser session sync | Save/restore tab sessions across browsers and devices. Browser-agnostic — capture from Chrome, restore in Safari/Arc/Zen. Syncs via Cider Web. Solves the problem that most browsers lack cross-browser sync. |
+| Quick Note scratchpad | Alt+N opens a small standalone panel with just a note editor. Fast capture without opening the full panel. |
 
 ---
 
@@ -611,6 +613,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Per-folder sort persistence | NOTES_VISION | Each folder remembers its own sort order/view mode |
 | Inline title (first H1 = display title) | R-09 | Apple Notes-style: first H1 in content becomes card title, filename stays decoupled (renameable via context menu) |
 | Plain text note format (.txt) | NOTES_VISION | `.txt` alongside `.md`, plain text editor, default format setting, +New picker |
+| Quick Note scratchpad (Alt+N) | USER_IDEA 2026-03 | Alt+N opens a small/narrow standalone NSPanel with just a note editor — no sidebar, no tabs. Fast scratchpad for jotting things down. Could use TipTap or plain text. Saves to vault like normal notes. May ship before or after 1.0. |
 
 ### Bookmarks
 | Item | Source | Notes |
@@ -668,6 +671,15 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Electron app drag-out (Discord, Slack) | R-11 | Rework internal drop detection so text payload can carry the URL instead of Cider ID |
 | SavedViewTabContent drag providers | R-11 | Wire drag providers into saved view tab cards (needs selection state first) |
 
+### Desktop Stickies
+| Item | Source | Notes |
+|------|--------|-------|
+| Desktop sticky notes | USER_IDEA 2026-03 | Pin any card (bookmark, note, todo, event, contact) to the desktop as a small persistent window. Each sticky is a thin NSWindow wrapper around existing card views. ~2-3MB per sticky, zero CPU when idle. Reuses existing card views + vault data. Natural extension of drag-out — if you can drag a card to another app, you should be able to drop it on your desktop too. |
+| Sticky window level picker | USER_IDEA 2026-03 | User-configurable window level per sticky: Desktop (behind all windows, stuck to wallpaper), Normal (with other windows), or Floating (always on top, PiP-style). Enables niche use cases like a quick note overlay while gaming, reading instructions over a full-screen app, or a todo list pinned above your workspace. Maps to `NSWindow.Level`: `.desktop`, `.normal`, `.floating`. |
+| Drag-to-desktop sticky creation | USER_IDEA 2026-03 | Drag a card out of Cider onto the desktop → creates a desktop sticky for that card. Inverse of the current drag-out behavior (which exports URLs/files to other apps). |
+| Sticky position persistence | USER_IDEA 2026-03 | Remember per-card desktop position across restarts + handle multi-monitor. Track which cards are "pinned to desktop" in CiderConfig or a separate index. |
+| Sticky lifecycle management | USER_IDEA 2026-03 | Clean up sticky windows when cards are deleted/trashed. Update live when card data changes (shared storage observer, not per-sticky timers). |
+
 ### Home & UX
 | Item | Source | Notes |
 |------|--------|-------|
@@ -683,6 +695,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Item | Source | Notes |
 |------|--------|-------|
 | Browser tab capture & restore | USER_IDEA | Capture all open tabs from Safari/Chrome/Arc/Brave/Edge via AppleScript, save as session/folder. Restore to any browser via `open -a`. Low difficulty — core is ~2-3h. Firefox lacks AppleScript (skip or extension). |
+| Portable browser sessions (cross-browser, cross-device) | USER_IDEA 2026-03 | Save a full tab session (all open tabs) as a named session object in Cider. Restore that session in ANY browser — not just the one it came from. Since Cider syncs via Cider Web, sessions sync across computers too: save a session on your Mac, open it on another machine. Basically a browser-agnostic, cross-device session manager. Sessions are just ordered lists of URLs stored in the vault, so they sync like any other card type. |
 
 ### Code Health & Refactoring
 | Item | Source | Notes |

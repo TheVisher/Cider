@@ -2,6 +2,8 @@
 
 > **Every agent working on any Cider app must read this file first.**
 > This is the single source of truth for how the three Cider apps relate to each other and to the shared backend.
+>
+> **Last updated**: 2026-03-14
 
 ## Architecture
 
@@ -21,8 +23,8 @@ All three clients share one Convex deployment. Desktop and iOS talk to it via RE
 | **Path** | `../Cider/` (this repo) | `../Cider-Web/` | `../Cider-iOS/` |
 | **Tech** | Swift 6, SwiftUI, AppKit (NSPanel) | React 19, Convex, TanStack Router, Tailwind v4 | Swift 6, SwiftUI (iOS 17+) |
 | **Role** | Primary app. Local-first with cloud sync. Bookmarks, notes, projects, AI enrichment. | Web companion + Convex backend host. Bookmark capture, browse, organize. | Mobile capture companion. Bookmarks + Share Extension. |
-| **Storage** | Local files in `~/CiderVault/` + Convex sync | Convex (server-side only) | In-memory from Convex pulls + shared UserDefaults (App Group) |
-| **Sync method** | REST polling every 5s (`/api/sync/push`, `/api/sync/pull`) | Direct Convex mutations + subscriptions | REST push/pull (same endpoints as Desktop) |
+| **Storage** | Local files in `~/CiderVault/` + Convex sync | Convex (server-side only) | SwiftData local persistence + offline queue + disk image cache (App Group shared) |
+| **Sync method** | REST polling every 5s (`/api/sync/push`, `/api/sync/pull`) | Direct Convex mutations + subscriptions | REST push/pull (same endpoints as Desktop) + offline queue (QueueDrainer) |
 | **Deploy** | Direct (macOS app, Sparkle updates) | Vercel (auto-deploy from main) at cider.so | Xcode / TestFlight |
 
 ## Convex Backend

@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Quick Action Model
 
 enum QuickAction: String, CaseIterable, Identifiable {
-    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newWhiteboard, openSettings
+    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newWhiteboard, saveSession, openSettings
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTag:       return "New Tag"
         case .newTab:        return "New Tab"
         case .newWhiteboard: return "New Whiteboard"
+        case .saveSession:  return "Save Browser Session"
         case .openSettings: return "Open Settings"
         }
     }
@@ -33,6 +34,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTag:       return "tag"
         case .newTab:        return "plus.square.on.square"
         case .newWhiteboard: return "scribble"
+        case .saveSession:  return "globe.badge.chevron.backward"
         case .openSettings: return "gearshape"
         }
     }
@@ -48,6 +50,7 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTag:       return ["label", "create", "add"]
         case .newTab:        return ["view", "create", "add"]
         case .newWhiteboard: return ["draw", "canvas", "sketch", "excalidraw", "create", "add"]
+        case .saveSession:  return ["browser", "tabs", "session", "capture", "save", "chrome", "safari"]
         case .openSettings: return ["preferences", "config", "set"]
         }
     }

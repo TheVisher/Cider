@@ -15,6 +15,7 @@ enum StorageType: String, CaseIterable {
     case todos = "Todos"
     case clipboard = "Clipboard"
     case whiteboards = "Whiteboards"
+    case sessions = "Sessions"
 
     /// Lowercase/hyphenated subdirectory name inside `.cider/`.
     var ciderSubpath: String {
@@ -31,6 +32,7 @@ enum StorageType: String, CaseIterable {
         case .todos: return "todos"
         case .clipboard: return "clipboard"
         case .whiteboards: return "whiteboards"
+        case .sessions: return "sessions"
         }
     }
 
