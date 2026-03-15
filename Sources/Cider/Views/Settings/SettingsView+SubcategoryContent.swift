@@ -71,6 +71,12 @@ extension SettingsView {
                         isOn: $viewModel.rememberPanelPosition
                     )
 
+                    SettingsToggleRow(
+                        title: "Open on active display",
+                        subtitle: "Show the panel on the screen where your mouse cursor is",
+                        isOn: $viewModel.openOnMouseScreen
+                    )
+
                     SettingsPickerRow(
                         title: "Detail view mode",
                         subtitle: "How bookmark details appear",

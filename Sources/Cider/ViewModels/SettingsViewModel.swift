@@ -65,6 +65,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var rememberPanelPosition: Bool {
         didSet { saveConfig() }
     }
+    @Published var openOnMouseScreen: Bool {
+        didSet { saveConfig() }
+    }
     @Published var enableSpotlightIndexing: Bool {
         didSet { saveConfig() }
     }
@@ -159,6 +162,7 @@ final class SettingsViewModel: ObservableObject {
         self.vaultDirectory = config.vaultDirectory
         self.directoryOverrides = config.directoryOverrides
         self.rememberPanelPosition = config.rememberPanelPosition
+        self.openOnMouseScreen = config.openOnMouseScreen
         self.enableSpotlightIndexing = config.enableSpotlightIndexing
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
@@ -240,6 +244,7 @@ final class SettingsViewModel: ObservableObject {
         config.vaultDirectory = vaultDirectory
         config.directoryOverrides = directoryOverrides
         config.rememberPanelPosition = rememberPanelPosition
+        config.openOnMouseScreen = openOnMouseScreen
         config.enableSpotlightIndexing = enableSpotlightIndexing
         config.bookmarksDefaultViewMode = bookmarksDefaultViewMode
         config.bookmarksCardSize = bookmarksCardSize

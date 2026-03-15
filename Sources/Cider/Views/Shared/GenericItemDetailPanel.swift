@@ -13,6 +13,7 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
     var showTitle: Bool = true
     var scrollsContent: Bool = true
     var onRenameTitle: ((String) -> Void)? = nil
+    var isEditingTitle: Binding<Bool>? = nil
     var onResize: (CGFloat) -> Void = { _ in }
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
@@ -96,7 +97,8 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
                 if showTitle {
                     EditableTitleLabel(
                         title: title,
-                        onRename: onRenameTitle
+                        onRename: onRenameTitle,
+                        isEditingExternal: isEditingTitle
                     )
                     .layoutPriority(-1)
                 }
@@ -150,6 +152,7 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra 
 private struct EditableTitleLabel: View {
     let title: String
     var onRename: ((String) -> Void)?
+    var isEditingExternal: Binding<Bool>?
 
     @State private var isEditing = false
     @State private var draftName = ""
@@ -171,10 +174,6 @@ private struct EditableTitleLabel: View {
                 .fixedSize()
                 .frame(maxWidth: 200, alignment: .leading)
                 .onSubmit { commit() }
-                .onKeyPress(.escape) {
-                    isEditing = false
-                    return .handled
-                }
                 .lineLimit(1)
         } else {
             Text(title)
@@ -184,10 +183,15 @@ private struct EditableTitleLabel: View {
                 .onTapGesture(count: 2) {
                     guard onRename != nil else { return }
                     draftName = title
-                    isEditing = true
+                    setEditing(true)
                 }
                 .help(onRename != nil ? "Double-click to rename" : title)
         }
+    }
+
+    private func setEditing(_ value: Bool) {
+        isEditing = value
+        isEditingExternal?.wrappedValue = value
     }
 
     private func commit() {
@@ -195,7 +199,7 @@ private struct EditableTitleLabel: View {
         if !trimmed.isEmpty && trimmed != title {
             onRename?(trimmed)
         }
-        isEditing = false
+        setEditing(false)
     }
 }
 

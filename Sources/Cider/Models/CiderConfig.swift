@@ -183,6 +183,7 @@ struct CiderConfig: Codable {
         case didMigrateTodosToPerFile
         case didMigrateDateCardsToPerFile
         case lastReconciliationAt
+        case openOnMouseScreen
         case sessionRestoreBrowserBundleID
         case tableColumnConfig
     }
@@ -257,6 +258,7 @@ struct CiderConfig: Codable {
     var didMigrateTodosToPerFile: Bool  // Whether one-time todos JSON → .ics migration has run
     var didMigrateDateCardsToPerFile: Bool  // Whether one-time date cards JSON → .ics migration has run
     var lastReconciliationAt: Double  // Epoch seconds of last full reconciliation check
+    var openOnMouseScreen: Bool  // Whether to open the panel on the screen where the mouse cursor is
     var sessionRestoreBrowserBundleID: String?  // Bundle ID of preferred browser for restoring session tabs (nil = system default)
     var tableColumnConfig: TableColumnConfig  // Persisted table list view column widths, order, visibility
 
@@ -328,6 +330,7 @@ struct CiderConfig: Codable {
             didMigrateTodosToPerFile: false,
             didMigrateDateCardsToPerFile: false,
             lastReconciliationAt: 0,
+            openOnMouseScreen: false,
             sessionRestoreBrowserBundleID: nil,
             tableColumnConfig: .default
         )
@@ -535,6 +538,7 @@ struct CiderConfig: Codable {
         didMigrateTodosToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateTodosToPerFile) ?? false
         didMigrateDateCardsToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateDateCardsToPerFile) ?? false
         lastReconciliationAt = try container.decodeIfPresent(Double.self, forKey: .lastReconciliationAt) ?? 0
+        openOnMouseScreen = try container.decodeIfPresent(Bool.self, forKey: .openOnMouseScreen) ?? false
         sessionRestoreBrowserBundleID = try container.decodeIfPresent(String.self, forKey: .sessionRestoreBrowserBundleID)
         tableColumnConfig = try container.decodeIfPresent(TableColumnConfig.self, forKey: .tableColumnConfig) ?? .default
     }
@@ -608,6 +612,7 @@ struct CiderConfig: Codable {
         didMigrateTodosToPerFile: Bool = false,
         didMigrateDateCardsToPerFile: Bool = false,
         lastReconciliationAt: Double = 0,
+        openOnMouseScreen: Bool = false,
         sessionRestoreBrowserBundleID: String? = nil,
         tableColumnConfig: TableColumnConfig = .default
     ) {
@@ -679,6 +684,7 @@ struct CiderConfig: Codable {
         self.didMigrateTodosToPerFile = didMigrateTodosToPerFile
         self.didMigrateDateCardsToPerFile = didMigrateDateCardsToPerFile
         self.lastReconciliationAt = lastReconciliationAt
+        self.openOnMouseScreen = openOnMouseScreen
         self.sessionRestoreBrowserBundleID = sessionRestoreBrowserBundleID
         self.tableColumnConfig = tableColumnConfig
     }

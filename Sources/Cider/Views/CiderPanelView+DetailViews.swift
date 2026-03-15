@@ -420,6 +420,7 @@ extension CiderPanelView {
             maxWidth: maxSlideOutWidth,
             scrollsContent: false,
             onRenameTitle: renameCurrentNote,
+            isEditingTitle: $isEditingNoteTitle,
             onResize: { newWidth in
                 let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                 detailSlideOutWidth = clamped
@@ -441,6 +442,7 @@ extension CiderPanelView {
             showDragHandle: false,
             scrollsContent: false,
             onRenameTitle: renameCurrentNote,
+            isEditingTitle: $isEditingNoteTitle,
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
             toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },

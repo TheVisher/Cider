@@ -131,7 +131,22 @@ extension AppDelegate {
 
         let config = CiderConfig.load()
         if config.rememberPanelPosition, let savedFrame = ciderPanelPositionStore.frame() {
-            panel.show(frame: savedFrame)
+            if config.openOnMouseScreen {
+                // Move saved frame to the screen where the mouse cursor is
+                let mouseLocation = NSEvent.mouseLocation
+                if let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }),
+                   !NSMouseInRect(NSPoint(x: savedFrame.midX, y: savedFrame.midY), mouseScreen.frame, false) {
+                    // Panel center is on a different screen — reposition to mouse screen
+                    let visible = mouseScreen.visibleFrame
+                    let x = max(visible.minX, min(mouseLocation.x - savedFrame.width / 2, visible.maxX - savedFrame.width))
+                    let y = max(visible.minY, min(mouseLocation.y - savedFrame.height / 2, visible.maxY - savedFrame.height))
+                    panel.show(frame: NSRect(x: x, y: y, width: savedFrame.width, height: savedFrame.height))
+                } else {
+                    panel.show(frame: savedFrame)
+                }
+            } else {
+                panel.show(frame: savedFrame)
+            }
         } else {
             panel.showAtMouse()
         }
