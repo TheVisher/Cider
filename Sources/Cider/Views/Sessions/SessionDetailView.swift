@@ -148,9 +148,9 @@ struct SessionDetailView: View {
     private func tabRow(_ tab: BrowserSessionTab) -> some View {
         let isSaved = savedTabIDs.contains(tab.id)
         return HStack(spacing: Spacing.sm) {
-            Image(systemName: isSaved ? "bookmark.fill" : "globe")
+            Image(systemName: "globe")
                 .font(CiderFont.captionMedium)
-                .foregroundColor(isSaved ? CiderColors.controlAccent : CiderColors.quaternary)
+                .foregroundColor(CiderColors.quaternary)
                 .frame(width: 14)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -167,26 +167,29 @@ struct SessionDetailView: View {
 
             Spacer(minLength: Spacing.xs)
 
-            if !isSaved {
-                Button {
-                    BookmarksStorage.shared.add(urlString: tab.urlString, title: tab.title)
-                    savedTabIDs.insert(tab.id)
-                } label: {
-                    Image(systemName: "bookmark.badge.plus")
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.tertiary)
-                }
-                .buttonStyle(.plain)
-                .help("Save as bookmark")
+            Button {
+                if isSaved { return }
+                BookmarksStorage.shared.add(urlString: tab.urlString, title: tab.title)
+                savedTabIDs.insert(tab.id)
+            } label: {
+                Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                    .font(CiderFont.body)
+                    .foregroundColor(isSaved ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help(isSaved ? "Saved as bookmark" : "Save as bookmark")
 
             if let url = tab.url {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
                     Image(systemName: "arrow.up.right.square")
-                        .font(CiderFont.captionMedium)
+                        .font(CiderFont.body)
                         .foregroundColor(CiderColors.tertiary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Open in browser")
