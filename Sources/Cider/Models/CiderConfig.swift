@@ -118,6 +118,7 @@ struct CiderConfig: Codable {
         case showMenuBarIcon
         case textSize
         case activationMode
+        case activationSpeed
         case enableNotesHotkey
         case notesEditorTextSize
         case enableBookmarksHotkey
@@ -191,6 +192,7 @@ struct CiderConfig: Codable {
     var showMenuBarIcon: Bool
     var textSize: TextSize
     var activationMode: ActivationMode
+    var activationSpeed: Double  // Double-tap: max interval between taps. Single-tap: max hold duration before ignored. Default 0.3s.
     var enableNotesHotkey: Bool  // Enable Option+N to create note
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
     var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
@@ -269,6 +271,7 @@ struct CiderConfig: Codable {
             showMenuBarIcon: true,
             textSize: .medium,
             activationMode: .doubleTap,
+            activationSpeed: 0.3,
             enableNotesHotkey: true,
             notesEditorTextSize: .normal,
             enableBookmarksHotkey: true,
@@ -362,6 +365,7 @@ struct CiderConfig: Codable {
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
         activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
+        activationSpeed = try container.decodeIfPresent(Double.self, forKey: .activationSpeed) ?? 0.3
         enableNotesHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableNotesHotkey) ?? true
         notesEditorTextSize = try container.decodeIfPresent(
             NotesEditorTextSize.self,
@@ -547,6 +551,7 @@ struct CiderConfig: Codable {
         showMenuBarIcon: Bool = true,
         textSize: TextSize = .medium,
         activationMode: ActivationMode = .doubleTap,
+        activationSpeed: Double = 0.3,
         enableNotesHotkey: Bool = true,
         notesEditorTextSize: NotesEditorTextSize = .normal,
         enableBookmarksHotkey: Bool = true,
@@ -619,6 +624,7 @@ struct CiderConfig: Codable {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
         self.activationMode = activationMode
+        self.activationSpeed = activationSpeed
         self.enableNotesHotkey = enableNotesHotkey
         self.notesEditorTextSize = notesEditorTextSize
         self.enableBookmarksHotkey = enableBookmarksHotkey

@@ -14,7 +14,9 @@ final class SettingsViewModel: ObservableObject {
         didSet { updateLaunchAtLogin() }
     }
     @Published var hotkeyEnabled: Bool = true
-    @Published var hotkeyDoubleTapInterval: Double = 0.3
+    @Published var activationSpeed: Double {
+        didSet { saveConfig() }
+    }
 
     // Appearance settings
     @Published var showMenuBarIcon: Bool {
@@ -152,6 +154,7 @@ final class SettingsViewModel: ObservableObject {
         self.showMenuBarIcon = config.showMenuBarIcon
         self.textSize = config.textSize
         self.activationMode = config.activationMode
+        self.activationSpeed = config.activationSpeed
         self.enableNotesHotkey = config.enableNotesHotkey
         self.notesEditorTextSize = config.notesEditorTextSize
         self.enableBookmarksHotkey = config.enableBookmarksHotkey
@@ -234,6 +237,7 @@ final class SettingsViewModel: ObservableObject {
         config.showMenuBarIcon = showMenuBarIcon
         config.textSize = textSize
         config.activationMode = activationMode
+        config.activationSpeed = activationSpeed
         config.enableNotesHotkey = enableNotesHotkey
         config.notesEditorTextSize = notesEditorTextSize
         config.enableBookmarksHotkey = enableBookmarksHotkey

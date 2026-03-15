@@ -402,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let config = CiderConfig.load()
         doubleTapDetector = DoubleTapDetector(
             key: .option,
-            maxInterval: 0.3,
+            maxInterval: config.activationSpeed,
             mode: config.activationMode
         ) { [weak self] in
             Task { @MainActor in

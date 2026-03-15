@@ -16,6 +16,7 @@ final class DoubleTapDetector: @unchecked Sendable {
 
     private var wasKeyDown = false
     private var usedAsModifier = false
+    private var keyDownTime: Date?
 
     /// Set synchronously by OptionTabDetector's CGEventTap to suppress activation.
     /// Reset on the next Option key-down so it doesn't persist across taps.
@@ -122,6 +123,7 @@ final class DoubleTapDetector: @unchecked Sendable {
         if isKeyDown && !wasKeyDown {
             // Option key just pressed down — reset modifier tracking
             usedAsModifier = false
+            keyDownTime = Date()
             Self.suppressUntilNextOptionDown = false
 
             // Check if other modifier keys are also held (e.g., Cmd+Option)
@@ -130,13 +132,24 @@ final class DoubleTapDetector: @unchecked Sendable {
                 usedAsModifier = true
             }
         } else if wasKeyDown && !isKeyDown {
-            // Option key just released — fire only if not used as a modifier
-            if !usedAsModifier && !Self.suppressUntilNextOptionDown {
+            // Option key just released — fire only if:
+            // 1. Not used as a modifier
+            // 2. Not suppressed by CGEventTap
+            // 3. Held for less than maxInterval (quick tap, not a hold)
+            let heldTooLong: Bool
+            if let downTime = keyDownTime {
+                heldTooLong = Date().timeIntervalSince(downTime) > maxInterval
+            } else {
+                heldTooLong = false
+            }
+
+            if !usedAsModifier && !Self.suppressUntilNextOptionDown && !heldTooLong {
                 let callback = onActivate
                 Task { @MainActor in
                     callback()
                 }
             }
+            keyDownTime = nil
         }
     }
 

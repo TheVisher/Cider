@@ -52,14 +52,14 @@ extension SettingsView {
                         label: { $0.displayName }
                     )
 
-                    if viewModel.activationMode == .doubleTap {
-                        SettingsSliderRow(
-                            title: "Double-tap speed",
-                            value: $viewModel.hotkeyDoubleTapInterval,
-                            range: 0.2...0.5,
-                            labels: ("Fast", "Slow")
-                        )
-                    }
+                    SettingsSliderRow(
+                        title: viewModel.activationMode == .doubleTap
+                            ? "Double-tap speed"
+                            : "Tap speed",
+                        value: $viewModel.activationSpeed,
+                        range: 0.15...0.5,
+                        labels: ("Fast", "Slow")
+                    )
                 }
                 Spacer(minLength: 0)
             }
