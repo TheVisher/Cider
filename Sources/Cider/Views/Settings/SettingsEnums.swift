@@ -56,7 +56,7 @@ enum SettingsCategory: String, CaseIterable {
         case .intelligence:
             [.intelligenceFeatures]
         case .data:
-            [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport, .syncSettings]
+            [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport]
         case .advanced:
             [.advancedAccessibility, .advancedReset]
         case .about:
