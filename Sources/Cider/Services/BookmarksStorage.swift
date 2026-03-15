@@ -2165,17 +2165,19 @@ final class BookmarksStorage: ObservableObject {
             return normalized
         }
 
-        guard !validFolderIDs.isEmpty else {
-            return rawBookmarks.map { bookmark in
-                var normalized = normalizedBookmark(bookmark)
-                normalized.folderID = nil
-                return normalized
-            }
+        // Combine legacy metadata folder IDs with vault folder IDs.
+        // Without this, bookmarks assigned to vault folders (the current system)
+        // would have their folderID wiped during sanitization.
+        let vaultFolderIDs = Set(VaultFolderService.shared.legacyFolders.map(\.id))
+        let allValidFolderIDs = validFolderIDs.union(vaultFolderIDs)
+
+        guard !allValidFolderIDs.isEmpty else {
+            return rawBookmarks.map { normalizedBookmark($0) }
         }
 
         return rawBookmarks.map { bookmark in
             var normalized = normalizedBookmark(bookmark)
-            if let folderID = normalized.folderID, !validFolderIDs.contains(folderID) {
+            if let folderID = normalized.folderID, !allValidFolderIDs.contains(folderID) {
                 normalized.folderID = nil
             }
             return normalized
