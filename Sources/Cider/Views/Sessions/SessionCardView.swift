@@ -74,7 +74,7 @@ struct SessionCardCardView: View {
                             HStack(spacing: Spacing.xs) {
                                 Circle()
                                     .fill(CiderColors.quaternary)
-                                    .frame(width: 4, height: 4)
+                                    .frame(width: Spacing.xs, height: Spacing.xs)
                                 Text(tab.title ?? tab.urlString)
                                     .font(CiderFont.caption)
                                     .foregroundColor(CiderColors.secondary)

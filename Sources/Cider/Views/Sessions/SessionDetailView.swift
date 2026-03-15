@@ -169,7 +169,7 @@ struct SessionDetailView: View {
 
             Button {
                 if isSaved { return }
-                BookmarksStorage.shared.add(urlString: tab.urlString, title: tab.title)
+                _ = BookmarksStorage.shared.add(urlString: tab.urlString, title: tab.title)
                 savedTabIDs.insert(tab.id)
             } label: {
                 Image(systemName: isSaved ? "bookmark.fill" : "bookmark")

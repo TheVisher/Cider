@@ -57,6 +57,9 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | PWA share target | N/A | Yes | N/A |
 | Browser extension | N/A | Planned | N/A |
 | Clipboard detection | Yes | Yes (global paste-to-capture) | Planned (M10) |
+| Browser session capture | Yes (Safari + Chromium) | Planned | N/A |
+| Session restore (any browser) | Yes | Planned | N/A |
+| Session tab → bookmark | Yes | Planned | N/A |
 
 ## Visual & Media
 

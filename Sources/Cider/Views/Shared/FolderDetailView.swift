@@ -27,6 +27,7 @@ struct FolderDetailView: View {
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
     @ObservedObject private var vaultFileService = VaultFileService.shared
+    @ObservedObject private var sessionStorage = BrowserSessionStorage.shared
 
     @State private var selectionAnchorID: String?
     @State private var coverImage: NSImage?
@@ -61,7 +62,7 @@ struct FolderDetailView: View {
             .map { LibraryItemV2.contact($0) }
         let vaultFiles = vaultFileService.files(inFolder: folderID)
             .map { LibraryItemV2.vaultFile($0) }
-        let sessions = BrowserSessionStorage.shared.sessions.filter { $0.folderID == folderID }
+        let sessions = sessionStorage.sessions.filter { $0.folderID == folderID }
             .map { LibraryItemV2.session($0) }
         var all = (bookmarks + notes + dateCards + contacts + vaultFiles + sessions)
             .sorted { $0.createdDate > $1.createdDate }

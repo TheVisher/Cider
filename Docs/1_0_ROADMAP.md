@@ -497,6 +497,28 @@ Expand Cider beyond bookmarks and notes.
 
 ---
 
+### R-22: Browser Session Cards
+> Capture, view, and restore browser tab sessions as full library cards.
+
+**Status:** `Complete` (2026-03-14)
+**Priority:** Medium
+
+**Scope:**
+- ✅ `BrowserSession` as full `LibraryItemV2` case with `LibraryEntityType.session`
+- ✅ `folderID`, `labelIDs` on BrowserSession with backward-compat decoding
+- ✅ `SessionCardCardView` (grid/masonry card with tab preview) + `SessionListRow` (list mode)
+- ✅ `SessionDetailView` slide-out with editable name, scrollable tab list, Restore All Tabs
+- ✅ Save individual tabs as bookmarks from detail view
+- ✅ Browser picker dropdown with persistent default (CiderConfig)
+- ✅ +New popover "Session" capture form with loading state
+- ✅ Search: `@sessions` scope modifier, tab title text search
+- ✅ Folders, tags, trash, undo — all standard library card operations
+- ✅ Bulk operations: select-all, bulk delete, bulk move, bulk tag
+- ✅ Keyboard navigation: arrow keys, Enter to open, Delete to trash
+- ✅ Table list view, entity filter chip, stacks support
+
+---
+
 ## Stretch Goals
 
 If time allows before 1.0. Otherwise, first post-1.0 priorities.
@@ -511,7 +533,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | Web archival | .webarchive snapshots for offline access |
 | Related links per bookmark | Multiple URLs for one entity (App Store + GitHub + docs) |
 | Quick-capture inline text field | Type and hit Enter to create note/bookmark from Home |
-| Browser session sync | Save/restore tab sessions across browsers and devices. Browser-agnostic — capture from Chrome, restore in Safari/Arc/Zen. Syncs via Cider Web. Solves the problem that most browsers lack cross-browser sync. |
+| ~~Browser session sync~~ | ✅ Shipped as R-22. Sessions are full library cards with capture, restore, search, folders, tags, trash. |
 | Quick Note scratchpad | Alt+N opens a small standalone panel with just a note editor. Fast capture without opening the full panel. |
 
 ---
@@ -541,8 +563,9 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-17 | Todos Card Type | 4 | ✅ Complete |
 | R-18 | Documents Card Type | 4 | Deferred → Vault Roadmap |
 | R-19 | Excalidraw Whiteboard Tab | 4 | ✅ Complete |
+| R-22 | Browser Session Cards | 4 | ✅ Complete |
 
-**Completed:** 17/21 (4 deferred to Vault Roadmap)
+**Completed:** 18/22 (4 deferred to Vault Roadmap)
 
 ---
 
@@ -694,8 +717,8 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 ### Browser Integration
 | Item | Source | Notes |
 |------|--------|-------|
-| Browser tab capture & restore | USER_IDEA | Capture all open tabs from Safari/Chrome/Arc/Brave/Edge via AppleScript, save as session/folder. Restore to any browser via `open -a`. Low difficulty — core is ~2-3h. Firefox lacks AppleScript (skip or extension). |
-| Portable browser sessions (cross-browser, cross-device) | USER_IDEA 2026-03 | Save a full tab session (all open tabs) as a named session object in Cider. Restore that session in ANY browser — not just the one it came from. Since Cider syncs via Cider Web, sessions sync across computers too: save a session on your Mac, open it on another machine. Basically a browser-agnostic, cross-device session manager. Sessions are just ordered lists of URLs stored in the vault, so they sync like any other card type. |
+| ~~Browser tab capture & restore~~ | ✅ Shipped as R-22 |
+| ~~Portable browser sessions~~ | ✅ Shipped as R-22. Cross-device sync planned via Cider Web session sync. |
 
 ### Code Health & Refactoring
 | Item | Source | Notes |
