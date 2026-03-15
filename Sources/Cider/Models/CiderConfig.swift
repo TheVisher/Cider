@@ -119,6 +119,8 @@ struct CiderConfig: Codable {
         case textSize
         case activationMode
         case activationSpeed
+        case hideCardFooters
+        case showCardDetailsOnHover
         case enableNotesHotkey
         case notesEditorTextSize
         case enableBookmarksHotkey
@@ -193,6 +195,8 @@ struct CiderConfig: Codable {
     var textSize: TextSize
     var activationMode: ActivationMode
     var activationSpeed: Double  // Double-tap: max interval between taps. Single-tap: max hold duration before ignored. Default 0.3s.
+    var hideCardFooters: Bool  // Hide card footer text (title, metadata, tags) for gallery-style view
+    var showCardDetailsOnHover: Bool  // When card footers are hidden, reveal details on hover
     var enableNotesHotkey: Bool  // Enable Option+N to create note
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
     var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
@@ -272,6 +276,8 @@ struct CiderConfig: Codable {
             textSize: .medium,
             activationMode: .doubleTap,
             activationSpeed: 0.3,
+            hideCardFooters: false,
+            showCardDetailsOnHover: true,
             enableNotesHotkey: true,
             notesEditorTextSize: .normal,
             enableBookmarksHotkey: true,
@@ -366,6 +372,8 @@ struct CiderConfig: Codable {
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
         activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
         activationSpeed = try container.decodeIfPresent(Double.self, forKey: .activationSpeed) ?? 0.3
+        hideCardFooters = try container.decodeIfPresent(Bool.self, forKey: .hideCardFooters) ?? false
+        showCardDetailsOnHover = try container.decodeIfPresent(Bool.self, forKey: .showCardDetailsOnHover) ?? true
         enableNotesHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableNotesHotkey) ?? true
         notesEditorTextSize = try container.decodeIfPresent(
             NotesEditorTextSize.self,
@@ -552,6 +560,8 @@ struct CiderConfig: Codable {
         textSize: TextSize = .medium,
         activationMode: ActivationMode = .doubleTap,
         activationSpeed: Double = 0.3,
+        hideCardFooters: Bool = false,
+        showCardDetailsOnHover: Bool = true,
         enableNotesHotkey: Bool = true,
         notesEditorTextSize: NotesEditorTextSize = .normal,
         enableBookmarksHotkey: Bool = true,
@@ -625,6 +635,8 @@ struct CiderConfig: Codable {
         self.textSize = textSize
         self.activationMode = activationMode
         self.activationSpeed = activationSpeed
+        self.hideCardFooters = hideCardFooters
+        self.showCardDetailsOnHover = showCardDetailsOnHover
         self.enableNotesHotkey = enableNotesHotkey
         self.notesEditorTextSize = notesEditorTextSize
         self.enableBookmarksHotkey = enableBookmarksHotkey

@@ -14,6 +14,43 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Hide Card Footers Environment Key
+
+private struct HideCardFootersKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    var hideCardFooters: Bool {
+        get { self[HideCardFootersKey.self] }
+        set { self[HideCardFootersKey.self] = newValue }
+    }
+}
+
+// MARK: - Show Card Details On Hover Environment Key
+
+private struct ShowCardDetailsOnHoverKey: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+
+extension EnvironmentValues {
+    var showCardDetailsOnHover: Bool {
+        get { self[ShowCardDetailsOnHoverKey.self] }
+        set { self[ShowCardDetailsOnHoverKey.self] = newValue }
+    }
+}
+
+// MARK: - Card Environment Modifier
+
+extension View {
+    func ciderCardEnvironment(textScale: CGFloat, hideFooters: Bool, detailsOnHover: Bool) -> some View {
+        self
+            .environment(\.textScale, textScale)
+            .environment(\.hideCardFooters, hideFooters)
+            .environment(\.showCardDetailsOnHover, detailsOnHover)
+    }
+}
+
 // MARK: - Notification Names
 
 extension Notification.Name {

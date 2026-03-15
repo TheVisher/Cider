@@ -35,6 +35,8 @@ struct BookmarkCard: View {
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.hideCardFooters) private var hideCardFooters
+    @Environment(\.showCardDetailsOnHover) private var showCardDetailsOnHover
     @State private var isHovered = false
     @State private var isThumbnailDropTargeted = false
     @State private var cardWidth: CGFloat = 220
@@ -69,44 +71,80 @@ struct BookmarkCard: View {
                                 .padding(Spacing.xs)
                         }
                     }
+                    .overlay(alignment: .bottom) {
+                        if hideCardFooters && showCardDetailsOnHover && isHovered {
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                Button { handleClick(normalAction: onOpen) } label: {
+                                    Text(bookmark.title)
+                                        .font(CiderFont.labelSemibold(scale: textScale))
+                                        .foregroundColor(.white)
+                                        .lineLimit(2)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+
+                                if bookmark.hasURL {
+                                    Text(bookmark.hostDisplay)
+                                        .font(CiderFont.body(scale: textScale))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .lineLimit(1)
+                                }
+                            }
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.bottom, Spacing.sm)
+                            .padding(.top, Spacing.xxl)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                LinearGradient(
+                                    colors: [.clear, .black.opacity(0.6)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
             .buttonStyle(.plain)
             .help("Show bookmark details")
 
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Button { handleClick(normalAction: onOpen) } label: {
-                    HighlightedText(bookmark.title, highlight: searchText)
-                        .font(CiderFont.labelSemibold(scale: textScale))
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
+            if !hideCardFooters {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Button { handleClick(normalAction: onOpen) } label: {
+                        HighlightedText(bookmark.title, highlight: searchText)
+                            .font(CiderFont.labelSemibold(scale: textScale))
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
 
-                Button { handleClick(normalAction: onOpen) } label: {
-                    HStack(spacing: Spacing.xs) {
-                        if bookmark.hasURL {
-                            Text(bookmark.hostDisplay)
+                    Button { handleClick(normalAction: onOpen) } label: {
+                        HStack(spacing: Spacing.xs) {
+                            if bookmark.hasURL {
+                                Text(bookmark.hostDisplay)
+                                    .font(CiderFont.body(scale: textScale))
+                                    .foregroundColor(CiderColors.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: Spacing.xs)
+
+                            Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
                                 .font(CiderFont.body(scale: textScale))
-                                .foregroundColor(CiderColors.secondary)
+                                .foregroundColor(CiderColors.tertiary)
                                 .lineLimit(1)
                         }
-
-                        Spacer(minLength: Spacing.xs)
-
-                        Text(bookmark.updatedAt.formatted(.relative(presentation: .named)))
-                            .font(CiderFont.body(scale: textScale))
-                            .foregroundColor(CiderColors.tertiary)
-                            .lineLimit(1)
                     }
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                if !bookmark.labelIDs.isEmpty {
-                    TagPillRow(
-                        labelIDs: bookmark.labelIDs,
-                        labels: CardLabelStorage.shared.labels
-                    )
+                    if !bookmark.labelIDs.isEmpty {
+                        TagPillRow(
+                            labelIDs: bookmark.labelIDs,
+                            labels: CardLabelStorage.shared.labels
+                        )
+                    }
                 }
             }
         }

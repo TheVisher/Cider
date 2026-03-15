@@ -24,6 +24,8 @@ struct NoteCardView: View {
         case masonry
     }
 
+    @Environment(\.hideCardFooters) private var hideCardFooters
+    @Environment(\.showCardDetailsOnHover) private var showCardDetailsOnHover
     @State private var isHovered = false
     @State private var cardData: NoteCardData = .empty
     @State private var isRenaming = false
@@ -90,28 +92,30 @@ struct NoteCardView: View {
                     }
                 }
 
-                // AI-generated summary from sidecar metadata
-                if let summary = sidecarMeta?.summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                if !hideCardFooters {
+                    // AI-generated summary from sidecar metadata
+                    if let summary = sidecarMeta?.summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.tertiary)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                // Footer
-                footer
+                    // Footer
+                    footer
 
-                if !note.labelIDs.isEmpty {
-                    TagPillRow(
-                        labelIDs: note.labelIDs,
-                        labels: CardLabelStorage.shared.labels
-                    )
-                }
+                    if !note.labelIDs.isEmpty {
+                        TagPillRow(
+                            labelIDs: note.labelIDs,
+                            labels: CardLabelStorage.shared.labels
+                        )
+                    }
 
-                // Sidecar metadata tags (from AI tools or .cider-meta.json)
-                if let sidecarTags = sidecarMeta?.tags, !sidecarTags.isEmpty {
-                    SidecarTagsView(tags: sidecarTags)
+                    // Sidecar metadata tags (from AI tools or .cider-meta.json)
+                    if let sidecarTags = sidecarMeta?.tags, !sidecarTags.isEmpty {
+                        SidecarTagsView(tags: sidecarTags)
+                    }
                 }
             }
             .padding(Spacing.sm)
@@ -120,6 +124,27 @@ struct NoteCardView: View {
         }
         .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused)
+        .overlay(alignment: .bottom) {
+            if hideCardFooters && showCardDetailsOnHover && isHovered {
+                HStack(spacing: Spacing.xs) {
+                    if let folderName, !folderName.isEmpty {
+                        Text(folderName)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.accentText)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Text(note.createdAt.noteCardDate)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(CiderColors.surfaceElevated.opacity(0.95))
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(alignment: .topLeading) {
             if isSelected {
                 SelectionCheckmark()

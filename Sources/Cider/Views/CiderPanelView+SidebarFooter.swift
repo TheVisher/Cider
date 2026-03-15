@@ -185,7 +185,9 @@ extension CiderPanelView {
                 .popover(isPresented: $isHomeViewOptionsVisible) {
                     ViewOptionsDropdown(
                         displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale
+                        cardSizeScale: $homeCardSizeScale,
+                        hideCardFooters: $hideCardFooters,
+                        showCardDetailsOnHover: $showCardDetailsOnHover
                     )
                 }
         } else if let savedViewID = selectedTab?.savedViewID {
@@ -200,6 +202,8 @@ extension CiderPanelView {
                     ViewOptionsDropdown(
                         displayMode: $homeDisplayMode,
                         cardSizeScale: $homeCardSizeScale,
+                        hideCardFooters: $hideCardFooters,
+                        showCardDetailsOnHover: $showCardDetailsOnHover,
                         sortMode: sortModeBinding(for: savedViewID),
                         entityFilter: entityFilterBinding(for: savedViewID),
                         tagFilter: tagFilterBinding(for: savedViewID),
@@ -282,4 +286,5 @@ extension CiderPanelView {
             }
         )
     }
+
 }

@@ -12,6 +12,8 @@ extension LibraryDisplayMode: DisplayModeOption {}
 struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
     @Binding var displayMode: Mode
     @Binding var cardSizeScale: Double
+    var hideCardFooters: Binding<Bool>? = nil
+    var showCardDetailsOnHover: Binding<Bool>? = nil
 
     // Home-tab-only extras — nil means the section is hidden
     var sortMode: Binding<LibrarySortMode>? = nil
@@ -65,6 +67,16 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
+            }
+
+            if let hideCardFooters {
+                Divider()
+                    .background(CiderColors.separator)
+
+                CardDetailsToggleSection(
+                    hideCardFooters: hideCardFooters,
+                    showCardDetailsOnHover: showCardDetailsOnHover
+                )
             }
 
             Divider()
@@ -432,6 +444,51 @@ private struct TagFilterChip: View {
         }
         .buttonStyle(.plain)
         .hoverState($isHovered)
+    }
+}
+
+// MARK: - Card Details Toggle
+
+private struct CardDetailsToggleSection: View {
+    @Binding var hideCardFooters: Bool
+    var showCardDetailsOnHover: Binding<Bool>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                Text("Hide card details")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                Spacer(minLength: 0)
+                Toggle("", isOn: $hideCardFooters)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
+
+            if hideCardFooters, let showCardDetailsOnHover {
+                HStack(spacing: Spacing.sm) {
+                    Text("Show on hover")
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                    Spacer(minLength: 0)
+                    Toggle("", isOn: showCardDetailsOnHover)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+                .padding(.leading, Spacing.sm)
+            }
+        }
+        .onChange(of: hideCardFooters) { _, _ in persistCardFooterSettings() }
+        .onChange(of: showCardDetailsOnHover?.wrappedValue) { _, _ in persistCardFooterSettings() }
+    }
+
+    private func persistCardFooterSettings() {
+        var config = CiderConfig.load()
+        config.hideCardFooters = hideCardFooters
+        config.showCardDetailsOnHover = showCardDetailsOnHover?.wrappedValue ?? true
+        config.save()
     }
 }
 

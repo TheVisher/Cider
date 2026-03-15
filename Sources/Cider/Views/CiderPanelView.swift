@@ -21,6 +21,8 @@ struct CiderPanelView: View {
     @State var showNewItemPicker = false
     @State var homeDisplayMode: LibraryDisplayMode = CiderConfig.load().homeDisplayMode
     @State var homeCardSizeScale: Double = CiderConfig.load().homeCardSizeScale ?? 1.0
+    @State var hideCardFooters: Bool = CiderConfig.load().hideCardFooters
+    @State var showCardDetailsOnHover: Bool = CiderConfig.load().showCardDetailsOnHover
     @State var homeSort: LibrarySortMode = CiderConfig.load().homeSort
     @State var homeEntityFilter: Set<LibraryEntityType> = CiderConfig.load().homeEntityFilter
     @State var subFoldersCollapsed: Bool = CiderConfig.load().subFoldersCollapsed
@@ -195,7 +197,7 @@ struct CiderPanelView: View {
         .animation(reduceMotion ? .none : .snappy, value: isGenericDetailSlideOut)
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailSlideOut)
-        .environment(\.textScale, textScale)
+        .ciderCardEnvironment(textScale: textScale, hideFooters: hideCardFooters, detailsOnHover: showCardDetailsOnHover)
         .task { ensureDefaultTabs() }
         .onAppear { installKeyboardMonitor() }
         .onDisappear { removeKeyboardMonitor() }
