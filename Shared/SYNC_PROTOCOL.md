@@ -14,11 +14,66 @@ Desktop (macOS)  ── REST ──>  Convex Backend  <── REST ──  iOS
                               Web (direct mutations + subscriptions)
 ```
 
-**Auth**: All REST endpoints require `Authorization: Bearer <sync_token>`. Tokens are generated in Cider Web's settings page.
+**Auth**: All REST sync endpoints require `Authorization: Bearer <sync_token>`. Desktop and iOS obtain tokens automatically via the native auth endpoints (login/signup). Web uses `@convex-dev/auth` session cookies.
 
 **Base URL**: `https://dashing-fennec-334.convex.site`
 
-## Endpoints
+## Native Auth Endpoints (Desktop + iOS)
+
+Desktop and iOS authenticate via email/password. On login or signup, the server auto-creates a sync token and returns it. The client stores the token in Keychain and uses it for all sync requests.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/auth/login` | Sign in with email + password → returns sync token |
+| POST | `/api/auth/signup` | Create account with email + password → returns sync token |
+| POST | `/api/auth/account` | Get account info (requires Bearer token) |
+
+### Login Request
+
+```json
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "deviceName": "MacBook Pro"
+}
+```
+
+### Login Response (200)
+
+```json
+{
+  "token": "aBcDeFgH-iJkLmNoP-qRsTuVwX-yZaBcDeF",
+  "userId": "convex_user_id",
+  "email": "user@example.com"
+}
+```
+
+### Error Response (401 login / 400 signup)
+
+```json
+{
+  "error": "Invalid email or password"
+}
+```
+
+### Auth Flow
+
+1. User enters email + password in Settings
+2. Client calls `/api/auth/login` (or `/api/auth/signup`)
+3. Server verifies credentials against `@convex-dev/auth` password hashes
+4. Server creates or reuses a sync token for this device
+5. Client stores token in Keychain, sets `syncEnabled = true`
+6. All subsequent sync calls use `Authorization: Bearer <token>`
+
+### Device Name
+
+Each device gets a named sync token (e.g., "MacBook Pro", "iPhone"). If the user logs in again from the same device name, the existing token is reused instead of creating a new one.
+
+### Sign Out
+
+Client clears the stored token and email, sets `syncEnabled = false`. The sync token remains valid on the server (can be revoked in Web settings).
+
+## Sync Endpoints
 
 | Method | Path | Purpose |
 |--------|------|---------|

@@ -32,7 +32,7 @@ All three clients share one Convex deployment. Desktop and iOS talk to it via RE
 - **Dev deployment** (currently live): `dashing-fennec-334`
 - **HTTP base URL**: `https://dashing-fennec-334.convex.site`
 - **Prod deployment** (unused): `spotted-sockeye-736`
-- **Auth model**: Sync tokens (bearer tokens). User generates a token in Cider Web settings, enters it in Desktop/iOS.
+- **Auth model**: Email/password accounts via `@convex-dev/auth`. Desktop and iOS authenticate via `/api/auth/login` (returns sync token automatically). Web uses Convex session cookies. Legacy sync tokens still work for backward compatibility.
 - **Schema lives in**: `Cider-Web/convex/schema.ts`
 - **Sync API lives in**: `Cider-Web/convex/sync.ts` + `Cider-Web/convex/http.ts`
 
