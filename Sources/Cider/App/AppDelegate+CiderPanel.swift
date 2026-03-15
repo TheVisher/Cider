@@ -115,6 +115,18 @@ extension AppDelegate {
         guard let panel = ciderPanel else { return }
 
         if panel.isVisible {
+            let config = CiderConfig.load()
+            if config.openOnMouseScreen {
+                // If mouse is on a different screen than the panel, move there instead of hiding
+                let mouseLocation = NSEvent.mouseLocation
+                let panelScreen = panel.screen ?? NSScreen.main
+                let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+                if let mouseScreen, mouseScreen != panelScreen {
+                    persistCurrentCiderPanelFrameIfNeeded()
+                    showCiderPanel()
+                    return
+                }
+            }
             hideCiderPanel()
         } else {
             showCiderPanel()

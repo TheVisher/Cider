@@ -9,6 +9,9 @@ final class DoubleTapDetector: @unchecked Sendable {
     private var localFlagsMonitor: Any?
     private var globalKeyDownMonitor: Any?
     private var localKeyDownMonitor: Any?
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private var retainedForEventTap = false
     private let targetKey: NSEvent.ModifierFlags
     private let maxInterval: TimeInterval
     private let mode: ActivationMode
@@ -57,6 +60,9 @@ final class DoubleTapDetector: @unchecked Sendable {
                 self?.handleKeyDown()
                 return event
             }
+
+            // CGEventTap catches system-level shortcuts (e.g., Opt+Tab) that NSEvent monitors miss
+            startEventTap()
         }
     }
 
@@ -76,6 +82,18 @@ final class DoubleTapDetector: @unchecked Sendable {
         if let monitor = localKeyDownMonitor {
             NSEvent.removeMonitor(monitor)
             localKeyDownMonitor = nil
+        }
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            if let source = runLoopSource {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+            runLoopSource = nil
+            eventTap = nil
+            if retainedForEventTap {
+                Unmanaged.passUnretained(self).release()
+                retainedForEventTap = false
+            }
         }
     }
 
@@ -156,6 +174,52 @@ final class DoubleTapDetector: @unchecked Sendable {
                 }
             }
             keyDownTime = nil
+        }
+    }
+
+    // MARK: - CGEventTap (catches system-level key events NSEvent monitors miss)
+
+    private func startEventTap() {
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+
+        eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: { _, type, event, refcon in
+                guard let refcon else { return Unmanaged.passUnretained(event) }
+                let detector = Unmanaged<DoubleTapDetector>.fromOpaque(refcon).takeUnretainedValue()
+                detector.handleEventTap(type: type, event: event)
+                return Unmanaged.passUnretained(event)
+            },
+            userInfo: refcon
+        )
+
+        guard let eventTap else { return }
+
+        _ = Unmanaged.passRetained(self)
+        retainedForEventTap = true
+
+        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+        if let runLoopSource {
+            CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+    }
+
+    private func handleEventTap(type: CGEventType, event: CGEvent) {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return
+        }
+
+        // If Option is held and any key is pressed, mark as modifier usage
+        if wasKeyDown && event.flags.contains(.maskAlternate) {
+            usedAsModifier = true
         }
     }
 
