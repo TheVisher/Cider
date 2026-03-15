@@ -266,10 +266,17 @@ extension CiderPanelView {
         .buttonStyle(.plain)
         .help("Back")
 
-        Text(currentDetailPageTitle)
-            .font(CiderFont.subheadingSemibold)
-            .foregroundColor(CiderColors.primary)
-            .lineLimit(1)
+        if isNoteDetailPageMode {
+            EditablePageTitle(
+                title: currentDetailPageTitle,
+                onRename: renameCurrentNote
+            )
+        } else {
+            Text(currentDetailPageTitle)
+                .font(CiderFont.subheadingSemibold)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+        }
 
         Spacer(minLength: Spacing.sm)
 
@@ -407,12 +414,12 @@ extension CiderPanelView {
     @ViewBuilder
     var noteDetailSlideOutContainer: some View {
         GenericItemDetailPanel(
-            title: "",
+            title: noteDetailTitle,
             detailViewMode: detailViewMode,
             width: min(detailSlideOutWidth, maxSlideOutWidth),
             maxWidth: maxSlideOutWidth,
-            showTitle: false,
             scrollsContent: false,
+            onRenameTitle: renameCurrentNote,
             onResize: { newWidth in
                 let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                 detailSlideOutWidth = clamped
@@ -429,11 +436,11 @@ extension CiderPanelView {
     @ViewBuilder
     var noteDetailFullPanelOverlay: some View {
         GenericItemDetailPanel(
-            title: "",
+            title: noteDetailTitle,
             detailViewMode: detailViewMode,
             showDragHandle: false,
-            showTitle: false,
             scrollsContent: false,
+            onRenameTitle: renameCurrentNote,
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
             toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
@@ -445,5 +452,61 @@ extension CiderPanelView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
         .transition(.opacity)
+    }
+
+    private var noteDetailTitle: String {
+        notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
+    }
+
+    private func renameCurrentNote(_ newTitle: String) {
+        guard let note = notesViewModel.selectedNote ?? selectedNote else { return }
+        NotesStorage.shared.rename(note: note, to: newTitle)
+    }
+}
+
+// MARK: - Editable Page Title
+
+/// Double-click to rename inline in the page view title bar.
+private struct EditablePageTitle: View {
+    let title: String
+    var onRename: ((String) -> Void)?
+
+    @State private var isEditing = false
+    @State private var draftName = ""
+
+    var body: some View {
+        if isEditing {
+            TextField("Title", text: $draftName, onCommit: commit)
+                .textFieldStyle(.plain)
+                .font(CiderFont.subheadingSemibold)
+                .foregroundColor(CiderColors.primary)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .onExitCommand { isEditing = false }
+                .lineLimit(1)
+        } else {
+            Text(title)
+                .font(CiderFont.subheadingSemibold)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+                .onTapGesture(count: 2) {
+                    guard onRename != nil else { return }
+                    draftName = title
+                    isEditing = true
+                }
+                .help("Double-click to rename")
+        }
+    }
+
+    private func commit() {
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && trimmed != title {
+            onRename?(trimmed)
+        }
+        isEditing = false
     }
 }

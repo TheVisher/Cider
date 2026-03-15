@@ -12,6 +12,7 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
     var showDragHandle: Bool = true
     var showTitle: Bool = true
     var scrollsContent: Bool = true
+    var onRenameTitle: ((String) -> Void)? = nil
     var onResize: (CGFloat) -> Void = { _ in }
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
@@ -74,41 +75,33 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
 
     @ViewBuilder
     private var toolbar: some View {
-        ZStack {
-            // Center layer: toolbar extras or title
+        HStack(spacing: Spacing.sm) {
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+
             if showTitle {
-                Text(title)
-                    .font(CiderFont.labelMedium(scale: textScale))
-                    .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(1)
-            } else {
-                toolbarExtra()
+                EditableTitleLabel(
+                    title: title,
+                    onRename: onRenameTitle
+                )
             }
 
-            // Edge layer: close button (left) + view modes (right)
-            HStack(spacing: Spacing.sm) {
-                Button {
-                    onClose()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Close")
+            toolbarExtra()
 
-                if showTitle {
-                    toolbarExtra()
-                }
+            Spacer(minLength: 0)
 
-                Spacer(minLength: 0)
+            trailingExtra()
 
-                trailingExtra()
-
-                DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
-            }
+            DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
         }
     }
 
@@ -143,6 +136,55 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra 
         self.toolbarExtra = { EmptyView() }
         self.trailingExtra = { EmptyView() }
         self.content = content
+    }
+}
+
+// MARK: - Editable Title Label
+
+/// Double-click to rename inline. Shows as a plain text label normally.
+private struct EditableTitleLabel: View {
+    let title: String
+    var onRename: ((String) -> Void)?
+
+    @State private var isEditing = false
+    @State private var draftName = ""
+
+    @Environment(\.textScale) private var textScale
+
+    var body: some View {
+        if isEditing, onRename != nil {
+            TextField("Title", text: $draftName, onCommit: commit)
+                .textFieldStyle(.plain)
+                .font(CiderFont.labelMedium(scale: textScale))
+                .foregroundColor(CiderColors.primary)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .onExitCommand { isEditing = false }
+                .lineLimit(1)
+        } else {
+            Text(title)
+                .font(CiderFont.labelMedium(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+                .onTapGesture(count: 2) {
+                    guard onRename != nil else { return }
+                    draftName = title
+                    isEditing = true
+                }
+                .help(onRename != nil ? "Double-click to rename" : title)
+        }
+    }
+
+    private func commit() {
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && trimmed != title {
+            onRename?(trimmed)
+        }
+        isEditing = false
     }
 }
 
