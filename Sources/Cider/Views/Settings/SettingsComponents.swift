@@ -289,6 +289,10 @@ struct SettingsAccountOverviewView: View {
                 }
             }
 
+            SettingsSection(title: "Devices") {
+                ConnectedDevicesView()
+            }
+
             SettingsSection(title: "Sync") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     HStack(spacing: Spacing.sm) {
