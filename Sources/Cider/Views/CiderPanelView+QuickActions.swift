@@ -42,18 +42,14 @@ extension CiderPanelView {
     // MARK: - Note Creation
 
     func createNoteAndOpen(title: String, content: String) {
-        // Create on disk first so selectNote picks up the right path/content
-        var note = NotesStorage.shared.createNew()
+        // Write content at creation time so it's on disk before any rename.
+        // Calling save(note:) after rename mis-routes Inbox paths to the vault directory.
+        var note = NotesStorage.shared.createNew(initialContent: content)
 
         if !title.isEmpty {
             NotesStorage.shared.rename(note: note, to: title)
             // Refresh from storage so we have the updated filename/title
             note = NotesStorage.shared.notes.first(where: { $0.id == note.id }) ?? note
-        }
-
-        if !content.isEmpty {
-            note.content = content
-            NotesStorage.shared.save(note: note)
         }
 
         openNoteDetail(note)

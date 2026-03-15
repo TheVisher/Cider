@@ -467,7 +467,7 @@ final class NotesStorage: ObservableObject {
 
     // MARK: - CRUD
 
-    func createNew() -> Note {
+    func createNew(initialContent: String = "") -> Note {
         let title = uniqueTitle("Untitled")
         let filename = "\(title).md"
         let inboxDir = inboxNotesDirectoryURL
@@ -478,14 +478,14 @@ final class NotesStorage: ObservableObject {
         // Ensure Inbox/Notes/ exists
         try? FileManager.default.createDirectory(at: inboxDir, withIntermediateDirectories: true)
 
-        // Write empty file to Inbox/Notes/
-        try? "".write(to: fileURL, atomically: true, encoding: .utf8)
+        // Write initial content to Inbox/Notes/
+        try? initialContent.write(to: fileURL, atomically: true, encoding: .utf8)
 
         let inboxRelativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
         index[uuid] = NoteIndexEntry(filename: filename, folderID: nil, createdAt: now)
         saveIndex()
 
-        let note = Note(id: uuid, title: title, content: "", createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
+        let note = Note(id: uuid, title: title, content: initialContent, createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
         return note
     }
