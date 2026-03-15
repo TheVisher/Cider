@@ -102,7 +102,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Planned (M12) |
 | Export (Netscape HTML) | Yes | Yes | Planned (M15) |
 | Import (Netscape HTML) | Yes | Planned | No |
-| Reader mode | Yes (Readability.js) | No | Yes (Readability.js) |
+| Reader mode | Yes (Readability.js) | Yes (Readability.js) | Yes (Readability.js) |
 | Accessibility (VoiceOver) | Partial | No | Yes |
 | Reduce Motion | Yes | No | Yes |
 | Dynamic Type | No | No | Partial |
