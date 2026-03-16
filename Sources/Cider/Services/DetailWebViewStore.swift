@@ -70,6 +70,7 @@ final class DetailWebViewStore: ObservableObject {
             self?.webViewReady = true
         }
         wv.navigationDelegate = delegate
+        wv.uiDelegate = Self.suppressingUIDelegate
         wv.setValue(false, forKey: "drawsBackground")
         wv.load(URLRequest(url: url))
         webView = wv
@@ -203,6 +204,27 @@ final class DetailWebViewStore: ObservableObject {
             "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause();}catch(e){}})"
         )
     }
+
+    /// Shared UI delegate that suppresses window.open() during preload.
+    /// Without this, JS-heavy sites (Shopify) fire window.open() calls that
+    /// leak to the system browser on macOS, opening dozens of tabs.
+    private static let suppressingUIDelegate = SuppressingUIDelegate()
+}
+
+// MARK: - Suppressing UI Delegate (blocks window.open during preload)
+
+private final class SuppressingUIDelegate: NSObject, WKUIDelegate {
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        // Return nil to block new window creation (window.open calls).
+        // During preload, no user interaction is happening so these are
+        // all JS-initiated and should be suppressed.
+        return nil
+    }
 }
 
 // MARK: - Associated Object Key
@@ -239,17 +261,11 @@ private final class WebLoadDelegate: NSObject, WKNavigationDelegate {
         onReady()
     }
 
-    func webView(
-        _ webView: WKWebView,
-        decidePolicyFor action: WKNavigationAction
-    ) async -> WKNavigationActionPolicy {
-        guard let url = action.request.url else { return .cancel }
-        if action.navigationType == .linkActivated {
-            openURLSafely(url)
-            return .cancel
-        }
-        return .allow
-    }
+    // No decidePolicyFor here — this delegate is for preload only.
+    // Opening URLs externally during preload causes JS-heavy sites
+    // (e.g., Shopify) to spawn dozens of browser tabs. Link-opening
+    // is handled by BookmarkWebView.Coordinator when the user
+    // interacts with the visible web view.
 }
 
 // MARK: - Reader Extraction Delegate (background extraction)

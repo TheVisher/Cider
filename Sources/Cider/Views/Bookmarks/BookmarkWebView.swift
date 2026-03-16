@@ -15,6 +15,7 @@ struct BookmarkWebView: NSViewRepresentable {
         // without SwiftUI dismantling it.
         let wrapper = WebViewWrapper()
         let wv = store.getWebView(for: url, delegate: context.coordinator)
+        wv.uiDelegate = context.coordinator
         wrapper.attach(wv)
         return wrapper
     }
@@ -22,6 +23,7 @@ struct BookmarkWebView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let wrapper = nsView as? WebViewWrapper else { return }
         let wv = store.getWebView(for: url, delegate: context.coordinator)
+        wv.uiDelegate = context.coordinator
         wrapper.attach(wv)
         if !isActive {
             wv.evaluateJavaScript(
@@ -37,7 +39,7 @@ struct BookmarkWebView: NSViewRepresentable {
         wrapper.detach()
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding var isLoading: Bool
         init(isLoading: Binding<Bool>) { _isLoading = isLoading }
 
@@ -63,10 +65,32 @@ struct BookmarkWebView: NSViewRepresentable {
         ) async -> WKNavigationActionPolicy {
             guard let url = action.request.url else { return .cancel }
             if action.navigationType == .linkActivated {
+                // Don't open externally if it's the same page (e.g., Shopify tracking
+                // redirects append campaign_id/ad_id params to the current URL).
+                // Only open genuinely different URLs in the browser.
+                let currentHost = webView.url?.host
+                let currentPath = webView.url?.path
+                if url.host == currentHost && url.path == currentPath {
+                    return .cancel
+                }
                 openURLSafely(url)
                 return .cancel
             }
             return .allow
+        }
+
+        // WKUIDelegate — handle window.open() from page JavaScript.
+        // Opens the URL in the system browser instead of creating a new WKWebView.
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if navigationAction.request.url != nil {
+                openURLSafely(navigationAction.request.url!)
+            }
+            return nil
         }
     }
 }

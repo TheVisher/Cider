@@ -106,6 +106,11 @@ struct BookmarkReaderView: NSViewRepresentable {
         ) async -> WKNavigationActionPolicy {
             guard let url = action.request.url else { return .cancel }
             if action.navigationType == .linkActivated {
+                let currentHost = webView.url?.host
+                let currentPath = webView.url?.path
+                if url.host == currentHost && url.path == currentPath {
+                    return .cancel
+                }
                 openURLSafely(url)
                 return .cancel
             }
