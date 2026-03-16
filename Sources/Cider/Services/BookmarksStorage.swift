@@ -1934,27 +1934,44 @@ final class BookmarksStorage: ObservableObject {
     private static func fetchRedditJSONPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
 
-        // Build the .json URL — works for post URLs like /r/sub/comments/id/slug/
-        // Strip trailing slash, append .json
-        var jsonURLString = pageURL.absoluteString
-        if jsonURLString.hasSuffix("/") {
-            jsonURLString = String(jsonURLString.dropLast())
+        // Only works for post URLs containing /comments/
+        guard pageURL.path.contains("/comments/") else {
+            enrichLog.debug("Reddit JSON: skipping non-post URL \(pageURL.path, privacy: .public)")
+            return nil
         }
-        jsonURLString += ".json"
-        guard let jsonURL = URL(string: jsonURLString) else { return nil }
+
+        // Build the .json URL — strip query/fragment, ensure trailing .json
+        var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false)
+        components?.query = nil
+        components?.fragment = nil
+        var cleanPath = components?.path ?? pageURL.path
+        if cleanPath.hasSuffix("/") {
+            cleanPath = String(cleanPath.dropLast())
+        }
+        components?.path = cleanPath + ".json"
+        // Force old.reddit.com — www.reddit.com returns HTML for .json in some cases
+        components?.host = "old.reddit.com"
+        guard let jsonURL = components?.url else { return nil }
+
+        enrichLog.info("Reddit JSON: fetching \(jsonURL.absoluteString, privacy: .public)")
 
         var request = URLRequest(url: jsonURL)
         request.timeoutInterval = 8
-        // Reddit requires a User-Agent or returns 429
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
+        // Reddit requires a unique app-like User-Agent for JSON endpoints.
+        // Browser UAs get HTML redirects instead of JSON.
+        request.setValue("Cider/1.0 (macOS bookmark manager)", forHTTPHeaderField: "User-Agent")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            enrichLog.debug("Reddit JSON fetch failed for \(pageURL.host ?? "?", privacy: .public)")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            enrichLog.warning("Reddit JSON: network error: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+            enrichLog.warning("Reddit JSON: HTTP \(httpResponse.statusCode) for \(jsonURL.host ?? "?", privacy: .public)")
             return nil
         }
 
@@ -1963,6 +1980,7 @@ final class BookmarksStorage: ObservableObject {
               let listing = json.first?["data"] as? [String: Any],
               let children = listing["children"] as? [[String: Any]],
               let postData = children.first?["data"] as? [String: Any] else {
+            enrichLog.warning("Reddit JSON: parse failed — response may not be JSON")
             return nil
         }
 
