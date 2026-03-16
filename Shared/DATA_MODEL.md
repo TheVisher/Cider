@@ -3,6 +3,8 @@
 > Canonical Convex schema reference. The actual schema lives in `Cider-Web/convex/schema.ts` — this doc mirrors it with annotations for all three platforms.
 >
 > **If the schema changes, update this doc. If this doc and the schema disagree, the schema wins.**
+>
+> **Last updated**: 2026-03-15
 
 ## Bookmarks Table
 
@@ -50,8 +52,9 @@ bookmarks: defineTable({
 })
   .index("by_user", ["userId"])
   .index("by_user_deleted", ["userId", "deleted"])
+  .index("by_user_created", ["userId", "createdAt"])
   .index("by_sync_id", ["userId", "ciderSyncId"])
-  .searchIndex("search_title", { searchField: "title", filterFields: ["userId"] })
+  .searchIndex("search_title", { searchField: "title", filterFields: ["userId", "deleted"] })
 ```
 
 ### Field Notes
@@ -82,6 +85,10 @@ folders: defineTable({
   updatedAt: v.number(),
   deleted: v.optional(v.boolean()),
   deletedAt: v.optional(v.number()),
+
+  // Permanent delete (for trash cleanup — same as bookmarks)
+  purged: v.optional(v.boolean()),
+  purgedAt: v.optional(v.number()),
 })
   .index("by_user", ["userId"])
   .index("by_sync_id", ["userId", "ciderSyncId"])
@@ -99,10 +106,107 @@ syncTokens: defineTable({
   name: v.string(),
   token: v.string(),                                // The bearer token string
   createdAt: v.number(),
+  lastUsedAt: v.optional(v.number()),               // Updated on each authenticated request
+  revoked: v.optional(v.boolean()),                  // True if device has been revoked
 })
   .index("by_user", ["userId"])
   .index("by_token", ["token"])
 ```
+
+## Notes Table
+
+```typescript
+notes: defineTable({
+  userId: v.id("users"),
+
+  // Core
+  title: v.string(),
+  content: v.string(),                              // Markdown
+
+  // Organization
+  folderId: v.optional(v.string()),                 // String (not v.id) — safer for sync
+  folderSyncId: v.optional(v.string()),             // Desktop sync resolution
+  tags: v.optional(v.array(v.string())),
+  isPinned: v.optional(v.boolean()),
+
+  // Sync
+  ciderSyncId: v.optional(v.string()),              // Desktop UUID (lowercase)
+
+  // Timestamps (ms since epoch)
+  createdAt: v.number(),
+  updatedAt: v.number(),
+
+  // Soft delete
+  deleted: v.optional(v.boolean()),
+  deletedAt: v.optional(v.number()),
+
+  // Permanent delete
+  purged: v.optional(v.boolean()),
+  purgedAt: v.optional(v.number()),
+})
+  .index("by_user", ["userId"])
+  .index("by_user_deleted", ["userId", "deleted"])
+  .index("by_sync_id", ["userId", "ciderSyncId"])
+  .searchIndex("search_title", { searchField: "title", filterFields: ["userId", "deleted"] })
+```
+
+### Field Notes
+
+| Field | Notes |
+|-------|-------|
+| `folderId` | Stored as string (not Convex ID) for safer sync + folder deletion handling. |
+| `folderSyncId` | Used by Desktop to resolve folder references during sync. |
+| `content` | Markdown format. Desktop and Web use TipTap for rich text editing. |
+
+## Tabs Table (Saved Views)
+
+```typescript
+tabs: defineTable({
+  userId: v.id("users"),
+  label: v.string(),
+  type: v.union(v.literal("tag"), v.literal("folder"), v.literal("search"), v.literal("savedView")),
+
+  // Filter payload (one set per type)
+  tagName: v.optional(v.string()),
+  folderId: v.optional(v.string()),                 // String, not v.id — safer for sync
+  folderSyncId: v.optional(v.string()),
+  searchQuery: v.optional(v.string()),
+
+  // SavedView configuration
+  isBlank: v.optional(v.boolean()),                 // true = "New Tab" welcome page
+  contentTypes: v.optional(v.array(v.string())),    // e.g. ["bookmark", "note"]
+  filterTags: v.optional(v.array(v.string())),
+  onlyUnassigned: v.optional(v.boolean()),
+  showComingUp: v.optional(v.boolean()),
+
+  // Sort spec
+  sortMode: v.optional(v.string()),                 // "createdDesc" | "createdAsc" | "updatedDesc" | etc.
+
+  // Layout spec
+  displayMode: v.optional(v.string()),              // "grid" | "list" | "masonry"
+  cardSizeScale: v.optional(v.number()),            // 0-3
+
+  // Ordering
+  position: v.number(),
+
+  // Sync
+  ciderSyncId: v.string(),                          // Required (not optional like other tables)
+
+  // Timestamps
+  createdAt: v.number(),
+  updatedAt: v.number(),
+
+  // Soft delete
+  deleted: v.optional(v.boolean()),
+  deletedAt: v.optional(v.number()),
+})
+  .index("by_user", ["userId"])
+  .index("by_sync_id", ["userId", "ciderSyncId"])
+```
+
+### Cleanup Note
+
+Tabs are hard-deleted immediately by the cleanup cron when `deleted: true` — no 30-day purge cycle like bookmarks, notes, and folders.
 
 ## Auth Tables
 

@@ -501,12 +501,12 @@ Removed 16+ unused AX window-management methods (appElement, windows, title, win
 
 | Metric | Desktop | iOS | Web | Total |
 |---|---|---|---|---|
-| Source files | 218 (.swift) | 45 (.swift) | 79 (.ts/.tsx) | 342 |
-| Lines of code | 60,012 | 10,117 | 14,951 | 85,080 |
+| Source files | 228 (.swift) | 48 (.swift) | 103 (.ts/.tsx/.js) | 379 |
+| Lines of code | 61,710 | 10,546 | 15,830 | 88,086 |
 | TODO comments | 0 | 0 | 0 | 0 |
 | FIXME comments | 0 | 0 | 0 | 0 |
 | HACK comments | 0 | 0 | 0 | 0 |
-| Files >500 lines | 19 | 5 | 7 | 31 |
+| Files >500 lines | 32 | 5 | 7 | 44 |
 | TypeScript errors | — | — | 0 | 0 |
 | Swift build | N/A (no toolchain) | N/A | — | — |
 
@@ -520,13 +520,13 @@ All three repos are clean — zero actionable TODO, FIXME, or HACK comments in p
 
 ### Large Files Needing Attention
 
-Files over 500 lines are candidates for decomposition. Sorted by severity:
+Files over 500 lines are candidates for decomposition. **32 files exceed the threshold on Desktop** (up from 19 in the prior scan — 13 newly crossed the line, likely from incremental feature work). iOS and Web are stable.
 
-**Desktop — 19 files >500 lines (top concerns):**
+**Desktop — 32 files >500 lines (top concerns):**
 
 | File | Lines | Suggested Action |
 |---|---|---|
-| `Services/BookmarksStorage.swift` | 2,416 | **Critical.** Extract import/export codecs, enrichment logic, and folder operations into focused files. |
+| `Services/BookmarksStorage.swift` | 2,418 | **Critical.** Extract import/export codecs, enrichment logic, and folder operations into focused files. |
 | `Views/Notes/InlineNoteEditorView.swift` | 1,390 | Extract toolbar, formatting helpers, and drag-drop handling. |
 | `Views/SavedViews/SavedViewTabContent.swift` | 1,332 | Extract card/row builders per entity type into shared components. |
 | `Views/Shared/FolderSidebarView.swift` | 1,319 | Extract folder tree rendering and drag-drop logic. |
@@ -536,8 +536,30 @@ Files over 500 lines are candidates for decomposition. Sorted by severity:
 | `Views/Shared/NewItemPopover.swift` | 1,136 | Extract individual item-creation cards. |
 | `Views/Bookmarks/BookmarkDetailsDraft.swift` | 1,047 | Extract `BookmarkMetadataSidebar` and `BookmarkDetailsHeroPreview` to own files. |
 | `Services/SyncService.swift` | 950 | Extract push/pull/auth into sub-services. |
+| `Views/Search/SearchPaletteView.swift` | 940 | Extract result renderers per entity type. |
+| `Views/Home/HomeDashboardView.swift` | 874 | Extract section renderers (recent, pinned, etc.). |
+| `Views/Shared/ClipboardViewerView.swift` | 829 | Extract item renderers and filter logic. |
+| `Services/VaultFolderService.swift` | 815 | Extract migration and validation helpers. |
+| `Views/Shared/TagDetailView.swift` | 747 | Extract tag editing and assignment UI. |
+| `Views/Settings/SettingsComponents.swift` | 719 | Extract reusable setting row types. |
+| `Models/CiderConfig.swift` | 691 | Extract nested config types or use sub-configs. |
+| `Services/TrashStorage.swift` | 672 | Extract restore logic and manifest management. |
+| `Services/ActiveBrowserCaptureService.swift` | 660 | Extract browser-specific capture adapters. |
+| `Services/BookmarkMetadataParser.swift` | 605 | *New.* Extract per-format parsers (Open Graph, Twitter Card, etc.). |
+| `Views/Bookmarks/BookmarkThumbnailView.swift` | 602 | *New.* Extract thumbnail layout variants. |
+| `Services/SearchService.swift` | 585 | *New.* Extract per-entity search logic. |
+| `Views/Stacks/StackManagerSheet.swift` | 583 | *New.* Extract stack item renderers. |
+| `App/AppDelegate.swift` | 573 | Already split into extensions (CH-D15). Monitor but acceptable. |
+| `Services/VaultStructureMigration.swift` | 561 | *New.* Extract per-version migration steps. |
+| `Views/Settings/SettingsView+SubcategoryContent.swift` | 554 | *New.* Extract individual subcategory views. |
+| `Services/ContactStorage.swift` | 537 | *New.* Extract vCard serialization. |
+| `Services/TodoCardStorage.swift` | 531 | *New.* Extract iCal serialization (shared with ICalendarSerializer). |
+| `Views/Shared/DetailSlideOutView.swift` | 522 | *New.* Extract slide-out animation and layout logic. |
+| `Views/CiderPanelView+DetailViews.swift` | 514 | *New.* Extract per-entity detail view builders. |
+| `Views/Notes/TipTapEditorView.swift` | 510 | *New.* Extract bridge message handling. |
+| `Utilities/Constants.swift` | 504 | *New.* Extract domain-specific constant groups into their own files. |
 
-**iOS — 5 files >500 lines:**
+**iOS — 5 files >500 lines (unchanged):**
 
 | File | Lines | Suggested Action |
 |---|---|---|
@@ -547,7 +569,7 @@ Files over 500 lines are candidates for decomposition. Sorted by severity:
 | `Views/FolderBrowserView.swift` | 605 | Extract folder card components. |
 | `Views/NoteEditorToolbar.swift` | 546 | Extract formatting button groups. |
 
-**Web — 7 files >500 lines:**
+**Web — 7 files >500 lines (unchanged):**
 
 | File | Lines | Suggested Action |
 |---|---|---|
@@ -559,9 +581,13 @@ Files over 500 lines are candidates for decomposition. Sorted by severity:
 | `components/bookmarks/library-table-view.tsx` | 592 | Extract column renderers and sort logic. |
 | `convex/syncInternal.ts` | 504 | Extract push/pull handlers into separate modules. |
 
-### Open Issues from Previous Scans
+### Trend vs. Prior Scan
 
-These items remain unresolved from prior reviews:
+This is the first automated scan, so no prior-scan comparison is available. The numbers above establish the baseline for future delta tracking.
+
+### Open Issues from Previous Reviews
+
+These items remain unresolved from prior code reviews:
 
 | ID | Severity | Summary |
 |---|---|---|
@@ -572,4 +598,7 @@ These items remain unresolved from prior reviews:
 | CH-D16 | Medium | List view and display modes inconsistent across card types |
 | CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
 
-**Priority recommendation:** CH-C22 (High) — note editor attachment rendering — is the only open High-severity item and directly impacts user-facing functionality. This should be the next fix target.
+**Priority recommendations:**
+
+1. **CH-C22 (High)** — Note editor attachment rendering — is the only open High-severity item and directly impacts user-facing functionality. This should be the next fix target.
+2. **Large file growth on Desktop** — 13 files newly crossed the 500-line threshold. `BookmarksStorage.swift` at 2,418 lines remains the most critical decomposition target. Consider a focused refactoring sprint to extract codecs, parsers, and per-entity builders before these files grow further.

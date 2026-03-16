@@ -27,6 +27,8 @@ Desktop and iOS authenticate via email/password. On login or signup, the server 
 | POST | `/api/auth/login` | Sign in with email + password → returns sync token |
 | POST | `/api/auth/signup` | Create account with email + password → returns sync token |
 | POST | `/api/auth/account` | Get account info (requires Bearer token) |
+| POST | `/api/auth/devices` | List connected devices (requires Bearer token) |
+| POST | `/api/auth/devices/revoke` | Revoke a device's sync token (requires Bearer token) |
 
 ### Login Request
 
@@ -71,7 +73,48 @@ Each device gets a named sync token (e.g., "MacBook Pro", "iPhone"). If the user
 
 ### Sign Out
 
-Client clears the stored token and email, sets `syncEnabled = false`. The sync token remains valid on the server (can be revoked in Web settings).
+Client clears the stored token and email, sets `syncEnabled = false`. The sync token remains valid on the server (can be revoked via Connected Devices).
+
+### Connected Devices
+
+All three apps display a Connected Devices view in Settings, showing every device that has a sync token. Users can revoke tokens to log out other devices.
+
+#### List Devices (`/api/auth/devices`)
+
+**Request**: POST with `Authorization: Bearer <token>`. No body required.
+
+**Response (200)**:
+```json
+{
+  "devices": [
+    {
+      "_id": "token_doc_id",
+      "name": "MacBook Pro",
+      "createdAt": 1709766000000,
+      "lastUsedAt": 1709800000000,
+      "revoked": false
+    }
+  ]
+}
+```
+
+#### Revoke Device (`/api/auth/devices/revoke`)
+
+**Request**:
+```json
+{
+  "tokenId": "token_doc_id"
+}
+```
+
+**Response (200)**:
+```json
+{
+  "success": true
+}
+```
+
+Revoking a device marks its sync token as `revoked: true`. The token will be rejected on subsequent sync requests. The server tracks `lastUsedAt` for each token, updated on every authenticated request.
 
 ## Sync Endpoints
 

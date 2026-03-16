@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-15
+> **Last updated**: 2026-03-16
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -43,7 +43,8 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Card size slider | Yes | Yes (per-view, debounced) | Yes (3 levels) |
 | Sidebar | Yes | Yes (collapsible) | Yes (tab bar) |
 | Detail panel (slide-out) | Yes | Yes | Yes (sheet) |
-| Keyboard shortcuts | Yes | Partial (Cmd+K, Cmd+B) | No |
+| Hide card details (hover reveal) | Yes | Yes | No |
+| Keyboard shortcuts | Yes | Partial (Cmd+K search, Cmd+B sidebar) | No |
 
 ## Capture & Input
 
@@ -87,9 +88,10 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Feature | Desktop | Web | iOS |
 |---------|---------|-----|-----|
 | Sync token auth | Yes | Yes (generates tokens) | Yes |
-| Account-based auth | Yes (email/password) | Yes (email/password) | No |
+| Account-based auth | Yes (email/password) | Yes (email/password) | Yes (email/password) |
+| Connected Devices (view/revoke) | Yes | Yes | Yes |
 | OAuth (Google/GitHub/Apple) | No | Planned | No |
-| Account-based sync (replace tokens) | Yes (login returns sync token) | Planned | Planned |
+| Account-based sync (replace tokens) | Yes (login returns sync token) | Planned | Yes (login returns sync token) |
 | Background sync | Yes (5s poll) | Yes (real-time subscriptions) | Yes (30s poll + offline queue) |
 | Dirty-only push | Yes | N/A | Yes (offline queue + immediate push) |
 | Failure handling / retry | Yes (pause after 3) | N/A (Convex retries) | Yes (user-facing errors) |
@@ -103,7 +105,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Pull to refresh | N/A | N/A | Yes |
 | Context menus | Yes | Yes (right-click) | Yes (long-press) |
 | Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Yes (filter panel multi-select) |
-| Export (Netscape HTML) | Yes | Yes | Planned (M15) |
+| Export (Netscape HTML) | Yes | Yes | Yes (JSON + HTML) |
 | Import (Netscape HTML) | Yes | Planned | No |
 | Reader mode | Yes (Readability.js) | Yes (Readability.js) | Yes (Readability.js) |
 | Accessibility (VoiceOver) | Partial | No | Yes |

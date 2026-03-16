@@ -3,7 +3,7 @@
 > **Every agent working on any Cider app must read this file first.**
 > This is the single source of truth for how the three Cider apps relate to each other and to the shared backend.
 >
-> **Last updated**: 2026-03-14
+> **Last updated**: 2026-03-15
 
 ## Architecture
 
@@ -32,7 +32,7 @@ All three clients share one Convex deployment. Desktop and iOS talk to it via RE
 - **Dev deployment** (currently live): `dashing-fennec-334`
 - **HTTP base URL**: `https://dashing-fennec-334.convex.site`
 - **Prod deployment** (unused): `spotted-sockeye-736`
-- **Auth model**: Email/password accounts via `@convex-dev/auth`. Desktop and iOS authenticate via `/api/auth/login` (returns sync token automatically). Web uses Convex session cookies. Legacy sync tokens still work for backward compatibility.
+- **Auth model**: Email/password accounts via `@convex-dev/auth`. All three native clients (Desktop, iOS, Web) authenticate via `/api/auth/login` (returns sync token automatically). Web also uses Convex session cookies for its direct client. Legacy sync tokens still work for backward compatibility. Connected Devices management available on all platforms via `/api/auth/devices`.
 - **Schema lives in**: `Cider-Web/convex/schema.ts`
 - **Sync API lives in**: `Cider-Web/convex/sync.ts` + `Cider-Web/convex/http.ts`
 
