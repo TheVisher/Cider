@@ -1864,6 +1864,32 @@ final class BookmarksStorage: ObservableObject {
 
     private static func fetchEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
+
+        // Site-specific enrichment — try structured APIs before HTML scraping.
+        let host = pageURL.host?.lowercased() ?? ""
+
+        // Reddit: .json endpoint gives structured data with reliable image URLs
+        if host.contains("reddit.com") {
+            if let redditResult = await fetchRedditJSONPayload(for: pageURL) {
+                enrichLog.info("Reddit JSON enrichment succeeded for \(pageURL.host ?? "?", privacy: .public)")
+                return redditResult
+            }
+        }
+
+        // YouTube: direct thumbnail URL from video ID — no API key needed
+        if host.contains("youtube.com") || host.contains("youtu.be") {
+            if let videoID = extractYouTubeVideoID(from: pageURL) {
+                let thumbURL = URL(string: "https://img.youtube.com/vi/\(videoID)/maxresdefault.jpg")
+                // Still fetch HTML for the title, but guarantee the thumbnail
+                let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
+                return BookmarkEnrichmentPayload(
+                    title: htmlResult?.title,
+                    thumbnailURL: thumbURL ?? htmlResult?.thumbnailURL,
+                    screenshotData: nil
+                )
+            }
+        }
+
         let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
 
         // If HTML gave us a real thumbnail (not just a favicon), we're done
@@ -1899,6 +1925,109 @@ final class BookmarksStorage: ObservableObject {
         }
 
         return htmlResult
+    }
+
+    // MARK: - Reddit JSON Enrichment
+
+    /// Fetches metadata from Reddit's .json endpoint for post URLs.
+    /// Returns structured title + high-res preview image without HTML scraping.
+    private static func fetchRedditJSONPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
+        let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
+
+        // Build the .json URL — works for post URLs like /r/sub/comments/id/slug/
+        // Strip trailing slash, append .json
+        var jsonURLString = pageURL.absoluteString
+        if jsonURLString.hasSuffix("/") {
+            jsonURLString = String(jsonURLString.dropLast())
+        }
+        jsonURLString += ".json"
+        guard let jsonURL = URL(string: jsonURLString) else { return nil }
+
+        var request = URLRequest(url: jsonURL)
+        request.timeoutInterval = 8
+        // Reddit requires a User-Agent or returns 429
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            enrichLog.debug("Reddit JSON fetch failed for \(pageURL.host ?? "?", privacy: .public)")
+            return nil
+        }
+
+        // Reddit returns an array: [{ data: { children: [{ data: { ... } }] } }, ...]
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let listing = json.first?["data"] as? [String: Any],
+              let children = listing["children"] as? [[String: Any]],
+              let postData = children.first?["data"] as? [String: Any] else {
+            return nil
+        }
+
+        let title = postData["title"] as? String
+
+        // Try preview images first (highest resolution)
+        var thumbnailURL: URL?
+        if let preview = postData["preview"] as? [String: Any],
+           let images = preview["images"] as? [[String: Any]],
+           let source = images.first?["source"] as? [String: Any],
+           let urlString = source["url"] as? String {
+            // Reddit HTML-encodes URLs in JSON (e.g., &amp; → &)
+            let cleaned = urlString.replacingOccurrences(of: "&amp;", with: "&")
+            thumbnailURL = URL(string: cleaned)
+        }
+
+        // Fallback to thumbnail field (lower res but usually available)
+        if thumbnailURL == nil {
+            if let thumb = postData["thumbnail"] as? String,
+               thumb.hasPrefix("http"),
+               let url = URL(string: thumb) {
+                thumbnailURL = url
+            }
+        }
+
+        // Fallback: for link posts, check url_overridden_by_dest (often a direct image)
+        if thumbnailURL == nil {
+            if let destURL = postData["url_overridden_by_dest"] as? String,
+               let url = URL(string: destURL),
+               isDirectImageURL(url) {
+                thumbnailURL = url
+            }
+        }
+
+        guard title != nil || thumbnailURL != nil else { return nil }
+
+        enrichLog.info("Reddit JSON: title=\(title ?? "nil", privacy: .public) thumbnail=\(thumbnailURL?.host ?? "nil", privacy: .public)")
+        return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL, screenshotData: nil)
+    }
+
+    // MARK: - YouTube Thumbnail
+
+    /// Extracts YouTube video ID from various URL formats:
+    /// youtube.com/watch?v=ID, youtu.be/ID, youtube.com/embed/ID, youtube.com/shorts/ID
+    private static func extractYouTubeVideoID(from url: URL) -> String? {
+        let host = url.host?.lowercased() ?? ""
+        if host.contains("youtu.be") {
+            let id = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return id.isEmpty ? nil : id
+        }
+        if host.contains("youtube.com") {
+            // /watch?v=ID
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let vParam = components.queryItems?.first(where: { $0.name == "v" })?.value,
+               !vParam.isEmpty {
+                return vParam
+            }
+            // /embed/ID or /shorts/ID
+            let pathComponents = url.pathComponents
+            if pathComponents.count >= 3,
+               (pathComponents[1] == "embed" || pathComponents[1] == "shorts") {
+                return pathComponents[2]
+            }
+        }
+        return nil
     }
 
     /// Check if a URL looks like a favicon (not a real og:image thumbnail).
