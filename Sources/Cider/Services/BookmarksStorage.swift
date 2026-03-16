@@ -1986,23 +1986,43 @@ final class BookmarksStorage: ObservableObject {
 
         let title = postData["title"] as? String
 
-        // Try preview images first (highest resolution)
+        // Try preview images first (highest resolution) — works for single images & videos
         var thumbnailURL: URL?
         if let preview = postData["preview"] as? [String: Any],
            let images = preview["images"] as? [[String: Any]],
            let source = images.first?["source"] as? [String: Any],
            let urlString = source["url"] as? String {
-            // Reddit HTML-encodes URLs in JSON (e.g., &amp; → &)
             let cleaned = urlString.replacingOccurrences(of: "&amp;", with: "&")
             thumbnailURL = URL(string: cleaned)
+        }
+
+        // Gallery/carousel posts: images are in media_metadata, ordered by gallery_data
+        if thumbnailURL == nil,
+           postData["is_gallery"] as? Bool == true,
+           let mediaMetadata = postData["media_metadata"] as? [String: [String: Any]] {
+            // Use gallery_data ordering if available, otherwise take first metadata entry
+            var firstMediaID: String?
+            if let galleryData = postData["gallery_data"] as? [String: Any],
+               let items = galleryData["items"] as? [[String: Any]],
+               let first = items.first {
+                firstMediaID = first["media_id"] as? String
+            }
+            let mediaID = firstMediaID ?? mediaMetadata.keys.first
+            if let mediaID,
+               let meta = mediaMetadata[mediaID],
+               let source = meta["s"] as? [String: Any],
+               let urlString = source["u"] as? String {
+                let cleaned = urlString.replacingOccurrences(of: "&amp;", with: "&")
+                thumbnailURL = URL(string: cleaned)
+            }
         }
 
         // Fallback to thumbnail field (lower res but usually available)
         if thumbnailURL == nil {
             if let thumb = postData["thumbnail"] as? String,
-               thumb.hasPrefix("http"),
-               let url = URL(string: thumb) {
-                thumbnailURL = url
+               thumb.hasPrefix("http") {
+                let cleaned = thumb.replacingOccurrences(of: "&amp;", with: "&")
+                thumbnailURL = URL(string: cleaned)
             }
         }
 
