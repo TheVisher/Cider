@@ -84,9 +84,12 @@ final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
     private func handleDidFinish(_ webView: WKWebView) {
         extractionAttempts += 1
 
-        // Brief delay for post-load JS execution (WAF token exchange, meta tag injection)
+        // Delay for post-load JS execution (WAF token exchange, meta tag injection).
+        // JS-heavy SPAs like X/Twitter need longer to render tweet content.
+        let host = webView.url?.host?.lowercased() ?? ""
+        let delayMs = (host == "x.com" || host == "twitter.com") ? 2500 : 800
         Task { [weak self, attempts = extractionAttempts] in
-            try? await Task.sleep(for: .milliseconds(800))
+            try? await Task.sleep(for: .milliseconds(delayMs))
             guard let self, self.extractionAttempts == attempts else { return }
             await self.extractMetadata(from: webView)
         }
@@ -147,8 +150,34 @@ final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
             var ogTitle = document.querySelector('meta[property="og:title"]');
             var title = ogTitle ? ogTitle.content : document.title;
 
+            // X/Twitter: extract tweet text + author from rendered DOM
+            var host = window.location.hostname;
+            if ((host === 'x.com' || host === 'twitter.com') && (!title || title === 'X' || title === 'X.Com' || title === 'Post / X')) {
+                // Try to find the main tweet text
+                var tweetText = document.querySelector('[data-testid="tweetText"]');
+                var authorName = document.querySelector('[data-testid="User-Name"]');
+                if (tweetText) {
+                    var author = '';
+                    if (authorName) {
+                        var nameSpan = authorName.querySelector('span span');
+                        if (nameSpan) author = nameSpan.textContent.trim() + ': ';
+                    }
+                    var text = tweetText.textContent.trim();
+                    if (text.length > 120) text = text.substring(0, 117) + '...';
+                    title = author + text;
+                }
+            }
+
+            // X/Twitter: try to find tweet media images from rendered DOM
+            var xMediaImg = null;
+            if (host === 'x.com' || host === 'twitter.com') {
+                var tweetImg = document.querySelector('[data-testid="tweetPhoto"] img[src*="pbs.twimg.com"]');
+                if (tweetImg) xMediaImg = tweetImg.src;
+            }
+
             var image = resolve(og ? og.content : null)
                      || resolve(tw ? tw.content : null)
+                     || xMediaImg
                      || resolve(ip ? ip.content : null)
                      || resolve(li ? li.href : null)
                      || resolve(jsonld)
