@@ -85,9 +85,19 @@ final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
         extractionAttempts += 1
 
         // Delay for post-load JS execution (WAF token exchange, meta tag injection).
-        // JS-heavy SPAs like X/Twitter need longer to render tweet content.
+        // Cloudflare challenges need ~3-5s to solve before redirecting.
+        // X/Twitter SPA needs ~2.5s to hydrate tweet content.
         let host = webView.url?.host?.lowercased() ?? ""
-        let delayMs = (host == "x.com" || host == "twitter.com") ? 2500 : 800
+        let pageTitle = webView.title?.lowercased() ?? ""
+        let delayMs: Int
+        if pageTitle.contains("just a moment") || pageTitle.contains("attention required") {
+            // Cloudflare WAF challenge — give it time to solve
+            delayMs = 4000
+        } else if host == "x.com" || host == "twitter.com" {
+            delayMs = 2500
+        } else {
+            delayMs = 800
+        }
         Task { [weak self, attempts = extractionAttempts] in
             try? await Task.sleep(for: .milliseconds(delayMs))
             guard let self, self.extractionAttempts == attempts else { return }
@@ -197,13 +207,20 @@ final class WebViewMetadataExtractor: NSObject, WKNavigationDelegate {
                 return
             }
 
-            let title = json["title"] as? String
+            var title = json["title"] as? String
             let imageString = json["image"] as? String
             let imageURL = imageString.flatMap { URL(string: $0) }
 
+            // Filter out WAF challenge page titles — treat as no title
+            if let t = title?.lowercased(),
+               t.contains("just a moment") || t.contains("attention required") || t == "x / ?" {
+                title = nil
+            }
+
             Self.logger.info("WebView DOM extraction attempt \(self.extractionAttempts): title=\(title ?? "nil", privacy: .public) image=\(imageURL?.absoluteString ?? "nil", privacy: .public)")
 
-            if imageURL != nil || extractionAttempts >= 3 {
+            let hasUsefulContent = title != nil || imageURL != nil
+            if hasUsefulContent || extractionAttempts >= 3 {
                 await resolveWithScreenshot(title: title, imageURL: imageURL)
             }
             // else: probably a WAF challenge page — wait for the reload
