@@ -1284,6 +1284,21 @@ final class BookmarksStorage: ObservableObject {
                 )
             }
 
+            // WebView screenshot fallback — if thumbnail URL was found but download
+            // failed (e.g., Cloudflare blocking image requests), capture a screenshot
+            if imageAssets == nil, payload?.thumbnailURL != nil {
+                let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
+                enrichLog.info("Thumbnail download failed, trying WebView screenshot for \(url.host ?? "?", privacy: .public)")
+                let extracted = await WebViewMetadataExtractor.extract(from: url)
+                if let screenshotData = extracted.screenshotData {
+                    imageAssets = self.cacheImageAssets(
+                        from: screenshotData,
+                        for: bookmarkID,
+                        preferredFileExtension: "jpg"
+                    )
+                }
+            }
+
             await self.completeEnrichment(
                 for: bookmarkID,
                 sourceURL: url,
