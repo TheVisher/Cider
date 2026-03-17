@@ -88,6 +88,12 @@ final class PanelEdgeResizeNSView: NSView {
         let initialFrame = window.frame
         let initialMouse = NSEvent.mouseLocation
 
+        // Use design constants directly — window.minSize reports (0,0)
+        // because borderless panels don't enforce minSize natively.
+        let minW = CiderPanelDesign.panelMinWidth
+        let minH = CiderPanelDesign.panelMinHeight
+        let maxW = window.maxSize.width
+
         var keepRunning = true
         while keepRunning {
             guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
@@ -99,8 +105,12 @@ final class PanelEdgeResizeNSView: NSView {
                 let dy = mouse.y - initialMouse.y
 
                 var newFrame = initialFrame
-                applyResize(zone: zone, dx: dx, dy: dy, initial: initialFrame, frame: &newFrame)
-                window.setFrame(newFrame, display: true)
+                applyResize(zone: zone, dx: dx, dy: dy, initial: initialFrame, frame: &newFrame,
+                            minW: minW, minH: minH, maxW: maxW)
+
+                if newFrame != window.frame {
+                    window.setFrame(newFrame, display: true)
+                }
 
             case .leftMouseUp:
                 keepRunning = false
@@ -204,56 +214,48 @@ final class PanelEdgeResizeNSView: NSView {
         dx: CGFloat,
         dy: CGFloat,
         initial: NSRect,
-        frame: inout NSRect
+        frame: inout NSRect,
+        minW: CGFloat,
+        minH: CGFloat,
+        maxW: CGFloat
     ) {
-        let minW = window?.minSize.width ?? CiderPanelDesign.panelMinWidth
-        let minH = window?.minSize.height ?? CiderPanelDesign.panelMinHeight
-        let maxW = window?.maxSize.width ?? CGFloat.greatestFiniteMagnitude
+
+        // Helper: resize width from the right edge (origin stays fixed)
+        func resizeRight() {
+            frame.size.width = min(maxW, max(minW, initial.width + dx))
+        }
+
+        // Helper: resize width from the left edge (right edge stays fixed)
+        func resizeLeft() {
+            let newW = min(maxW, max(minW, initial.width - dx))
+            // Only move origin by exactly how much the width changed
+            frame.origin.x = initial.origin.x + (initial.width - newW)
+            frame.size.width = newW
+        }
+
+        // Helper: resize height from the top edge (bottom stays fixed)
+        func resizeTop() {
+            frame.size.height = max(minH, initial.height + dy)
+        }
+
+        // Helper: resize height from the bottom edge (top edge stays fixed)
+        func resizeBottom() {
+            let newH = max(minH, initial.height - dy)
+            // Only move origin by exactly how much the height changed
+            frame.origin.y = initial.origin.y - (newH - initial.height)
+            frame.size.height = newH
+        }
 
         switch zone {
-        case .none:
-            break
-
-        case .right:
-            frame.size.width = min(maxW, max(minW, initial.width + dx))
-
-        case .left:
-            let newW = min(maxW, max(minW, initial.width - dx))
-            frame.origin.x = initial.maxX - newW
-            frame.size.width = newW
-
-        case .bottom:
-            // NSScreen: bottom is low Y. Dragging down = negative dy
-            let newH = max(minH, initial.height - dy)
-            frame.origin.y = initial.maxY - newH
-            frame.size.height = newH
-
-        case .top:
-            frame.size.height = max(minH, initial.height + dy)
-
-        case .bottomRight:
-            frame.size.width = min(maxW, max(minW, initial.width + dx))
-            let newH = max(minH, initial.height - dy)
-            frame.origin.y = initial.maxY - newH
-            frame.size.height = newH
-
-        case .bottomLeft:
-            let newW = min(maxW, max(minW, initial.width - dx))
-            frame.origin.x = initial.maxX - newW
-            frame.size.width = newW
-            let newH = max(minH, initial.height - dy)
-            frame.origin.y = initial.maxY - newH
-            frame.size.height = newH
-
-        case .topRight:
-            frame.size.width = min(maxW, max(minW, initial.width + dx))
-            frame.size.height = max(minH, initial.height + dy)
-
-        case .topLeft:
-            let newW = min(maxW, max(minW, initial.width - dx))
-            frame.origin.x = initial.maxX - newW
-            frame.size.width = newW
-            frame.size.height = max(minH, initial.height + dy)
+        case .none:       break
+        case .right:      resizeRight()
+        case .left:       resizeLeft()
+        case .top:        resizeTop()
+        case .bottom:     resizeBottom()
+        case .topRight:   resizeRight(); resizeTop()
+        case .topLeft:    resizeLeft(); resizeTop()
+        case .bottomRight: resizeRight(); resizeBottom()
+        case .bottomLeft: resizeLeft(); resizeBottom()
         }
     }
 }

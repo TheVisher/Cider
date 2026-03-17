@@ -92,6 +92,14 @@ struct CiderTabBar: View {
             .opacity(isDragging ? 0.4 : 1)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                if let savedViewID = tab.savedViewID {
+                    renameText = tab.displayName
+                    renamingTabID = savedViewID
+                }
+            }
+        )
         .contextMenu {
             if tab.savedViewID != nil {
                 Button("Rename Tab") {

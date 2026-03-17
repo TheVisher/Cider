@@ -113,8 +113,15 @@ struct NoteCardView: View {
                     }
 
                     // Sidecar metadata tags (from AI tools or .cider-meta.json)
+                    // Filter out tags that already appear as Cider labels
                     if let sidecarTags = sidecarMeta?.tags, !sidecarTags.isEmpty {
-                        SidecarTagsView(tags: sidecarTags)
+                        let ciderLabelNames = Set(note.labelIDs.compactMap { id in
+                            CardLabelStorage.shared.labels.first(where: { $0.id == id })?.name.lowercased()
+                        })
+                        let uniqueSidecarTags = sidecarTags.filter { !ciderLabelNames.contains($0.lowercased()) }
+                        if !uniqueSidecarTags.isEmpty {
+                            SidecarTagsView(tags: uniqueSidecarTags)
+                        }
                     }
                 }
             }

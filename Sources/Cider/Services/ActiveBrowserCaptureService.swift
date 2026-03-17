@@ -1,6 +1,9 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import os.log
+
+private let captureLog = Logger(subsystem: "com.cider", category: "capture")
 
 struct ActiveBrowserCaptureResult {
     let urlString: String
@@ -87,12 +90,19 @@ enum ActiveBrowserCaptureService {
             candidates.append(contentsOf: fallbackRunningBrowserTargets(limit: 6))
         }
 
+        captureLog.info("Frontmost app: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil", privacy: .public)")
+        captureLog.info("Last activated browser: \(lastActivatedBrowser?.bundleID ?? "nil", privacy: .public)")
+        captureLog.info("Candidates: \(candidates.map { "\($0.appName)(\($0.bundleID))" }.joined(separator: ", "), privacy: .public)")
+
         for candidate in candidates {
+            captureLog.info("Trying capture from: \(candidate.appName, privacy: .public) (\(candidate.bundleID, privacy: .public))")
             if let capture = capture(from: candidate) {
+                captureLog.info("Captured: \(capture.urlString, privacy: .public)")
                 return capture
             }
         }
 
+        captureLog.warning("All capture attempts failed")
         if captureFailureHint == nil {
             captureFailureHint = "Could not capture active browser tab"
         }
@@ -149,47 +159,44 @@ enum ActiveBrowserCaptureService {
     private static func capture(from target: BrowserTarget) -> ActiveBrowserCaptureResult? {
         let targetName = target.appName.isEmpty ? target.bundleID : target.appName
 
-        if isSafariFamily(bundleID: target.bundleID),
-           let capture = runScript(
-               safariScript(forBundleID: target.bundleID),
-               targetName: targetName
-           ) {
-            return capture
+        if isSafariFamily(bundleID: target.bundleID) {
+            captureLog.debug("  Safari path for \(target.bundleID, privacy: .public)")
+            if let capture = runScript(safariScript(forBundleID: target.bundleID), targetName: targetName) {
+                return capture
+            }
         }
 
-        if isDiaFamily(bundleID: target.bundleID),
-           let capture = runScript(
-               diaScript(forBundleID: target.bundleID),
-               targetName: targetName
-           ) {
-            return capture
+        if isDiaFamily(bundleID: target.bundleID) {
+            captureLog.debug("  Dia path for \(target.bundleID, privacy: .public)")
+            if let capture = runScript(diaScript(forBundleID: target.bundleID), targetName: targetName) {
+                return capture
+            }
         }
 
         if isChromiumFamily(bundleID: target.bundleID, appName: target.appName) {
-            if let capture = runScript(
-                chromiumScript(forBundleID: target.bundleID),
-                targetName: targetName
-            ) {
+            captureLog.debug("  Chromium path for \(target.bundleID, privacy: .public)")
+            if let capture = runScript(chromiumScript(forBundleID: target.bundleID), targetName: targetName) {
                 return capture
             }
-
-            if !target.appName.isEmpty,
-               let capture = runScript(
-                   chromiumScript(forApplicationName: target.appName),
-                   targetName: targetName
-               ) {
-                return capture
+            if !target.appName.isEmpty {
+                captureLog.debug("  Chromium app-name path for \(target.appName, privacy: .public)")
+                if let capture = runScript(chromiumScript(forApplicationName: target.appName), targetName: targetName) {
+                    return capture
+                }
             }
         }
 
+        captureLog.debug("  Trying accessibility for \(target.bundleID, privacy: .public)")
         if let accessibilityCapture = captureViaAccessibility(from: target) {
             return accessibilityCapture
         }
 
+        captureLog.debug("  Trying address bar copy for \(target.bundleID, privacy: .public)")
         if let copied = captureByCopyingAddressBar(from: target) {
             return copied
         }
 
+        captureLog.debug("  All paths failed for \(target.bundleID, privacy: .public)")
         return nil
     }
 
@@ -249,7 +256,8 @@ enum ActiveBrowserCaptureService {
         var copiedURL: String?
 
         browserApp.activate(options: [])
-        _ = waitUntilFrontmost(bundleID: target.bundleID, timeout: 1.2)
+        let becameFront = waitUntilFrontmost(bundleID: target.bundleID, timeout: 1.2)
+        captureLog.debug("  Browser activated, frontmost=\(becameFront)")
         waitFor(seconds: 0.08)
 
         for attempt in 0..<3 {
@@ -257,6 +265,7 @@ enum ActiveBrowserCaptureService {
             let sentinelChangeCount = writeSentinelToPasteboard(sentinel, pasteboard: pasteboard)
 
             guard triggerAddressBarCopyShortcut(for: target) else {
+                captureLog.debug("  triggerAddressBarCopyShortcut returned false")
                 restorePasteboard(snapshot, to: pasteboard)
                 restoreFrontmostApplication(previouslyFrontmost)
                 setAccessibilityHint(for: target)
@@ -269,6 +278,7 @@ enum ActiveBrowserCaptureService {
                 timeout: 0.95 + Double(attempt) * 0.2
             )
             let copiedValue = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            captureLog.debug("  Attempt \(attempt): clipboardChanged=\(clipboardChanged) copiedValue=\(copiedValue ?? "nil", privacy: .public) isURL=\(copiedValue.map { isValidWebURL($0) } ?? false)")
 
             if clipboardChanged,
                let copiedValue,
@@ -410,40 +420,37 @@ enum ActiveBrowserCaptureService {
     }
 
     private static func triggerAddressBarCopyShortcut(for target: BrowserTarget) -> Bool {
-        let escapedBundleID = escapedAppleScriptLiteral(target.bundleID)
         let targetName = target.appName.isEmpty ? target.bundleID : target.appName
-        let scriptBody = """
-        tell application id "\(escapedBundleID)" to activate
-        delay 0.08
-        tell application "System Events"
-            keystroke "l" using {command down}
-            delay 0.08
-            keystroke "c" using {command down}
-        end tell
-        """
 
-        guard let script = NSAppleScript(source: scriptBody) else { return false }
-        var errorInfo: NSDictionary?
-        _ = script.executeAndReturnError(&errorInfo)
-        if let errorInfo {
-            if let errorCode = errorInfo[NSAppleScript.errorNumber] as? Int {
-                switch errorCode {
-                case -1743:
-                    captureFailureHint =
-                        "Allow Cider to control System Events and \(targetName) in System Settings > Privacy & Security > Automation."
-                case -1719:
-                    captureFailureHint =
-                        "Allow Cider in System Settings > Privacy & Security > Accessibility to capture from \(targetName)."
-                default:
-                    break
-                }
-            }
-            if let message = errorInfo[NSAppleScript.errorMessage] as? String {
-                NSLog("[BookmarksCapture] Shortcut script error: \(message)")
-            }
+        guard AXIsProcessTrusted() else {
+            captureFailureHint =
+                "Allow Cider in System Settings > Privacy & Security > Accessibility to capture from \(targetName)."
             return false
         }
+
+        // Use CGEvent to send keystrokes directly — bypasses AppleScript
+        // entirely, which fails with -600 when running from Xcode's build dir.
+        let src = CGEventSource(stateID: .hidSystemState)
+
+        // Cmd+L (focus address bar)
+        postKeystroke(keyCode: 0x25, flags: .maskCommand, source: src) // 'l'
+        waitFor(seconds: 0.12)
+
+        // Cmd+C (copy)
+        postKeystroke(keyCode: 0x08, flags: .maskCommand, source: src) // 'c'
+
         return true
+    }
+
+    private static func postKeystroke(keyCode: CGKeyCode, flags: CGEventFlags, source: CGEventSource?) {
+        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) {
+            keyDown.flags = flags
+            keyDown.post(tap: .cghidEventTap)
+        }
+        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) {
+            keyUp.flags = flags
+            keyUp.post(tap: .cghidEventTap)
+        }
     }
 
     private static func waitUntilFrontmost(bundleID: String, timeout: TimeInterval) -> Bool {

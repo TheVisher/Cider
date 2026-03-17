@@ -28,7 +28,7 @@ final class CiderPanel: NSPanel {
 
         super.init(
             contentRect: initialFrame,
-            styleMask: [.borderless, .resizable, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -196,7 +196,7 @@ final class CiderPanel: NSPanel {
         setFrame(clamped, display: true)
         expandedFrameBeforeCollapse = clamped
         isCollapsed = false
-        makeKeyAndOrderFront(nil)
+        orderFront(nil)
     }
 
     func showAtMouse() {
