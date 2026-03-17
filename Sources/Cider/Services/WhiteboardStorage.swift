@@ -102,7 +102,7 @@ final class WhiteboardStorage: ObservableObject {
 
         // Move the scene file into the trash directory
         let sceneURL = sceneFileURL(for: id)
-        let trashDir = whiteboardsDir.appendingPathComponent(".Trash")
+        let trashDir = whiteboardsDir.appendingPathComponent(".trash")
         try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
         let trashSceneURL = trashDir.appendingPathComponent("\(id.uuidString).excalidraw")
         try? FileManager.default.moveItem(at: sceneURL, to: trashSceneURL)
@@ -117,7 +117,7 @@ final class WhiteboardStorage: ObservableObject {
 
         // Move scene file back from trash
         let whiteboardsDir = StoragePaths.cachedDirectoryURL(for: .whiteboards)
-        let trashDir = whiteboardsDir.appendingPathComponent(".Trash")
+        let trashDir = whiteboardsDir.appendingPathComponent(".trash")
         let trashSceneURL = trashDir.appendingPathComponent("\(canvas.id.uuidString).excalidraw")
         let sceneURL = sceneFileURL(for: canvas.id)
         if FileManager.default.fileExists(atPath: trashSceneURL.path) {

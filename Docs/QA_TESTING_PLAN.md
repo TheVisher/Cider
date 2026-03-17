@@ -327,3 +327,4 @@ Track everything found during QA here. Reference the test step number.
 - [ ] Medium/Low issues triaged (fix or defer)
 - **Date:**
 - **Ready for release:** Yes / No
+| 8.10b | New tab blank state has no shortcut to create a whiteboard | Low | Open | Whiteboards are created via +New or Cmd+K. The blank tab view only offers library/filter tab setup. Could add a "Create Whiteboard" link in the blank state or closed tabs area, but low priority since discovery via +New is clear. |

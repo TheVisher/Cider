@@ -60,7 +60,9 @@ extension CiderPanelView {
         // For whiteboard tabs, flush any pending drawing and send canvas to trash
         if case .whiteboard(let canvasID) = savedView.kind {
             whiteboardViewModel.flushSave()
-            WhiteboardStorage.shared.deleteCanvas(canvasID)
+            if let trashItem = WhiteboardStorage.shared.deleteCanvas(canvasID) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .whiteboard, trashItem: trashItem))
+            }
         }
 
         let wasSelected = selectedTab == tab
@@ -73,7 +75,9 @@ extension CiderPanelView {
     func deleteClosedTab(_ savedView: SavedView) {
         if case .whiteboard(let canvasID) = savedView.kind {
             whiteboardViewModel.flushSave()
-            WhiteboardStorage.shared.deleteCanvas(canvasID)
+            if let trashItem = WhiteboardStorage.shared.deleteCanvas(canvasID) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .whiteboard, trashItem: trashItem))
+            }
         }
         savedViewStorage.deleteSavedView(savedView.id)
     }

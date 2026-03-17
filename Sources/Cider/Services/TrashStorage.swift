@@ -301,6 +301,14 @@ final class TrashStorage {
         let trashDir = whiteboardsDir.appendingPathComponent(trashDirName)
 
         WhiteboardStorage.shared.restoreFromTrash(payload.canvas)
+
+        // Recreate the SavedView tab pointing to this canvas so it appears in the tab bar
+        let savedView = SavedViewStorage.shared.createWhiteboardView(
+            name: payload.canvas.name,
+            canvasID: payload.canvas.id
+        )
+        SavedViewStorage.shared.addToTabOrder(savedView.id)
+
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
@@ -455,18 +463,22 @@ final class TrashStorage {
         let notesDir = StoragePaths.directoryURL(for: .notes)
         let dateCardsDir = StoragePaths.directoryURL(for: .dateCards)
         let contactsDir = StoragePaths.directoryURL(for: .contacts)
+        let todosDir = StoragePaths.directoryURL(for: .todos)
+        let whiteboardsDir = StoragePaths.directoryURL(for: .whiteboards)
+        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
         var items: [TrashItem] = []
         items += loadManifest(trashDir: bookmarksDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: dateCardsDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: contactsDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: todosDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: whiteboardsDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: sessionsDir.appendingPathComponent(trashDirName))
         // Also check Inbox trash locations
         let inboxBookmarksDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
         let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
         items += loadManifest(trashDir: inboxBookmarksDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: inboxNotesDir.appendingPathComponent(trashDirName))
-        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
-        items += loadManifest(trashDir: sessionsDir.appendingPathComponent(trashDirName))
         items += VaultFolderService.shared.trashedFolders()
         return items.sorted { $0.deletedAt > $1.deletedAt }
     }
@@ -564,7 +576,7 @@ final class TrashStorage {
     }
 
     func emptyTrash() {
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .whiteboards]
         for type in trashTypes {
             let trashDir = StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
             let items = loadManifest(trashDir: trashDir)

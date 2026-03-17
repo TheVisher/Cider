@@ -23,6 +23,9 @@ struct WhiteboardTabView: View {
                 viewModel.loadCanvas(canvas)
             }
         }
+        .onDisappear {
+            viewModel.whiteboardWebView?.window?.makeFirstResponder(nil)
+        }
         .onChange(of: canvasID) {
             if let canvas {
                 viewModel.loadCanvas(canvas)
