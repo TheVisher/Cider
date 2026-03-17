@@ -50,6 +50,44 @@ extension CiderPanelView {
         }
     }
 
+    func deleteTab(_ tab: CiderTab) {
+        guard case .savedView(let id, _) = tab else {
+            closeTab(tab)
+            return
+        }
+        guard let savedView = savedViewStorage.savedView(for: id) else { return }
+
+        // For whiteboard tabs, flush any pending drawing and send canvas to trash
+        if case .whiteboard(let canvasID) = savedView.kind {
+            whiteboardViewModel.flushSave()
+            WhiteboardStorage.shared.deleteCanvas(canvasID)
+        }
+
+        let wasSelected = selectedTab == tab
+        savedViewStorage.deleteSavedView(id)
+        if wasSelected {
+            selectedTab = allTabs.first
+        }
+    }
+
+    func deleteClosedTab(_ savedView: SavedView) {
+        if case .whiteboard(let canvasID) = savedView.kind {
+            whiteboardViewModel.flushSave()
+            WhiteboardStorage.shared.deleteCanvas(canvasID)
+        }
+        savedViewStorage.deleteSavedView(savedView.id)
+    }
+
+    func reopenTab(_ id: UUID) {
+        guard let savedView = savedViewStorage.savedView(for: id) else { return }
+        savedViewStorage.addToTabOrder(id)
+        withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
+            selectedFolderID = nil
+            selectedSourceID = nil
+            selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        }
+    }
+
     func createSavedViewFromCurrentState() {
         let name = nextSavedViewName()
         let filter = SavedViewFilterSpec(entityTypes: [])

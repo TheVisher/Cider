@@ -245,6 +245,10 @@ extension CiderPanelView {
 
     @ViewBuilder
     func blankTabWelcome(savedViewID: UUID) -> some View {
+        let closed = savedViewStorage.savedViews.filter {
+            !savedViewStorage.tabOrder.contains($0.id) && !$0.isOnboarding
+        }
+
         VStack(spacing: Spacing.xl) {
             Spacer()
 
@@ -287,6 +291,43 @@ extension CiderPanelView {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
+            closedTabsGrid(closed)
+        }
+    }
+
+    @ViewBuilder
+    private func closedTabsGrid(_ closed: [SavedView]) -> some View {
+        VStack(spacing: Spacing.sm) {
+            Divider()
+                .padding(.horizontal, Spacing.lg)
+
+            Text("Closed Tabs")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+
+            if closed.isEmpty {
+                Text("Closed tabs appear here")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.quaternary)
+                    .frame(minHeight: 32)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 100, maximum: 160), spacing: Spacing.sm)],
+                    spacing: Spacing.sm
+                ) {
+                    ForEach(closed) { sv in
+                        ClosedTabCard(
+                            savedView: sv,
+                            onReopen: { reopenTab(sv.id) },
+                            onDelete: { deleteClosedTab(sv) }
+                        )
+                    }
+                }
+                .padding(.horizontal, Spacing.lg)
+            }
+        }
+        .padding(.bottom, Spacing.md)
     }
 
     private func blankTabHint(icon: String, text: String) -> some View {
@@ -336,6 +377,8 @@ extension CiderPanelView {
         selectedFolderID = nil
     }
 
+    // MARK: - noTabsEmptyState
+
     var noTabsEmptyState: some View {
         VStack(spacing: Spacing.lg) {
             Image(systemName: "rectangle.stack.badge.plus")
@@ -351,5 +394,60 @@ extension CiderPanelView {
                 .buttonStyle(CiderAccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - ClosedTabCard
+
+private struct ClosedTabCard: View {
+    let savedView: SavedView
+    let onReopen: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var icon: String {
+        if case .whiteboard = savedView.kind { return "scribble" }
+        return "square.grid.2x2"
+    }
+
+    var body: some View {
+        Button(action: onReopen) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: icon)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(isHovered ? CiderColors.primary : CiderColors.tertiary)
+                Text(savedView.name)
+                    .font(CiderFont.label)
+                    .foregroundColor(isHovered ? CiderColors.primary : CiderColors.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if isHovered {
+                    Spacer(minLength: 0)
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.destructive)
+                            .padding(Spacing.xxs)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity.combined(with: .scale(0.8)))
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isHovered ? CiderColors.separatorLight : CiderColors.surfaceInput)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(reduceMotion ? .none : .snappy, value: isHovered)
     }
 }

@@ -23,9 +23,11 @@ extension CiderPanelView {
             selectedFolderID: $selectedFolderID,
             selectedSourceID: $selectedSourceID,
             onCloseTab: closeTab,
+            onDeleteTab: deleteTab,
             onReorderTab: { from, to in savedViewStorage.moveTab(from: from, to: to) },
             onRenameTab: { id, name in savedViewStorage.renameSavedView(id, to: name) },
-            onAddTab: { createSavedViewFromCurrentState() }
+            onAddTab: { createSavedViewFromCurrentState() },
+            onReopenTab: reopenTab
         )
         .frame(maxWidth: .infinity)
 

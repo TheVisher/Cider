@@ -22,6 +22,17 @@ final class WhiteboardViewModel: ObservableObject {
     /// Stores the latest scene JSON received from JS — used for flush-saves without JS round-trip.
     private var latestSceneJSON: Data?
     private var saveTask: Task<Void, Never>?
+    private var terminationObserver: NSObjectProtocol?
+
+    init() {
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.flushSave() }
+        }
+    }
 
     @discardableResult
     func ensureWebView() -> WKWebView {
@@ -47,8 +58,8 @@ final class WhiteboardViewModel: ObservableObject {
             withExtension: "html",
             subdirectory: "ExcalidrawEditor"
         ) {
-            // Scope file access to the vault directory instead of the entire home directory.
-            let readAccessRoot = StoragePaths.cachedVaultDirectoryURL
+            // Allow read access to the ExcalidrawEditor bundle directory so JS/CSS assets load.
+            let readAccessRoot = resourceURL.deletingLastPathComponent()
             webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
         } else {
             Self.logger.error("ExcalidrawEditor/index.html not found in bundle")

@@ -311,6 +311,9 @@ Track everything found during QA here. Reference the test step number.
 | 7.6a | Todo subtask checkboxes not clickable on card preview | Low | Open | Main task toggle works on card, subtasks only clickable in detail panel. |
 | 7.6b | Todo cards don't conform to grid card size | Medium | Open | Todo cards (especially single todos) are smaller than other cards in grid view. All cards should be uniform height in grid mode. |
 | 7.10 | Single todo creation popover should have optional due date field | Low | Open | Single todos created without a due date don't appear in Coming Up. Adding a due date field to the quick-create popover would help. |
+| 8.1 | Browser session capture doesn't work with Zen (Firefox-based) | Medium | Open | Works with Dia and Chromium browsers. Zen likely needs Firefox-specific AppleScript or a different capture path. |
+| 8.2 | Session card doesn't fill grid card space — shows 3 tabs with lots of empty space | Low | Open | Card has room to show more tab entries but caps at 3 + "+N more". Should fill available card height. |
+| 8.6 | Browser picker only shows "Default" — can't select other browsers | Medium | Open | Should list installed browsers. Currently stuck on Default with no other options. |
 
 **Severity:** Critical / High / Medium / Low
 **Status:** Open / In Progress / Fixed / Won't Fix

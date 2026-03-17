@@ -6,17 +6,27 @@ struct CiderTabBar: View {
     @Binding var selectedFolderID: UUID?
     @Binding var selectedSourceID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
+    var onDeleteTab: ((CiderTab) -> Void)?
     var onReorderTab: ((Int, Int) -> Void)?
     var onRenameTab: ((UUID, String) -> Void)?
     var onAddTab: (() -> Void)?
+    var onReopenTab: ((UUID) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
+    @ObservedObject private var savedViewStorage = SavedViewStorage.shared
 
     @State private var draggingTabID: String?
     @State private var renamingTabID: UUID?
     @State private var renameText: String = ""
+    @State private var showAddTabPopover = false
     @FocusState private var isRenameFieldFocused: Bool
+
+    private var closedTabs: [SavedView] {
+        savedViewStorage.savedViews.filter {
+            !savedViewStorage.tabOrder.contains($0.id) && !$0.isOnboarding
+        }
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -112,6 +122,12 @@ struct CiderTabBar: View {
             Button("Close Tab") {
                 onCloseTab?(tab)
             }
+            if tab.savedViewID != nil {
+                Divider()
+                Button("Delete Tab", role: .destructive) {
+                    onDeleteTab?(tab)
+                }
+            }
         }
         .onDrag {
             draggingTabID = tab.id
@@ -128,7 +144,7 @@ struct CiderTabBar: View {
 
     private func addTabButton(action: @escaping () -> Void) -> some View {
         Button {
-            action()
+            showAddTabPopover.toggle()
         } label: {
             Image(systemName: "plus")
                 .font(CiderFont.bodyMedium)
@@ -138,6 +154,69 @@ struct CiderTabBar: View {
         }
         .buttonStyle(.plain)
         .help("New tab")
+        .popover(isPresented: $showAddTabPopover, arrowEdge: .bottom) {
+            addTabPopoverContent(action: action)
+        }
+    }
+
+    @ViewBuilder
+    private func addTabPopoverContent(action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                action()
+                showAddTabPopover = false
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "plus")
+                        .font(CiderFont.bodyMedium)
+                        .frame(width: 16, alignment: .center)
+                    Text("New Tab")
+                        .font(CiderFont.body)
+                }
+                .foregroundColor(CiderColors.primary)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !closedTabs.isEmpty {
+                Divider()
+                    .padding(.vertical, Spacing.xxs)
+
+                Text("Closed")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.xs)
+                    .padding(.bottom, Spacing.xxs)
+
+                ForEach(closedTabs) { sv in
+                    Button {
+                        onReopenTab?(sv.id)
+                        showAddTabPopover = false
+                    } label: {
+                        HStack(spacing: Spacing.sm) {
+                            Image(systemName: { if case .whiteboard = sv.kind { return "scribble" }; return "square.grid.2x2" }())
+                                .font(CiderFont.bodyMedium)
+                                .frame(width: 16, alignment: .center)
+                            Text(sv.name)
+                                .font(CiderFont.body)
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(CiderColors.secondary)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.vertical, Spacing.xs)
+        .frame(minWidth: 200)
     }
 
     private func commitRename(_ savedViewID: UUID) {
