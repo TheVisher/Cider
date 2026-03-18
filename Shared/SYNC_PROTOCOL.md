@@ -1,5 +1,7 @@
 # Sync Protocol
 
+> Last validated: 2026-03-18 (iOS now expects purge + tag management routes — see Planned Endpoints below)
+
 > Canonical sync specification for all three Cider apps. Consolidates the per-app `SYNC_COLLABORATION.md` docs into one source of truth.
 >
 > **If you're working on anything sync-related, read this entire file first.**
@@ -125,6 +127,18 @@ Revoking a device marks its sync token as `revoked: true`. The token will be rej
 | POST | `/api/sync/reconcile` | Full manifest of all bookmark `ciderSyncId` + `updatedAt` pairs (drift detection) |
 | POST | `/api/sync/upload-thumbnail` | Upload thumbnail image for a bookmark (multipart or raw binary) |
 | POST | `/api/capture` | Quick-capture a URL (creates bookmark with `enrichmentStatus: "pending"`) |
+
+### Planned Endpoints (not yet in `http.ts` — iOS client code calls these as of 2026-03-18)
+
+| Method | Path | Purpose | iOS client code |
+|--------|------|---------|-----------------|
+| POST | `/api/sync/purge` | Permanently delete one item: `{ type: "bookmark"\|"note", ciderSyncId }` | `SyncClient.purgeBookmark/purgeNote` |
+| POST | `/api/sync/empty-trash` | Purge all soft-deleted items for the user | `SyncClient.emptyTrash` |
+| POST | `/api/tags/rename` | Rename a tag: `{ oldName, newName }` → `{ count }` | `SyncClient.renameTag` |
+| POST | `/api/tags/delete` | Delete a tag: `{ name }` → `{ count }` | `SyncClient.deleteTag` |
+| POST | `/api/tags/merge` | Merge tags: `{ sourceName, targetName }` → `{ count }` | `SyncClient.mergeTag` |
+
+Backend mutations for purge already exist (`bookmarks.ts`, `notes.ts`), but the HTTP routes in `http.ts` need to be added. Tag management mutations need to be created. All routes should use the existing `authenticateSync` Bearer token pattern.
 
 All requests: `POST`, `Content-Type: application/json`, `Authorization: Bearer <sync_token>`.
 

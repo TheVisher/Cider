@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-17
+> **Last updated**: 2026-03-18
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -16,7 +16,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Folder sync | Yes | Yes | Yes |
 | Soft delete / trash | Yes | Yes | Yes |
 | Trash view / restore | Yes | Yes | Yes |
-| Permanent delete (purge) | Yes | Yes (30-day cron) | No |
+| Permanent delete (purge) | Yes | Yes (30-day cron) | Partial (client ready, needs backend routes) |
 | Search | Yes | Yes | Yes (local filter) |
 | Tags | Yes | Yes | Yes (display only) |
 | Share Extension | N/A | N/A | Yes |
@@ -29,9 +29,9 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Nested folders (tree) | Yes | Yes | Yes |
 | Folder icons | Yes (SF Symbols) | Yes (Lucide) | Yes (SF Symbols + emoji) |
 | Move to folder | Yes | Yes (context menu + drag-and-drop) | Yes (context menu + detail) |
-| Tag management (rename/merge/delete) | Yes | Yes | No |
+| Tag management (rename/merge/delete) | Yes | Yes | Partial (client ready, needs backend routes) |
 | Tag filtering | Yes | Yes (AND/OR toggle) | Yes (multi-tag filter panel) |
-| Saved views / smart filters | Yes | Yes (tabs) | Planned (M16) |
+| Saved views / smart filters | Yes | Yes (tabs) | Yes |
 
 ## Display & Layout
 
