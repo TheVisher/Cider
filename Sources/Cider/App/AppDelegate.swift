@@ -112,6 +112,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureAIChatPanel()
         observeAIChatNotifications()
 
+        // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
+        DispatchQueue.main.async {
+            if let appMenu = NSApp.mainMenu?.item(at: 0)?.submenu {
+                for item in appMenu.items where item.keyEquivalent == "," {
+                    item.target = self
+                    item.action = #selector(self.openSettingsFromMenu)
+                }
+            }
+        }
+
         // Build vault index if empty (first run or rebuild needed)
         if VaultIndexService.shared.entries.isEmpty {
             VaultIndexService.shared.rebuildFromCurrentState()
@@ -458,6 +468,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hideSettings()
             }
             .store(in: &cancellables)
+    }
+
+    @objc func openSettingsFromMenu() {
+        showSettings()
     }
 
     func showSettings() {

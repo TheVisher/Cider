@@ -209,6 +209,7 @@ final class NotesViewModel: ObservableObject {
         editorCoordinator = coordinator
 
         let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(CiderVaultSchemeHandler(), forURLScheme: "cider-vault")
         let contentController = config.userContentController
         contentController.add(coordinator, name: "contentChanged")
         contentController.add(coordinator, name: "editorReady")
@@ -231,8 +232,10 @@ final class NotesViewModel: ObservableObject {
         }
 
         if let resourceURL = Bundle.main.url(forResource: "editor", withExtension: "html", subdirectory: "TipTapEditor") {
-            // Grant read access to the TipTapEditor bundle directory (for JS/CSS)
-            // Note content is loaded via JS bridge (pushContentToEditor), not direct file access.
+            // Grant read access to the TipTapEditor bundle directory (for JS/CSS).
+            // Vault images are served via the cider-vault:// custom URL scheme instead,
+            // which avoids the constraint that allowingReadAccessTo must cover both
+            // the app bundle and the vault simultaneously.
             let readAccessRoot = resourceURL.deletingLastPathComponent()
             webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
         }
@@ -276,7 +279,12 @@ final class NotesViewModel: ObservableObject {
             logger.warning("pushContentToEditor: editor not ready or webView nil")
             return
         }
-        let editorMarkdown = NotesStorage.shared.markdownForEditor(markdown)
+        let editorMarkdown: String
+        if let note = selectedNote {
+            editorMarkdown = NotesStorage.shared.markdownForEditor(markdown, note: note)
+        } else {
+            editorMarkdown = NotesStorage.shared.markdownForEditor(markdown)
+        }
         // Use JSON encoding for safe string transport — handles all special
         // characters (newlines, quotes, backslashes, unicode) correctly.
         guard let jsonData = try? JSONSerialization.data(
@@ -458,7 +466,12 @@ final class NotesViewModel: ObservableObject {
     // MARK: - Auto-save
 
     func contentChanged(_ newContent: String) {
-        let persistedContent = NotesStorage.shared.markdownForPersistence(newContent)
+        let persistedContent: String
+        if let note = selectedNote {
+            persistedContent = NotesStorage.shared.markdownForPersistence(newContent, note: note)
+        } else {
+            persistedContent = NotesStorage.shared.markdownForPersistence(newContent)
+        }
         editingContent = persistedContent
         charCount = persistedContent.count
         hasPendingSave = true

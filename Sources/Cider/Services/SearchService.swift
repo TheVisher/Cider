@@ -28,6 +28,7 @@ struct SearchResult: Identifiable {
     var dateCard: DateCard?
     var contact: ContactCard?
     var todoCard: TodoCard?
+    var session: BrowserSession?
 }
 
 // MARK: - Search Scope
@@ -317,6 +318,21 @@ enum SearchService {
             }
         }
 
+        if shouldSearchType(.session) {
+            let sessions = BrowserSessionStorage.shared.sessions
+            if tokens.isEmpty {
+                results += sessions.map { session in
+                    SearchResult(
+                        id: session.id, type: .session, title: session.name,
+                        subtitle: "\(session.tabCount) tab\(session.tabCount == 1 ? "" : "s")",
+                        snippet: nil, date: session.updatedAt, session: session
+                    )
+                }
+            } else {
+                results += searchSessions(tokens, in: sessions)
+            }
+        }
+
         return results
     }
 
@@ -467,6 +483,20 @@ enum SearchService {
                 snippet: snippet,
                 date: contact.updatedAt,
                 contact: contact
+            )
+        }
+    }
+
+    static func searchSessions(_ tokens: [String], in sessions: [BrowserSession]) -> [SearchResult] {
+        sessions.compactMap { session in
+            let tabTitles = session.tabs.compactMap { $0.title }
+            let tabURLs = session.tabs.map { $0.urlString }
+            let fields = [session.name] + tabTitles + tabURLs
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
+            return SearchResult(
+                id: session.id, type: .session, title: session.name,
+                subtitle: "\(session.tabCount) tab\(session.tabCount == 1 ? "" : "s")",
+                snippet: nil, date: session.updatedAt, session: session
             )
         }
     }

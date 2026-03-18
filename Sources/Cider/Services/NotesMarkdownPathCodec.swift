@@ -1,29 +1,31 @@
 import Foundation
 
 enum NotesMarkdownPathCodec {
-    /// Convert stored markdown to editor-friendly markdown (absolute image paths).
+    /// Convert stored markdown to editor-friendly markdown.
+    /// Attachment paths are rewritten to use the `cider-vault://` custom scheme so
+    /// WKWebView can load them without needing broad filesystem `allowingReadAccessTo`.
     static func markdownForEditor(_ markdown: String, notesDirectoryURL: URL) -> String {
         var normalized = markdown
         let encodedDirectoryPath = notesDirectoryURL.path.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed
         ) ?? notesDirectoryURL.path
-        let absolutePrefix = encodedDirectoryPath + "/"
+        let schemePrefix = "cider-vault://" + encodedDirectoryPath + "/"
 
-        normalized = normalized.replacingOccurrences(of: "(./", with: "(\(absolutePrefix)")
-        normalized = normalized.replacingOccurrences(of: "=\"./", with: "=\"\(absolutePrefix)")
-        normalized = normalized.replacingOccurrences(of: "('./", with: "('\(absolutePrefix)")
+        normalized = normalized.replacingOccurrences(of: "(./", with: "(\(schemePrefix)")
+        normalized = normalized.replacingOccurrences(of: "=\"./", with: "=\"\(schemePrefix)")
+        normalized = normalized.replacingOccurrences(of: "('./", with: "('\(schemePrefix)")
 
         normalized = normalized.replacingOccurrences(
             of: "(.attachments/",
-            with: "(\(absolutePrefix).attachments/"
+            with: "(\(schemePrefix).attachments/"
         )
         normalized = normalized.replacingOccurrences(
             of: "=\".attachments/",
-            with: "=\"\(absolutePrefix).attachments/"
+            with: "=\"\(schemePrefix).attachments/"
         )
         normalized = normalized.replacingOccurrences(
             of: "('.attachments/",
-            with: "('\(absolutePrefix).attachments/"
+            with: "('\(schemePrefix).attachments/"
         )
 
         return normalized
@@ -38,6 +40,19 @@ enum NotesMarkdownPathCodec {
             ?? notesDirectoryURL.path
         ) + "/"
 
+        // Strip cider-vault:// scheme paths (current editor format)
+        let vaultSchemeRawPrefix = "cider-vault://\(rawPrefix)"
+        let vaultSchemeEncodedPrefix = "cider-vault://\(encodedPrefix)"
+
+        normalized = normalized.replacingOccurrences(of: "(\(vaultSchemeRawPrefix)", with: "(./")
+        normalized = normalized.replacingOccurrences(of: "=\"\(vaultSchemeRawPrefix)", with: "=\"./")
+        normalized = normalized.replacingOccurrences(of: "('\(vaultSchemeRawPrefix)", with: "('./")
+
+        normalized = normalized.replacingOccurrences(of: "(\(vaultSchemeEncodedPrefix)", with: "(./")
+        normalized = normalized.replacingOccurrences(of: "=\"\(vaultSchemeEncodedPrefix)", with: "=\"./")
+        normalized = normalized.replacingOccurrences(of: "('\(vaultSchemeEncodedPrefix)", with: "('./")
+
+        // Strip plain absolute paths (legacy, pre-cider-vault scheme)
         normalized = normalized.replacingOccurrences(of: "(\(rawPrefix)", with: "(./")
         normalized = normalized.replacingOccurrences(of: "=\"\(rawPrefix)", with: "=\"./")
         normalized = normalized.replacingOccurrences(of: "('\(rawPrefix)", with: "('./")
@@ -67,21 +82,21 @@ enum NotesMarkdownPathCodec {
     private static func normalizeLegacyAbsoluteAttachmentPaths(_ markdown: String) -> String {
         var normalized = markdown
 
-        // Markdown links/images: (.../.attachments/<file>)
+        // Markdown links/images: (.../.attachments/<file>) — covers file:// and cider-vault://
         normalized = normalized.replacingOccurrences(
-            of: #"\((?:file://)?/[^\)]*?/\.attachments/"#,
+            of: #"\((?:cider-vault://|file://)?/[^\)]*?/\.attachments/"#,
             with: "(./.attachments/",
             options: .regularExpression
         )
 
-        // HTML attributes: src="/.../.attachments/<file>"
+        // HTML attributes: src="/.../.attachments/<file>" — covers file:// and cider-vault://
         normalized = normalized.replacingOccurrences(
-            of: #"=\"(?:file://)?/[^\"]*?/\.attachments/"#,
+            of: #"=\"(?:cider-vault://|file://)?/[^\"]*?/\.attachments/"#,
             with: "=\"./.attachments/",
             options: .regularExpression
         )
         normalized = normalized.replacingOccurrences(
-            of: #"='(?:file://)?/[^']*?/\.attachments/"#,
+            of: #"='(?:cider-vault://|file://)?/[^']*?/\.attachments/"#,
             with: "='./.attachments/",
             options: .regularExpression
         )

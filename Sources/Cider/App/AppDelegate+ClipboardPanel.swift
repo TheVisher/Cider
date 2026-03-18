@@ -27,7 +27,8 @@ extension AppDelegate {
         clipboardPanelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
             guard let frame = change.newValue else { return }
             DispatchQueue.main.async {
-                self?.clipboardShadowPanel?.updateFrame(for: frame)
+                guard let self, let panel = self.clipboardPanel, panel.isVisible else { return }
+                self.clipboardShadowPanel?.updateFrame(for: frame)
             }
         }
 

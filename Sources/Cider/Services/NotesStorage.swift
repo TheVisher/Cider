@@ -517,13 +517,15 @@ final class NotesStorage: ObservableObject {
         // Ensure Inbox/Notes/ exists
         try? FileManager.default.createDirectory(at: inboxDir, withIntermediateDirectories: true)
 
-        // Save screenshot to Attachments if provided
+        // Save screenshot to Attachments if provided.
+        // Use the inbox note's directory as the base so the relative .attachments/ path
+        // resolves correctly when the editor loads the note.
         var screenshotFilename: String?
         if let image = screenshot,
            let pngData = image.tiffRepresentation,
            let bitmap = NSBitmapImageRep(data: pngData),
            let png = bitmap.representation(using: .png, properties: [:]) {
-            let attachmentsDir = attachmentsDirectoryURL()
+            let attachmentsDir = inboxDir.appendingPathComponent(attachmentsDirectoryName, isDirectory: true)
             let fm = FileManager.default
             if !fm.fileExists(atPath: attachmentsDir.path) {
                 try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
@@ -585,9 +587,22 @@ final class NotesStorage: ObservableObject {
         NotesMarkdownPathCodec.markdownForEditor(markdown, notesDirectoryURL: directoryURL)
     }
 
+    /// Convert stored markdown to editor-friendly markdown, using the note's actual directory
+    /// as the base. Required for inbox notes whose .attachments/ live in Inbox/Notes/.
+    func markdownForEditor(_ markdown: String, note: Note) -> String {
+        let noteDir = note.absoluteFileURL.deletingLastPathComponent()
+        return NotesMarkdownPathCodec.markdownForEditor(markdown, notesDirectoryURL: noteDir)
+    }
+
     /// Convert editor markdown to portable markdown (relative image paths).
     func markdownForPersistence(_ markdown: String) -> String {
         NotesMarkdownPathCodec.markdownForPersistence(markdown, notesDirectoryURL: directoryURL)
+    }
+
+    /// Convert editor markdown to portable markdown, using the note's actual directory.
+    func markdownForPersistence(_ markdown: String, note: Note) -> String {
+        let noteDir = note.absoluteFileURL.deletingLastPathComponent()
+        return NotesMarkdownPathCodec.markdownForPersistence(markdown, notesDirectoryURL: noteDir)
     }
 
     func save(note: Note, createSnapshot: Bool = true) {
@@ -1058,9 +1073,10 @@ final class NotesStorage: ObservableObject {
 
     // MARK: - Image Storage
 
-    /// Save image data to the `.attachments` subdirectory, returning the file URL.
+    /// Save image data to the `.attachments` subdirectory next to the note, returning the file URL.
     func saveImage(data: Data, filename: String, for note: Note) -> URL {
-        let attachmentsDir = attachmentsDirectoryURL()
+        let noteDir = note.absoluteFileURL.deletingLastPathComponent()
+        let attachmentsDir = noteDir.appendingPathComponent(attachmentsDirectoryName, isDirectory: true)
         let fm = FileManager.default
         if !fm.fileExists(atPath: attachmentsDir.path) {
             try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)

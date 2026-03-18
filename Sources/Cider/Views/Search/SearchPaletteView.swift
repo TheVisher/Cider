@@ -71,12 +71,14 @@ private enum SelectableItem: Identifiable {
     case action(QuickAction)
     case tag(CardLabel)
     case result(SearchResult)
+    case createTab(String)
 
     var id: String {
         switch self {
         case .action(let a): return "action-\(a.id)"
         case .tag(let t): return "tag-\(t.id.uuidString)"
         case .result(let r): return "result-\(r.id.uuidString)"
+        case .createTab: return "createTab"
         }
     }
 }
@@ -127,6 +129,10 @@ struct SearchPaletteView: View {
         results.filter { $0.type == .contact }
     }
 
+    private var sessionResults: [SearchResult] {
+        results.filter { $0.type == .session }
+    }
+
     private var filteredTags: [CardLabel] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -145,6 +151,9 @@ struct SearchPaletteView: View {
         var items: [SelectableItem] = filteredActions.map { .action($0) }
         items += filteredTags.map { .tag($0) }
         items += results.map { .result($0) }
+        if hasQuery, onSpawnSearchTab != nil {
+            items.append(.createTab(query))
+        }
         return items
     }
 
@@ -268,12 +277,8 @@ struct SearchPaletteView: View {
 
     private func handleReturn() {
         let items = selectableItems
-        if selectedIndex >= 0, selectedIndex < items.count {
-            executeItem(items[selectedIndex])
-        } else if hasQuery {
-            onSpawnSearchTab?(query)
-            onDismiss()
-        }
+        guard selectedIndex >= 0, selectedIndex < items.count else { return }
+        executeItem(items[selectedIndex])
     }
 
     private func executeItem(_ item: SelectableItem) {
@@ -283,6 +288,9 @@ struct SearchPaletteView: View {
             onDismiss()
         case .tag(let label):
             onSelectTag?(label)
+            onDismiss()
+        case .createTab(let q):
+            onSpawnSearchTab?(q)
             onDismiss()
         case .result(let result):
             switch result.type {
@@ -558,10 +566,17 @@ struct SearchPaletteView: View {
                         if !contactResults.isEmpty {
                             resultsSection(title: "Contacts", icon: "person", results: contactResults)
                         }
+                        if !sessionResults.isEmpty {
+                            resultsSection(title: "Sessions", icon: "rectangle.stack", results: sessionResults)
+                        }
                     }
 
                     if showNoResults && !activeScope.hasFolderScope {
                         noResultsRow
+                    }
+
+                    if onSpawnSearchTab != nil {
+                        createTabRow
                     }
                 }
                 .padding(Spacing.md)
@@ -920,6 +935,50 @@ struct SearchPaletteView: View {
         var suffix = AttributedString(snippet.suffix)
         suffix.swiftUI.foregroundColor = CiderColors.tertiary
         return prefix + match + suffix
+    }
+
+    // MARK: - Create Tab Row
+
+    private var createTabRow: some View {
+        let isSelected = isItemSelected(.createTab(query))
+
+        return Button {
+            onSpawnSearchTab?(query)
+            onDismiss()
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "plus.square.on.square")
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(width: 16)
+
+                Text("Create tab: \(query.trimmingCharacters(in: .whitespacesAndNewlines))")
+                    .font(CiderFont.subheadingMedium)
+                    .foregroundColor(CiderColors.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: Spacing.sm)
+
+                Text("New Tab")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.quaternary)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(isSelected ? CiderColors.selectedFill : Color.clear)
+        )
+        .id(SelectableItem.createTab(query).id)
     }
 
     // MARK: - No Results

@@ -4,7 +4,7 @@
 >
 > **If the schema changes, update this doc. If this doc and the schema disagree, the schema wins.**
 >
-> **Last updated**: 2026-03-15
+> **Last updated**: 2026-03-17
 
 ## Bookmarks Table
 
@@ -185,6 +185,8 @@ tabs: defineTable({
   // Layout spec
   displayMode: v.optional(v.string()),              // "grid" | "list" | "masonry"
   cardSizeScale: v.optional(v.number()),            // 0-3
+  hideCardFooters: v.optional(v.boolean()),         // Hide card footer text (title/host)
+  showDetailsOnHover: v.optional(v.boolean()),      // Reveal details on hover instead
 
   // Ordering
   position: v.number(),
