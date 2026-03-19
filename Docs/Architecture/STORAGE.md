@@ -268,3 +268,116 @@ Currently, if a user (or an external tool like Apple Contacts or a text editor) 
 - Debounce rapid changes (file saves trigger multiple events)
 - Compare file modification dates against index `updatedAt` to detect actual changes
 - Orphan adoption already handles "new file appeared" — file watching just triggers it live
+
+---
+
+## Bookmark File Migration (Monolithic JSON → Individual .webloc Files)
+
+> **Status:** Phases 1-4 complete (dual-write active). Phases 5-6 are future work.
+
+### Rationale
+
+The original bookmark storage used a single monolithic JSON file (`_cider_bookmarks_metadata.json`) for ALL bookmarks and folder definitions. Folders were virtual (UUIDs in an array, not directories on disk), creating a disconnect with `VaultFolderService` which uses actual directories. The migration moves each bookmark to an individual `.webloc` file in the vault folder tree, with sidecar metadata. Folders become real directories. AI sorting becomes simple file movement.
+
+### Target Architecture
+
+```
+~/CiderVault/
+├── Bookmarks/                          # unfiled bookmarks live here
+│   ├── .cider-meta.json               # metadata for items in this folder
+│   ├── YouTube - Some Video.webloc
+│   └── Reddit - Front Page.webloc
+├── Entertainment/                      # user folder (real directory)
+│   ├── .cider-meta.json
+│   ├── .thumbnails/                   # thumbnails for items in this folder
+│   │   └── <UUID>.png
+│   ├── .originals/                    # full-size images
+│   │   └── <UUID>.jpg
+│   ├── Netflix - A Show.webloc
+│   └── Videos/                        # sub-folder
+│       ├── .cider-meta.json
+│       └── TikTok - Funny Clip.webloc
+└── ...
+```
+
+### Key Decisions
+
+**1. `.webloc` as the bookmark file**
+- macOS native format (XML plist with URL key)
+- Double-click opens in browser
+- Drag from browser into Cider folder = instant bookmark
+- Finder shows site favicon
+- Only stores the URL — lightweight, portable
+
+**2. Per-folder `.cider-meta.json` sidecar**
+- Maps each filename to its Cider metadata (tags, AI summary, colors, notes, labels, dates, etc.)
+- One file per folder, not one per bookmark (avoids 2x file count)
+- Structure:
+```json
+{
+  "items": {
+    "YouTube - Some Video.webloc": {
+      "id": "UUID",
+      "title": "YouTube - Some Video",
+      "tags": ["entertainment", "video"],
+      "labelIDs": ["UUID"],
+      "aiSummary": "...",
+      "dominantColors": ["#ff0000"],
+      "thumbnailFilename": "<UUID>.png",
+      "originalImageFilename": "<UUID>.jpg",
+      "carouselImageFilenames": [],
+      "notes": "",
+      "createdAt": "2026-03-10T...",
+      "updatedAt": "2026-03-10T...",
+      "metadataUpdatedAt": "2026-03-10T...",
+      "mediaType": "image",
+      "dismissedLabelIDs": [],
+      "ocrText": null,
+      "readerUnavailable": false,
+      "preferredHeroMode": "thumbnail"
+    }
+  }
+}
+```
+
+**3. Thumbnails/originals move with bookmarks**
+- Each folder has its own `.thumbnails/` and `.originals/` hidden dirs
+- When a bookmark moves to a new folder, its image assets move too
+- Keeps everything self-contained — copy a folder and you get everything
+
+**4. Filename = sanitized title**
+- `sanitize(title)` produces a valid macOS filename (no `/`, `:`, max 255 chars)
+- Collision handling: append ` (2)`, ` (3)`, etc.
+- UUID stays in the sidecar metadata, not the filename (human-readable filenames)
+
+**5. `bookmarks.html` still generated**
+- Written to vault root on demand (export feature)
+- Not part of the live storage cycle — just for browser import/export
+
+### Migration Phases
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Add `relativePath` to Bookmark model (`decodeIfPresent` + nil fallback) | Complete |
+| 2 | `BookmarkFileService.swift` — per-file I/O (write/read/move/delete .webloc + sidecar) | Complete |
+| 3 | Dual-write in `persist()` — monolithic JSON (existing) + .webloc files + sidecars (new) | Complete |
+| 4 | One-time migration on first launch (`runBookmarkFileMigrationIfNeeded()`) — creates vault directories, writes .webloc per bookmark, writes per-folder sidecar JSON, sets `didMigrateBookmarkFiles` flag | Complete |
+| 5 | Wire up FSEvents for live folder watching — detect new .webloc files dropped in, auto-enrich, detect moved/deleted files | Future |
+| 6 | Clean up — remove monolithic JSON write path, remove legacy `Folder` model from JSON, update VaultIndexService to use real file paths, update AI Chat CLAUDE.md | Future |
+
+After migration, every `persist()` call keeps files in sync. Monolithic JSON stays as primary load source (safe fallback). Image assets stay in `Bookmarks/.thumbnails/` and `.originals/` for now.
+
+### What Changes for Users
+
+- Bookmarks appear in Finder as .webloc files in organized folders
+- Drag a URL from any browser into a Cider folder creates a bookmark
+- Move bookmarks in Finder and Cider picks up the change (once Phase 5 ships)
+- AI sorting becomes just file movement, instantly visible
+- Everything else unchanged — same UI, same cards, same enrichment
+
+### Risks & Mitigations
+
+- **Filename collisions** — multiple bookmarks with same title. Mitigation: append ` (2)` etc.
+- **Large folder scans** — scanning 1000+ .webloc files on load. Mitigation: sidecar JSON is the fast path, .webloc files only read when sidecar is missing.
+- **Atomic saves** — sidecar must be written atomically to avoid corruption. Use `.atomic` write option.
+- **Image asset movement** — moving a bookmark between folders must also move thumbnails. Must be transactional.

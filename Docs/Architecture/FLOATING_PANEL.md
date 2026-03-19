@@ -14,6 +14,39 @@ Cider's floating panels combine three layers:
 
 The command palette is a fixed-size panel (no resize). This document covers the **resizable** variant, first used by the Notes panel.
 
+### Fixed-Size Panel Variant (Command Palette)
+
+Fixed-size panels like the command palette differ from resizable panels in a few key ways:
+
+```swift
+final class CommandPalettePanel: NSPanel {
+    init() {
+        let initialFrame = NSRect(x: 0, y: 0, width: 600, height: 500)
+        super.init(contentRect: initialFrame,
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered,
+                   defer: false)
+
+        isFloatingPanel = true
+        level = .floating
+        hidesOnDeactivate = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false  // We draw our own shadow
+
+        isMovable = false                // Fixed position — not draggable
+        acceptsMouseMovedEvents = true   // Needed for hover tracking
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+```
+
+Key differences from resizable panels: `isMovable = false` (panel stays put), `acceptsMouseMovedEvents = true` (for hover tracking in search results), and `.transient` in `collectionBehavior` (dismissed when switching spaces, unlike persistent panels).
+
 ---
 
 ## Panel (NSPanel subclass)

@@ -374,34 +374,7 @@ withAnimation(reduceMotion ? .none : .snappy) {
 
 ## AppKit Integration
 
-### NSPanel for Floating Windows
-
-```swift
-final class CommandPalettePanel: NSPanel {
-    init() {
-        let initialFrame = NSRect(x: 0, y: 0, width: 600, height: 500)
-        super.init(contentRect: initialFrame,
-                   styleMask: [.borderless, .nonactivatingPanel],
-                   backing: .buffered,
-                   defer: false)
-
-        isFloatingPanel = true
-        level = .floating
-        hidesOnDeactivate = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false  // We draw our own shadow
-
-        isMovable = false
-        acceptsMouseMovedEvents = true
-    }
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-}
-```
+> NSPanel setup patterns are documented in `Docs/Architecture/FLOATING_PANEL.md`.
 
 ### Window Management (AXUIElement)
 
