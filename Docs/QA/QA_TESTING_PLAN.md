@@ -320,6 +320,7 @@ Track everything found during QA here. Reference the test step number.
 | 9.11a | `@folder:Name` uses colon syntax, inconsistent with `@b`, `@n`, `@t` shorthands. Should support `@f FolderName` (space-separated) to match the pattern. Same likely applies to `@tag:Name` → `@tag Name`. | Low | Open | |
 | 10.4 | Vault location change has no confirmation dialog — moves immediately after folder selection | Medium | Open | Should show a confirmation sheet: "Move vault to X? This cannot be undone." |
 | 10.13 | Option+drag bookmark image to Finder produces doubled file extension (e.g. "title.jpg.jpeg") | Low | Open | Cosmetic — the file is usable but the name is wrong. |
+| 11.1 | Sources folder → normal folder navigation stuck — selecting a sources folder then clicking a normal folder highlights both blue, doesn't switch. Must click a tab first to leave sources, then can enter normal folder. | Medium | Open | Sidebar selection state gets stuck when transitioning from linked source to regular folder. |
 
 **Severity:** Critical / High / Medium / Low
 **Status:** Open / In Progress / Fixed / Won't Fix
