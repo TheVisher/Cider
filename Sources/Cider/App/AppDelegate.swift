@@ -57,11 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var clipboardShadowPanel: CiderShadowPanel?
     var clipboardPanelFrameObservation: NSKeyValueObservation?
 
-    // AI Chat
-    var aiChatPanel: AIChatPanel?
-    var aiChatShadowPanel: CiderShadowPanel?
-    var aiChatPanelFrameObservation: NSKeyValueObservation?
-    // AI Chat view model is AIChatViewModel.shared (singleton)
+    // AI Assistant
+    var aiAssistantPanel: AIAssistantPanel?
+    var aiAssistantShadowPanel: CiderShadowPanel?
+    var aiAssistantPanelFrameObservation: NSKeyValueObservation?
+    var aiAssistantHotkeyDetector: AIAssistantHotkeyDetector?
 
     // Services
     var servicesProvider: CiderServicesProvider?
@@ -109,8 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureClipboardHistory()
         configureClipboardPanel()
         observeClipboardViewerNotifications()
-        configureAIChatPanel()
-        observeAIChatNotifications()
+        configureAIAssistantPanel()
+        observeAIAssistantNotifications()
+        startAIAssistantHotkeyDetection()
 
         // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
         DispatchQueue.main.async { [weak self] in
@@ -197,8 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenCaptureToastPanel?.orderOut(nil)
         clipboardShadowPanel?.orderOut(nil)
         clipboardPanel?.orderOut(nil)
-        aiChatShadowPanel?.orderOut(nil)
-        aiChatPanel?.orderOut(nil)
+        aiAssistantShadowPanel?.orderOut(nil)
+        aiAssistantPanel?.orderOut(nil)
     }
 
     func applicationWillResignActive(_ notification: Notification) {

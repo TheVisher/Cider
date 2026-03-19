@@ -6,6 +6,31 @@ extension CiderPanelView {
 
     var sidebarFooterView: some View {
         VStack(spacing: Spacing.sm) {
+            // AI Assistant button
+            Button {
+                NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "sparkles")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                    Text("AI Assistant")
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceSubtle)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("Open AI Assistant")
+            .padding(.horizontal, Spacing.sm)
+
             Divider()
                 .background(CiderColors.separator)
                 .padding(.bottom, Spacing.xs)
@@ -51,44 +76,6 @@ extension CiderPanelView {
                 .popover(isPresented: $showNewItemPicker, arrowEdge: .bottom) {
                     newItemPickerContent
                 }
-
-                // AI Chat toggle — reopens in last-used mode (docked tab or floating panel)
-                Button {
-                    if aiChatDocked {
-                        if aiChatVisible && selectedTab?.id == CiderTab.aiChat.id {
-                            // Already viewing AI tab — close it
-                            aiChatVisible = false
-                            selectedTab = tabBeforeAIChat
-                            var config = CiderConfig.load()
-                            config.aiChatVisible = false
-                            config.save()
-                        } else {
-                            // Open/reopen as docked tab
-                            aiChatVisible = true
-                            tabBeforeAIChat = selectedTab
-                            selectedFolderID = nil
-                            selectedSourceID = nil
-                            selectedTagIDs = []
-                            selectedTab = .aiChat
-                            var config = CiderConfig.load()
-                            config.aiChatVisible = true
-                            config.save()
-                        }
-                    } else {
-                        NotificationCenter.default.post(name: .toggleAIChatPanel, object: nil)
-                    }
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(CiderFont.bodyMedium)
-                        .foregroundColor(
-                            (aiChatVisible && aiChatDocked && selectedTab?.id == CiderTab.aiChat.id)
-                            ? CiderColors.controlAccent : CiderColors.secondary
-                        )
-                        .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Toggle AI Chat")
 
                 Spacer(minLength: 0)
 

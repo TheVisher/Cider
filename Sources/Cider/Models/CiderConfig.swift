@@ -180,8 +180,6 @@ struct CiderConfig: Codable {
         case syncToken
         case lastSyncTimestamp
         case lastSuccessfulPushAt
-        case aiChatDocked
-        case aiChatVisible
         case didMigrateBookmarkFiles
         case didMigrateVaultToCiderDir
         case didMigrateContentToInbox
@@ -258,8 +256,6 @@ struct CiderConfig: Codable {
     var syncToken: String  // Bearer token for authenticating with Cider Web
     var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
     var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)
-    var aiChatDocked: Bool  // Whether AI Chat is docked in the tab bar (false = floating panel)
-    var aiChatVisible: Bool  // Whether AI Chat is currently open (tab or panel)
     var didMigrateBookmarkFiles: Bool  // Whether one-time .webloc file migration has run
     var didMigrateVaultToCiderDir: Bool  // Whether one-time vault → .cider/ migration has run
     var didMigrateContentToInbox: Bool  // Whether one-time .cider/ → Inbox/ content migration has run
@@ -333,8 +329,6 @@ struct CiderConfig: Codable {
             syncToken: "",
             lastSyncTimestamp: 0,
             lastSuccessfulPushAt: 0,
-            aiChatDocked: false,
-            aiChatVisible: false,
             didMigrateBookmarkFiles: false,
             didMigrateVaultToCiderDir: false,
             didMigrateContentToInbox: false,
@@ -544,8 +538,6 @@ struct CiderConfig: Codable {
         syncToken = try container.decodeIfPresent(String.self, forKey: .syncToken) ?? ""
         lastSyncTimestamp = try container.decodeIfPresent(Double.self, forKey: .lastSyncTimestamp) ?? 0
         lastSuccessfulPushAt = try container.decodeIfPresent(Double.self, forKey: .lastSuccessfulPushAt) ?? 0
-        aiChatDocked = try container.decodeIfPresent(Bool.self, forKey: .aiChatDocked) ?? false
-        aiChatVisible = try container.decodeIfPresent(Bool.self, forKey: .aiChatVisible) ?? false
         didMigrateBookmarkFiles = try container.decodeIfPresent(Bool.self, forKey: .didMigrateBookmarkFiles) ?? false
         didMigrateVaultToCiderDir = try container.decodeIfPresent(Bool.self, forKey: .didMigrateVaultToCiderDir) ?? false
         didMigrateContentToInbox = try container.decodeIfPresent(Bool.self, forKey: .didMigrateContentToInbox) ?? false
@@ -621,8 +613,6 @@ struct CiderConfig: Codable {
         syncToken: String = "",
         lastSyncTimestamp: Double = 0,
         lastSuccessfulPushAt: Double = 0,
-        aiChatDocked: Bool = false,
-        aiChatVisible: Bool = false,
         didMigrateBookmarkFiles: Bool = false,
         didMigrateVaultToCiderDir: Bool = false,
         didMigrateContentToInbox: Bool = false,
@@ -696,8 +686,6 @@ struct CiderConfig: Codable {
         self.syncToken = syncToken
         self.lastSyncTimestamp = lastSyncTimestamp
         self.lastSuccessfulPushAt = lastSuccessfulPushAt
-        self.aiChatDocked = aiChatDocked
-        self.aiChatVisible = aiChatVisible
         self.didMigrateBookmarkFiles = didMigrateBookmarkFiles
         self.didMigrateVaultToCiderDir = didMigrateVaultToCiderDir
         self.didMigrateContentToInbox = didMigrateContentToInbox

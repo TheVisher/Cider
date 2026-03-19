@@ -30,12 +30,7 @@ extension CiderPanelView {
     func closeTab(_ tab: CiderTab) {
         let wasSelected = selectedTab == tab
 
-        if case .aiChat = tab {
-            aiChatVisible = false
-            var config = CiderConfig.load()
-            config.aiChatVisible = false
-            config.save()
-        } else if case .savedView(let id, _) = tab {
+        if case .savedView(let id, _) = tab {
             savedViewStorage.removeFromTabOrder(id)
         } else if case .externalSource(let id, _) = tab, var source = externalSourceStorage.source(for: id) {
             source.isTabPinned = false

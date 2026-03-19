@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-final class AIChatPanel: NSPanel {
-    // Window dragging state
+/// Floating NSPanel for the AI Assistant chat window.
+final class AIAssistantPanel: NSPanel {
     private var dragStartOrigin: NSPoint?
     private var dragStartMouse: NSPoint?
     private var isDragging = false
@@ -11,8 +11,8 @@ final class AIChatPanel: NSPanel {
         let initialFrame = NSRect(
             x: 0,
             y: 0,
-            width: AIChatPanelDesign.defaultWidth,
-            height: AIChatPanelDesign.defaultHeight
+            width: AIAssistantPanelDesign.defaultWidth,
+            height: AIAssistantPanelDesign.defaultHeight
         )
 
         super.init(
@@ -34,9 +34,9 @@ final class AIChatPanel: NSPanel {
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
 
-        self.minSize = NSSize(
-            width: AIChatPanelDesign.minWidth,
-            height: AIChatPanelDesign.minHeight
+        minSize = NSSize(
+            width: AIAssistantPanelDesign.minWidth,
+            height: AIAssistantPanelDesign.minHeight
         )
 
         contentView?.wantsLayer = true
@@ -45,29 +45,11 @@ final class AIChatPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    // MARK: - Key Equivalents
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.modifierFlags.contains(.command) else {
-            return super.performKeyEquivalent(with: event)
-        }
-
-        let action: Selector? = switch event.charactersIgnoringModifiers {
-        case "x": #selector(NSText.cut(_:))
-        case "c": #selector(NSText.copy(_:))
-        case "v": #selector(NSText.paste(_:))
-        case "a": #selector(NSText.selectAll(_:))
-        case "z" where event.modifierFlags.contains(.shift): #selector(UndoManager.redo)
-        case "z": #selector(UndoManager.undo)
-        default: nil
-        }
-
-        if let action, let responder = firstResponder, responder.responds(to: action) {
-            responder.doCommand(by: action)
-            return true
-        }
-
-        return super.performKeyEquivalent(with: event)
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        var rect = frameRect
+        rect.size.width = max(minSize.width, rect.size.width)
+        rect.size.height = max(minSize.height, rect.size.height)
+        return rect
     }
 
     // MARK: - Window Dragging
@@ -75,8 +57,6 @@ final class AIChatPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         switch event.type {
         case .leftMouseDown:
-            makeKey()
-
             if isInDraggableArea(event.locationInWindow) {
                 dragStartOrigin = frame.origin
                 dragStartMouse = NSEvent.mouseLocation
@@ -106,6 +86,11 @@ final class AIChatPanel: NSPanel {
             super.sendEvent(event)
 
         case .leftMouseUp:
+            // Save position after drag
+            if isDragging {
+                UserDefaults.standard.set(frame.origin.x, forKey: "cider.aiAssistantPanelX")
+                UserDefaults.standard.set(frame.origin.y, forKey: "cider.aiAssistantPanelY")
+            }
             dragStartOrigin = nil
             dragStartMouse = nil
             isDragging = false
@@ -118,17 +103,19 @@ final class AIChatPanel: NSPanel {
 
     private func isInDraggableArea(_ locationInWindow: NSPoint) -> Bool {
         guard let contentView = contentView else { return false }
+        let bounds = contentView.bounds
 
+        // Check if the hit view is an interactive control
         if let hitView = contentView.hitTest(locationInWindow) {
             var view: NSView? = hitView
             while let v = view, v !== contentView {
                 if v is NSControl { return false }
-                if v is PanelEdgeResizeNSView { return false }
                 view = v.superview
             }
         }
 
-        let headerMinY = contentView.bounds.height - AIChatPanelDesign.draggableHeaderHeight
+        // Title bar region is draggable
+        let headerMinY = bounds.height - AIAssistantPanelDesign.draggableHeaderHeight
         return locationInWindow.y >= headerMinY
     }
 }

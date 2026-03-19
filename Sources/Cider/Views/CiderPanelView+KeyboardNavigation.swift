@@ -19,13 +19,6 @@ extension CiderPanelView {
         }
     }
 
-    /// Whether the given view is inside the AI Chat view hierarchy.
-    /// When focused on AI Chat, all key events should pass through to the input field.
-    private func isInsideAIChatView(_ view: NSView) -> Bool {
-        // When the AI Chat tab is active, don't intercept keys for card navigation.
-        selectedTab?.id == CiderTab.aiChat.id
-    }
-
     /// Whether the first responder is a text field or its field editor
     private var isTextFieldFocused: Bool {
         guard let responder = NSApp.keyWindow?.firstResponder else { return false }
@@ -67,12 +60,6 @@ extension CiderPanelView {
     }
 
     func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-        // If the AI Chat tab is active, let all key events pass through to the chat input.
-        if let responder = NSApp.keyWindow?.firstResponder as? NSView,
-           isInsideAIChatView(responder) {
-            return event
-        }
-
         let isArrowKey = event.keyCode >= 123 && event.keyCode <= 126
 
         // When a text field has content, let most keys go to it.

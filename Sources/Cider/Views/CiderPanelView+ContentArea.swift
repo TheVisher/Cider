@@ -31,7 +31,6 @@ extension CiderPanelView {
                 }
             }
 
-            // AI Chat is now a separate slide-out panel (AIChatPanelView)
         }
         .animation(reduceMotion ? .none : .snappy, value: isAnyDetailOpen)
         .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
@@ -235,8 +234,6 @@ extension CiderPanelView {
                     scrollToItemID: $scrollToItemID,
                     focusedItemID: focusedItemID
                 )
-            case .aiChat:
-                AIChatView(viewModel: AIChatViewModel.shared, isDocked: true)
             }
         } else {
             noTabsEmptyState

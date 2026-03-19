@@ -53,9 +53,6 @@ struct CiderPanelView: View {
     @State var sidebarSearchText: String = ""
     @State var debouncedSearchText: String = ""
     @State var searchDebounceTask: Task<Void, Never>?
-    @State var aiChatDocked: Bool = CiderConfig.load().aiChatDocked
-    @State var aiChatVisible: Bool = CiderConfig.load().aiChatVisible
-    @State var tabBeforeAIChat: CiderTab?
     @State var selectedNote: Note?
     @State var isEditingNoteTitle = false
     @State var newEventEditorContext: DateCardEditorContext?
@@ -70,14 +67,9 @@ struct CiderPanelView: View {
     @State var selectionAnchorID: String?
     @State var scrollToItemID: String?
     @State var keyboardMonitor: Any?
-    // Terminal state removed — AI Chat is now a separate slide-out panel
 
     var allTabs: [CiderTab] {
-        var tabs = savedViewTabs + sourceTabs + dynamicTabs
-        if aiChatVisible && aiChatDocked {
-            tabs.append(.aiChat)
-        }
-        return tabs
+        savedViewTabs + sourceTabs + dynamicTabs
     }
 
     private var sourceTabs: [CiderTab] {
@@ -285,31 +277,6 @@ struct CiderPanelView: View {
             let config = CiderConfig.load()
             textScale = config.textSize.scale
             enableLinkedSources = config.enableLinkedSources
-            aiChatDocked = config.aiChatDocked
-            aiChatVisible = config.aiChatVisible
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .selectAIChatTab)) { _ in
-            aiChatDocked = true
-            aiChatVisible = true
-            tabBeforeAIChat = selectedTab
-            selectedFolderID = nil
-            selectedSourceID = nil
-            selectedTagIDs = []
-            selectedTab = .aiChat
-            var config = CiderConfig.load()
-            config.aiChatDocked = true
-            config.aiChatVisible = true
-            config.save()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .undockAIChat)) { _ in
-            aiChatDocked = false
-            aiChatVisible = false
-            if selectedTab?.id == CiderTab.aiChat.id {
-                selectedTab = tabBeforeAIChat
-            }
-            var config = CiderConfig.load()
-            config.aiChatDocked = false
-            config.save()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
             if isNoteDetailOpen {
