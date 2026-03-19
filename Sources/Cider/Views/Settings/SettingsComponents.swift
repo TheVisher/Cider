@@ -450,7 +450,7 @@ struct SettingsAccountOverviewView: View {
                 return
             }
         }
-        Task {
+        Task { @MainActor in
             if isSignUp {
                 await authService.signUp(email: email, password: password)
             } else {

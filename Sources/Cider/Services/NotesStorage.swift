@@ -260,9 +260,9 @@ final class NotesStorage: ObservableObject {
         // These aren't found by the Notes/-only scan but are tracked in the index.
         let scannedIDs = Set(scannedNotes.map(\.id))
         for (uuid, entry) in previousIndex where !scannedIDs.contains(uuid) {
-            guard entry.folderID != nil else { continue }
+            guard let entryFolderID = entry.folderID else { continue }
             // Verify the file still exists on disk
-            if let vaultFolder = VaultFolderService.shared.folder(for: entry.folderID!) {
+            if let vaultFolder = VaultFolderService.shared.folder(for: entryFolderID) {
                 let filePath = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
                     .appendingPathComponent(entry.filename).path
                 if fm.fileExists(atPath: filePath) {

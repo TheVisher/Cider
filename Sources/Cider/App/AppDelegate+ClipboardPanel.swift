@@ -26,7 +26,7 @@ extension AppDelegate {
 
         clipboardPanelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
             guard let frame = change.newValue else { return }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self, let panel = self.clipboardPanel, panel.isVisible else { return }
                 self.clipboardShadowPanel?.updateFrame(for: frame)
             }
@@ -177,8 +177,9 @@ extension AppDelegate {
                 context.duration = 0.25
                 context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
                 panel.animator().setFrame(newFrame, display: true)
-            }, completionHandler: {
-                DispatchQueue.main.async { [weak panel] in
+            }, completionHandler: { [weak panel] in
+                // NSAnimationContext completion always fires on main; assumeIsolated is safe here.
+                MainActor.assumeIsolated {
                     guard let panel else { return }
                     panel.minSize = NSSize(width: targetWidth, height: ClipboardPanelDesign.minHeight)
                     panel.maxSize = NSSize(width: targetWidth, height: .greatestFiniteMagnitude)

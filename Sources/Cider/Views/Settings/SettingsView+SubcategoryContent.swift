@@ -486,8 +486,10 @@ extension SettingsView {
                             migrationResult = nil
                             Task {
                                 let result = await VaultMigrationService.shared.runFullMigration()
-                                migrationResult = result.summary
-                                isMigrating = false
+                                await MainActor.run {
+                                    migrationResult = result.summary
+                                    isMigrating = false
+                                }
                             }
                         } label: {
                             Label("Export to Vault", systemImage: "shippingbox")

@@ -213,7 +213,8 @@ enum ScreenCaptureOCRRouter {
                 continue
             }
 
-            let matchedString = String(text[Range(match.range, in: text)!])
+            guard let matchRange = Range(match.range, in: text) else { continue }
+            let matchedString = String(text[matchRange])
             let parsed = parseTime(matchedString)
             if let (h, m) = parsed {
                 return calendar.date(bySettingHour: h, minute: m, second: 0, of: date) ?? date

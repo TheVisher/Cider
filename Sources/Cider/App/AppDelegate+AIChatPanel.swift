@@ -14,7 +14,7 @@ extension AppDelegate {
 
         aiChatPanelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
             guard let frame = change.newValue else { return }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 self?.aiChatShadowPanel?.updateFrame(for: frame)
             }
         }
@@ -88,8 +88,8 @@ extension AppDelegate {
         let frame: NSRect
         if let ciderFrame = ciderPanel?.frame, ciderPanel?.isVisible == true {
             // Place to the right of the Cider panel
-            let screen = NSScreen.screens.first(where: { $0.frame.contains(ciderFrame.origin) })
-                ?? NSScreen.main ?? NSScreen.screens.first!
+            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(ciderFrame.origin) })
+                    ?? NSScreen.main ?? NSScreen.screens.first else { return }
             let height = min(preferredHeight, screen.visibleFrame.height - Spacing.lg * 2)
 
             var x = ciderFrame.maxX + Spacing.sm

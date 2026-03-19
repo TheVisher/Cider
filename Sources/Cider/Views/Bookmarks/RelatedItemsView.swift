@@ -18,6 +18,7 @@ struct RelatedItemsView: View {
             }
         }
         .task(id: bookmarkID) {
+            guard !Task.isCancelled else { return }
             recompute()
         }
     }

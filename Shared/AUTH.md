@@ -2,7 +2,7 @@
 
 > Cross-platform auth specification for all three Cider apps. Read this before working on auth, login, sync credentials, or account management.
 >
-> **Last updated**: 2026-03-15
+> **Last updated**: 2026-03-19
 
 ## Overview
 
@@ -149,7 +149,7 @@ The "Connected Devices" view shows all devices with active sync tokens. Users ca
 - Tokens are stored in Keychain on native clients (not UserDefaults)
 - Token lookup uses an indexed query (`by_token`) — O(1) at any scale
 - Passwords are never stored on the client
-- HTTPS enforced for all auth endpoints (Desktop validates URL scheme before sending credentials)
+- HTTPS enforced for all auth endpoints (Desktop and iOS both validate URL scheme before sending credentials)
 - Revoking a device immediately invalidates its token — next sync request will fail with 401
 
 ## Future Considerations

@@ -467,26 +467,37 @@ struct AnimatedGIFView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AnimatedGIFWrapper {
         let wrapper = AnimatedGIFWrapper(contentMode: contentMode)
-        if let image = NSImage(contentsOf: url) {
-            wrapper.setImage(image)
-        }
-        context.coordinator.loadedURL = url
+        context.coordinator.load(url: url, into: wrapper)
         return wrapper
     }
 
     func updateNSView(_ wrapper: AnimatedGIFWrapper, context: Context) {
         wrapper.contentFillMode = contentMode
-        if context.coordinator.loadedURL != url, let image = NSImage(contentsOf: url) {
-            wrapper.setImage(image)
-            context.coordinator.loadedURL = url
+        if context.coordinator.loadedURL != url {
+            context.coordinator.load(url: url, into: wrapper)
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
-        var loadedURL: URL
-        init(url: URL) { loadedURL = url }
+        var loadedURL: URL? = nil
+        private var loadTask: Task<Void, Never>?
+
+        /// Cancels any in-flight load and starts a new one off the main thread.
+        func load(url: URL, into wrapper: AnimatedGIFWrapper) {
+            loadedURL = url
+            loadTask?.cancel()
+            loadTask = Task { @MainActor in
+                let image: NSImage? = await Task.detached(priority: .userInitiated) {
+                    NSImage(contentsOf: url)
+                }.value
+                guard !Task.isCancelled else { return }
+                if let image {
+                    wrapper.setImage(image)
+                }
+            }
+        }
     }
 }
 

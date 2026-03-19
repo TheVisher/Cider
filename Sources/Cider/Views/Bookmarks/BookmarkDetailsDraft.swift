@@ -56,6 +56,10 @@ struct BookmarkMetadataSidebar: View {
     @State private var newTagText: String = ""
     @State private var copiedHex: String?
     @State private var showAddTagPicker = false
+    /// Cached result of the FileManager.fileExists check for the original image source.
+    /// Populated asynchronously via .task(id: bookmark?.id) to keep the view body free of
+    /// synchronous file I/O (Rule 5 compliance).
+    @State private var imageSourceExists: Bool = false
 
     @State private var isSourceExpanded = true
     @State private var isImagesExpanded = true
@@ -152,15 +156,33 @@ struct BookmarkMetadataSidebar: View {
         }
         .task(id: bookmark?.id) {
             fileSize = nil
-            guard let url = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL else { return }
-            let size = await Task.detached(priority: .utility) {
-                (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
+            imageSourceExists = false
+            // Snapshot the URLs needed for background work before the async hop.
+            let sizeURL = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL
+            let originalFileURL = bookmark?.originalImageFileURL
+            let remoteURLString = bookmark?.thumbnailRemoteURLString
+            // Run all file I/O off the main thread (Rule 5).
+            let (size, sourceExists) = await Task.detached(priority: .utility) {
+                let size: Int64? = sizeURL.flatMap {
+                    (try? FileManager.default.attributesOfItem(atPath: $0.path))?[.size] as? Int64
+                }
+                let exists: Bool = {
+                    if let url = originalFileURL {
+                        return FileManager.default.fileExists(atPath: url.path)
+                    }
+                    if let remote = remoteURLString {
+                        return URL(string: remote) != nil
+                    }
+                    return false
+                }()
+                return (size, exists)
             }.value
             guard !Task.isCancelled else { return }
             var t = Transaction(animation: .none)
             t.disablesAnimations = true
             withTransaction(t) {
                 fileSize = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
+                imageSourceExists = sourceExists
             }
         }
     }
@@ -718,14 +740,10 @@ struct BookmarkMetadataSidebar: View {
         return folders.first(where: { $0.id == fid })?.name ?? "No Folder"
     }
 
+    /// Returns the cached file-existence check resolved by the .task(id: bookmark?.id) block.
+    /// Using the cached value avoids synchronous FileManager.fileExists in the view body (Rule 5).
     private var hasOpenableImageSource: Bool {
-        if let originalFileURL = bookmark?.originalImageFileURL {
-            return FileManager.default.fileExists(atPath: originalFileURL.path)
-        }
-        if let remote = bookmark?.thumbnailRemoteURLString {
-            return URL(string: remote) != nil
-        }
-        return false
+        imageSourceExists
     }
 
     private func openOriginalImage() {

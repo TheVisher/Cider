@@ -124,7 +124,9 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
         }
 
         if navigationAction.navigationType == .linkActivated {
-            openURLSafely(url)
+            // NSWorkspace.shared.open is AppKit — must be called on the main thread.
+            // This async delegate may be invoked off-main by WebKit, so hop explicitly.
+            await MainActor.run { openURLSafely(url) }
         }
         return .cancel
     }
@@ -255,9 +257,16 @@ final class TipTapWebView: WKWebView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if let content = readTextFileDrop(sender) {
-            Task { @MainActor [weak viewModel] in
-                viewModel?.handleDroppedTextFileContent(content)
+        if let fileURL = textFileDropURL(sender) {
+            Task { @MainActor [weak viewModel, logger] in
+                do {
+                    let content = try await Task.detached(priority: .userInitiated) {
+                        try String(contentsOf: fileURL, encoding: .utf8)
+                    }.value
+                    viewModel?.handleDroppedTextFileContent(content)
+                } catch {
+                    logger.error("Failed to read dropped text file: \(error.localizedDescription, privacy: .public)")
+                }
             }
             return true
         }
@@ -277,19 +286,15 @@ final class TipTapWebView: WKWebView {
         return urls.contains { Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
     }
 
-    private func readTextFileDrop(_ sender: NSDraggingInfo) -> String? {
+    /// Returns the URL of the first droppable text file, without reading file contents (safe to call on main thread).
+    private func textFileDropURL(_ sender: NSDraggingInfo) -> URL? {
         guard let urls = sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL] else {
             return nil
         }
-        guard let fileURL = urls.first(where: {
-            Self.textFileExtensions.contains($0.pathExtension.lowercased())
-        }) else {
-            return nil
-        }
-        return try? String(contentsOf: fileURL, encoding: .utf8)
+        return urls.first(where: { Self.textFileExtensions.contains($0.pathExtension.lowercased()) })
     }
 
     // MARK: - Web Image Drag & Drop
@@ -342,15 +347,21 @@ final class TipTapWebView: WKWebView {
             return true
         }
 
-        // Priority 2: Local image file URLs
+        // Priority 2: Local image file URLs — read off-main to avoid blocking
         if let urls = pb.readObjects(
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL],
-           let imageURL = urls.first(where: { Self.imageExtensions.contains($0.pathExtension.lowercased()) }),
-           let data = try? Data(contentsOf: imageURL) {
-            Task { @MainActor [weak viewModel] in
-                viewModel?.handleImageDrop(data: data, filename: imageURL.lastPathComponent)
+           let imageURL = urls.first(where: { Self.imageExtensions.contains($0.pathExtension.lowercased()) }) {
+            Task { @MainActor [weak viewModel, logger] in
+                do {
+                    let data = try await Task.detached(priority: .userInitiated) {
+                        try Data(contentsOf: imageURL)
+                    }.value
+                    viewModel?.handleImageDrop(data: data, filename: imageURL.lastPathComponent)
+                } catch {
+                    logger.error("Failed to read dropped image file: \(error.localizedDescription, privacy: .public)")
+                }
             }
             return true
         }

@@ -132,6 +132,7 @@ struct ConnectedDevicesView: View {
 
     // MARK: - Network
 
+    @MainActor
     private func loadDevices() async {
         isLoading = true
         errorMessage = nil
@@ -175,6 +176,7 @@ struct ConnectedDevicesView: View {
         isLoading = false
     }
 
+    @MainActor
     private func revokeDevice(_ device: ConnectedDevice) async {
         do {
             let token = SyncService.loadSyncToken()

@@ -192,7 +192,7 @@ struct FolderSidebarView: View {
         .padding(.horizontal, Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .onReceive(NotificationCenter.default.publisher(for: .showFolderCreationField)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .showFolderCreationField).receive(on: DispatchQueue.main)) { _ in
             toggleFolderCreationField()
         }
         .background {

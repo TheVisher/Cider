@@ -1931,7 +1931,7 @@ final class BookmarksStorage: ObservableObject {
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
             let hasResult = extracted.title != nil || extracted.imageURL != nil
             if hasResult || extracted.screenshotData != nil {
-                enrichLog.info("WebView result for \(pageURL.host ?? "?", privacy: .public): title=\(extracted.title ?? "nil", privacy: .public) image=\(extracted.imageURL?.absoluteString ?? "nil", privacy: .public) screenshot=\(extracted.screenshotData != nil ? "\(extracted.screenshotData!.count) bytes" : "nil", privacy: .public)")
+                enrichLog.info("WebView result for \(pageURL.host ?? "?", privacy: .public): title=\(extracted.title ?? "nil", privacy: .public) image=\(extracted.imageURL?.absoluteString ?? "nil", privacy: .public) screenshot=\(extracted.screenshotData.map { "\($0.count) bytes" } ?? "nil", privacy: .public)")
                 return BookmarkEnrichmentPayload(
                     title: extracted.title ?? htmlResult?.title,
                     thumbnailURL: extracted.imageURL ?? htmlResult?.thumbnailURL,

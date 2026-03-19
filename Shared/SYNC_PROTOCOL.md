@@ -1,6 +1,6 @@
 # Sync Protocol
 
-> Last validated: 2026-03-18 (iOS now expects purge + tag management routes — see Planned Endpoints below)
+> Last validated: 2026-03-19 (iOS now expects purge + tag management routes — see Planned Endpoints below; iOS SyncService adds generation counter for stale-pull safety)
 
 > Canonical sync specification for all three Cider apps. Consolidates the per-app `SYNC_COLLABORATION.md` docs into one source of truth.
 >
@@ -327,6 +327,7 @@ When timestamps are equal, the **server is canonical** for folder assignment. On
 | **Pull trigger** | Every 5s poll | Launch + foreground + pull-to-refresh | Convex real-time subscriptions |
 | **Dirty tracking** | `lastSuccessfulPushAt` filter | Pushes only affected bookmark(s) | N/A |
 | **Failure handling** | Consecutive failure counter, pauses after 3+ | Shows user-facing error | Convex handles retries |
+| **Stale-pull guard** | N/A | Generation counter — stop/restart increments gen; results from stale gen are discarded (prevents sign-out race) | N/A |
 | **Enrichment** | Runs enrichment pipeline locally, pushes `"complete"` | Pushes `"pending"` | Pushes `"pending"`, has server-side enrichment action |
 | **Thumbnail upload** | Not yet (planned) | Not yet | Endpoint exists (`/api/sync/upload-thumbnail`) |
 

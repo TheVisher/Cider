@@ -1,0 +1,5 @@
+# Build Smoke Test Status
+
+| Date | Desktop (swift) | Web (vite build) | Web (tsc) | Overall |
+|------|-----------------|------------------|-----------|---------|
+| 2026-03-19 | ⏭ Skipped (swift not available in sandbox) | ❌ FAIL — missing `@rollup/rollup-linux-arm64-gnu` (platform mismatch; node_modules installed for macOS) | ✅ Pass | ⚠️ Partial |

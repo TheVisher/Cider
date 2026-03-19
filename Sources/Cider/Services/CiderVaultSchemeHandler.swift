@@ -10,7 +10,13 @@ import UniformTypeIdentifiers
 final class CiderVaultSchemeHandler: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        let url = urlSchemeTask.request.url!
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(
+                NSError(domain: "CiderVaultSchemeHandler", code: 400,
+                        userInfo: [NSLocalizedDescriptionKey: "Missing request URL"])
+            )
+            return
+        }
         let filePath = url.path
         let fileURL = URL(fileURLWithPath: filePath)
 

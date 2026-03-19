@@ -61,7 +61,8 @@ enum StoragePaths {
     /// `cachedDirectoryURL(for:)` is called from background threads (e.g., NoteCardData.load),
     /// so the dictionary needs synchronization. Simple `URL?` optionals are practically atomic
     /// on 64-bit, but `Dictionary` mutation during a concurrent read crashes with EXC_BAD_ACCESS.
-    private static let _lock = NSLock()
+    /// Uses OSAllocatedUnfairLock per codebase convention (faster than NSLock, no ObjC overhead).
+    private static let _lock = OSAllocatedUnfairLock()
     nonisolated(unsafe) private static var _cachedVaultURL: URL?
     nonisolated(unsafe) private static var _cachedTypeURLs: [StorageType: URL] = [:]
 

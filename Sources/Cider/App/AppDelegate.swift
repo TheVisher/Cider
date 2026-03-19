@@ -290,6 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func observeConfigChanges() {
         NotificationCenter.default.publisher(for: .ciderConfigChanged)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.handleConfigChanged()
             }
@@ -448,6 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func observeSettingsNotifications() {
         NotificationCenter.default.publisher(for: .openCiderSettings)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 self?.showSettings()
                 if let category = notification.userInfo?["category"] as? String {
@@ -465,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .dismissSettings)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.hideSettings()
             }
@@ -532,6 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func observeBookmarksNotifications() {
         NotificationCenter.default.publisher(for: .showBookmarkCaptureToast)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 let message = notification.userInfo?["message"] as? String ?? "Bookmark updated"
                 let isSuccess = notification.userInfo?["isSuccess"] as? Bool ?? true
@@ -540,6 +544,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .showBookmarkClipboardReviewToast)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 guard let urlString = notification.userInfo?["urlString"] as? String else { return }
                 self?.showBookmarkClipboardReviewToast(urlString: urlString)
@@ -547,6 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .showImageClipboardReviewToast)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.showImageClipboardReviewToast()
             }

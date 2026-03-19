@@ -87,8 +87,8 @@ struct BookmarkWebView: NSViewRepresentable {
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            if navigationAction.request.url != nil {
-                openURLSafely(navigationAction.request.url!)
+            if let url = navigationAction.request.url {
+                openURLSafely(url)
             }
             return nil
         }

@@ -18,7 +18,7 @@ extension AppDelegate {
         // including during user dragging, programmatic setFrame, and animations.
         panelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
             guard let frame = change.newValue else { return }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 self?.ciderShadowPanel?.updateFrame(for: frame)
             }
         }
@@ -48,30 +48,35 @@ extension AppDelegate {
 
     func observeCiderPanelNotifications() {
         NotificationCenter.default.publisher(for: .toggleCiderPanel)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.toggleCiderPanel()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .dismissCiderPanel)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.hideCiderPanel()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .toggleCiderPanelCollapse)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.toggleCiderPanelCollapsed()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .maximizeCiderPanel)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.maximizeCiderPanel()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .snapCiderPanel)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 guard let raw = notification.userInfo?["target"] as? String,
                       let target = SnapTarget(rawValue: raw) else { return }
@@ -81,6 +86,7 @@ extension AppDelegate {
 
         // Note editor hotkey — show panel if hidden, CiderPanelView handles the rest
         NotificationCenter.default.publisher(for: .toggleNoteEditor)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
                 if self.ciderPanel?.isVisible != true {
@@ -90,6 +96,7 @@ extension AppDelegate {
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .expandCiderPanelForSlideOut)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 let minWidth = notification.userInfo?["minimumWidth"] as? CGFloat
                     ?? BookmarksDesign.detailsSlideOutExpandedPanelMinWidth
@@ -98,6 +105,7 @@ extension AppDelegate {
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .restoreCiderPanelAfterSlideOut)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.restoreCiderPanelAfterSlideOut()
             }
@@ -105,6 +113,7 @@ extension AppDelegate {
 
         // Bookmark capture hotkey
         NotificationCenter.default.publisher(for: .captureBookmark)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.captureBookmarkFromHotkey()
             }

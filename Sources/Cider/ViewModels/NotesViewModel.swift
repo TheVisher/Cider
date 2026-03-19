@@ -89,9 +89,12 @@ final class NotesViewModel: ObservableObject {
     var filteredNotes: [Note] {
         guard !searchText.isEmpty else { return notes }
         let query = searchText.lowercased()
+        // Filter by title only — content search requires disk I/O (loadContent reads from disk)
+        // which must not run synchronously on @MainActor in a frequently-rendered computed
+        // property. Full-text search across note content is handled by LibraryViewModel
+        // (which caches reads) in the library/search tab.
         return notes.filter {
-            $0.title.lowercased().contains(query) ||
-            NotesStorage.shared.loadContent(for: $0).lowercased().contains(query)
+            $0.title.lowercased().contains(query)
         }
     }
 
