@@ -88,7 +88,7 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
                     Image(systemName: "xmark")
                         .font(CiderFont.bodySemibold)
                         .foregroundColor(CiderColors.secondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: DetailToolbarDesign.largeButtonSize, height: DetailToolbarDesign.largeButtonSize)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -172,7 +172,7 @@ private struct EditableTitleLabel: View {
                         .fill(CiderColors.surfaceInput)
                 )
                 .fixedSize()
-                .frame(maxWidth: 200, alignment: .leading)
+                .frame(maxWidth: GenericItemDetailDesign.titleFieldMaxWidth, alignment: .leading)
                 .onSubmit { commit() }
                 .lineLimit(1)
         } else {

@@ -77,7 +77,7 @@ struct BookmarkCard: View {
                                 Button { handleClick(normalAction: onOpen) } label: {
                                     Text(bookmark.title)
                                         .font(CiderFont.labelSemibold(scale: textScale))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(CiderColors.textOnColor)
                                         .lineLimit(2)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
@@ -86,7 +86,7 @@ struct BookmarkCard: View {
                                 if bookmark.hasURL {
                                     Text(bookmark.hostDisplay)
                                         .font(CiderFont.body(scale: textScale))
-                                        .foregroundColor(.white.opacity(0.7))
+                                        .foregroundColor(CiderColors.textOnColorDim)
                                         .lineLimit(1)
                                 }
                             }
@@ -96,7 +96,7 @@ struct BookmarkCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
                                 LinearGradient(
-                                    colors: [.clear, .black.opacity(0.6)],
+                                    colors: [.clear, CiderColors.gradientOverlay],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )

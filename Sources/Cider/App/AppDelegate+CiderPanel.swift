@@ -291,7 +291,7 @@ extension AppDelegate {
         guard let screen else { return }
 
         let vf = screen.visibleFrame
-        let gap: CGFloat = 15
+        let gap: CGFloat = Spacing.lg
         let minW = CiderPanelDesign.panelMinWidth
 
         let targetFrame: NSRect

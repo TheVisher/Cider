@@ -78,9 +78,9 @@ struct NoteCardView: View {
 
                 // Content area with left accent bar
                 HStack(alignment: .top, spacing: Spacing.sm) {
-                    RoundedRectangle(cornerRadius: 1, style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.55))
-                        .frame(width: 2)
+                    RoundedRectangle(cornerRadius: NoteEditorDesign.accentBarRadius, style: .continuous)
+                        .fill(CiderColors.accentDim)
+                        .frame(width: NoteEditorDesign.accentBarWidth)
 
                     if !cardData.preview.isEmpty || !cardData.imageURLs.isEmpty {
                         contentArea
@@ -147,7 +147,7 @@ struct NoteCardView: View {
                 }
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
-                .background(CiderColors.surfaceElevated.opacity(0.95))
+                .background(CiderColors.surfaceElevated.opacity(NoteEditorDesign.hoverOverlayOpacity))
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
@@ -228,7 +228,7 @@ struct NoteCardView: View {
             }
 
             noteImage(url: imageURL)
-                .frame(width: cardSizing.imageWidth, height: cardSizing.imageWidth * 0.75)
+                .frame(width: cardSizing.imageWidth, height: cardSizing.imageHeight)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
         }
     }
@@ -241,7 +241,7 @@ struct NoteCardView: View {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     if !imageOnRight {
                         noteImage(url: imageURL)
-                            .frame(width: cardSizing.imageWidth, height: cardSizing.imageWidth * 0.75)
+                            .frame(width: cardSizing.imageWidth, height: cardSizing.imageHeight)
                             .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
                     }
 
@@ -256,7 +256,7 @@ struct NoteCardView: View {
 
                     if imageOnRight {
                         noteImage(url: imageURL)
-                            .frame(width: cardSizing.imageWidth, height: cardSizing.imageWidth * 0.75)
+                            .frame(width: cardSizing.imageWidth, height: cardSizing.imageHeight)
                             .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
                     }
                 }
@@ -322,7 +322,7 @@ struct NoteCardView: View {
     // MARK: - Layout Helpers
 
     private var gridMinHeight: CGFloat {
-        cardSizing.previewHeight + 60
+        cardSizing.previewHeight + NoteEditorDesign.gridMinHeightPadding
     }
 
     private var gridPreviewLineLimit: Int {

@@ -82,7 +82,7 @@ struct VaultFileDetailView: View {
             if let pdfDocument {
                 PDFKitView(document: pdfDocument)
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 300, maxHeight: 500)
+                    .frame(minHeight: VaultFileDesign.detailPreviewMinHeight, maxHeight: VaultFileDesign.detailPreviewMaxHeight)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             } else {
                 iconPlaceholder
@@ -92,8 +92,8 @@ struct VaultFileDetailView: View {
             if let avPlayer {
                 VideoPlayer(player: avPlayer)
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: file.fileType == .audio ? 60 : 200,
-                           maxHeight: file.fileType == .audio ? 60 : 400)
+                    .frame(minHeight: file.fileType == .audio ? VaultFileDesign.audioPlayerHeight : VaultFileDesign.detailPreviewMinHeight,
+                           maxHeight: file.fileType == .audio ? VaultFileDesign.audioPlayerMaxHeight : VaultFileDesign.detailPreviewMaxHeight)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             } else {
                 iconPlaceholder
@@ -102,7 +102,7 @@ struct VaultFileDetailView: View {
         case .document, .archive, .unknown:
             QuickLookPreview(url: file.absoluteURL)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 200, maxHeight: 500)
+                .frame(minHeight: VaultFileDesign.detailPreviewMinHeight, maxHeight: VaultFileDesign.detailPreviewMaxHeight)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         }
     }
@@ -111,10 +111,10 @@ struct VaultFileDetailView: View {
         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
             .fill(CiderColors.surfaceInput)
             .frame(maxWidth: .infinity)
-            .frame(height: 180)
+            .frame(height: VaultFileDesign.detailPlaceholderHeight)
             .overlay(
                 Image(systemName: file.fileType.systemImageName)
-                    .font(.system(size: 48, weight: .light))
+                    .font(CiderFont.vaultDetailIcon)
                     .foregroundColor(CiderColors.tertiary)
             )
     }
@@ -126,7 +126,7 @@ struct VaultFileDetailView: View {
             Image(systemName: icon)
                 .font(CiderFont.captionMedium)
                 .foregroundColor(CiderColors.tertiary)
-                .frame(width: 14)
+                .frame(width: FolderSidebarItemDesign.metaIconWidth)
             Text(text)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.secondary)

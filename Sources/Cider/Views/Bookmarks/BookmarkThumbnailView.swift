@@ -61,13 +61,13 @@ struct BookmarkThumbnailView: View {
 
     private var imageCountBadge: some View {
         Text("\(bookmark.imageCount)")
-            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .font(CiderFont.microBold)
             .foregroundColor(CiderColors.textOnColor)
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, Spacing.xxs)
             .background(
                 Capsule()
-                    .fill(Color.black.opacity(0.55))
+                    .fill(CiderColors.overlayBadge)
             )
             .padding(Spacing.xs)
     }
@@ -95,13 +95,13 @@ struct BookmarkThumbnailView: View {
 
     private var gifBadge: some View {
         Text("GIF")
-            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .font(CiderFont.microBold)
             .foregroundColor(CiderColors.textOnColor)
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, Spacing.xxs)
             .background(
                 Capsule()
-                    .fill(Color.black.opacity(0.55))
+                    .fill(CiderColors.overlayBadge)
             )
             .padding(Spacing.sm)
     }
@@ -282,13 +282,13 @@ struct CarouselThumbnailView: View {
             if isHovered, urls.count > 1 {
                 HStack {
                     if page > 0 {
-                        carouselArrowButton(systemName: "chevron.left", size: 10) {
+                        carouselArrowButton(systemName: "chevron.left") {
                             navigatePage(delta: -1)
                         }
                     }
                     Spacer()
                     if page < urls.count - 1 {
-                        carouselArrowButton(systemName: "chevron.right", size: 10) {
+                        carouselArrowButton(systemName: "chevron.right") {
                             navigatePage(delta: 1)
                         }
                     }
@@ -301,15 +301,15 @@ struct CarouselThumbnailView: View {
                 HStack(spacing: Spacing.xs) {
                     ForEach(0..<urls.count, id: \.self) { index in
                         Circle()
-                            .fill(index == page ? CiderColors.textOnColor : CiderColors.textOnColor.opacity(0.4))
-                            .frame(width: 5, height: 5)
+                            .fill(index == page ? CiderColors.textOnColor : CiderColors.textOnColorSubtle)
+                            .frame(width: BookmarksDesign.carouselDotSize, height: BookmarksDesign.carouselDotSize)
                     }
                 }
                 .padding(.vertical, Spacing.xs)
                 .padding(.horizontal, Spacing.sm)
                 .background(
                     Capsule()
-                        .fill(Color.black.opacity(0.45))
+                        .fill(CiderColors.acrylicTint)
                 )
                 .padding(.bottom, Spacing.sm)
             }
@@ -318,13 +318,13 @@ struct CarouselThumbnailView: View {
             VStack {
                 HStack {
                     Text("\(page + 1)/\(urls.count)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(CiderFont.microBold)
                         .foregroundColor(CiderColors.textOnColor)
                         .padding(.horizontal, Spacing.xs)
                         .padding(.vertical, Spacing.xxs)
                         .background(
                             Capsule()
-                                .fill(Color.black.opacity(0.55))
+                                .fill(CiderColors.overlayBadge)
                         )
                         .padding(Spacing.sm)
                     Spacer()
@@ -337,16 +337,19 @@ struct CarouselThumbnailView: View {
     private func navigatePage(delta: Int) {
         let target = max(0, min(page + delta, urls.count - 1))
         guard target != page else { return }
-        withAnimation(.snappy) { currentPage = target }
+        withAnimation(reduceMotion ? .none : .snappy) { currentPage = target }
     }
 
-    private func carouselArrowButton(systemName: String, size: CGFloat, action: @escaping () -> Void) -> some View {
+    private func carouselArrowButton(systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: size, weight: .bold))
+                .font(CiderFont.microBold)
                 .foregroundColor(CiderColors.textOnColor)
-                .frame(width: size + 12, height: size + 12)
-                .background(Circle().fill(Color.black.opacity(0.55)))
+                .frame(
+                    width: BookmarksDesign.carouselArrowButtonSize,
+                    height: BookmarksDesign.carouselArrowButtonSize
+                )
+                .background(Circle().fill(CiderColors.overlayBadge))
         }
         .buttonStyle(.plain)
     }

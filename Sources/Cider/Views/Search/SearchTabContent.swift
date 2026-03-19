@@ -133,7 +133,7 @@ struct SearchTabContent: View {
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(result.title)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)

@@ -431,15 +431,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shadowPadding = SettingsDesign.shadowPadding
         let settingsView = SettingsView()
             .padding(.horizontal, shadowPadding)
-            .padding(.top, 20)
-            .padding(.bottom, shadowPadding + 15)
+            .padding(.top, Spacing.xl)
+            .padding(.bottom, shadowPadding + Spacing.lg)
 
         let hostingView = SettingsHostingView(rootView: settingsView)
         window.contentView = hostingView
 
         // Size the window to fit content plus shadow padding
         let width = SettingsDesign.width + shadowPadding * 2
-        let height = SettingsDesign.height + 20 + shadowPadding + 15
+        let height = SettingsDesign.height + Spacing.xl + shadowPadding + Spacing.lg
         window.setContentSize(NSSize(width: width, height: height))
 
         self.settingsWindow = window

@@ -47,7 +47,7 @@ struct SnapMenuView: View {
             )
         }
         .padding(.vertical, Spacing.xs)
-        .frame(width: 210)
+        .frame(width: SnapMenuDesign.popoverWidth)
     }
 }
 

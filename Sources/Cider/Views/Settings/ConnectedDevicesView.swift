@@ -76,7 +76,7 @@ struct ConnectedDevicesView: View {
             Image(systemName: device.icon)
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(device.isCurrentDevice ? CiderColors.controlAccent : CiderColors.tertiary)
-                .frame(width: 20)
+                .frame(width: SettingsDesign.deviceIconColumnWidth)
 
             VStack(alignment: .leading, spacing: Spacing.hairline) {
                 HStack(spacing: Spacing.xs) {

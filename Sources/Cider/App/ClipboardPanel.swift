@@ -115,8 +115,8 @@ final class ClipboardPanel: NSPanel {
             }
         }
 
-        // Header region: top 48pt is draggable (covers the "Clipboard" title bar area)
-        let headerMinY = bounds.height - 48
+        // Header region: top strip is draggable (covers the "Clipboard" title bar area)
+        let headerMinY = bounds.height - ClipboardPanelDesign.draggableHeaderHeight
         return locationInWindow.y >= headerMinY
     }
 }

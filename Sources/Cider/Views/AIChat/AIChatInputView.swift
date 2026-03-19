@@ -175,7 +175,7 @@ struct MultilineInputField: NSViewRepresentable {
             recalcHeight()
         }
 
-        func recalcHeight() {
+        @MainActor func recalcHeight() {
             guard let textView, let container = textView.textContainer,
                   let layoutManager = textView.layoutManager else { return }
             layoutManager.ensureLayout(for: container)

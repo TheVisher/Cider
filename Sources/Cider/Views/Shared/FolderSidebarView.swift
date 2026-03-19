@@ -349,7 +349,7 @@ struct FolderSidebarView: View {
                         Image(systemName: "plus")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.secondary)
-                            .frame(width: 20, height: 20)
+                            .frame(width: FolderSidebarItemDesign.folderIconSize, height: FolderSidebarItemDesign.folderIconSize)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -935,7 +935,7 @@ struct RootFolderHeaderRow: View {
                     .rotationEffect(.degrees(isExpanded ? 0 : -90))
                     .opacity(shouldShowChevron ? 1 : 0)
             }
-            .frame(width: 20, height: BookmarksDesign.folderSidebarRowMinHeight + 2)
+            .frame(width: FolderSidebarItemDesign.folderIconSize, height: BookmarksDesign.folderSidebarRowMinHeight + 2)
             .contentShape(Rectangle())
             .onTapGesture {
                 onToggleCollapse()
@@ -1042,7 +1042,7 @@ struct RootFolderHeaderRow: View {
     private var folderIconView: some View {
         if let icon = folderIcon, folderIconIsEmoji {
             Text(icon)
-                .font(.system(size: 14))
+                .font(CiderFont.heading)
         } else if let icon = folderIcon {
             Image(systemName: icon)
                 .font(CiderFont.bodySemibold)
@@ -1121,13 +1121,13 @@ struct SubFolderRow: View {
                     Image(systemName: "chevron.right")
                         .font(CiderFont.micro)
                         .foregroundColor(CiderColors.quaternary)
-                        .frame(width: 14, height: 14)
+                        .frame(width: FolderSidebarItemDesign.subFolderIconSize, height: FolderSidebarItemDesign.subFolderIconSize)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
                 .buttonStyle(.plain)
             } else {
                 Color.clear
-                    .frame(width: 14, height: 14)
+                    .frame(width: FolderSidebarItemDesign.subFolderIconSize, height: FolderSidebarItemDesign.subFolderIconSize)
             }
 
             subFolderIconView
@@ -1212,7 +1212,7 @@ struct SubFolderRow: View {
     private var subFolderIconView: some View {
         if let icon = folderIcon, folderIconIsEmoji {
             Text(icon)
-                .font(.system(size: 13))
+                .font(CiderFont.subheading)
         } else if let icon = folderIcon {
             Image(systemName: icon)
                 .font(CiderFont.bodySemibold)

@@ -3,7 +3,7 @@ import SwiftUI
 
 final class SettingsWindow: NSPanel {
     init() {
-        let initialFrame = NSRect(x: 0, y: 0, width: 750, height: 580)
+        let initialFrame = NSRect(x: 0, y: 0, width: SettingsDesign.width, height: SettingsDesign.height)
 
         super.init(contentRect: initialFrame,
                    styleMask: [.borderless, .nonactivatingPanel],

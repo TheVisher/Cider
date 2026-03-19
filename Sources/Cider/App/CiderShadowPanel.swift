@@ -9,6 +9,8 @@ import SwiftUI
 final class CiderShadowPanel: NSPanel {
     /// How many points this panel extends beyond the main panel on each side.
     static let padding: CGFloat = 80
+    /// Blur radius for the shadow shape.
+    static let blurRadius: CGFloat = 28
 
     init() {
         super.init(
@@ -27,7 +29,8 @@ final class CiderShadowPanel: NSPanel {
 
         contentView = NSHostingView(rootView: CiderShadowView(
             cornerRadius: CiderPanelDesign.cornerRadius,
-            padding: Self.padding
+            padding: Self.padding,
+            blurRadius: Self.blurRadius
         ))
     }
 
@@ -53,11 +56,12 @@ final class CiderShadowPanel: NSPanel {
 private struct CiderShadowView: View {
     let cornerRadius: CGFloat
     let padding: CGFloat
+    let blurRadius: CGFloat
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(Color.black.opacity(0.6))
             .padding(padding)
-            .blur(radius: 28)
+            .blur(radius: blurRadius)
     }
 }

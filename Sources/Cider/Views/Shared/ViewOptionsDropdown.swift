@@ -107,7 +107,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
             }
         }
         .padding(Spacing.md)
-        .frame(width: 210)
+        .frame(width: ViewOptionsDesign.popoverWidth)
     }
 
     // MARK: - Sort Section
@@ -228,7 +228,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
                         }
                     }
                 }
-                .frame(maxHeight: 120)
+                .frame(maxHeight: TagPopoverDesign.filterScrollMaxHeight)
             }
         }
     }
@@ -428,7 +428,7 @@ private struct TagFilterChip: View {
             HStack(spacing: Spacing.xxs) {
                 Circle()
                     .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                    .frame(width: 6, height: 6)
+                    .frame(width: TagDotDesign.groupRowDotSize, height: TagDotDesign.groupRowDotSize)
                 Text(label.name)
                     .font(CiderFont.caption)
                     .foregroundColor(isOn ? CiderColors.controlAccent : CiderColors.secondary)
@@ -506,7 +506,7 @@ private struct ViewModeIcon: View {
         Image(systemName: icon)
             .font(CiderFont.subheadingSemibold)
             .foregroundColor(isSelected ? CiderColors.controlAccent : isHovered ? CiderColors.primary : CiderColors.secondary)
-            .frame(width: 32, height: 28)
+            .frame(width: ViewOptionsDesign.segmentButtonWidth, height: ViewOptionsDesign.segmentButtonHeight)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(isSelected ? CiderColors.accentSelected : isHovered ? CiderColors.surfaceHover : CiderColors.surfaceInput)

@@ -109,7 +109,7 @@ struct NewItemPopover: View {
         }
         // No animation on step changes: animating popover content size via ViewBridge
         // (RemoteViewService XPC) causes crashes in non-activating NSPanel popovers.
-        .frame(width: 264)
+        .frame(width: NewItemPopoverFormDesign.panelWidth)
     }
 
     private func back() {
@@ -152,7 +152,7 @@ struct NewItemPopover: View {
         } label: {
             VStack(spacing: Spacing.xs) {
                 Image(systemName: type.systemImage)
-                    .font(.system(size: 20, weight: .regular))
+                    .font(CiderFont.display)
                     .foregroundColor(CiderColors.secondary)
 
                 Text(type.displayName)
@@ -161,7 +161,7 @@ struct NewItemPopover: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 62)
+            .frame(height: NewItemPopoverDesign.typeCardHeight)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.surfaceInput)
@@ -242,7 +242,7 @@ private struct FormHeader: View {
                 Image(systemName: "chevron.left")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: NewItemPopoverFormDesign.headerButtonSize, height: NewItemPopoverFormDesign.headerButtonSize)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -269,7 +269,7 @@ private struct AddButton: View {
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.textOnColor)
                 .frame(maxWidth: .infinity)
-                .frame(height: 32)
+                .frame(height: NewItemPopoverFormDesign.actionButtonHeight)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(disabled ? CiderColors.separatorMedium : CiderColors.controlAccent)
@@ -652,7 +652,7 @@ private struct TodoCreationForm: View {
                     Image(systemName: "circle")
                         .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.controlAccent)
-                        .frame(width: 20)
+                        .frame(width: NewItemPopoverFormDesign.todoModeIconWidth)
                     VStack(alignment: .leading, spacing: Spacing.hairline) {
                         Text("Single Todo")
                             .font(CiderFont.bodyMedium)
@@ -678,7 +678,7 @@ private struct TodoCreationForm: View {
                     Image(systemName: "checklist")
                         .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.controlAccent)
-                        .frame(width: 20)
+                        .frame(width: NewItemPopoverFormDesign.todoModeIconWidth)
                     VStack(alignment: .leading, spacing: Spacing.hairline) {
                         Text("Todo List")
                             .font(CiderFont.bodyMedium)
@@ -887,7 +887,7 @@ private struct TabCreationForm: View {
                 .font(CiderFont.label)
                 .foregroundColor(isSelected ? CiderColors.primary : CiderColors.tertiary)
                 .frame(maxWidth: .infinity)
-                .frame(height: 32)
+                .frame(height: NewItemPopoverFormDesign.actionButtonHeight)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(isSelected ? CiderColors.surfaceElevated : CiderColors.surfaceInput)
@@ -946,7 +946,7 @@ private struct TagCreationForm: View {
                     .padding(.top, Spacing.xxs)
 
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 28), spacing: Spacing.xs)],
+                    columns: [GridItem(.adaptive(minimum: TagColorPickerDesign.gridCellMinWidth), spacing: Spacing.xs)],
                     spacing: Spacing.xs
                 ) {
                     ForEach(presets, id: \.hex) { preset in
@@ -956,12 +956,12 @@ private struct TagCreationForm: View {
                         } label: {
                             Circle()
                                 .fill(Color(hex: preset.hex) ?? CiderColors.secondary)
-                                .frame(width: 24, height: 24)
+                                .frame(width: TagColorPickerDesign.swatchSize, height: TagColorPickerDesign.swatchSize)
                                 .overlay {
                                     if isSelected {
                                         Circle()
-                                            .stroke(Color.white, lineWidth: 2)
-                                            .frame(width: 18, height: 18)
+                                            .stroke(CiderColors.colorPickerSelectionRing, lineWidth: CiderBorder.colorPickerRingWidth)
+                                            .frame(width: TagColorPickerDesign.selectionRingSize, height: TagColorPickerDesign.selectionRingSize)
                                     }
                                 }
                         }
@@ -1099,7 +1099,7 @@ private struct SessionCaptureForm: View {
                 }
                 .foregroundColor(CiderColors.textOnColor)
                 .frame(maxWidth: .infinity)
-                .frame(height: 32)
+                .frame(height: NewItemPopoverFormDesign.actionButtonHeight)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(isCapturing ? CiderColors.separatorMedium : CiderColors.controlAccent)

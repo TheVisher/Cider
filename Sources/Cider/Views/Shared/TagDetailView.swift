@@ -118,7 +118,7 @@ struct TagDetailView: View {
                     emptyTagsState
                 } else {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 180), spacing: Spacing.sm)],
+                        columns: [GridItem(.adaptive(minimum: TagPopoverDesign.managerCardMinWidth), spacing: Spacing.sm)],
                         spacing: Spacing.sm
                     ) {
                         ForEach(labelStorage.labels) { label in
@@ -207,7 +207,7 @@ struct TagDetailView: View {
                         HStack(spacing: Spacing.sm) {
                             Circle()
                                 .fill(Color(hex: tag.colorHex) ?? CiderColors.secondary)
-                                .frame(width: 8, height: 8)
+                                .frame(width: TagDotDesign.unusedDotSize, height: TagDotDesign.unusedDotSize)
 
                             Text(tag.name)
                                 .font(CiderFont.body)
@@ -262,7 +262,7 @@ struct TagDetailView: View {
     private var emptyTagsState: some View {
         VStack(spacing: Spacing.md) {
             Image(systemName: "tag")
-                .font(.system(size: 32))
+                .font(CiderFont.fileIconLarge)
                 .foregroundColor(CiderColors.quaternary)
 
             Text("No tags yet")
@@ -298,7 +298,7 @@ struct TagDetailView: View {
                 if resolvedLabels.count == 1, let label = resolvedLabels.first {
                     Circle()
                         .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                        .frame(width: 10, height: 10)
+                        .frame(width: TagDotDesign.filterHeaderDotSize, height: TagDotDesign.filterHeaderDotSize)
 
                     Text(label.name)
                         .font(CiderFont.subheadingSemibold)
@@ -423,7 +423,7 @@ private struct SimilarGroupRow: View {
                     HStack(spacing: Spacing.xxs) {
                         Circle()
                             .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                            .frame(width: 6, height: 6)
+                            .frame(width: TagDotDesign.groupRowDotSize, height: TagDotDesign.groupRowDotSize)
                         Text(label.name)
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.primary)
@@ -484,7 +484,7 @@ private struct TagManagerCard: View {
                 HStack(spacing: Spacing.sm) {
                     Circle()
                         .fill(tintColor)
-                        .frame(width: 12, height: 12)
+                        .frame(width: TagDotDesign.cardDotSize, height: TagDotDesign.cardDotSize)
 
                     if isRenaming {
                         TextField("Tag name", text: $renamingText)
@@ -600,7 +600,7 @@ private struct MergeTargetPopover: View {
                                 HStack(spacing: Spacing.sm) {
                                     Circle()
                                         .fill(Color(hex: target.colorHex) ?? CiderColors.secondary)
-                                        .frame(width: 8, height: 8)
+                                        .frame(width: TagDotDesign.mergeRowDotSize, height: TagDotDesign.mergeRowDotSize)
 
                                     Text(target.name)
                                         .font(CiderFont.body)
@@ -622,11 +622,11 @@ private struct MergeTargetPopover: View {
                         }
                     }
                 }
-                .frame(maxHeight: 300)
+                .frame(maxHeight: TagPopoverDesign.mergeListMaxHeight)
             }
         }
         .padding(Spacing.md)
-        .frame(width: 240)
+        .frame(width: TagPopoverDesign.mergePopoverWidth)
     }
 }
 
@@ -644,7 +644,7 @@ private struct TagColorPickerPopover: View {
                 .font(CiderFont.captionSemibold)
                 .foregroundColor(CiderColors.secondary)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 28), spacing: Spacing.xs)], spacing: Spacing.xs) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: TagColorPickerDesign.gridCellMinWidth), spacing: Spacing.xs)], spacing: Spacing.xs) {
                 ForEach(presets, id: \.hex) { preset in
                     let isSelected = preset.hex.lowercased() == selectedHex.lowercased()
                     Button {
@@ -652,12 +652,12 @@ private struct TagColorPickerPopover: View {
                     } label: {
                         Circle()
                             .fill(Color(hex: preset.hex) ?? CiderColors.secondary)
-                            .frame(width: 24, height: 24)
+                            .frame(width: TagColorPickerDesign.swatchSize, height: TagColorPickerDesign.swatchSize)
                             .overlay {
                                 if isSelected {
                                     Circle()
-                                        .stroke(Color.white, lineWidth: 2)
-                                        .frame(width: 18, height: 18)
+                                        .stroke(CiderColors.colorPickerSelectionRing, lineWidth: CiderBorder.colorPickerRingWidth)
+                                        .frame(width: TagColorPickerDesign.selectionRingSize, height: TagColorPickerDesign.selectionRingSize)
                                 }
                             }
                     }
@@ -667,7 +667,7 @@ private struct TagColorPickerPopover: View {
             }
         }
         .padding(Spacing.md)
-        .frame(width: 200)
+        .frame(width: TagPopoverDesign.colorPickerWidth)
     }
 }
 
@@ -698,7 +698,7 @@ private struct InlineTagCreationForm: View {
                 )
                 .onSubmit(commit)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 28), spacing: Spacing.xs)], spacing: Spacing.xs) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: TagColorPickerDesign.gridCellMinWidth), spacing: Spacing.xs)], spacing: Spacing.xs) {
                 ForEach(presets, id: \.hex) { preset in
                     let isSelected = preset.hex.lowercased() == selectedColorHex.lowercased()
                     Button {
@@ -706,12 +706,12 @@ private struct InlineTagCreationForm: View {
                     } label: {
                         Circle()
                             .fill(Color(hex: preset.hex) ?? CiderColors.secondary)
-                            .frame(width: 24, height: 24)
+                            .frame(width: TagColorPickerDesign.swatchSize, height: TagColorPickerDesign.swatchSize)
                             .overlay {
                                 if isSelected {
                                     Circle()
-                                        .stroke(Color.white, lineWidth: 2)
-                                        .frame(width: 18, height: 18)
+                                        .stroke(CiderColors.colorPickerSelectionRing, lineWidth: CiderBorder.colorPickerRingWidth)
+                                        .frame(width: TagColorPickerDesign.selectionRingSize, height: TagColorPickerDesign.selectionRingSize)
                                 }
                             }
                     }
@@ -725,7 +725,7 @@ private struct InlineTagCreationForm: View {
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.textOnColor)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 32)
+                    .frame(height: NewItemPopoverFormDesign.actionButtonHeight)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -736,7 +736,7 @@ private struct InlineTagCreationForm: View {
             .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(Spacing.md)
-        .frame(width: 220)
+        .frame(width: TagPopoverDesign.creationFormWidth)
     }
 
     private func commit() {

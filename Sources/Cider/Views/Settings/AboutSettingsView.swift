@@ -13,7 +13,7 @@ struct AboutSettingsView: View {
                         Image(nsImage: nsImage)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 64, height: 64)
+                            .frame(width: SettingsDesign.aboutAppIconSize, height: SettingsDesign.aboutAppIconSize)
                     } else {
                         Image(systemName: "cube.fill")
                             .font(CiderFont.appIcon)
@@ -92,7 +92,7 @@ private struct AboutLink: View {
                     .font(CiderFont.caption)
             }
             .foregroundColor(CiderColors.secondary)
-            .frame(width: 70, height: 50)
+            .frame(width: SettingsDesign.aboutLinkButtonWidth, height: SettingsDesign.aboutLinkButtonHeight)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.surfaceSubtle)

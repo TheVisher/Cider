@@ -102,7 +102,7 @@ struct SettingsView: View {
     @ViewBuilder
     var emptyTrashConfirmOverlay: some View {
         RoundedRectangle(cornerRadius: SettingsDesign.cornerRadius, style: .continuous)
-            .fill(Color.black.opacity(0.55))
+            .fill(CiderColors.overlayBadge)
             .onTapGesture { viewModel.showEmptyTrashConfirm = false }
 
         VStack(spacing: Spacing.lg) {
@@ -132,11 +132,11 @@ struct SettingsView: View {
             }
         }
         .padding(Spacing.xl)
-        .frame(width: 320)
+        .frame(width: SettingsDesign.confirmDialogWidth)
         .background {
             ZStack {
                 VisualEffectView(material: .popover, blendingMode: .withinWindow)
-                Color.black.opacity(0.4)
+                CiderColors.shadowHeavy
             }
             .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
         }
@@ -166,4 +166,44 @@ enum SettingsDesign {
     static let headerHeight: CGFloat = 48
     static let primarySidebarWidth: CGFloat = 190
     static let displayPickerMaxWidth: CGFloat = 250
+    /// Width of inline Picker controls in SettingsPickerRow
+    static let inlinePickerWidth: CGFloat = 140
+    /// Width of the modal confirmation dialog (e.g. Empty Trash)
+    static let confirmDialogWidth: CGFloat = 320
+    /// Max width of text input fields in account forms
+    static let formFieldMaxWidth: CGFloat = 320
+    /// Small avatar circle diameter (sidebar account button)
+    static let accountAvatarSmall: CGFloat = 36
+    /// Large avatar circle diameter (account overview section)
+    static let accountAvatarLarge: CGFloat = 52
+    /// Width of the preview area in text-size option buttons
+    static let sizeOptionPreviewWidth: CGFloat = 50
+    /// Height of the preview area in text-size option buttons
+    static let sizeOptionPreviewHeight: CGFloat = 32
+    /// Base font size for text-size preview buttons (14pt heading)
+    static let textPreviewBaseSize: CGFloat = 14
+    /// Width of the keyboard-shortcut key column in the Shortcuts reference table
+    static let shortcutKeyColumnWidth: CGFloat = 170
+    /// Width of the trash retention picker
+    static let retentionPickerWidth: CGFloat = 100
+    /// Stroke width for selection-ring overlays on option buttons and sidebar rows
+    static let rowStrokeWidth: CGFloat = 1
+    /// Minimum tap-target height for subcategory chip buttons in the header
+    static let chipMinHeight: CGFloat = 30
+    /// Icon column width in trash item rows
+    static let trashIconColumnWidth: CGFloat = 16
+    /// Width of the About page link button
+    static let aboutLinkButtonWidth: CGFloat = 70
+    /// Height of the About page link button
+    static let aboutLinkButtonHeight: CGFloat = 50
+    /// App icon image size in About view
+    static let aboutAppIconSize: CGFloat = 64
+    /// Drop-shadow blur radius on the settings window chrome
+    static let windowShadowRadius: CGFloat = 8
+    /// Drop-shadow Y offset on the settings window chrome
+    static let windowShadowYOffset: CGFloat = 6
+    /// Device icon column width in Connected Devices rows
+    static let deviceIconColumnWidth: CGFloat = 20
+    /// Intelligence status indicator dot size
+    static let intelligenceDotSize: CGFloat = 8
 }

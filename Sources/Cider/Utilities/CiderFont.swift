@@ -62,10 +62,14 @@ enum CiderFont {
 
     // MARK: - Heading (14pt) — Section titles
 
+    /// 14pt regular — folder emoji icon, section titles
+    static var heading: Font { Font.system(size: scaled(14)) }
     /// 14pt medium — dashboard section headers, search categories
     static var headingMedium: Font { Font.system(size: scaled(14), weight: .medium) }
     /// 14pt semibold — settings section title
     static var headingSemibold: Font { Font.system(size: scaled(14), weight: .semibold) }
+    /// 14pt bold — carousel navigation arrows
+    static var headingBold: Font { Font.system(size: scaled(14), weight: .bold) }
 
     // MARK: - Title (15–16pt) — Panel headers, search titles
 
@@ -89,6 +93,8 @@ enum CiderFont {
 
     /// 8pt bold — tab bar badge count
     static var badge: Font { Font.system(size: scaled(8), weight: .bold) }
+    /// 8pt semibold — small inline icons (add tag "+", copy checkmark)
+    static var badgeSemibold: Font { Font.system(size: scaled(8), weight: .semibold) }
     /// 9pt medium — resize icon, decorative labels
     static var microMedium: Font { Font.system(size: scaled(9), weight: .medium) }
     /// 9pt semibold — small sidebar chevrons
@@ -100,10 +106,31 @@ enum CiderFont {
 
     /// 28pt bold — bookmark hero fallback letter
     static var heroFallback: Font { Font.system(size: scaled(28), weight: .bold) }
+    /// 32pt medium — drag preview icon overlay
+    static var dragPreviewIcon: Font { Font.system(size: scaled(32), weight: .medium) }
+    /// 32pt light — vault file card placeholder icon
+    static var vaultCardIcon: Font { Font.system(size: scaled(32), weight: .light) }
+    /// 32pt regular — tag manager empty-state icon
+    static var fileIconLarge: Font { Font.system(size: scaled(32)) }
+    /// 48pt light — vault file detail panel placeholder icon
+    static var vaultDetailIcon: Font { Font.system(size: scaled(48), weight: .light) }
+    /// 11pt medium — notes/bookmark toolbar button icon (matches NotesDesign.toolbarIconSize)
+    static var toolbarIcon: Font { Font.system(size: scaled(11), weight: .medium) }
+    /// Traffic-light overlay symbol — sized via CiderPanelDesign.trafficLightSymbolSize
+    static var trafficLightSymbol: Font { Font.system(size: scaled(CiderPanelDesign.trafficLightSymbolSize), weight: .semibold) }
     /// 36pt regular — empty state icon
     static var emptyStateIcon: Font { Font.system(size: scaled(36)) }
+    /// 28pt regular — settings/storage empty-state icon (trash, etc.)
+    static var settingsEmptyIcon: Font { Font.system(size: scaled(28)) }
+    /// 11pt medium monospaced — keyboard shortcut key labels in Settings
+    static var monospacedBody: Font { Font.system(size: scaled(11), weight: .medium, design: .monospaced) }
     /// 64pt regular — about screen app icon
     static let appIcon = Font.system(size: 64)
+
+    // MARK: - AppKit NSFont tokens (for CoreGraphics / NSAttributedString contexts)
+
+    /// 11pt medium monospaced-digit — screen capture dimensions label (e.g. "320 × 240")
+    static var captureLabel: NSFont { NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium) }
 
     // MARK: - Responsive (textScale-based)
 

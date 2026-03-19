@@ -71,7 +71,7 @@ struct IntelligenceSettingsView: View {
         HStack(spacing: Spacing.sm) {
             Circle()
                 .fill(isAppleIntelligenceAvailable ? CiderColors.successMuted : CiderColors.tertiary)
-                .frame(width: 8, height: 8)
+                .frame(width: SettingsDesign.intelligenceDotSize, height: SettingsDesign.intelligenceDotSize)
             Text(isAppleIntelligenceAvailable
                  ? "Apple Intelligence available on this device"
                  : "Apple Intelligence not available — on-device NLP features still work")
@@ -83,7 +83,7 @@ struct IntelligenceSettingsView: View {
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(isAppleIntelligenceAvailable
-                      ? CiderColors.success.opacity(0.08)
+                      ? CiderColors.successSubtle
                       : CiderColors.surfaceSubtle)
         )
     }

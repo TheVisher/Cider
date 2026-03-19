@@ -192,7 +192,7 @@ struct CiderPanelShell<
                 Button(action: toggleSidebar) {
                     Image(systemName: "sidebar.left")
                         .font(CiderFont.bodySemibold)
-                        .frame(width: 24, height: 24)
+                        .frame(width: Spacing.xxl, height: Spacing.xxl)
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(CiderColors.secondary)
@@ -265,7 +265,7 @@ struct CiderPanelShell<
                 Image(systemName: "sidebar.left")
                     .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: CiderPanelDesign.trafficLightTapTarget)
+                    .frame(width: NotesDesign.toolbarButtonSize, height: CiderPanelDesign.trafficLightTapTarget)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -378,7 +378,7 @@ struct PanelTrafficLightButton: View {
                 .overlay {
                     if isHovered {
                         Image(systemName: symbol)
-                            .font(.system(size: CiderPanelDesign.trafficLightSymbolSize * CiderFont.scale, weight: .semibold))
+                            .font(CiderFont.trafficLightSymbol)
                             .foregroundColor(CiderColors.trafficLightSymbol)
                     }
                 }
@@ -398,7 +398,7 @@ struct CiderPanelResizeIcon: View {
         Image(systemName: "arrow.down.backward.and.arrow.up.forward")
             .font(CiderFont.microMedium)
             .foregroundColor(CiderColors.quaternary)
-            .frame(width: 16, height: 16)
+            .frame(width: Spacing.lg, height: Spacing.lg)
             .allowsHitTesting(false)
     }
 }

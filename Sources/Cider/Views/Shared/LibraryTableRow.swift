@@ -25,7 +25,7 @@ struct LibraryTableRow: View {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .font(CiderFont.body)
                     .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.tertiary)
-                    .frame(width: 40, height: 40)
+                    .frame(width: LibraryTableDesign.checkboxColumnWidth, height: LibraryTableDesign.rowHeight)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isSelected ? "Deselect \(item.title)" : "Select \(item.title)")
@@ -43,10 +43,10 @@ struct LibraryTableRow: View {
 
             // Overflow menu
             LibraryTableRowMenu(item: item, onOpen: onOpen)
-                .frame(width: 40)
+                .frame(width: LibraryTableDesign.menuColumnWidth)
                 .opacity(isHovered ? 1 : 0)
         }
-        .frame(height: 40)
+        .frame(height: LibraryTableDesign.rowHeight)
         .padding(.horizontal, Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
@@ -58,7 +58,7 @@ struct LibraryTableRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: 1.5)
+                .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .contentShape(Rectangle())
         .hoverState($isHovered, animation: .snappy)
@@ -105,7 +105,7 @@ struct LibraryTableRow: View {
     private var nameCell: some View {
         HStack(spacing: Spacing.sm) {
             itemIcon
-                .frame(width: 20, height: 20)
+                .frame(width: FolderSidebarItemDesign.folderIconSize, height: FolderSidebarItemDesign.folderIconSize)
 
             Text(item.title)
                 .font(CiderFont.bodyMedium)
@@ -319,7 +319,7 @@ private struct CompactTagPill: View {
         HStack(spacing: Spacing.xxs) {
             Circle()
                 .fill(tintColor)
-                .frame(width: 5, height: 5)
+                .frame(width: ClipboardViewerTableDesign.tagDotSize, height: ClipboardViewerTableDesign.tagDotSize)
 
             Text(label.name)
                 .font(CiderFont.caption)
@@ -330,7 +330,7 @@ private struct CompactTagPill: View {
         .padding(.vertical, Spacing.hairline)
         .background(
             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                .fill(tintColor.opacity(0.12))
+                .fill(tintColor.opacity(TagPillDesign.fillOpacity))
         )
     }
 }
@@ -350,7 +350,7 @@ private struct LibraryTableRowMenu: View {
             Image(systemName: "ellipsis")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
-                .frame(width: 28, height: 28)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)

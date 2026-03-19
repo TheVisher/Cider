@@ -27,7 +27,7 @@ struct SettingsBackgroundView: View {
                 .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
                 .padding(CiderBorder.innerStrokeInset)
         )
-        .shadow(color: Color.black.opacity(0.5), radius: 8, x: 0, y: 6)
+        .shadow(color: CiderColors.coverBannerLabel, radius: SettingsDesign.windowShadowRadius, x: 0, y: SettingsDesign.windowShadowYOffset)
     }
 
     @ViewBuilder
@@ -61,7 +61,7 @@ struct SettingsPrimarySidebar: View {
                 HStack(spacing: Spacing.sm) {
                     Circle()
                         .fill(AuthService.shared.isLoggedIn ? CiderColors.accentMedium : CiderColors.separatorMedium)
-                        .frame(width: 36, height: 36)
+                        .frame(width: SettingsDesign.accountAvatarSmall, height: SettingsDesign.accountAvatarSmall)
                         .overlay {
                             Image(systemName: "person.fill")
                                 .font(CiderFont.navTitle)
@@ -90,7 +90,7 @@ struct SettingsPrimarySidebar: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .stroke(selectedCategory == .account ? CiderColors.borderSelected : Color.clear, lineWidth: 1)
+                        .stroke(selectedCategory == .account ? CiderColors.borderSelected : Color.clear, lineWidth: SettingsDesign.rowStrokeWidth)
                 )
                 .contentShape(Rectangle())
             }
@@ -174,7 +174,7 @@ struct SettingsPrimaryCategoryButton: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .stroke(isSelected ? CiderColors.borderSelected : Color.clear, lineWidth: 1)
+                    .stroke(isSelected ? CiderColors.borderSelected : Color.clear, lineWidth: SettingsDesign.rowStrokeWidth)
             )
             .contentShape(Rectangle())
         }
@@ -218,14 +218,14 @@ struct SettingsSubcategoryChip: View {
                 .foregroundColor(isSelected ? CiderColors.primary : CiderColors.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, Spacing.sm)
-                .frame(minHeight: 30)
+                .frame(minHeight: SettingsDesign.chipMinHeight)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(isSelected ? CiderColors.surfaceHover : Color.clear)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .stroke(isSelected ? CiderColors.borderSelected : Color.clear, lineWidth: 1)
+                        .stroke(isSelected ? CiderColors.borderSelected : Color.clear, lineWidth: SettingsDesign.rowStrokeWidth)
                 )
         }
         .buttonStyle(.plain)
@@ -262,7 +262,7 @@ struct SettingsAccountOverviewView: View {
                 HStack(spacing: Spacing.md) {
                     Circle()
                         .fill(CiderColors.accentMedium)
-                        .frame(width: 52, height: 52)
+                        .frame(width: SettingsDesign.accountAvatarLarge, height: SettingsDesign.accountAvatarLarge)
                         .overlay {
                             Image(systemName: "person.fill")
                                 .font(CiderFont.displaySemibold)
@@ -304,22 +304,22 @@ struct SettingsAccountOverviewView: View {
                                 .foregroundColor(CiderColors.tertiary)
                         } else if let error = syncService.lastError {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                                .font(.system(size: 12))
+                                .foregroundColor(CiderColors.warning)
+                                .font(CiderFont.label)
                             Text(error)
                                 .font(CiderFont.caption)
-                                .foregroundColor(.orange)
+                                .foregroundColor(CiderColors.warning)
                         } else if let lastSync = syncService.lastSyncedAt {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                                .font(.system(size: 12))
+                                .foregroundColor(CiderColors.success)
+                                .font(CiderFont.label)
                             Text("Last synced \(lastSync.formatted(.relative(presentation: .named)))")
                                 .font(CiderFont.body)
                                 .foregroundColor(CiderColors.tertiary)
                         } else {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .foregroundColor(CiderColors.tertiary)
-                                .font(.system(size: 12))
+                                .font(CiderFont.label)
                             Text("Sync is active")
                                 .font(CiderFont.body)
                                 .foregroundColor(CiderColors.tertiary)
@@ -352,7 +352,7 @@ struct SettingsAccountOverviewView: View {
                     HStack(spacing: Spacing.md) {
                         Circle()
                             .fill(CiderColors.separatorMedium)
-                            .frame(width: 52, height: 52)
+                            .frame(width: SettingsDesign.accountAvatarLarge, height: SettingsDesign.accountAvatarLarge)
                             .overlay {
                                 Image(systemName: "person.fill")
                                     .font(CiderFont.displaySemibold)
@@ -378,7 +378,7 @@ struct SettingsAccountOverviewView: View {
                             TextField("you@example.com", text: $email)
                                 .textFieldStyle(.roundedBorder)
                                 .font(CiderFont.body)
-                                .frame(maxWidth: 320)
+                                .frame(maxWidth: SettingsDesign.formFieldMaxWidth)
                                 .textContentType(.emailAddress)
                                 .onSubmit(submit)
                         }
@@ -390,7 +390,7 @@ struct SettingsAccountOverviewView: View {
                             SecureField("••••••••", text: $password)
                                 .textFieldStyle(.roundedBorder)
                                 .font(CiderFont.body)
-                                .frame(maxWidth: 320)
+                                .frame(maxWidth: SettingsDesign.formFieldMaxWidth)
                                 .onSubmit(submit)
                         }
 
@@ -402,7 +402,7 @@ struct SettingsAccountOverviewView: View {
                                 SecureField("••••••••", text: $confirmPassword)
                                     .textFieldStyle(.roundedBorder)
                                     .font(CiderFont.body)
-                                    .frame(maxWidth: 320)
+                                    .frame(maxWidth: SettingsDesign.formFieldMaxWidth)
                                     .onSubmit(submit)
                             }
                         }
@@ -481,11 +481,11 @@ struct SettingsSizeOptionButton: View {
                 if let preview, let previewSize {
                     Text(preview)
                         .font(.system(size: previewSize, weight: .medium))
-                        .frame(width: 50, height: 32)
+                        .frame(width: SettingsDesign.sizeOptionPreviewWidth, height: SettingsDesign.sizeOptionPreviewHeight)
                 } else if let icon {
                     Image(systemName: icon)
                         .font(CiderFont.display)
-                        .frame(width: 50, height: 32)
+                        .frame(width: SettingsDesign.sizeOptionPreviewWidth, height: SettingsDesign.sizeOptionPreviewHeight)
                 }
 
                 Text(title)
@@ -500,7 +500,7 @@ struct SettingsSizeOptionButton: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(isSelected ? CiderColors.controlAccent : CiderColors.surfaceHover, lineWidth: 1)
+                    .strokeBorder(isSelected ? CiderColors.controlAccent : CiderColors.surfaceHover, lineWidth: SettingsDesign.rowStrokeWidth)
             )
             .contentShape(Rectangle())
         }
@@ -699,9 +699,9 @@ struct KeyboardShortcutsReferenceView: View {
                     ForEach(group.shortcuts) { shortcut in
                         HStack(alignment: .firstTextBaseline) {
                             Text(shortcut.keys)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .font(CiderFont.monospacedBody)
                                 .foregroundColor(CiderColors.controlAccent)
-                                .frame(width: 170, alignment: .leading)
+                                .frame(width: SettingsDesign.shortcutKeyColumnWidth, alignment: .leading)
 
                             Text(shortcut.description)
                                 .font(CiderFont.body)

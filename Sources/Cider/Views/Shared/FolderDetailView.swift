@@ -160,7 +160,7 @@ struct FolderDetailView: View {
                                     title: "No items yet",
                                     subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
                                 )
-                                .frame(minHeight: 200)
+                                .frame(minHeight: BookmarksDesign.detailsSheetNotesHeight)
                             }
                         }
                     }
@@ -234,7 +234,7 @@ struct FolderDetailView: View {
                 if let icon = folder?.icon {
                     if folder?.iconIsEmoji == true {
                         Text(icon)
-                            .font(.system(size: 20))
+                            .font(CiderFont.display)
                     } else {
                         Image(systemName: icon)
                             .font(CiderFont.titleMedium)
@@ -316,7 +316,7 @@ struct FolderDetailView: View {
                                 .foregroundColor(CiderColors.textOnColor)
                                 .padding(.horizontal, Spacing.sm)
                                 .padding(.vertical, Spacing.xxs)
-                                .background(Capsule().fill(Color.black.opacity(0.5)))
+                                .background(Capsule().fill(CiderColors.coverBannerLabel))
                                 .padding(.bottom, Spacing.sm)
                                 .transition(.opacity)
                                 .animation(reduceMotion ? .none : .snappy, value: isHoveringCover)
@@ -392,7 +392,7 @@ struct FolderDetailView: View {
 
     private var subFolderCards: some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: Spacing.sm)],
+            columns: [GridItem(.adaptive(minimum: FolderDetailDesign.subFolderCardMinWidth, maximum: FolderDetailDesign.subFolderCardMaxWidth), spacing: Spacing.sm)],
             spacing: Spacing.sm
         ) {
             ForEach(childFolders) { folder in

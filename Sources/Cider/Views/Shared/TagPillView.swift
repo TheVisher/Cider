@@ -15,7 +15,7 @@ struct TagPillView: View {
         HStack(spacing: Spacing.xs) {
             Circle()
                 .fill(dotColor)
-                .frame(width: 6, height: 6)
+                .frame(width: TagDotDesign.pillDotSize, height: TagDotDesign.pillDotSize)
 
             Text(label.name)
                 .font(CiderFont.caption)
@@ -35,11 +35,11 @@ struct TagPillView: View {
         .padding(.vertical, Spacing.xxs)
         .background(
             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                .fill(tintColor.opacity(0.12))
+                .fill(tintColor.opacity(TagPillDesign.fillOpacity))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                .stroke(tintColor.opacity(0.2), lineWidth: 0.5)
+                .stroke(tintColor.opacity(TagPillDesign.strokeOpacity), lineWidth: CiderBorder.hairlineStrokeWidth)
         )
         .contentShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
         .onTapGesture { onTap?() }
@@ -72,7 +72,7 @@ struct TagPillRow: View {
                     TagPillView(label: label, onTap: onTapTag != nil ? { onTapTag?(label.id) } : nil)
                 }
             }
-            .frame(maxHeight: CGFloat(maxLines) * 24, alignment: .topLeading)
+            .frame(maxHeight: CGFloat(maxLines) * Spacing.xxl, alignment: .topLeading)
             .clipped()
         }
     }
@@ -96,7 +96,7 @@ struct SidebarTagPill: View {
         HStack(spacing: Spacing.xxs) {
             Circle()
                 .fill(tintColor)
-                .frame(width: 6, height: 6)
+                .frame(width: TagDotDesign.pillDotSize, height: TagDotDesign.pillDotSize)
 
             Text(label.name)
                 .font(CiderFont.caption)

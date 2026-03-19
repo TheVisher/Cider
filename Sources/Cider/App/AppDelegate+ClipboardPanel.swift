@@ -175,7 +175,7 @@ extension AppDelegate {
         } else {
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.25
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
                 panel.animator().setFrame(newFrame, display: true)
             }, completionHandler: {
                 DispatchQueue.main.async { [weak panel] in

@@ -67,7 +67,7 @@ struct CiderTabBar: View {
                     })
                     .textFieldStyle(.plain)
                     .font(isSelected ? CiderFont.labelSemibold : CiderFont.label)
-                    .frame(minWidth: 40, maxWidth: 120)
+                    .frame(minWidth: CiderTabDesign.renameFieldMinWidth, maxWidth: CiderTabDesign.renameFieldMaxWidth)
                     .focused($isRenameFieldFocused)
                     .task {
                         try? await Task.sleep(for: .milliseconds(150))
@@ -149,7 +149,7 @@ struct CiderTabBar: View {
             Image(systemName: "plus")
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.tertiary)
-                .frame(width: 24, height: 24)
+                .frame(width: Spacing.xxl, height: Spacing.xxl)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -169,7 +169,7 @@ struct CiderTabBar: View {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "plus")
                         .font(CiderFont.bodyMedium)
-                        .frame(width: 16, alignment: .center)
+                        .frame(width: Spacing.lg, alignment: .center)
                     Text("New Tab")
                         .font(CiderFont.body)
                 }
@@ -200,7 +200,7 @@ struct CiderTabBar: View {
                         HStack(spacing: Spacing.sm) {
                             Image(systemName: { if case .whiteboard = sv.kind { return "scribble" }; return "square.grid.2x2" }())
                                 .font(CiderFont.bodyMedium)
-                                .frame(width: 16, alignment: .center)
+                                .frame(width: Spacing.lg, alignment: .center)
                             Text(sv.name)
                                 .font(CiderFont.body)
                                 .lineLimit(1)
@@ -216,7 +216,7 @@ struct CiderTabBar: View {
             }
         }
         .padding(.vertical, Spacing.xs)
-        .frame(minWidth: 200)
+        .frame(minWidth: CiderTabDesign.addTabPopoverMinWidth)
     }
 
     private func commitRename(_ savedViewID: UUID) {

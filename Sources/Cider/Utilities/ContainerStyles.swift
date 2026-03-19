@@ -55,8 +55,8 @@ private struct CardContainerModifier: ViewModifier {
             : isSelected ? CiderColors.selectedBorder
             : isDropTargeted ? CiderColors.dropTargetBorderStrong
             : isHovered ? CiderColors.borderHover : CiderColors.borderSubtle
-        let borderWidth: CGFloat = isFocused ? 1.5
-            : (isSelected || isDropTargeted) ? CiderBorder.innerStrokeWidth : 1
+        let borderWidth: CGFloat = isFocused ? CiderBorder.innerStrokeWidth
+            : (isSelected || isDropTargeted) ? CiderBorder.innerStrokeWidth : Spacing.hairline
         content
             .background(shape.fill(isHovered ? CiderColors.surfaceHover : CiderColors.surfaceElevated))
             .overlay(shape.stroke(borderColor, lineWidth: borderWidth))

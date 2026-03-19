@@ -31,7 +31,7 @@ struct StorageSettingsView: View {
 
     private var retentionRow: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Keep deleted items for")
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)
@@ -48,7 +48,7 @@ struct StorageSettingsView: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 100)
+            .frame(width: SettingsDesign.retentionPickerWidth)
         }
     }
 
@@ -59,7 +59,7 @@ struct StorageSettingsView: View {
                 Spacer()
                 VStack(spacing: Spacing.sm) {
                     Image(systemName: "trash")
-                        .font(.system(size: 28))
+                        .font(CiderFont.settingsEmptyIcon)
                         .foregroundColor(CiderColors.tertiary)
                     Text("Trash is empty")
                         .font(CiderFont.body)
@@ -156,9 +156,9 @@ private struct TrashItemRow: View {
             Image(systemName: trashItemIcon)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.secondary)
-                .frame(width: 16)
+                .frame(width: SettingsDesign.trashIconColumnWidth)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(item.title)
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)

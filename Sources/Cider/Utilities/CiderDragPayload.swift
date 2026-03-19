@@ -255,8 +255,8 @@ struct BookmarkDragPreview: View {
                 .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 3)
-        .padding(.top, 24)
-        .padding(.trailing, 40)
+        .padding(.top, Spacing.xxl)
+        .padding(.trailing, BookmarksDesign.dragPreviewPaddingBleed)
         .scaleEffect(BookmarksDesign.dragPreviewScale)
         .rotationEffect(.degrees(BookmarksDesign.dragPreviewRotation))
         .offset(
@@ -291,7 +291,7 @@ struct NoteDragPreview: View {
                 .frame(height: BookmarksDesign.dragPreviewThumbnailHeight)
                 .overlay {
                     Image(systemName: "doc.text.fill")
-                        .font(.system(size: 32, weight: .medium))
+                        .font(CiderFont.dragPreviewIcon)
                         .foregroundColor(CiderColors.controlAccent)
                 }
 
@@ -311,8 +311,8 @@ struct NoteDragPreview: View {
                 .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 3)
-        .padding(.top, 24)
-        .padding(.trailing, 40)
+        .padding(.top, Spacing.xxl)
+        .padding(.trailing, BookmarksDesign.dragPreviewPaddingBleed)
         .scaleEffect(BookmarksDesign.dragPreviewScale)
         .rotationEffect(.degrees(BookmarksDesign.dragPreviewRotation))
         .offset(
@@ -361,9 +361,9 @@ struct MultiDragPreview: View {
                     }
                 }
         }
-        .padding(.top, 40)
-        .padding(.trailing, extraX + 40)
-        .padding(.bottom, extraY + 40)
+        .padding(.top, BookmarksDesign.dragPreviewPaddingBleed)
+        .padding(.trailing, extraX + BookmarksDesign.dragPreviewPaddingBleed)
+        .padding(.bottom, extraY + BookmarksDesign.dragPreviewPaddingBleed)
         .scaleEffect(BookmarksDesign.dragPreviewScale)
         .rotationEffect(.degrees(BookmarksDesign.dragPreviewRotation))
         .offset(
@@ -429,7 +429,7 @@ struct MultiDragPreview: View {
                 .frame(height: BookmarksDesign.dragPreviewThumbnailHeight)
                 .overlay {
                     Image(systemName: "doc.text.fill")
-                        .font(.system(size: 32, weight: .medium))
+                        .font(CiderFont.dragPreviewIcon)
                         .foregroundColor(CiderColors.controlAccent)
                 }
 

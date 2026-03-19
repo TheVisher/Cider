@@ -105,7 +105,7 @@ struct BookmarkListRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: 1.5)
+                .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: CiderBorder.innerStrokeWidth)
         )
         .hoverState($isHovered, animation: .snappy)
         .bookmarkContextMenu(

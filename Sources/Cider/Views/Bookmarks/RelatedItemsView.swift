@@ -52,10 +52,10 @@ private struct RelatedItemRow: View {
         } label: {
             HStack(spacing: Spacing.sm) {
                 BookmarkThumbnailView(bookmark: bookmark, mode: .list)
-                    .frame(width: 32, height: 24)
+                    .frame(width: BookmarksDesign.relatedItemThumbnailWidth, height: BookmarksDesign.relatedItemThumbnailHeight)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(bookmark.title)
                         .font(CiderFont.bodyMedium(scale: textScale))
                         .foregroundColor(CiderColors.primary)

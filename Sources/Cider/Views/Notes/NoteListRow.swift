@@ -138,7 +138,7 @@ struct NoteListRow: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: 1.5)
+                    .stroke(isFocused ? CiderColors.controlAccent : Color.clear, lineWidth: CiderBorder.innerStrokeWidth)
             )
             .contentShape(Rectangle())
         }

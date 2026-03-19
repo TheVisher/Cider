@@ -128,7 +128,7 @@ final class AIChatPanel: NSPanel {
             }
         }
 
-        let headerMinY = contentView.bounds.height - 48
+        let headerMinY = contentView.bounds.height - AIChatPanelDesign.draggableHeaderHeight
         return locationInWindow.y >= headerMinY
     }
 }

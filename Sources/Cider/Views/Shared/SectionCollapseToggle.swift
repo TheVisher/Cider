@@ -25,7 +25,7 @@ struct SectionCollapseToggle: View {
                     .foregroundColor(CiderColors.quaternary)
                     .rotationEffect(.degrees(isCollapsed ? 0 : 90))
             }
-            .frame(height: 28)
+            .frame(height: NotesDesign.toolbarButtonSize)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

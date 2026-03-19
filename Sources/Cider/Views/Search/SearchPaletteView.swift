@@ -174,11 +174,11 @@ struct SearchPaletteView: View {
     }
 
     private var recentDateCards: [DateCard] {
-        Array(DateCardStorage.shared.dateCards.sorted { $0.updatedAt > $1.updatedAt }.prefix(2))
+        Array(DateCardStorage.shared.dateCards.sorted { $0.updatedAt > $1.updatedAt }.prefix(SearchPaletteDesign.recentDateCardCount))
     }
 
     private var recentContacts: [ContactCard] {
-        Array(ContactStorage.shared.contacts.sorted { $0.updatedAt > $1.updatedAt }.prefix(2))
+        Array(ContactStorage.shared.contacts.sorted { $0.updatedAt > $1.updatedAt }.prefix(SearchPaletteDesign.recentContactCount))
     }
 
     // MARK: - Body
@@ -222,12 +222,12 @@ struct SearchPaletteView: View {
             )
             .background {
                 RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .fill(Color.black)
-                    .blur(radius: 24)
-                    .offset(y: 12)
-                    .opacity(0.7)
+                    .fill(SearchPaletteDesign.shadowColor)
+                    .blur(radius: SearchPaletteDesign.shadowBlurRadius)
+                    .offset(y: SearchPaletteDesign.shadowYOffset)
+                    .opacity(SearchPaletteDesign.shadowOpacity)
             }
-            .padding(.top, proxy.size.height * 0.22)
+            .padding(.top, proxy.size.height * SearchPaletteDesign.topOffsetFactor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -380,7 +380,7 @@ struct SearchPaletteView: View {
                 .padding(.vertical, Spacing.xxs)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.controlAccent.opacity(0.12))
+                        .fill(CiderColors.accentLight)
                 )
             }
             Spacer()
@@ -466,13 +466,13 @@ struct SearchPaletteView: View {
 
                 if !subFolders.isEmpty {
                     HStack(spacing: Spacing.xxs) {
-                        ForEach(subFolders.prefix(3)) { sub in
+                        ForEach(subFolders.prefix(SearchPaletteDesign.folderSectionMaxSubfolderPills)) { sub in
                             Text(sub.name)
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
                         }
-                        if subFolders.count > 3 {
-                            Text("+\(subFolders.count - 3)")
+                        if subFolders.count > SearchPaletteDesign.folderSectionMaxSubfolderPills {
+                            Text("+\(subFolders.count - SearchPaletteDesign.folderSectionMaxSubfolderPills)")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
                         }
@@ -683,9 +683,9 @@ struct SearchPaletteView: View {
                     HStack(spacing: Spacing.sm) {
                         Circle()
                             .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                            .frame(width: 10, height: 10)
+                            .frame(width: TagDotDesign.filterHeaderDotSize, height: TagDotDesign.filterHeaderDotSize)
 
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: Spacing.hairline) {
                             Text(label.name)
                                 .font(CiderFont.subheadingMedium)
                                 .foregroundColor(CiderColors.primary)
@@ -810,7 +810,7 @@ struct SearchPaletteView: View {
                 .foregroundColor(CiderColors.secondary)
                 .frame(width: 16)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text(title)
                     .font(CiderFont.subheadingMedium)
                     .foregroundColor(CiderColors.primary)
@@ -872,7 +872,7 @@ struct SearchPaletteView: View {
                     .foregroundColor(CiderColors.controlAccent)
                     .frame(width: 16)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(result.title)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)

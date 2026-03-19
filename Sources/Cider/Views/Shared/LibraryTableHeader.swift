@@ -20,7 +20,7 @@ struct LibraryTableHeader: View {
                     .foregroundColor(allSelected ? CiderColors.controlAccent : CiderColors.tertiary)
             }
             .buttonStyle(.plain)
-            .frame(width: 40)
+            .frame(width: LibraryTableDesign.checkboxColumnWidth)
             .accessibilityLabel(allSelected ? "Deselect all" : "Select all")
             .help(allSelected ? "Deselect all" : "Select all")
 
@@ -61,13 +61,13 @@ struct LibraryTableHeader: View {
 
             // Column picker (fixed width)
             TableColumnPicker(columnConfig: $columnConfig)
-                .frame(width: 40)
+                .frame(width: LibraryTableDesign.menuColumnWidth)
         }
-        .frame(height: 32)
+        .frame(height: LibraryTableDesign.headerHeight)
         .padding(.horizontal, Spacing.sm)
         .background(CiderColors.surfaceSubtle)
         .overlay(alignment: .bottom) {
-            CiderColors.separator.frame(height: 0.5)
+            CiderColors.separator.frame(height: CiderBorder.hairlineStrokeWidth)
         }
     }
 
@@ -91,12 +91,12 @@ private struct ColumnResizeHandle: View {
     var body: some View {
         Rectangle()
             .fill(CiderColors.separator)
-            .frame(width: 1)
+            .frame(width: LibraryTableDesign.columnSeparatorWidth)
             .padding(.vertical, Spacing.sm)
             .overlay(
                 Rectangle()
                     .fill(Color.clear)
-                    .frame(width: 10)
+                    .frame(width: LibraryTableDesign.columnDragHitWidth)
                     .contentShape(Rectangle())
                     .cursor(.resizeLeftRight)
                     .gesture(
@@ -154,7 +154,7 @@ private struct TableColumnPicker: View {
             Image(systemName: "plus")
                 .font(CiderFont.captionSemibold)
                 .foregroundColor(CiderColors.tertiary)
-                .frame(width: 28, height: 28)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Toggle columns")
@@ -188,7 +188,7 @@ private struct TableColumnPicker: View {
                 }
             }
             .padding(.bottom, Spacing.sm)
-            .frame(width: 160)
+            .frame(width: LibraryTableDesign.columnPickerPopoverWidth)
         }
     }
 }

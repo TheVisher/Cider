@@ -173,7 +173,7 @@ private final class ScreenCaptureSelectionView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
-        let dimColor = NSColor.black.withAlphaComponent(0.35).cgColor
+        let dimColor = ScreenCaptureOverlayDesign.screenDimColor.cgColor
 
         if let sel = selectionRect, sel.width > 2, sel.height > 2 {
             // Draw dim as 4 rects around the selection — avoids blend-mode issues in layer-backed views.
@@ -192,33 +192,35 @@ private final class ScreenCaptureSelectionView: NSView {
             }
 
             // Selection border
-            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
-            ctx.setLineWidth(1.5)
-            ctx.stroke(sel.insetBy(dx: -0.75, dy: -0.75))
+            ctx.setStrokeColor(ScreenCaptureOverlayDesign.selectionBorderColor.cgColor)
+            ctx.setLineWidth(ScreenCaptureOverlayDesign.selectionBorderWidth)
+            let hw = ScreenCaptureOverlayDesign.selectionBorderWidth / 2
+            ctx.stroke(sel.insetBy(dx: -hw, dy: -hw))
 
             // Corner handles
-            let h: CGFloat = 6
+            let h = ScreenCaptureOverlayDesign.cornerHandleSize
             let corners: [CGPoint] = [
                 CGPoint(x: sel.minX, y: sel.minY), CGPoint(x: sel.maxX, y: sel.minY),
                 CGPoint(x: sel.minX, y: sel.maxY), CGPoint(x: sel.maxX, y: sel.maxY)
             ]
-            ctx.setFillColor(NSColor.white.cgColor)
+            ctx.setFillColor(ScreenCaptureOverlayDesign.cornerHandleColor.cgColor)
             for c in corners {
                 ctx.fill(CGRect(x: c.x - h / 2, y: c.y - h / 2, width: h, height: h))
             }
 
             // Dimensions label
             let label = "\(Int(sel.width)) × \(Int(sel.height))"
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+            let font = CiderFont.captureLabel
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ScreenCaptureOverlayDesign.labelTextColor]
             let str = label as NSString
             let labelSize = str.size(withAttributes: attrs)
-            let pad: CGFloat = 4
+            let pad = ScreenCaptureOverlayDesign.labelPadding
+            let gap = ScreenCaptureOverlayDesign.labelGap
             var lx = sel.midX - labelSize.width / 2
-            var ly = sel.maxY + 8
-            if ly + labelSize.height > bounds.maxY - 8 { ly = sel.minY - labelSize.height - 8 }
+            var ly = sel.maxY + gap
+            if ly + labelSize.height > bounds.maxY - gap { ly = sel.minY - labelSize.height - gap }
             lx = max(pad, min(bounds.maxX - labelSize.width - pad, lx))
-            ctx.setFillColor(NSColor.black.withAlphaComponent(0.55).cgColor)
+            ctx.setFillColor(ScreenCaptureOverlayDesign.labelBackgroundColor.cgColor)
             ctx.fill(CGRect(x: lx - pad, y: ly - 2,
                             width: labelSize.width + pad * 2, height: labelSize.height + 4))
             str.draw(at: CGPoint(x: lx, y: ly), withAttributes: attrs)

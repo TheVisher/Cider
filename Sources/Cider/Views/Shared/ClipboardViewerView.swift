@@ -118,7 +118,7 @@ struct ClipboardViewerView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let isWide = proxy.size.width > 500
+            let isWide = proxy.size.width > ClipboardPanelDesign.wideLayoutThreshold
 
             VStack(spacing: 0) {
                 viewerHeader
@@ -510,7 +510,7 @@ private struct ClipboardSectionHeader: View {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                         .font(CiderFont.micro)
                         .foregroundColor(CiderColors.tertiary)
-                        .frame(width: 12)
+                        .frame(width: ClipboardDesign.sectionChevronWidth)
 
                     Text(group.displayLabel)
                         .font(CiderFont.captionMedium)
@@ -646,7 +646,7 @@ struct ClipboardItemRow: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(spacing: Spacing.xs) {
                     AsyncFavicon(item: item)
-                        .frame(width: 16, height: 16)
+                        .frame(width: ClipboardDesign.faviconSize, height: ClipboardDesign.faviconSize)
                     if let domain = Self.domain(from: item.textContent) {
                         Text(domain)
                             .font(CiderFont.captionMedium)
@@ -677,7 +677,7 @@ struct ClipboardItemRow: View {
     private var clipboardImagePreview: some View {
         if let url = ClipboardStorage.shared.imageURL(for: item) {
             AsyncClipboardImage(url: url)
-                .frame(maxHeight: 120)
+                .frame(maxHeight: ClipboardDesign.imagePreviewMaxHeight)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         }
     }
@@ -714,7 +714,7 @@ struct ClipboardItemRow: View {
             .padding(.vertical, Spacing.xs)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(item.isSaved ? CiderColors.success.opacity(0.08) : CiderColors.accentSubtle)
+                    .fill(item.isSaved ? CiderColors.successSubtle : CiderColors.accentSubtle)
             )
         }
         .buttonStyle(.plain)
@@ -804,7 +804,7 @@ private struct AsyncClipboardImage: View {
             } else {
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.surfaceSubtle)
-                    .frame(height: 60)
+                    .frame(height: ClipboardDesign.imagePlaceholderHeight)
             }
         }
         .task(id: url) {

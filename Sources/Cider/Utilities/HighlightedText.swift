@@ -6,7 +6,7 @@ struct HighlightedText: View {
     let searchText: String
     let highlightColor: Color
 
-    init(_ text: String, highlight searchText: String, color: Color = .accentColor) {
+    init(_ text: String, highlight searchText: String, color: Color = CiderColors.controlAccent) {
         self.text = text
         self.searchText = searchText
         self.highlightColor = color

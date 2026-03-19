@@ -56,6 +56,9 @@ Read the relevant doc BEFORE writing code in that area:
 | Display/perf bugs | `Docs/TROUBLESHOOTING.md` |
 | Code health/debt | `Docs/CODE_HEALTH.md` |
 | Pre-release QA | `Docs/RELEASE_CHECKLIST.md` |
+| QA, audits, code quality | `Docs/QA/` folder |
+| Code audit loop | `Docs/QA/AUDIT_LOOP.md` |
+| QA testing plan | `Docs/QA/QA_TESTING_PLAN.md` |
 
 Tab vision docs: `Docs/{TAB_NAME}_VISION.md` (HOME, BOOKMARKS, NOTES, WHITEBOARD, CLIPBOARD, LINKED_SOURCES)
 Future tabs (Books, Todos, Documents): `Docs/FUTURE_TABS.md`
@@ -97,8 +100,8 @@ panel.hasShadow = false  // Custom shadows
 // Acrylic background
 ZStack {
     VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-    Color.black.opacity(0.45)
-    Color.white.opacity(0.03)
+    CiderColors.acrylicTint
+    CiderColors.surfaceHighlight
 }
 
 // Reduce Motion

@@ -12,15 +12,15 @@ struct SidecarTagsView: View {
                 Text(tag)
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.secondary)
-                    .padding(.horizontal, Spacing.xs + 2)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, Spacing.xs + Spacing.xxs)
+                    .padding(.vertical, Spacing.xxs)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                            .fill(CiderColors.primary.opacity(0.06))
+                            .fill(CiderColors.sidecarTagFill)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                            .stroke(CiderColors.primary.opacity(0.08), lineWidth: 0.5)
+                            .stroke(CiderColors.sidecarTagBorder, lineWidth: CiderBorder.hairlineStrokeWidth)
                     )
             }
         }

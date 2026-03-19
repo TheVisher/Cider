@@ -93,16 +93,16 @@ struct VaultFileCardView: View {
                 .resizable()
                 .scaledToFill()
                 .frame(maxWidth: .infinity)
-                .frame(height: 120)
+                .frame(height: VaultFileDesign.cardThumbnailHeight)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                 .fill(CiderColors.surfaceInput)
                 .frame(maxWidth: .infinity)
-                .frame(height: 120)
+                .frame(height: VaultFileDesign.cardThumbnailHeight)
                 .overlay(
                     Image(systemName: file.fileType.systemImageName)
-                        .font(.system(size: 32, weight: .light))
+                        .font(CiderFont.vaultCardIcon)
                         .foregroundColor(CiderColors.tertiary)
                         .imageScale(.large)
                 )
@@ -209,9 +209,9 @@ struct VaultFileListRow: View {
                 Image(systemName: file.fileType.systemImageName)
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(CiderColors.tertiary)
-                    .frame(width: 20)
+                    .frame(width: FolderSidebarItemDesign.folderIconSize)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(file.filename)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
@@ -249,7 +249,7 @@ struct VaultFileListRow: View {
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .strokeBorder(
                         isFocused ? CiderColors.controlAccent : (isSelected ? CiderColors.controlAccent : Color.clear),
-                        lineWidth: isFocused ? 1.5 : (isSelected ? CiderBorder.innerStrokeWidth : 0)
+                        lineWidth: isFocused ? CiderBorder.innerStrokeWidth : (isSelected ? CiderBorder.innerStrokeWidth : 0)
                     )
             )
         }

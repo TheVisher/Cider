@@ -33,7 +33,7 @@ struct SettingsToggleRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)
@@ -71,7 +71,7 @@ struct SettingsPickerRow<T: Hashable>: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)
@@ -91,7 +91,7 @@ struct SettingsPickerRow<T: Hashable>: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 140)
+            .frame(width: SettingsDesign.inlinePickerWidth)
         }
     }
 }

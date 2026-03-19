@@ -179,7 +179,7 @@ struct BookmarkMetadataSidebar: View {
                     .foregroundColor(CiderColors.tertiary)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
+                    .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : -90))
             }
@@ -405,7 +405,7 @@ struct BookmarkMetadataSidebar: View {
                                     HStack(spacing: Spacing.xs) {
                                         Circle()
                                             .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                                            .frame(width: 8, height: 8)
+                                            .frame(width: BookmarksDesign.tagColorDotSize, height: BookmarksDesign.tagColorDotSize)
                                         Text(label.name)
                                     }
                                 }
@@ -423,9 +423,9 @@ struct BookmarkMetadataSidebar: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 2) {
+                        HStack(spacing: Spacing.xxs) {
                             Image(systemName: "plus")
-                                .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
+                                .font(CiderFont.badgeSemibold)
                             Text("Add Tag")
                                 .font(CiderFont.caption(scale: textScale))
                         }
@@ -593,7 +593,7 @@ struct BookmarkMetadataSidebar: View {
                             VStack(spacing: Spacing.xxs) {
                                 RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                                     .fill(color)
-                                    .frame(width: 44, height: 22)
+                                    .frame(width: BookmarksDesign.colorSwatchWidth, height: BookmarksDesign.colorSwatchHeight)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
                                             .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
@@ -602,7 +602,7 @@ struct BookmarkMetadataSidebar: View {
                                 Group {
                                     if copiedHex == hex {
                                         Image(systemName: "checkmark")
-                                            .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
+                                            .font(CiderFont.badgeSemibold)
                                             .foregroundColor(CiderColors.success)
                                     } else {
                                         Text(hex.uppercased())
@@ -611,7 +611,7 @@ struct BookmarkMetadataSidebar: View {
                                             .lineLimit(1)
                                     }
                                 }
-                                .frame(height: 12)
+                                .frame(height: BookmarksDesign.colorSwatchLabelHeight)
                             }
                         }
                         .buttonStyle(.plain)
@@ -662,7 +662,7 @@ struct BookmarkMetadataSidebar: View {
                     .foregroundColor(CiderColors.tertiary)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
+                    .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .rotationEffect(.degrees(isPropertiesExpanded ? 0 : -90))
             }
@@ -695,7 +695,7 @@ struct BookmarkMetadataSidebar: View {
             Text(label)
                 .font(CiderFont.caption(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
-                .frame(width: 52, alignment: .leading)
+                .frame(width: BookmarksDesign.propertyLabelWidth, alignment: .leading)
             Text(value)
                 .font(CiderFont.caption(scale: textScale))
                 .foregroundColor(CiderColors.secondary)
@@ -942,15 +942,15 @@ struct CarouselHeroView: View {
                     HStack(spacing: Spacing.xs) {
                         ForEach(0..<urls.count, id: \.self) { index in
                             Circle()
-                                .fill(index == currentPage ? CiderColors.textOnColor : CiderColors.textOnColor.opacity(0.4))
-                                .frame(width: 6, height: 6)
+                                .fill(index == currentPage ? CiderColors.textOnColor : CiderColors.textOnColorSubtle)
+                                .frame(width: BookmarksDesign.carouselHeroDotSize, height: BookmarksDesign.carouselHeroDotSize)
                         }
                     }
                     .padding(.vertical, Spacing.xs)
                     .padding(.horizontal, Spacing.sm)
                     .background(
                         Capsule()
-                            .fill(Color.black.opacity(0.45))
+                            .fill(CiderColors.acrylicTint)
                     )
                     .padding(.bottom, Spacing.sm)
                 }
@@ -962,10 +962,12 @@ struct CarouselHeroView: View {
         .onHover { isHovered = $0 }
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private func navigatePage(delta: Int) {
         let target = max(0, min(currentPage + delta, urls.count - 1))
         guard target != currentPage else { return }
-        withAnimation(.snappy) {
+        withAnimation(reduceMotion ? .none : .snappy) {
             currentPage = target
         }
     }
@@ -973,10 +975,13 @@ struct CarouselHeroView: View {
     private func carouselArrow(systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 14, weight: .bold))
+                .font(CiderFont.headingBold)
                 .foregroundColor(CiderColors.textOnColor)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.black.opacity(0.55)))
+                .frame(
+                    width: BookmarksDesign.carouselHeroArrowButtonSize,
+                    height: BookmarksDesign.carouselHeroArrowButtonSize
+                )
+                .background(Circle().fill(CiderColors.overlayBadge))
         }
         .buttonStyle(.plain)
     }
@@ -1017,10 +1022,13 @@ struct CarouselMetadataThumbnail: View {
             if isHovered {
                 Button(action: onDelete) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(CiderFont.badge)
                         .foregroundColor(CiderColors.textOnColor)
-                        .frame(width: 16, height: 16)
-                        .background(Circle().fill(Color.black.opacity(0.7)))
+                        .frame(
+                            width: BookmarksDesign.carouselDeleteButtonSize,
+                            height: BookmarksDesign.carouselDeleteButtonSize
+                        )
+                        .background(Circle().fill(CiderColors.overlayButton))
                 }
                 .buttonStyle(.plain)
                 .padding(Spacing.xxs)

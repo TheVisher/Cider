@@ -55,7 +55,7 @@ struct ContinueSectionView: View {
         .frame(height: rowHeight * CGFloat(min(leftItems.count, 4)))
     }
 
-    private var rowHeight: CGFloat { 32 }
+    private var rowHeight: CGFloat { HomeDesign.continueRowHeight }
 
     // MARK: - Row
 
@@ -85,7 +85,7 @@ private struct ContinueRow: View {
                 Image(systemName: item.iconName)
                     .font(CiderFont.bodyMedium)
                     .foregroundColor(item.iconColor)
-                    .frame(width: 16)
+                    .frame(width: HomeDesign.continueRowIconWidth)
 
                 Text(item.title)
                     .font(CiderFont.labelMedium)

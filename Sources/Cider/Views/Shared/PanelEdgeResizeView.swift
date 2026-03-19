@@ -144,7 +144,7 @@ final class PanelEdgeResizeNSView: NSView {
         let topPad = CiderPanelDesign.topPadding
         let bottomPad = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
         let cornerSize = CiderPanelDesign.resizeCornerSize
-        let edgeInset: CGFloat = 6  // extend this many pt into the content for easier grab
+        let edgeInset: CGFloat = CiderPanelDesign.resizeEdgeThickness  // extend this many pt into the content for easier grab
 
         // Content rect — the visible acrylic area (NSView: y=0 is bottom)
         let contentMinX = hPad

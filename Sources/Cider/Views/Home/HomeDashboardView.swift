@@ -225,7 +225,7 @@ struct HomeDashboardView: View {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     ForEach(comingUpItems) { item in
                         comingUpCard(item)
-                            .frame(width: 220)
+                            .frame(width: cardSizing.cardMinWidth)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }

@@ -66,7 +66,7 @@ struct NotesCompactToolbar: View {
                     .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                     .overlay {
                         Text("Aa")
-                            .font(.system(size: NotesDesign.toolbarIconSize + 1, weight: .semibold, design: .rounded))
+                            .font(NoteEditorDesign.textStyleButtonFont)
                             .foregroundColor(showTextStylePopover ? CiderColors.controlAccent : CiderColors.secondary)
                     }
             }
@@ -86,7 +86,7 @@ struct NotesCompactToolbar: View {
                     .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                     .overlay {
                         Image(systemName: "tablecells")
-                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .font(CiderFont.bodyMedium)
                             .foregroundColor(showTablePopover ? CiderColors.controlAccent : CiderColors.secondary)
                     }
             }
@@ -116,7 +116,7 @@ struct NotesCompactToolbar: View {
                     .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                     .overlay {
                         Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .font(CiderFont.bodyMedium)
                             .foregroundColor(showSnapshotPopover ? CiderColors.controlAccent : CiderColors.secondary)
                     }
             }
@@ -144,10 +144,10 @@ struct NotesTextStylePopover: View {
         VStack(alignment: .leading, spacing: 0) {
             // Section 1: Inline styles
             HStack(spacing: Spacing.xs) {
-                inlineToggle("B", font: .system(size: 13, weight: .bold), active: fmt.bold, action: viewModel.editorToggleBold)
-                inlineToggle("I", font: .system(size: 13, weight: .regular, design: .serif).italic(), active: fmt.italic, action: viewModel.editorToggleItalic)
-                inlineToggle("U", font: .system(size: 13, weight: .medium), active: fmt.underline, action: viewModel.editorToggleUnderline, underlined: true)
-                inlineToggle("S", font: .system(size: 13, weight: .medium), active: fmt.strike, action: viewModel.editorToggleStrike, strikethrough: true)
+                inlineToggle("B", font: NoteEditorDesign.inlineToggleBoldFont, active: fmt.bold, action: viewModel.editorToggleBold)
+                inlineToggle("I", font: NoteEditorDesign.inlineToggleItalicFont, active: fmt.italic, action: viewModel.editorToggleItalic)
+                inlineToggle("U", font: NoteEditorDesign.inlineToggleMediumFont, active: fmt.underline, action: viewModel.editorToggleUnderline, underlined: true)
+                inlineToggle("S", font: NoteEditorDesign.inlineToggleMediumFont, active: fmt.strike, action: viewModel.editorToggleStrike, strikethrough: true)
                 inlineToggleIcon("chevron.left.forwardslash.chevron.right", active: fmt.code, action: viewModel.editorToggleCode)
                 highlightMenuButton
                 inlineToggleIcon("eraser", active: false, action: viewModel.editorClearFormatting)
@@ -195,7 +195,7 @@ struct NotesTextStylePopover: View {
             }
             .padding(.vertical, Spacing.xs)
         }
-        .frame(width: 248)
+        .frame(width: NoteEditorDesign.textStylePopoverWidth)
     }
 
     // MARK: - Inline toggle button
@@ -215,7 +215,7 @@ struct NotesTextStylePopover: View {
                 .underline(underlined)
                 .strikethrough(strikethrough)
                 .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: 28, height: 28)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(active ? CiderColors.accentSubtle : Color.clear)
@@ -228,9 +228,9 @@ struct NotesTextStylePopover: View {
     private func inlineToggleIcon(_ symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
+                .font(CiderFont.labelMedium)
                 .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: 28, height: 28)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(active ? CiderColors.accentSubtle : Color.clear)
@@ -265,7 +265,7 @@ struct NotesTextStylePopover: View {
                     HStack {
                         Circle()
                             .fill(color.swatch)
-                            .frame(width: 10, height: 10)
+                            .frame(width: NoteEditorDesign.highlightColorDotSize, height: NoteEditorDesign.highlightColorDotSize)
                         Text(color.name)
                     }
                 }
@@ -273,14 +273,14 @@ struct NotesTextStylePopover: View {
         } label: {
             ZStack(alignment: .bottom) {
                 Image(systemName: "highlighter")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(fmt.highlight ? CiderColors.controlAccent : CiderColors.secondary)
-                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                RoundedRectangle(cornerRadius: NoteEditorDesign.highlightSwatchRadius, style: .continuous)
                     .fill(lastHighlightSwatch)
-                    .frame(width: 14, height: 3)
-                    .offset(y: 1)
+                    .frame(width: NoteEditorDesign.highlightSwatchWidth, height: NoteEditorDesign.highlightSwatchHeight)
+                    .offset(y: NoteEditorDesign.highlightSwatchYOffset)
             }
-            .frame(width: 28, height: 28)
+            .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(fmt.highlight ? CiderColors.accentSubtle : Color.clear)
@@ -307,9 +307,9 @@ struct NotesTextStylePopover: View {
             }
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
+                .font(CiderFont.labelMedium)
                 .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
-                .frame(width: 28, height: 28)
+                .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                         .fill(active ? CiderColors.accentSubtle : Color.clear)
@@ -325,9 +325,9 @@ struct NotesTextStylePopover: View {
         Button(action: action) {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(CiderFont.captionBold)
                     .foregroundColor(CiderColors.controlAccent)
-                    .frame(width: 16)
+                    .frame(width: NoteEditorDesign.popoverRowIconWidth)
                     .opacity(active ? 1 : 0)
 
                 Text(title)
@@ -337,7 +337,7 @@ struct NotesTextStylePopover: View {
                 Spacer()
             }
             .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.xs + 1)
+            .padding(.vertical, NoteEditorDesign.popoverRowVerticalPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -350,15 +350,15 @@ struct NotesTextStylePopover: View {
         Button(action: action) {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(CiderFont.captionBold)
                     .foregroundColor(CiderColors.controlAccent)
-                    .frame(width: 16)
+                    .frame(width: NoteEditorDesign.popoverRowIconWidth)
                     .opacity(active ? 1 : 0)
 
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(active ? CiderColors.controlAccent : CiderColors.secondary)
-                    .frame(width: 16)
+                    .frame(width: NoteEditorDesign.popoverRowIconWidth)
 
                 Text(title)
                     .font(CiderFont.body)
@@ -367,7 +367,7 @@ struct NotesTextStylePopover: View {
                 Spacer()
             }
             .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.xs + 1)
+            .padding(.vertical, NoteEditorDesign.popoverRowVerticalPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -383,8 +383,8 @@ struct NotesTablePopover: View {
     @State private var hoveredCol = 0
 
     private let gridSize = 5
-    private let cellSize: CGFloat = 18
-    private let cellSpacing: CGFloat = 2
+    private let cellSize: CGFloat = NoteEditorDesign.tableCellSize
+    private let cellSpacing: CGFloat = NoteEditorDesign.tableCellSpacing
 
     private var fmt: EditorFormatState { viewModel.editorFormatState }
 
@@ -396,7 +396,7 @@ struct NotesTablePopover: View {
                     HStack(spacing: cellSpacing) {
                         ForEach(1...gridSize, id: \.self) { col in
                             let highlighted = hoveredRow > 0 && hoveredCol > 0 && row <= hoveredRow && col <= hoveredCol
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            RoundedRectangle(cornerRadius: NoteEditorDesign.tableCellRadius, style: .continuous)
                                 .fill(highlighted ? CiderColors.controlAccent : CiderColors.separatorSubtle)
                                 .frame(width: cellSize, height: cellSize)
                                 .onHover { isHovered in
@@ -472,7 +472,7 @@ struct NotesTablePopover: View {
                 .padding(.vertical, Spacing.xs)
             }
         }
-        .frame(width: 200)
+        .frame(width: NoteEditorDesign.tablePopoverWidth)
     }
 
     @ViewBuilder
@@ -485,9 +485,9 @@ struct NotesTablePopover: View {
         Button(action: action) {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(CiderFont.labelMedium)
                     .foregroundColor(destructive ? CiderColors.destructive : CiderColors.secondary)
-                    .frame(width: 16)
+                    .frame(width: NoteEditorDesign.popoverRowIconWidth)
 
                 Text(title)
                     .font(CiderFont.body)
@@ -496,7 +496,7 @@ struct NotesTablePopover: View {
                 Spacer()
             }
             .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.xs + 1)
+            .padding(.vertical, NoteEditorDesign.popoverRowVerticalPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -520,7 +520,7 @@ struct NotesInfoToggleButton: View {
                 .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .overlay {
                     Image(systemName: viewModel.isMetadataPanelVisible ? "info.circle.fill" : "info.circle")
-                        .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                        .font(CiderFont.bodyMedium)
                         .foregroundColor(viewModel.isMetadataPanelVisible ? CiderColors.controlAccent : CiderColors.secondary)
                 }
         }
@@ -543,7 +543,7 @@ struct NotesToolbarButton: View {
                 .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                 .overlay {
                     Image(systemName: symbol)
-                        .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                        .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.secondary)
                 }
         }
@@ -558,7 +558,7 @@ struct NotesToolbarDivider: View {
     var body: some View {
         Rectangle()
             .fill(CiderColors.separatorSolid)
-            .frame(width: 1, height: NotesDesign.toolbarDividerHeight)
+            .frame(width: Spacing.hairline, height: NotesDesign.toolbarDividerHeight)
             .padding(.horizontal, Spacing.xs)
     }
 }
@@ -667,7 +667,7 @@ struct NotesFindTextField: NSViewRepresentable {
         textField.delegate = context.coordinator
         textField.stringValue = text
         textField.placeholderString = placeholder
-        textField.font = .systemFont(ofSize: 12)
+        textField.font = NoteEditorDesign.findBarNSFont
         textField.isBordered = false
         textField.isBezeled = false
         textField.drawsBackground = false
@@ -809,11 +809,11 @@ struct NoteSnapshotPopover: View {
                         } label: {
                             HStack(spacing: Spacing.sm) {
                                 Image(systemName: "clock")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(CiderFont.bodyMedium)
                                     .foregroundColor(CiderColors.tertiary)
-                                    .frame(width: 16)
+                                    .frame(width: NoteEditorDesign.popoverRowIconWidth)
 
-                                VStack(alignment: .leading, spacing: 1) {
+                                VStack(alignment: .leading, spacing: Spacing.hairline) {
                                     Text(choice.title)
                                         .font(CiderFont.bodyMedium)
                                         .foregroundColor(CiderColors.primary)
@@ -826,16 +826,16 @@ struct NoteSnapshotPopover: View {
                                 Spacer()
                             }
                             .padding(.horizontal, Spacing.md)
-                            .padding(.vertical, Spacing.xs + 1)
+                            .padding(.vertical, NoteEditorDesign.popoverRowVerticalPadding)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
-            .frame(maxHeight: 300)
+            .frame(maxHeight: NoteEditorDesign.snapshotScrollMaxHeight)
         }
-        .frame(width: 260)
+        .frame(width: NoteEditorDesign.snapshotPopoverWidth)
         .padding(.bottom, Spacing.xs)
     }
 }
@@ -928,7 +928,7 @@ struct NoteMetadataSidebar: View {
                     .foregroundColor(CiderColors.tertiary)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
+                    .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : -90))
             }
@@ -1060,7 +1060,7 @@ struct NoteMetadataSidebar: View {
                                     HStack(spacing: Spacing.xs) {
                                         Circle()
                                             .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                                            .frame(width: 8, height: 8)
+                                            .frame(width: BookmarksDesign.tagColorDotSize, height: BookmarksDesign.tagColorDotSize)
                                         Text(label.name)
                                     }
                                 }
@@ -1077,9 +1077,9 @@ struct NoteMetadataSidebar: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 2) {
+                        HStack(spacing: Spacing.xxs) {
                             Image(systemName: "plus")
-                                .font(.system(size: 8 * CiderFont.scale, weight: .semibold))
+                                .font(CiderFont.badgeSemibold)
                             Text("Add Tag")
                                 .font(CiderFont.caption)
                         }
@@ -1118,9 +1118,9 @@ struct NoteMetadataSidebar: View {
                             } label: {
                                 HStack(spacing: Spacing.xs) {
                                     Image(systemName: "link")
-                                        .font(.system(size: 10, weight: .medium))
+                                        .font(CiderFont.captionMedium)
                                         .foregroundColor(CiderColors.tertiary)
-                                        .frame(width: 16)
+                                        .frame(width: NoteEditorDesign.popoverRowIconWidth)
 
                                     VStack(alignment: .leading, spacing: 0) {
                                         Text(url.host ?? url.absoluteString)
@@ -1175,11 +1175,11 @@ struct NoteMetadataSidebar: View {
                             } label: {
                                 HStack(spacing: Spacing.sm) {
                                     Image(systemName: "clock")
-                                        .font(.system(size: 11, weight: .medium))
+                                        .font(CiderFont.bodyMedium)
                                         .foregroundColor(CiderColors.tertiary)
-                                        .frame(width: 16)
+                                        .frame(width: NoteEditorDesign.popoverRowIconWidth)
 
-                                    VStack(alignment: .leading, spacing: 1) {
+                                    VStack(alignment: .leading, spacing: Spacing.hairline) {
                                         Text(choice.title)
                                             .font(CiderFont.bodyMedium)
                                             .foregroundColor(CiderColors.primary)
@@ -1274,7 +1274,7 @@ struct NoteMetadataSidebar: View {
                     .foregroundColor(CiderColors.tertiary)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9 * CiderFont.scale, weight: .semibold))
+                    .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .rotationEffect(.degrees(isInfoExpanded ? 0 : -90))
             }
@@ -1298,7 +1298,7 @@ struct NoteMetadataSidebar: View {
             Text(label)
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
-                .frame(width: 72, alignment: .leading)
+                .frame(width: NoteEditorDesign.infoGridLabelWidth, alignment: .leading)
             Text(value)
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.secondary)
@@ -1385,6 +1385,6 @@ struct NotesStatusBar: View {
             }
         }
         .padding(.horizontal, Spacing.md)
-        .frame(height: 24)
+        .frame(height: NoteEditorDesign.statusBarHeight)
     }
 }

@@ -39,6 +39,11 @@ struct NoteCardSizing {
     var imageWidth: CGFloat { interpolate(60, 80, 110, 160) }
     /// Square thumbnail size in list view
     var listImageSize: CGFloat { interpolate(36, 44, 56, 72) }
+    /// 4:3 aspect ratio height for inline note images (width × imageAspectRatio)
+    var imageHeight: CGFloat { imageWidth * NoteCardSizing.imageAspectRatio }
+
+    /// Aspect ratio multiplier applied to imageWidth to derive the inline image frame height (4:3 portrait)
+    static let imageAspectRatio: CGFloat = 0.75
 
     private func interpolate(_ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ d: CGFloat) -> CGFloat {
         let stops = [a, b, c, d]

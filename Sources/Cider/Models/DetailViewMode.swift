@@ -52,13 +52,13 @@ struct DetailViewModePicker: View {
                     } label: {
                         HStack(spacing: Spacing.sm) {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(CiderFont.captionBold)
                                 .foregroundColor(CiderColors.controlAccent)
                                 .frame(width: 16)
                                 .opacity(mode == currentMode ? 1 : 0)
 
                             Image(systemName: mode.iconName)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(CiderFont.labelMedium)
                                 .foregroundColor(mode == currentMode ? CiderColors.controlAccent : CiderColors.secondary)
                                 .frame(width: 16)
 

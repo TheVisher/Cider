@@ -107,6 +107,10 @@ enum SnapTarget: String, CaseIterable {
 enum CiderBorder {
     static let innerStrokeWidth: CGFloat = 1.5
     static let innerStrokeInset: CGFloat = 0.75
+    /// Sub-pixel hairline stroke for subtle pill/card outlines
+    static let hairlineStrokeWidth: CGFloat = 0.5
+    /// Width of the selection ring on color-picker swatches
+    static let colorPickerRingWidth: CGFloat = 2
 }
 
 // MARK: - Safe URL Opening
@@ -160,6 +164,78 @@ enum NotesDesign {
     static let trafficLightSpacing: CGFloat = Spacing.xs
 }
 
+enum NoteEditorDesign {
+    // MARK: - Popover widths
+    /// Width of the text-style formatting popover
+    static let textStylePopoverWidth: CGFloat = 248
+    /// Width of the table insert/edit popover
+    static let tablePopoverWidth: CGFloat = 200
+    /// Width of the version-history (snapshot) popover
+    static let snapshotPopoverWidth: CGFloat = 260
+    /// Max scroll height of the snapshot list inside the popover
+    static let snapshotScrollMaxHeight: CGFloat = 300
+
+    // MARK: - Popover row layout
+    /// Width of icon column in popover rows (checkmark, symbol, clock)
+    static let popoverRowIconWidth: CGFloat = 16
+    /// Vertical padding for each popover menu row (xs + 1px optical correction)
+    static let popoverRowVerticalPadding: CGFloat = Spacing.xs + 1
+
+    // MARK: - Table grid picker
+    /// Size of each table-picker cell in the grid
+    static let tableCellSize: CGFloat = 18
+    /// Spacing between cells in the table picker grid (= Spacing.xxs)
+    static let tableCellSpacing: CGFloat = Spacing.xxs
+    /// Corner radius of each table picker cell
+    static let tableCellRadius: CGFloat = Radius.xs
+
+    // MARK: - Highlight swatch bar (in toolbar)
+    /// Width of the color swatch underline bar on the highlight button
+    static let highlightSwatchWidth: CGFloat = 14
+    /// Height of the color swatch underline bar on the highlight button
+    static let highlightSwatchHeight: CGFloat = 3
+    /// Corner radius of the swatch underline bar (hairline rounding)
+    static let highlightSwatchRadius: CGFloat = Spacing.hairline
+    /// Y offset to nudge the swatch bar toward the bottom of the icon
+    static let highlightSwatchYOffset: CGFloat = Spacing.hairline
+    /// Diameter of the color-choice dot inside the highlight submenu
+    static let highlightColorDotSize: CGFloat = 10
+
+    // MARK: - Status bar
+    /// Height of the editor status bar at the bottom of the notes pane
+    static let statusBarHeight: CGFloat = 24
+    /// Width of the label column in the notes metadata info grid ("Created", "Modified", etc.)
+    static let infoGridLabelWidth: CGFloat = 72
+
+    // MARK: - Note card accent bar
+    /// Width of the left accent bar on note cards
+    static let accentBarWidth: CGFloat = 2
+    /// Corner radius of the left accent bar on note cards
+    static let accentBarRadius: CGFloat = Spacing.hairline
+
+    // MARK: - Note card grid layout
+    /// Extra height added to the card content preview height to form the grid card minimum height
+    static let gridMinHeightPadding: CGFloat = 60
+    /// Opacity of the hover footer overlay on note cards (semi-opaque surface)
+    static let hoverOverlayOpacity: CGFloat = 0.95
+
+    // MARK: - Fonts (non-standard variants not expressible through CiderFont tokens)
+    /// "Aa" text-style button label — 12pt semibold rounded (toolbar branding treatment)
+    static var textStyleButtonFont: Font {
+        .system(size: 12 * CiderFont.scale, weight: .semibold, design: .rounded)
+    }
+    /// AppKit NSFont for the find bar text field (12pt regular)
+    static var findBarNSFont: NSFont { .systemFont(ofSize: 12 * CiderFont.scale) }
+    /// Inline toggle letter label for Bold (13pt bold)
+    static var inlineToggleBoldFont: Font { .system(size: 13 * CiderFont.scale, weight: .bold) }
+    /// Inline toggle letter label for Italic (13pt regular serif italic)
+    static var inlineToggleItalicFont: Font {
+        .system(size: 13 * CiderFont.scale, weight: .regular, design: .serif).italic()
+    }
+    /// Inline toggle letter label for Underline/Strikethrough (13pt medium)
+    static var inlineToggleMediumFont: Font { .system(size: 13 * CiderFont.scale, weight: .medium) }
+}
+
 enum BookmarksDesign {
     static let thumbnailHeightGrid: CGFloat = 140
     static let thumbnailHeightMasonryMin: CGFloat = 120
@@ -205,6 +281,35 @@ enum BookmarksDesign {
     static let multiDragFanXStep: CGFloat = 16
     static let multiDragFanYStep: CGFloat = 8
     static let buttonTapTarget: CGFloat = 28
+    static let dragPreviewPaddingBleed: CGFloat = 40
+    /// Carousel navigation arrow icon size
+    static let carouselArrowIconSize: CGFloat = 10
+    /// Carousel navigation arrow button hit-target (icon + padding)
+    static let carouselArrowButtonSize: CGFloat = 22
+    /// Carousel page-indicator dot diameter
+    static let carouselDotSize: CGFloat = 5
+    /// Hero carousel navigation arrow icon size (larger surface)
+    static let carouselHeroArrowIconSize: CGFloat = 14
+    /// Hero carousel navigation arrow button hit-target
+    static let carouselHeroArrowButtonSize: CGFloat = 28
+    /// Carousel inline delete-button (×) hit-target
+    static let carouselDeleteButtonSize: CGFloat = 16
+    /// Width of the label column in the properties info grid
+    static let propertyLabelWidth: CGFloat = 52
+    /// Tag color indicator dot in menus and pickers
+    static let tagColorDotSize: CGFloat = 8
+    /// Hero carousel page-indicator dot diameter (larger surface, slightly bigger than card dot)
+    static let carouselHeroDotSize: CGFloat = 6
+    /// Color swatch width in AI dominant-colors section
+    static let colorSwatchWidth: CGFloat = 44
+    /// Color swatch height in AI dominant-colors section
+    static let colorSwatchHeight: CGFloat = 22
+    /// Color swatch label row height (hex / checkmark row)
+    static let colorSwatchLabelHeight: CGFloat = 12
+    /// Related-items row thumbnail width
+    static let relatedItemThumbnailWidth: CGFloat = 32
+    /// Related-items row thumbnail height
+    static let relatedItemThumbnailHeight: CGFloat = 24
 }
 
 enum BookmarksToastDesign {
@@ -267,6 +372,30 @@ enum UndoToastDesign {
     }
 }
 
+/// NSColor design tokens for ScreenCaptureService's CoreGraphics overlay drawing.
+/// These are AppKit/CGColor-based because the draw(_ dirtyRect:) method uses
+/// CoreGraphics directly — SwiftUI Color cannot be used there.
+enum ScreenCaptureOverlayDesign {
+    /// Full-screen dim tint drawn outside the active selection rectangle.
+    static let screenDimColor = NSColor.black.withAlphaComponent(0.35)
+    /// Selection rectangle border stroke color.
+    static let selectionBorderColor = NSColor.white.withAlphaComponent(0.9)
+    /// Selection rectangle border line width.
+    static let selectionBorderWidth: CGFloat = CiderBorder.innerStrokeWidth
+    /// Corner handle fill color (solid white squares).
+    static let cornerHandleColor = NSColor.white
+    /// Corner handle size (width and height of each square handle).
+    static let cornerHandleSize: CGFloat = 6
+    /// Dimensions label text color.
+    static let labelTextColor = NSColor.white
+    /// Dimensions label pill background color.
+    static let labelBackgroundColor = NSColor.black.withAlphaComponent(0.55)
+    /// Horizontal padding between label text and pill edge.
+    static let labelPadding: CGFloat = Spacing.xs
+    /// Gap between selection edge and dimensions label pill.
+    static let labelGap: CGFloat = Spacing.sm
+}
+
 enum ScreenCaptureToastDesign {
     static let width: CGFloat = 360
     static let height: CGFloat = 112
@@ -286,6 +415,20 @@ enum SearchPaletteDesign {
     static let searchFieldHeight: CGFloat = 52
     static let recentBookmarkCount = 3
     static let recentNoteCount = 2
+    static let recentDateCardCount = 2
+    static let recentContactCount = 2
+    /// Maximum number of subfolder name pills shown in a folder section header
+    static let folderSectionMaxSubfolderPills = 3
+    /// Base color for the floating drop-shadow shape beneath the palette
+    static let shadowColor: Color = .black
+    /// Blur radius for the palette floating drop-shadow
+    static let shadowBlurRadius: CGFloat = 24
+    /// Y-axis offset for the palette floating drop-shadow
+    static let shadowYOffset: CGFloat = 12
+    /// Opacity of the palette floating drop-shadow
+    static let shadowOpacity: CGFloat = 0.7
+    /// Fraction of the screen height at which the palette is positioned from the top
+    static let topOffsetFactor: CGFloat = 0.22
 }
 
 enum CiderPanelDesign {
@@ -343,6 +486,188 @@ enum ClipboardPanelDesign {
     static let minHeight: CGFloat = 300
     static let defaultHeight: CGFloat = 500
     static let cornerRadius: CGFloat = Radius.lg
+    static let draggableHeaderHeight: CGFloat = 48
+    /// Width threshold above which the viewer switches to two-column layout
+    static let wideLayoutThreshold: CGFloat = 500
+}
+
+enum VaultFileDesign {
+    /// Height of the thumbnail/placeholder area in grid cards
+    static let cardThumbnailHeight: CGFloat = 120
+    /// Height of the placeholder area in the detail panel
+    static let detailPlaceholderHeight: CGFloat = 180
+    /// Min/max preview heights for PDF and video in detail view
+    static let detailPreviewMinHeight: CGFloat = 200
+    static let detailPreviewMaxHeight: CGFloat = 500
+    /// Audio player fixed height
+    static let audioPlayerHeight: CGFloat = 60
+    /// Audio player max height (same as fixed, for API parity)
+    static let audioPlayerMaxHeight: CGFloat = 60
+}
+
+enum SnapMenuDesign {
+    /// Width of the snap-target popover
+    static let popoverWidth: CGFloat = 210
+}
+
+enum NewItemPopoverDesign {
+    /// Height of each item-type card in the picker grid
+    static let typeCardHeight: CGFloat = 62
+}
+
+enum LibraryTableDesign {
+    /// Width of the leading checkbox column
+    static let checkboxColumnWidth: CGFloat = 40
+    /// Width of the trailing overflow-menu column
+    static let menuColumnWidth: CGFloat = 40
+    /// Height of each data row
+    static let rowHeight: CGFloat = 40
+    /// Height of the sticky header bar
+    static let headerHeight: CGFloat = 32
+    /// Width of the separator line between columns
+    static let columnSeparatorWidth: CGFloat = 1
+    /// Width of the invisible drag hit area on each column separator
+    static let columnDragHitWidth: CGFloat = 10
+    /// Width of the column-visibility picker popover
+    static let columnPickerPopoverWidth: CGFloat = 160
+    /// Minimum column width (referenced via TableColumnID.minWidth — kept here for symmetry)
+    static let minColumnWidth: CGFloat = 60
+}
+
+enum CiderTabDesign {
+    /// Minimum width of the rename text field inside a tab
+    static let renameFieldMinWidth: CGFloat = 40
+    /// Maximum width of the rename text field inside a tab
+    static let renameFieldMaxWidth: CGFloat = 120
+    /// Minimum width of the add-tab popover
+    static let addTabPopoverMinWidth: CGFloat = 200
+}
+
+enum ClipboardDesign {
+    /// Width of the collapsed-section chevron icon frame
+    static let sectionChevronWidth: CGFloat = 12
+    /// Width/height of the favicon thumbnail frame
+    static let faviconSize: CGFloat = 16
+    /// Max height of the image preview in a clipboard card
+    static let imagePreviewMaxHeight: CGFloat = 120
+    /// Height of the async placeholder while image loads
+    static let imagePlaceholderHeight: CGFloat = 60
+}
+
+enum DetailToolbarDesign {
+    /// Width/height of toolbar icon buttons (close, hero mode, etc.)
+    static let iconButtonSize: CGFloat = 24
+    /// Width/height of the larger toolbar buttons (e.g. info toggle, sidebar toggle)
+    static let largeButtonSize: CGFloat = 28
+}
+
+enum FolderSidebarItemDesign {
+    /// Width/height of the folder icon in sidebar rows
+    static let folderIconSize: CGFloat = 20
+    /// Width/height of the folder icon in sub-folder rows
+    static let subFolderIconSize: CGFloat = 14
+    /// Width of the metadata icon column in VaultFileDetailView meta rows
+    static let metaIconWidth: CGFloat = 14
+}
+
+enum FolderDetailDesign {
+    /// Minimum card width in the sub-folder grid
+    static let subFolderCardMinWidth: CGFloat = 140
+    /// Maximum card width in the sub-folder grid
+    static let subFolderCardMaxWidth: CGFloat = 200
+}
+
+enum TagColorPickerDesign {
+    /// Width/height of a color swatch circle
+    static let swatchSize: CGFloat = 24
+    /// Width/height of the selection ring indicator inside a swatch
+    static let selectionRingSize: CGFloat = 18
+    /// Minimum GridItem adaptive cell width for a swatch color-picker grid (swatchSize + breathing room)
+    static let gridCellMinWidth: CGFloat = 28
+}
+
+enum TagDotDesign {
+    /// Diameter of the color dot in tag pills (TagPillView, SidebarTagPill, CompactTagPill)
+    static let pillDotSize: CGFloat = 6
+    /// Diameter of the color dot in the tag manager card header
+    static let cardDotSize: CGFloat = 12
+    /// Diameter of the color dot in the unused-tags hygiene list
+    static let unusedDotSize: CGFloat = 8
+    /// Diameter of the color dot in the filtered-tag header pill
+    static let filterHeaderDotSize: CGFloat = 10
+    /// Diameter of color dots inside similar-group rows
+    static let groupRowDotSize: CGFloat = 6
+    /// Diameter of color dots in merge-target popover rows
+    static let mergeRowDotSize: CGFloat = 8
+}
+
+enum NewItemPopoverFormDesign {
+    /// Overall popover panel width
+    static let panelWidth: CGFloat = 264
+    /// Back/close button frame size
+    static let headerButtonSize: CGFloat = 28
+    /// Primary action button height
+    static let actionButtonHeight: CGFloat = 32
+    /// Todo mode-picker row icon column width
+    static let todoModeIconWidth: CGFloat = 20
+    /// Tag swatch circle inside the creation form
+    static let tagSwatchSize: CGFloat = 24
+    /// Tag swatch selection ring inside the creation form
+    static let tagSelectionRingSize: CGFloat = 18
+}
+
+enum TagPopoverDesign {
+    /// Max height of the scrollable merge-target list
+    static let mergeListMaxHeight: CGFloat = 300
+    /// Width of the merge-target popover
+    static let mergePopoverWidth: CGFloat = 240
+    /// Width of the tag-color picker popover
+    static let colorPickerWidth: CGFloat = 200
+    /// Width of the inline tag creation form
+    static let creationFormWidth: CGFloat = 220
+    /// Max height of the tag-filter scroll section in ViewOptionsDropdown
+    static let filterScrollMaxHeight: CGFloat = 120
+    /// Minimum adaptive grid card width in the tag manager card grid
+    static let managerCardMinWidth: CGFloat = 180
+}
+
+enum SelectionCheckmarkDesign {
+    /// Diameter of the checkmark circle badge
+    static let circleSize: CGFloat = 20
+}
+
+enum ClipboardViewerTableDesign {
+    /// CompactTagPill color dot diameter
+    static let tagDotSize: CGFloat = 5
+}
+
+enum TagPillDesign {
+    /// Background fill opacity for colored tag pills (applied to dynamic label color)
+    static let fillOpacity: CGFloat = 0.12
+    /// Stroke border opacity for colored tag pills (applied to dynamic label color)
+    static let strokeOpacity: CGFloat = 0.2
+}
+
+enum ViewOptionsDesign {
+    /// Width of the view-options popover panel
+    static let popoverWidth: CGFloat = 210
+    /// Width × height of the segmented group-by icon button
+    static let segmentButtonWidth: CGFloat = 32
+    static let segmentButtonHeight: CGFloat = 28
+}
+
+enum GenericItemDetailDesign {
+    /// Maximum width of the editable title text field
+    static let titleFieldMaxWidth: CGFloat = 200
+}
+
+enum HomeDesign {
+    /// Height of each row in the Continue section
+    static let continueRowHeight: CGFloat = Spacing.xxxl
+    /// Width of the leading icon column in Continue rows
+    static let continueRowIconWidth: CGFloat = Spacing.lg
+    /// Minimum width of a Coming Up card in the horizontal scroll strip
+    static let comingUpCardMinWidth: CGFloat = BookmarksDesign.cardMinWidth
 }
 
 enum AIChatPanelDesign {
@@ -355,6 +680,8 @@ enum AIChatPanelDesign {
     static let modelSelectorHeight: CGFloat = 32
     /// Total height of the SwiftUI header (title bar + divider + model selector + padding)
     static let headerHeight: CGFloat = titleBarHeight + 1 + modelSelectorHeight + Spacing.xs * 2
+    /// Height of the draggable region at the top of the panel (used for window dragging)
+    static let draggableHeaderHeight: CGFloat = 48
 }
 
 enum CiderColors {
@@ -423,17 +750,29 @@ enum CiderColors {
 
     /// Dark overlay on drag preview / thumbnail
     static let overlayDark = Color.black.opacity(0.72)
+    /// Badge/counter pill background on thumbnails
+    static let overlayBadge = Color.black.opacity(0.55)
+    /// Hover gradient overlay on thumbnail footers
+    static let gradientOverlay = Color.black.opacity(0.6)
+    /// Delete/action button circle background on hover
+    static let overlayButton = Color.black.opacity(0.7)
     /// Subtle backdrop for in-panel overlays (details sheets)
     static let backdropSubtle = Color.black.opacity(0.14)
     /// Hero preview stage gradient (dark end)
     static let stageGradientStart = Color.black.opacity(0.34)
     /// Hero preview stage gradient (light end)
     static let stageGradientEnd = Color.black.opacity(0.22)
+    /// Label pill background for folder cover image reposition hint
+    static let coverBannerLabel = Color.black.opacity(0.5)
 
     // MARK: - Text on Color
 
     /// Bright text on gradient/colored backgrounds
     static let textOnColor = Color.white.opacity(0.9)
+    /// Dimmed secondary text on gradient/colored backgrounds
+    static let textOnColorDim = Color.white.opacity(0.7)
+    /// Subtle (inactive) indicator on gradient/colored backgrounds — carousel page dots
+    static let textOnColorSubtle = Color.white.opacity(0.4)
 
     // MARK: - Shimmer Animation
 
@@ -444,6 +783,8 @@ enum CiderColors {
 
     /// Settings selected-row border / progress track
     static let borderSelected = Color.white.opacity(0.14)
+    /// Selection ring on color picker swatches (solid white ring)
+    static let colorPickerSelectionRing = Color.white
 
     // MARK: - Selection & Drop Targets (accent-based)
 
@@ -472,6 +813,8 @@ enum CiderColors {
     static let accentMedium = controlAccent.opacity(0.2)
     /// Accent-colored border (sidebar drop target)
     static let accentBorder = controlAccent.opacity(0.3)
+    /// Dimmed accent fill (note card left accent bar)
+    static let accentDim = controlAccent.opacity(0.55)
     /// Near-solid accent (progress bar fill)
     static let accentSolid = controlAccent.opacity(0.88)
 
@@ -503,6 +846,15 @@ enum CiderColors {
 
     /// Muted success indicator
     static let successMuted = success.opacity(0.7)
+    /// Faint success background (saved-item pill rest state)
+    static let successSubtle = success.opacity(0.08)
+
+    // MARK: - Sidecar Tag Colors
+
+    /// Faint tinted background for AI/vault sidecar tag pills
+    static let sidecarTagFill = primary.opacity(0.06)
+    /// Hairline border for AI/vault sidecar tag pills
+    static let sidecarTagBorder = primary.opacity(0.08)
 
     // MARK: - Gradient Tint
 

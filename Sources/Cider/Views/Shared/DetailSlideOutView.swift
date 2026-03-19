@@ -253,7 +253,7 @@ struct DetailSlideOutView: View {
                         .scaleEffect(0.7)
                 }
             }
-            .frame(width: 24, height: 24)
+            .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -273,7 +273,7 @@ struct DetailSlideOutView: View {
                 Image(systemName: "xmark")
                     .font(CiderFont.bodySemibold)
                     .foregroundColor(CiderColors.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: DetailToolbarDesign.largeButtonSize, height: DetailToolbarDesign.largeButtonSize)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -289,7 +289,7 @@ struct DetailSlideOutView: View {
                     Image(systemName: "photo")
                         .font(CiderFont.label)
                         .foregroundColor(heroMode == .thumbnail ? CiderColors.controlAccent : CiderColors.tertiary)
-                        .frame(width: 24, height: 24)
+                        .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -323,7 +323,7 @@ struct DetailSlideOutView: View {
                     .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                     .overlay {
                         Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
-                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .font(CiderFont.toolbarIcon)
                             .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
                     }
             }
@@ -386,7 +386,7 @@ struct BookmarkPageToolbar: View {
                     .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
                     .overlay {
                         Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
-                            .font(.system(size: NotesDesign.toolbarIconSize, weight: .medium))
+                            .font(CiderFont.toolbarIcon)
                             .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
                     }
             }
@@ -410,7 +410,7 @@ struct BookmarkPageToolbar: View {
                         .scaleEffect(0.7)
                 }
             }
-            .frame(width: 24, height: 24)
+            .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

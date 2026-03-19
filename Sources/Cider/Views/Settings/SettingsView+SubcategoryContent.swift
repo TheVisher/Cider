@@ -239,7 +239,7 @@ extension SettingsView {
                             SettingsSizeOptionButton(
                                 title: size.displayName,
                                 preview: "Aa",
-                                previewSize: 14 * size.scale,
+                                previewSize: SettingsDesign.textPreviewBaseSize * size.scale,
                                 isSelected: viewModel.textSize == size,
                                 action: { viewModel.textSize = size }
                             )
