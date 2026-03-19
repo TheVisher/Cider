@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Combine
+import os.log
 
 struct NoteSnapshotInfo: Identifiable, Hashable {
     let id: String
@@ -15,6 +16,7 @@ final class NotesStorage: ObservableObject {
 
     @Published private(set) var notes: [Note] = []
 
+    private let logger = Logger(subsystem: "com.cider.app", category: "NotesStorage")
     private var directoryURL: URL
     private var directoryFileDescriptor: Int32 = -1
     private var directorySource: DispatchSourceFileSystemObject?
@@ -689,7 +691,7 @@ final class NotesStorage: ObservableObject {
             }
             SyncService.shared.pushAfterLocalChange()
         } catch {
-            NSLog("[NotesStorage] Rename failed: \(error)")
+            logger.error("Rename failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -737,7 +739,7 @@ final class NotesStorage: ObservableObject {
             do {
                 try fm.moveItem(at: oldFileURL, to: newFileURL)
             } catch {
-                NSLog("[NotesStorage] Failed to move note file: \(error)")
+                logger.error("Failed to move note file: \(error.localizedDescription, privacy: .public)")
                 return false
             }
         }

@@ -113,7 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeAIChatNotifications()
 
         // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
             if let appMenu = NSApp.mainMenu?.item(at: 0)?.submenu {
                 for item in appMenu.items where item.keyEquivalent == "," {
                     item.target = self

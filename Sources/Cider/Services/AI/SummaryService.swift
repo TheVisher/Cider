@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import os.log
 
 /// On-device page summarization using Foundation Models (Apple Intelligence).
 /// Only available when Apple Intelligence is enabled on the device.
@@ -7,6 +8,7 @@ import FoundationModels
 final class SummaryService {
     static let shared = SummaryService()
 
+    private let logger = Logger(subsystem: "com.cider.app", category: "SummaryService")
     private var _session: LanguageModelSession?
 
     private var session: LanguageModelSession {
@@ -36,7 +38,7 @@ final class SummaryService {
             let summary = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             return summary.isEmpty ? nil : summary
         } catch {
-            NSLog("[Cider AI] Summary failed: \(error)")
+            logger.error("Summary failed: \(error.localizedDescription, privacy: .public)")
             _session = nil  // reset session on error
             return nil
         }

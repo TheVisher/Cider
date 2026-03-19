@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.cider.app", category: "CiderConfig")
 
 enum ActivationMode: String, Codable, CaseIterable {
     case doubleTap
@@ -354,7 +357,7 @@ struct CiderConfig: Codable {
             let config = try JSONDecoder().decode(CiderConfig.self, from: data)
             return config
         } catch {
-            NSLog("[Cider] Config decode error: \(error). Using defaults (saved config preserved).")
+            logger.error("Config decode error: \(error, privacy: .public). Using defaults (saved config preserved).")
             return .default
         }
     }

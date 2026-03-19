@@ -27,6 +27,7 @@ final class BookmarksStorage: ObservableObject {
     @Published private(set) var bookmarks: [Bookmark] = []
     @Published private(set) var folders: [Folder] = []
 
+    private let logger = Logger(subsystem: "com.cider.app", category: "BookmarksStorage")
     private let legacyDefaultsKey = "CiderBookmarks"
     private let htmlFileName = "bookmarks.html"
     private let metadataFileName = "_cider_bookmarks_metadata.json"
@@ -861,7 +862,7 @@ final class BookmarksStorage: ObservableObject {
                     let bookmarks = try JSONDecoder().decode([Bookmark].self, from: data)
                     metadataSnapshot = BookmarksMetadataSnapshot(bookmarks: bookmarks, folders: [])
                 } catch {
-                    NSLog("[BookmarksStorage] Failed to decode metadata: \(error)")
+                    logger.error("Failed to decode metadata: \(error.localizedDescription, privacy: .public)")
                     metadataSnapshot = BookmarksMetadataSnapshot(bookmarks: [], folders: [])
                 }
             }
@@ -982,7 +983,7 @@ final class BookmarksStorage: ObservableObject {
                 let bookmarks = try JSONDecoder().decode([Bookmark].self, from: data)
                 return BookmarksMetadataSnapshot(bookmarks: bookmarks, folders: [])
             } catch {
-                NSLog("[BookmarksStorage] Failed to decode metadata: \(error)")
+                logger.error("Failed to decode metadata (sync): \(error.localizedDescription, privacy: .public)")
                 return BookmarksMetadataSnapshot(bookmarks: [], folders: [])
             }
         }
@@ -1001,7 +1002,7 @@ final class BookmarksStorage: ObservableObject {
                 folders: []
             )
         } catch {
-            NSLog("[BookmarksStorage] Failed to migrate legacy bookmarks: \(error)")
+            logger.error("Failed to migrate legacy bookmarks: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -1011,7 +1012,7 @@ final class BookmarksStorage: ObservableObject {
             let html = NetscapeBookmarksCodec.encode(bookmarks)
             try html.write(to: htmlFileURL, atomically: true, encoding: .utf8)
         } catch {
-            NSLog("[BookmarksStorage] Failed to write bookmarks HTML: \(error)")
+            logger.error("Failed to write bookmarks HTML: \(error.localizedDescription, privacy: .public)")
         }
 
         do {
@@ -1019,7 +1020,7 @@ final class BookmarksStorage: ObservableObject {
             let data = try JSONEncoder().encode(snapshot)
             try data.write(to: metadataFileURL, options: .atomic)
         } catch {
-            NSLog("[BookmarksStorage] Failed to write bookmarks metadata: \(error)")
+            logger.error("Failed to write bookmarks metadata: \(error.localizedDescription, privacy: .public)")
         }
 
         SyncService.shared.pushAfterLocalChange()

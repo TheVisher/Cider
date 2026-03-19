@@ -178,12 +178,6 @@ enum ActiveBrowserCaptureService {
             if let capture = runScript(chromiumScript(forBundleID: target.bundleID), targetName: targetName) {
                 return capture
             }
-            if !target.appName.isEmpty {
-                captureLog.debug("  Chromium app-name path for \(target.appName, privacy: .public)")
-                if let capture = runScript(chromiumScript(forApplicationName: target.appName), targetName: targetName) {
-                    return capture
-                }
-            }
         }
 
         captureLog.debug("  Trying accessibility for \(target.bundleID, privacy: .public)")
@@ -217,7 +211,7 @@ enum ActiveBrowserCaptureService {
                 }
             }
             if let message = errorInfo[NSAppleScript.errorMessage] as? String {
-                NSLog("[BookmarksCapture] AppleScript error: \(message)")
+                captureLog.error("AppleScript error: \(message, privacy: .public)")
             }
             return nil
         }
@@ -569,18 +563,6 @@ enum ActiveBrowserCaptureService {
             if (count of tabs of w) = 0 then return ""
             set t to item 1 of tabs of w
             return (URL of t) & linefeed & (title of t)
-        end tell
-        """
-    }
-
-    private static func chromiumScript(forApplicationName appName: String) -> String {
-        let escapedName = escapedAppleScriptLiteral(appName)
-        return """
-        tell application "\(escapedName)"
-            if not (exists front window) then return ""
-            set tabURL to URL of active tab of front window
-            set tabTitle to title of active tab of front window
-            return tabURL & linefeed & tabTitle
         end tell
         """
     }

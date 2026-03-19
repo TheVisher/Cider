@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Carbon.HIToolbox
+import os
 
 // MARK: - TipTapEditorView (container pattern)
 
@@ -39,6 +40,7 @@ struct TipTapEditorView: NSViewRepresentable {
 /// Owned by NotesViewModel so it outlives any individual TipTapEditorView mount.
 final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     let viewModel: NotesViewModel
+    private let logger = Logger(subsystem: "com.cider.app", category: "TipTapEditor")
 
     init(viewModel: NotesViewModel) {
         self.viewModel = viewModel
@@ -48,7 +50,7 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        Task { @MainActor [viewModel] in
+        Task { @MainActor [viewModel, logger] in
             switch message.name {
             case "editorReady":
                 viewModel.editorDidBecomeReady()
@@ -95,11 +97,11 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
                 if let payload = message.body as? [String: Any],
                    let kind = payload["kind"] as? String,
                    let detail = payload["message"] as? String {
-                    NSLog("[TipTapEditor][\(kind)] \(detail)")
+                    logger.error("[\(kind, privacy: .public)] \(detail, privacy: .public)")
                 } else if let detail = message.body as? String {
-                    NSLog("[TipTapEditor] \(detail)")
+                    logger.error("\(detail, privacy: .public)")
                 } else {
-                    NSLog("[TipTapEditor] Unknown editor diagnostic payload")
+                    logger.error("Unknown editor diagnostic payload")
                 }
 
             default:
@@ -136,6 +138,8 @@ final class TipTapWebView: WKWebView {
     override var acceptsFirstResponder: Bool { true }
     var onFindRequested: (() -> Void)?
     weak var viewModel: NotesViewModel?
+
+    private let logger = Logger(subsystem: "com.cider.app", category: "TipTapWebView")
 
     private var slashPopupFrame: CGRect?
     private var slashPopupActive = false
@@ -356,14 +360,14 @@ final class TipTapWebView: WKWebView {
            let url = URL(string: urlString),
            (url.scheme == "http" || url.scheme == "https"),
            Self.imageExtensions.contains(url.pathExtension.lowercased()) {
-            Task { @MainActor [weak viewModel] in
+            Task { @MainActor [weak viewModel, logger] in
                 guard let viewModel else { return }
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
                     let filename = url.lastPathComponent.isEmpty ? "web-image.png" : url.lastPathComponent
                     viewModel.handleImageDrop(data: data, filename: filename)
                 } catch {
-                    NSLog("[TipTapWebView] Failed to download web image: \(error.localizedDescription)")
+                    logger.error("Failed to download web image: \(error.localizedDescription, privacy: .public)")
                 }
             }
             return true

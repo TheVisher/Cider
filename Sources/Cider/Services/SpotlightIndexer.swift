@@ -1,12 +1,14 @@
 import Foundation
 import CoreSpotlight
 import Combine
+import os.log
 
 @MainActor
 final class SpotlightIndexer {
     static let shared = SpotlightIndexer()
 
     private let index = CSSearchableIndex.default()
+    private let logger = Logger(subsystem: "com.cider.app", category: "SpotlightIndexer")
     private var cancellables = Set<AnyCancellable>()
     private var indexedIDs = Set<String>()
     private var debounceTask: Task<Void, Never>?
@@ -215,18 +217,20 @@ final class SpotlightIndexer {
         // Delete removed items
         let removedIDs = indexedIDs.subtracting(newIDs)
         if !removedIDs.isEmpty {
+            let log = logger
             index.deleteSearchableItems(withIdentifiers: Array(removedIDs)) { error in
                 if let error {
-                    NSLog("[SpotlightIndexer] Delete error: \(error)")
+                    log.error("Delete error: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
 
         // Index current items
         if !items.isEmpty {
+            let log = logger
             index.indexSearchableItems(items) { error in
                 if let error {
-                    NSLog("[SpotlightIndexer] Index error: \(error)")
+                    log.error("Index error: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
@@ -235,9 +239,10 @@ final class SpotlightIndexer {
     }
 
     private func deleteAll() {
+        let log = logger
         index.deleteAllSearchableItems { error in
             if let error {
-                NSLog("[SpotlightIndexer] Delete all error: \(error)")
+                log.error("Delete all error: \(error.localizedDescription, privacy: .public)")
             }
         }
         indexedIDs.removeAll()
