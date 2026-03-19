@@ -8,6 +8,30 @@ final class FoundationModelsProvider: AIAssistantProvider {
     private let logger = Logger(subsystem: "com.cider.app", category: "FoundationModelsProvider")
     private var session: LanguageModelSession?
 
+    /// All tools the AI can call to query or act on Cider's data.
+    private let tools: [any Tool] = [
+        // Read tools
+        CountItemsTool(),
+        SearchItemsTool(),
+        ListFoldersTool(),
+        ListTagsTool(),
+        GetRecentItemsTool(),
+        GetItemsByTagTool(),
+        GetUpcomingEventsTool(),
+        GetOverdueTodosTool(),
+        GetFolderContentsTool(),
+        GetBrowserSessionsTool(),
+        FindSimilarTool(),
+        // Write tools
+        CreateFolderTool(),
+        MoveToFolderTool(),
+        ApplyTagTool(),
+        RenameBookmarkTool(),
+        CreateNoteTool(),
+        SummarizeTextTool(),
+        AddBookmarkTool()
+    ]
+
     var isAvailable: Bool {
         AIAvailability.isFoundationModelsAvailable
     }
@@ -15,9 +39,11 @@ final class FoundationModelsProvider: AIAssistantProvider {
     var displayName: String { "Apple Intelligence" }
 
     private func getOrCreateSession(context: AIAssistantContext) -> LanguageModelSession {
-        // Recreate session when context changes so the instructions stay fresh
         let instructions = buildInstructions(context: context)
-        let s = LanguageModelSession(instructions: instructions)
+        let s = LanguageModelSession(
+            tools: tools,
+            instructions: instructions
+        )
         session = s
         return s
     }
@@ -41,8 +67,7 @@ final class FoundationModelsProvider: AIAssistantProvider {
                 let activeSession = getOrCreateSession(context: context)
 
                 do {
-                    // Build the prompt including recent conversation history
-                    let prompt = buildPrompt(messages: messages, latestMessage: lastUserMessage.content)
+                    let prompt = lastUserMessage.content
 
                     let stream = activeSession.streamResponse(to: prompt)
                     var previousContent = ""
@@ -58,7 +83,7 @@ final class FoundationModelsProvider: AIAssistantProvider {
                     continuation.finish()
                 } catch {
                     logger.error("Foundation Models stream error: \(error.localizedDescription, privacy: .public)")
-                    session = nil  // reset on error
+                    session = nil
                     continuation.finish(throwing: error)
                 }
             }
@@ -69,9 +94,13 @@ final class FoundationModelsProvider: AIAssistantProvider {
 
     private func buildInstructions(context: AIAssistantContext) -> String {
         var instructions = """
-        You are a helpful assistant built into Cider, a macOS bookmarks, notes, \
-        and projects app. Be concise, friendly, and helpful. \
-        Keep responses focused and practical.
+        You are a helpful assistant built into Cider, a macOS app for bookmarks, \
+        notes, events, todos, contacts, and projects. You have access to tools that \
+        let you look up the user's data. Always use the appropriate tool when the \
+        user asks about their items, counts, folders, tags, or schedule. \
+        Be concise, friendly, and accurate. When reporting results from tools, \
+        present the information clearly. If you don't know something, say so — \
+        don't make things up.
         """
 
         let contextDesc = context.contextDescription
@@ -80,12 +109,6 @@ final class FoundationModelsProvider: AIAssistantProvider {
         }
 
         return instructions
-    }
-
-    private func buildPrompt(messages: [AIAssistantMessage], latestMessage: String) -> String {
-        // For Foundation Models, we pass the latest message directly.
-        // The session handles conversation continuity internally.
-        latestMessage
     }
 }
 

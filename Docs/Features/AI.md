@@ -263,28 +263,172 @@ MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)  // 20 MB cache limit
 
 ## AI Chat
 
-> **Status:** v1 CLI wrapper built. Transitioning to local model backend.
+> **Status:** v1 shipped — floating panel with Foundation Models backend. CLI wrapper removed.
 
-### Current Implementation (CLI Wrapper — To Be Removed)
+### What's Built
 
-The existing AI chat wraps CLI tools (Claude, Gemini, Codex) via Process spawning. This is being replaced by the local model strategy above.
+- Floating NSPanel with acrylic background, draggable, resizable, position persisted
+- `AIAssistantProvider` protocol — swappable backends (Foundation Models now, MLX later)
+- `FoundationModelsProvider` — streaming responses with context-aware instructions
+- `AIAssistantViewModel` — conversation state, typewriter text reveal
+- Chat bubble UI with streaming indicator (bouncing dots)
+- Option+A global hotkey to toggle panel
+- Sidebar "AI Assistant" button in footer
+- Escape to close, trash to clear conversation
 
-**Files to remove during transition:**
+### Key Files
+
 | File | Role |
 |------|------|
-| `Models/AIChatMessage.swift` | Message model (keep, adapt for new backend) |
-| `Models/AIModelOption.swift` | CLI model definitions (remove) |
-| `Services/AI/AIChatProcessService.swift` | Process management, PATH, ANSI stripping (remove) |
-| `ViewModels/AIChatViewModel.swift` | Shared singleton (keep, rewire to MLX) |
-| `Views/AIChat/AIChatView.swift` | Main view (keep, adapt) |
-| `Views/AIChat/AIChatBubbleView.swift` | Bubble rendering (keep) |
-| `Views/AIChat/AIChatInputView.swift` | Text input (keep) |
-| `App/AIChatPanel.swift` | Floating NSPanel for undocked mode (keep) |
+| `Services/AI/AIAssistantProvider.swift` | Protocol, message model, context model |
+| `Services/AI/AIAssistantTools.swift` | All 18 tools (read + write) for data access and actions |
+| `Services/AI/FoundationModelsProvider.swift` | Apple Intelligence backend with tool registration |
+| `ViewModels/AIAssistantViewModel.swift` | Conversation state, streaming, typewriter |
+| `Views/AIAssistant/AIAssistantPanelView.swift` | Root panel view |
+| `Views/AIAssistant/AIAssistantBubbleView.swift` | Message bubbles, bouncing dots |
+| `Views/AIAssistant/AIAssistantInputView.swift` | Text input with send/stop |
+| `App/AIAssistantPanel.swift` | NSPanel subclass with dragging |
+| `App/AppDelegate+AIAssistantPanel.swift` | Panel lifecycle, show/hide |
+| `Services/AIAssistantHotkeyDetector.swift` | Option+A hotkey |
 
-### Planned Features (Post-Transition)
+---
 
-- **Conversation history** — JSON files in `.cider/ai-chat/`, browsable and resumable
-- **Conversation selector** — slide-out panel to browse past chats
-- **Streaming markdown rendering** — code blocks, links, etc. in bubbles
-- **Library context injection** — embed relevant bookmarks/notes into conversation context
-- **Organization assistant** — suggest folders, groupings, tag cleanup based on library analysis
+## AI Chat Roadmap
+
+### Tool Reference (Shipped)
+
+All tools are defined in `Services/AI/AIAssistantTools.swift` and registered in `FoundationModelsProvider`. The model decides which tool to call based on the user's message.
+
+**Read Tools — Query Cider's Data:**
+
+| Tool | Example Query | What It Does |
+|------|--------------|-------------|
+| `countItems` | "How many bookmarks do I have?" | Counts any entity type or gives a full library summary |
+| `searchItems` | "Find bookmarks about shoes" | Keyword search across bookmarks, notes, events, todos, contacts |
+| `listFolders` | "What folders do I have?" | Lists all folders with item counts per type |
+| `listTags` | "Show me my tags" | Lists all tags/labels with usage counts |
+| `getRecentItems` | "What did I save this week?" | Items created/modified in the last N days |
+| `getItemsByTag` | "What's tagged as Important?" | All items with a specific tag across all types |
+| `getUpcomingEvents` | "What's coming up this month?" | Upcoming events in the next N days |
+| `getOverdueTodos` | "Any overdue tasks?" | Incomplete todos past due date + high-priority items |
+| `getFolderContents` | "What's in my Applications folder?" | Lists everything inside a specific folder |
+| `getBrowserSessions` | "Show my saved sessions" | Saved browser tab groups with tab counts |
+| `findSimilar` | "Find bookmarks similar to this one" | Cosine similarity via `EmbeddingStore` vectors |
+
+**Write Tools — Organize & Create:**
+
+| Tool | Example Query | What It Does |
+|------|--------------|-------------|
+| `createFolder` | "Create a Products folder" | Creates a new folder, optionally inside a parent |
+| `moveToFolder` | "Move shoe bookmarks to Products" | Searches by keyword, moves matching items to a folder |
+| `applyTag` | "Tag shoe bookmarks as Footwear" | Searches by keyword, applies tag (creates tag if needed) |
+| `renameBookmark` | "Rename 'Untitled' to 'Vans Store'" | Finds bookmark by current title, sets new title |
+| `createNote` | "Create a note called Meeting Notes" | Creates note with title/content, optionally in a folder |
+| `addBookmark` | "Save this URL as a bookmark" | Saves URL with optional title, folder, and tag |
+| `summarizeText` | "Summarize this and save as a note" | Summarizes text via AI, optionally saves as a note in a folder |
+
+**How tool calling works:**
+1. User asks "how many bookmarks do I have?"
+2. Model decides to call `countItems(itemType: "bookmarks")`
+3. Tool executes on MainActor, queries `BookmarksStorage.shared.bookmarks.count`
+4. Tool returns `"The user has 92 bookmarks."`
+5. Model formats a natural response: "You have 92 bookmarks."
+
+**Data sources for tools:**
+- `BookmarksStorage.shared` — URLs, titles, tags, AI summaries, folders, dates
+- `NotesStorage.shared` — titles, content, folders, labels
+- `DateCardStorage.shared` — events with dates, location, recurrence, completion
+- `TodoCardStorage.shared` — tasks with due dates, priority, checklists
+- `ContactStorage.shared` — names, email, phone, relationship
+- `CardLabelStorage.shared` — tags with colors, usage counts, `findOrCreate`
+- `VaultFolderService.shared` — folder hierarchy with paths
+- `ClipboardStorage.shared` — clipboard history
+- `BrowserSessionStorage.shared` — saved browser tab groups
+- `EmbeddingStore.shared` — vector embeddings for semantic similarity
+- `SummaryService.shared` — AI text summarization
+
+### Phase 1: Chat UI Polish (Next)
+
+**Markdown rendering** — render bold, italics, lists, code blocks in assistant responses. Currently plain text only.
+
+**Citations** — when the AI references a bookmark or note, show a clickable card/link the user can tap to open it. Users need to verify what the AI tells them.
+
+**Conversation persistence** — save conversations as JSONL files in the vault (see [Conversation Storage](#conversation-storage)). One file per conversation, append-only.
+
+**Message actions:**
+- Copy button on messages
+- Regenerate/retry button on assistant messages
+- Timestamp display
+
+**Conversation management:**
+- Conversation list sidebar or popover
+- Resume previous conversations
+- Delete/archive conversations
+
+### Phase 2: Confirmation UI for Write Actions
+
+Add a confirm/cancel step before write tools execute, so the model proposes an action and the user approves.
+
+```
+AI: I'll create a "Products" folder and move 3 shoe-related
+    bookmarks into it:
+    - Vans Old Skool
+    - Nike Air Max 90
+    - Adidas Superstar
+
+    [Confirm] [Cancel]
+```
+
+### Phase 3: MLX / Qwen 3.5 Integration
+
+Add the downloadable local model as an alternative backend. Only after tool calling is solid — tools are what make the AI capable, the model quality makes conversations smoother.
+
+- `MLXProvider` conforming to `AIAssistantProvider`
+- Model download UI in settings (see [Local Model Strategy](#local-model-strategy))
+- Auto-detect RAM and recommend 4B vs 9B
+- Load/unload model on demand for memory discipline
+
+### Phase 5: Advanced Features
+
+- **RAG (Retrieval Augmented Generation)** — vector search across all items for semantic queries. Use existing `EmbeddingStore` or Apple's `NLContextualEmbedder`.
+- **Custom instructions** — let users set personality/behavior preferences
+- **Quick actions in sidebar** — context-sensitive buttons above the chat (Summarize, Auto-Tag, Organize)
+- **Screen context** — feed screenshot OCR into chat (existing `ScreenCaptureService`)
+
+---
+
+## Conversation Storage
+
+Conversations are stored as **JSONL files** (one JSON object per line) in the vault. Each conversation is a file the user owns on disk.
+
+**Location:** `~/CiderVault/.cider/ai-conversations/`
+
+**Format:** Each line is a self-contained JSON object — one per message.
+
+```jsonl
+{"id":"conv-550e8400","title":"Bookmark organization","created":"2026-03-19T14:20:00Z","model":"apple-intelligence","type":"metadata"}
+{"id":"msg-1","role":"user","content":"How many bookmarks do I have?","timestamp":"2026-03-19T14:20:00Z"}
+{"id":"msg-2","role":"assistant","content":"You have 92 bookmarks across 4 folders.","timestamp":"2026-03-19T14:20:03Z"}
+{"id":"msg-3","role":"user","content":"Which ones are about shoes?","timestamp":"2026-03-19T14:21:10Z"}
+{"id":"msg-4","role":"assistant","content":"I found 3 bookmarks about shoes:\n- **Vans Old Skool** (vans.com)\n- **Nike Air Max 90** (nike.com)\n- **Phone Rebel Cases** (phonerebel.com)","timestamp":"2026-03-19T14:21:15Z"}
+```
+
+**Why JSONL over markdown:**
+- AI responses contain markdown formatting (bold, code blocks, lists) — storing markdown inside markdown creates unparseable escaping nightmares
+- JSONL is append-only — each new message is one line appended to the file. Crash-safe (partial write only corrupts the last line, not the whole conversation)
+- Unambiguous parsing — no delimiter confusion, no content-vs-formatting ambiguity
+- Still human-readable — open the file and each line is a clear message object
+- Used by Claude Code, Gemini CLI, and other production AI tools
+
+**Why JSONL over SQLite:**
+- File-on-disk — consistent with Cider's philosophy (users own their data)
+- Portable — copy the file, done
+- No database overhead for what amounts to sequential message logs
+
+**Markdown export:** Users can export any conversation as a clean `.md` file for sharing or use in other tools. This is a one-way export, not the storage format.
+
+**Filename:** `{date}-{auto-title}.jsonl` — e.g. `2026-03-19-bookmark-organization.jsonl`
+
+**Auto-titling:** First user message (truncated) or AI-generated summary becomes the filename slug.
+
+**Context window management:** For long conversations, older messages are summarized into a compact block prepended to the system prompt. The full JSONL history is preserved on disk but only the summary + recent messages are sent to the model.
