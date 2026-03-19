@@ -213,7 +213,7 @@ URL bookmarks get hero mode buttons in the detail panel toolbar (implemented as 
 
 This detail view pattern is shared across all content types — not just bookmarks. Notes, date cards, contacts, and future types (documents, whiteboard items) should all use the same three-mode detail surface with content-specific tabs and a consistent metadata panel. The metadata sections vary by type (notes don't have URL/Colors, date cards have date/time/location, etc.) but the shell is identical.
 
-Update `SHARED_COMPONENTS.md` when implementing to document the shared detail view container.
+Update `DESIGN_SYSTEM.md` (section 18, Component Catalog) when implementing to document the shared detail view container.
 
 ## Phase 3: Library Management
 1. **Multi-select** ✓ — Shift-click range, Cmd-click toggle, Cmd+A select all. Bulk move/delete implemented. Multi-drag with fanned preview implemented. Bulk tag future. See `WORKSPACES_VISION.md`.

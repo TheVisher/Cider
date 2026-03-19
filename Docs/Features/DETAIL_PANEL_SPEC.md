@@ -1,6 +1,8 @@
 # Detail Panel Layout Specification
 
 > Reference for building detail view surfaces (slide-out, full panel, page). These values ensure visual alignment with the main CiderPanel's sidebar and title bar. Apply consistently across all content types (bookmarks, notes, date cards, contacts, documents).
+>
+> **Token reference:** All spacing, radius, and border values are defined in `Docs/Design/DESIGN_SYSTEM.md` (sections 3.1-3.3). Use `Spacing.*`, `Radius.*`, and `CiderBorder.*` tokens — never hardcoded numbers.
 
 ---
 
@@ -26,43 +28,43 @@ These are the positions from the **panel clip edge** (the inner edge of the pane
 
 | Element | From panel clip edge | Notes |
 | --- | --- | --- |
-| Traffic light circle center | **28pt** | 12pt sidebar padding + 8pt header padding + 8pt (half of 16pt tap target) |
+| Traffic light circle center | **28pt** | `Spacing.md` sidebar padding + `Spacing.sm` header padding + half of traffic light tap target |
 | Sidebar collapse button center | **28pt** | Same HStack as traffic lights |
-| Main panel divider | **47pt** | 7pt right column top padding + 40pt title bar height |
-| Sidebar search bar top | **48pt** | 12pt + 8pt + 28pt (sidebar header height) |
+| Main panel divider | **47pt** | Right column top padding (7pt) + `CiderPanelDesign.titleBarHeight` |
+| Sidebar search bar top | **48pt** | `Spacing.md` + `Spacing.sm` + sidebar header height |
 
 ### Slide-Out Geometry
 
 ```
 Panel clip edge
-│
-├─ 12pt  ← overlay inset (detailsSlideOutFloatInset = Spacing.md)
-│
-│  Slide-out top edge
-│  ├─ 2pt   ← toolbar top padding (Spacing.xxs)
-│  ├─ 28pt  ← toolbar content height (buttons are 28×28)
-│  │         → button center at 12 + 2 + 14 = 28pt from panel edge ✓
-│  ├─ 5pt   ← toolbar bottom padding (Spacing.xs + 1)
-│  │         → divider at 12 + 2 + 28 + 5 = 47pt from panel edge ✓
-│  ├─ divider line
-│  └─ content area (hero + title | metadata sidebar)
+|
++- Spacing.md  <- overlay inset (detailsSlideOutFloatInset)
+|
+|  Slide-out top edge
+|  +- Spacing.xxs  <- toolbar top padding
+|  +- 28pt         <- toolbar content height (buttons are 28x28)
+|  |                -> button center at Spacing.md + Spacing.xxs + 14 = 28pt from panel edge
+|  +- Spacing.xs+1 <- toolbar bottom padding
+|  |                -> divider at Spacing.md + Spacing.xxs + 28 + Spacing.xs+1 = 47pt from panel edge
+|  +- divider line
+|  +- content area (hero + title | metadata sidebar)
 ```
 
 ### Key Values
 
 | Property | Value | Token / Derivation |
 | --- | --- | --- |
-| Overlay inset (all sides) | 12pt | `BookmarksDesign.detailsSlideOutFloatInset` = `Spacing.md` |
-| Corner radius | 10pt | `Radius.md` (matches sidebar `sectionContainer`) |
+| Overlay inset (all sides) | `Spacing.md` | `BookmarksDesign.detailsSlideOutFloatInset` |
+| Corner radius | `Radius.md` | Matches sidebar `sectionContainer` |
 | Border | `stroke` (not `strokeBorder`) | `CiderColors.borderPanel`, `CiderBorder.innerStrokeWidth` |
-| Toolbar top padding | 2pt | `Spacing.xxs` — aligns button centers with traffic lights |
-| Toolbar bottom padding | 5pt | `Spacing.xs + 1` — pushes divider to 47pt from panel edge |
-| Toolbar horizontal padding | 12pt | `Spacing.md` |
-| Divider horizontal inset | 14pt | `Spacing.md + Spacing.xxs` (matches main panel divider) |
-| Drag handle width | 6pt | `SlideOutDesign.dragHandleWidth` |
-| Min width | 600pt | `BookmarksDesign.detailsSlideOutMinWidth` |
-| Max width | `contentAreaWidth - 2 × inset` | Ensures uniform gap between sidebar and slide-out |
-| Metadata sidebar width | 300pt | `BookmarksDesign.detailsSidebarFixedWidth` |
+| Toolbar top padding | `Spacing.xxs` | Aligns button centers with traffic lights |
+| Toolbar bottom padding | `Spacing.xs` + 1pt | Pushes divider to 47pt from panel edge |
+| Toolbar horizontal padding | `Spacing.md` | |
+| Divider horizontal inset | `Spacing.md` + `Spacing.xxs` | Matches main panel divider |
+| Drag handle width | `SlideOutDesign.dragHandleWidth` | |
+| Min width | `BookmarksDesign.detailsSlideOutMinWidth` | 600pt |
+| Max width | `contentAreaWidth - 2 x inset` | Ensures uniform gap between sidebar and slide-out |
+| Metadata sidebar width | `BookmarksDesign.detailsSidebarFixedWidth` | 300pt |
 
 ### Background
 
@@ -89,29 +91,29 @@ Single acrylic container — no nested panels:
 ### Toolbar
 
 ```
-[X close]  ···spacer···  [ℹ info toggle]  [≡ slideOut] [□ fullPanel] [■ page]
+[X close]  ...spacer...  [i info toggle]  [= slideOut] [box fullPanel] [fill page]
 ```
 
-- Close button: `xmark`, 28×28, `CiderFont.bodySemibold`
-- Info toggle: `info.circle` / `info.circle.fill`, 24×24, toggles metadata sidebar
-- Mode icons: 24×24, active mode highlighted with `CiderColors.controlAccent`
+- Close button: `xmark`, 28x28, `CiderFont.bodySemibold`
+- Info toggle: `info.circle` / `info.circle.fill`, 24x24, toggles metadata sidebar
+- Mode icons: 24x24, active mode highlighted with `CiderColors.controlAccent`
 - No divider between toolbar and drag handle area
 
 ### Content Layout
 
 ```
 HStack(alignment: .top, spacing: 0)
-├─ Left column (ScrollView, maxWidth: .infinity)
-│   ├─ Hero image (BookmarkDetailsHeroPreview)
-│   ├─ Title (heroTitle)
-│   └─ Subtitle (host · relative date)
-│   └─ padding: Spacing.lg (16pt) around content
-│
-└─ Right column (conditional, animated)
-    └─ BookmarkMetadataSidebar
-        ├─ surfaceInput background + borderStrong stroke + shadow
-        ├─ Toggle: @State isMetadataVisible (default true, resets on open)
-        └─ Transition: .move(edge: .trailing).combined(with: .opacity), .snappy
++- Left column (ScrollView, maxWidth: .infinity)
+|   +- Hero image (BookmarkDetailsHeroPreview)
+|   +- Title (heroTitle)
+|   +- Subtitle (host . relative date)
+|   +- padding: Spacing.lg around content
+|
++- Right column (conditional, animated)
+    +- BookmarkMetadataSidebar
+        +- surfaceInput background + borderStrong stroke + shadow
+        +- Toggle: @State isMetadataVisible (default true, resets on open)
+        +- Transition: .move(edge: .trailing).combined(with: .opacity), .snappy
 ```
 
 ### CiderPanelShell Integration

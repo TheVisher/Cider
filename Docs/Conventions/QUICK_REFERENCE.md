@@ -38,7 +38,7 @@ Docs/
 │   ├── NOTES_VISION.md
 │   ├── WORKSPACES_VISION.md      folders, projects, saved view tabs
 │   ├── AI_VISION.md
-│   ├── INTEGRATION_DESIGN.md     Obsidian/knowledge-base sync (future)
+│   ├── INTEGRATION_DESIGN.md     Obsidian/knowledge-base sync (→ Docs/Features/)
 │   ├── WHITEBOARD_VISION.md      (not yet implemented)
 │   ├── DOCUMENTS_VISION.md       (not yet implemented)
 │   ├── BOOKS_VISION.md           (not yet implemented)
@@ -46,11 +46,11 @@ Docs/
 │
 ├── Reference Docs (agents read before writing code)
 │   ├── DESIGN_SYSTEM.md
-│   ├── ACRYLIC_STYLE.md
+│   ├── ACRYLIC_IMPLEMENTATION.md
 │   ├── CONVENTIONS.md
 │   ├── TECH_STACK.md
 │   ├── FLOATING_PANEL.md
-│   ├── SHARED_COMPONENTS.md
+│   └── (SHARED_COMPONENTS absorbed into DESIGN_SYSTEM.md §18-19)
 │   └── USER_PREFERENCES.md
 │
 ├── Ops

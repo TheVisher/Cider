@@ -279,9 +279,7 @@ Available: `body`, `bodyMedium`, `bodySemibold`, `caption`, `captionMedium`, `ca
 
 ## 4. Acrylic Material
 
-### 4.1 Background Stack
-
-All floating surfaces use the same background implementation (`AcrylicPanelBackground`):
+All floating surfaces use `AcrylicPanelBackground` — a three-layer stack of blurred shadow shape, `NSVisualEffectView` with dark tint/shimmer, and an inset border stroke. Canonical example:
 
 ```swift
 ZStack {
@@ -309,36 +307,17 @@ ZStack {
 }
 ```
 
-### 4.2 Shadow Styles
+**Key rules:**
+- **Never use SwiftUI `.shadow()` modifier** — it clips at window bounds. Draw shadows as blurred shapes.
+- **Never use `.glassEffect()`** — we use the Raycast acrylic aesthetic.
+- **Reduce Transparency fallback:** Replace acrylic stack with `Color(nsColor: NSColor.windowBackgroundColor)`.
 
-| Style | Blur | Y Offset | Opacity | Usage |
+| Shadow Style | Blur | Y Offset | Opacity | Usage |
 |-------|------|----------|---------|-------|
 | Full | 18pt | 18pt | 0.7 | Expanded panel |
 | Compact | 10pt | 8pt | 0.52 | Collapsed panel |
 
-**Never use SwiftUI `.shadow()` modifier** — it clips at window bounds.
-
-### 4.3 NSPanel Configuration
-
-```swift
-styleMask: [.borderless, .nonactivatingPanel]
-level: .floating
-collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-isOpaque: false
-backgroundColor: .clear
-hasShadow: false          // We draw custom shadows
-isMovable: false          // We handle resize ourselves
-canBecomeKey: true
-canBecomeMain: false
-```
-
-### 4.4 Reduce Transparency Fallback
-
-When `accessibilityReduceTransparency` is true, replace the acrylic stack with:
-```swift
-Color(nsColor: NSColor.windowBackgroundColor)
-    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-```
+> **Full implementation guide:** `Docs/Design/ACRYLIC_IMPLEMENTATION.md` — NSPanel configuration, `VisualEffectView` wrapper, border/divider guidelines, color palette, common mistakes.
 
 ---
 
@@ -946,7 +925,201 @@ When building or modifying any UI component, verify:
 
 ---
 
-## 18. File Reference
+## 18. Component Catalog
+
+When building a new feature, check this section first. If a component already exists, reuse it. If a new feature creates something reusable, add it here.
+
+### 18.1 Shared Views (`Views/Shared/`)
+
+#### MasonryLayout
+- **File:** `Views/Shared/MasonryLayout.swift`
+- **Used by:** Bookmarks, Notes
+- **What:** Custom SwiftUI `Layout` that arranges items in a variable-height masonry grid with shortest-column placement
+- **Config:** `minimumColumnWidth` and `itemSpacing` — column count auto-calculates from available width
+
+#### ViewOptionsDropdown
+- **File:** `Views/Shared/ViewOptionsDropdown.swift`
+- **Used by:** Bookmarks, Notes (sidebar header popover in CiderPanelView)
+- **What:** Generic dropdown for display mode toggle (list/grid/masonry icons) + continuous card size slider
+- **Pattern:** Generic over `DisplayModeOption` protocol — any tab with display modes can use it by conforming its enum
+
+#### FolderSidebarView
+- **File:** `Views/Shared/FolderSidebarView.swift`
+- **Used by:** All tabs (universal sidebar in CiderPanelView)
+- **What:** Hierarchical folder tree + projects list + search trigger + quick action buttons
+- **Params:** `showBackground: Bool = true` — set `false` when a wrapper provides the background (e.g., CiderPanelView's sidebar column)
+- **Note:** Folders are shared across bookmarks and notes — both content types can be assigned to any folder
+
+#### BookmarkCard
+- **File:** `Views/Bookmarks/BookmarkCard.swift`
+- **Used by:** Bookmarks (grid/masonry), Home (library feed grid/masonry)
+- **What:** Visual card for bookmarks with thumbnail, title, domain, timestamp. Supports `.grid` and `.masonry` modes.
+- **Note:** Extracted from BookmarksBrowserView to enable reuse from Home tab's mixed-content library feed
+
+#### BookmarkListRow (legacy — superseded by LibraryTableRow in list mode)
+- **File:** `Views/Bookmarks/BookmarkListRow.swift`
+- **Used by:** Bookmarks (list mode — legacy, may still be referenced in BookmarksTabContent)
+- **What:** Compact list row for bookmarks with optional thumbnail, title, domain, timestamp, hover delete
+- **Note:** Superseded by the unified table list view. Grid/masonry modes still use per-type card views.
+
+#### LibraryTableView / LibraryTableRows
+- **Files:** `Views/Shared/LibraryTableView.swift`, `Views/Shared/LibraryTableRow.swift`, `Views/Shared/LibraryTableHeader.swift`, `Models/TableColumn.swift`
+- **Used by:** HomeDashboardView, FolderDetailView, SavedViewTabContent (all in list mode)
+- **What:** Unified table list view — all item types (bookmarks, notes, todos, events, contacts, files) render in the same row with column headers. 9 columns: Name (flexible), Type, Tags, Folder, Created, Modified, URL, Words, Priority. Resizable column dividers, column visibility toggling via `+` button. Config persisted in `CiderConfig.tableColumnConfig`.
+- **Note:** `LibraryTableView` owns its own scroll (used by HomeDashboardView). `LibraryTableRows` is embeddable inside existing ScrollViews (used by FolderDetailView, SavedViewTabContent).
+
+#### FolderContentView / RootFolderOverviewView
+- **Files:** `Views/Shared/FolderContentView.swift`, `Views/Shared/RootFolderOverviewView.swift`
+- **Used by:** CiderPanelView (when a folder is selected in sidebar)
+- **What:** Mixed-content views showing bookmarks + notes within a folder
+
+#### AcrylicPanelBackground
+- **File:** `Views/Shared/AcrylicPanelBackground.swift`
+- **Used by:** All panels
+- **What:** Standard dark acrylic background with optional custom shadows, respects accessibility transparency
+
+#### CiderTabBar
+- **File:** `Views/Shared/CiderTabBar.swift`
+- **Used by:** CiderPanelView
+- **What:** Horizontal scrollable tab bar with badge counts
+
+#### CiderPanelShell
+- **File:** `Views/Shared/CiderPanelShell.swift`
+- **Used by:** CiderPanelView
+- **What:** Generic structural shell for all panel windows — encapsulates two-column layout, sidebar container, traffic lights, title bar, divider, compact mode logic, resize handles, and shadow padding
+- **Generic params:** `SidebarContent`, `SidebarFooter`, `TitleBarContent`, `Content`, `PanelOverlay`
+- **Init params:** `isCollapsed`, `onClose`, `onCollapse`, `onMaximize`, plus `@ViewBuilder` closures for each generic slot
+- **Handles:** Sidebar show/hide animation, compact mode auto-collapse at `CiderPanelDesign.sidebarCompactThreshold` (680pt), title bar toggle appearance, panel edge resize, acrylic background + shadow
+
+#### PanelEdgeResizeView
+- **File:** `Views/Shared/PanelEdgeResizeView.swift`
+- **Used by:** CiderPanelView
+- **What:** All-edge resize handles with cursor tracking
+
+#### EmptyStateView
+- **File:** `Views/Shared/EmptyStateView.swift`
+- **Used by:** NotesTabContent, SearchTabContent, ProjectTabContent, FolderContentView, RootFolderOverviewView
+- **What:** Vertically centered empty state with icon (36pt), title, optional subtitle, optional action button
+- **Params:** `icon: String`, `title: String`, `subtitle: String?`, `actionLabel: String?`, `action: (() -> Void)?`
+- **Note:** BookmarksBrowserView has its own inline empty state that scales with `textScale` — don't use this shared component there
+
+### 18.2 Shared Utilities (`Utilities/`)
+
+#### HighlightedText
+- **File:** `Utilities/HighlightedText.swift`
+- **Used by:** Notes cards/rows (titles and previews)
+- **What:** SwiftUI `Text` view with search match highlighting — preserves all Text modifiers (font, color, lineLimit)
+- **Note:** Search palette and search tab result rows use inline `AttributedString` snippet rendering instead (see `SearchService.SearchSnippet` + `snippetAttributedString()` in both search views) — `HighlightedText` is for card titles/previews in context, not search result rows
+
+#### CiderFont
+- **File:** `Utilities/CiderFont.swift`
+- **Used by:** All views with text
+- **What:** Semantic typography tokens replacing all `.font(.system(size:weight:))` declarations. 29 fixed tokens + 13 responsive `(scale:)` function variants for textScale views.
+- **Pattern:** `CiderFont.body`, `CiderFont.captionMedium`, `CiderFont.subheadingSemibold`, etc.
+- **Responsive:** `CiderFont.body(scale: textScale)` for views with continuous card size slider
+- **When NOT to use:** Design constants (`CiderPanelDesign.trafficLightSymbolSize`), dynamic weights (`isSelected ? .semibold : .regular`), Apple semantic styles in Settings views
+
+#### Constants (Spacing, Radius, Animation)
+- **File:** `Utilities/Constants.swift`
+- **What:** All design tokens — `Spacing.*`, `Radius.*`, animation presets, notification names, border constants
+
+#### VisualEffectView
+- **File:** `Utilities/VisualEffectView.swift`
+- **What:** NSViewRepresentable for `NSVisualEffectView` — use instead of `.glassEffect()`
+
+### 18.3 Search System (`Services/` + `Views/Search/`)
+
+#### SearchService
+- **File:** `Services/SearchService.swift`
+- **What:** `@MainActor` enum with static search methods across all content types
+- **Types searched:** Bookmarks, Notes, DateCards, Contacts (reads from storage singletons internally)
+- **`SearchResult`:** `id`, `type` (`SearchResultType`), `title`, `subtitle: String?`, `snippet: SearchSnippet?`, `date`, plus optional typed payload (`bookmark`, `note`, `dateCard`, `contact`)
+- **`SearchSnippet`:** `prefix`, `match`, `suffix` — 60-char context window around the query hit, with `...` truncation markers. `match` preserves original casing.
+- **Rule:** `subtitle` is set when the match is in a short metadata field (host, date, tag, relationship label). `snippet` is set when the match is in a long body field (note content, bookmark notes, date card details/location, contact notes). Exactly one is non-nil.
+- **`extractSnippet(query:from:windowSize:)`** — finds first case-insensitive match, returns +/-60 chars of context.
+
+#### SearchPaletteView
+- **File:** `Views/Search/SearchPaletteView.swift`
+- **What:** Center-screen overlay palette (Cmd+K). Debounces search 100ms via `@State searchTask: Task`. Shows four result sections (Bookmarks, Notes, Date Cards, Contacts). Recent section shows 2 bookmarks + 2 notes + 2 date cards + 2 contacts when query is empty.
+- **Snippet rendering:** `snippetAttributedString(_:)` -> `AttributedString` with `.swiftUI.foregroundColor` per range (tertiary/primary/tertiary).
+
+#### SearchTabContent
+- **File:** `Views/Search/SearchTabContent.swift`
+- **What:** Full-height tab content for search tabs spawned from the palette. Same four-section layout + snippet rendering as the palette. Query is a fixed prop (no debounce needed — tab is created once per query).
+
+---
+
+## 19. Cross-Tab Patterns
+
+These aren't single components but established patterns that should be followed consistently across tabs.
+
+### 19.1 Display Modes (list / grid / masonry)
+- **Used by:** Bookmarks (`BookmarkDisplayMode`), Notes (`NoteDisplayMode`), Home (`LibraryDisplayMode`)
+- **Pattern:** Enum conforming to `DisplayModeOption` protocol -> plugs into `ViewOptionsDropdown`
+- **Card sizing:** Continuous 0-3 slider via a sizing struct (e.g., `CardSizing`, `NoteCardSizing`, `LibraryCardSizing`) that interpolates between stops
+- **Cross-type sizing:** `LibraryCardSizing` delegates to `CardSizing` and `NoteCardSizing` — mixed-content views use it to size both bookmark and note cards consistently
+- **When adding a new tab with cards:** Create a `<Tab>DisplayMode` enum conforming to `DisplayModeOption` + a `<Tab>CardSizing` struct
+
+### 19.2 Card Data Loading
+- **Used by:** Notes (`NoteCardData`)
+- **Pattern:** Pre-compute display data off the main thread, cache in `@State`
+- **Key rule:** Use `.task(id: item.modifiedAt)` not `.task(id: item.id)` so cards refresh after edits
+- **Never:** Put disk I/O or regex in SwiftUI view body — always use `.task` + `@State` cache
+
+### 19.3 CardContextMenu (NSMenu-based)
+- **File:** `Utilities/CardContextMenu.swift`
+- **Used by:** Notes (NoteCardView, NoteListRow), Bookmarks (BookmarkCard, BookmarkListRow)
+- **What:** Native `NSMenu` context menu that builds fresh on every right-click, replacing SwiftUI's `.contextMenu` which caches content and goes stale when data changes
+- **Architecture:** `CardMenuItem` enum (.action, .submenu, .separator, .destructive) -> `CardContextMenuModifier` -> invisible `RightClickView` overlay with `hitTest` pass-through for non-right-click events
+- **Convenience extensions:** `.noteContextMenu()` (Open, Rename, Move to Folder, Delete) and `.bookmarkContextMenu()` (Open in Browser, Show Details, Move to Folder, Delete)
+- **Adding a new context menu:** Create a new View extension that returns `CardContextMenuModifier` with the desired `CardMenuItem` list
+- **Key detail:** `RightClickView.hitTest()` returns nil for non-right-click events so left clicks, hovers, and drags pass through to SwiftUI content underneath
+- **Why not `.contextMenu`:** SwiftUI caches `.contextMenu` content inside lazy containers (`LazyVStack`, `LazyVGrid`). After any data change (moving items to folders, creating folders), the menu shows stale content. No workaround (`.id()`, removing conditionals) reliably fixes it.
+
+### 19.4 Container Style Modifiers
+- **File:** `Utilities/ContainerStyles.swift`
+- **Used by:** CiderPanelShell, BookmarksBrowserView, RootFolderOverviewView, NoteCardView
+- **What:** Two `ViewModifier`s for common container background + border patterns
+- **Modifiers:**
+  - `.sectionContainer(cornerRadius:)` — static elevated container: `surfaceElevated` fill + `borderDefault` stroke + `innerStrokeWidth`. Default radius: `Radius.md`. For sidebar columns, panel sections, folder cards.
+  - `.cardContainer(isHovered:, cornerRadius:)` — hover-aware card: `surfaceElevated`/`surfaceHover` fill + `borderSubtle`/`borderHover` stroke + clipShape + contentShape. Default radius: `BookmarksDesign.cardCornerRadius`. For masonry/grid cards.
+- **When NOT to use:** Containers with conditional backgrounds (FolderSidebarView's `showBackground` flag) or cards with custom stroke logic (BookmarksBrowserView's drop-target border)
+
+### 19.5 Button Styles
+- **File:** `Utilities/ButtonStyles.swift`
+- **Used by:** Settings views (currently), any view needing pill-shaped action buttons
+- **What:** Three shared `ButtonStyle` variants for pill-shaped action buttons with rounded backgrounds and press states
+- **Styles:**
+  - `CiderAccentButtonStyle` — primary action (accent text on `accentSubtle` bg, `accentLight` on press)
+  - `CiderDestructiveButtonStyle` — destructive action (red text on `destructiveSubtle` bg, `destructiveLight` on press)
+  - `CiderSecondaryButtonStyle` — cancel/dismiss (secondary text on `surfaceInput` bg, `surfaceHover` on press)
+- **All three share:** `.font(CiderFont.body)` + `.padding(.horizontal: Spacing.md, .vertical: Spacing.sm)` + `RoundedRectangle(Radius.sm)` background
+- **When NOT to use:** Icon-only toolbar buttons (use `.buttonStyle(.plain)`) or buttons that need `textScale` multipliers (style inline)
+
+### 19.6 Hover State Modifier
+- **File:** `Utilities/HoverState.swift`
+- **Used by:** All interactive views with hover effects
+- **What:** `.hoverState($isHovered)` — binds hover to a `@State` Bool. Optional `animation:` parameter wraps state change in `withAnimation` with automatic Reduce Motion respect.
+- **Usage:**
+  - `.hoverState($isHovered)` — plain binding (use when view has `.animation(_, value: isHovered)`)
+  - `.hoverState($isHovered, animation: .snappy)` — animated (use when no `.animation()` on view)
+- **Remaining `.onHover`:** `BookmarksBrowserView` list row (custom hover callback) and `BookmarkCaptureToastPanel` (toast dismiss logic) — both have custom `onHoverChanged` callbacks, can't use shared modifier
+
+### 19.7 Inline Rename
+- **Used by:** Notes (NoteCardView, NoteListRow)
+- **Pattern:** Local `@State isRenaming` + `@State renamingTitle` + `@FocusState` per card
+- **Flow:** Context menu "Rename" -> title swaps to TextField -> Enter saves, Escape cancels
+- **Focus:** Use `.task { try? await Task.sleep(for: .milliseconds(150)); focused = true }` — NSPanel needs delay for `@FocusState`
+- **Reuse opportunity:** Bookmark cards, folder rename in sidebar
+
+### 19.8 Folder Assignment
+- **Used by:** Notes (via context menu), Bookmarks (via drag-and-drop and context menu)
+- **Pattern:** Folders stored in `BookmarksStorage.shared.folders`, shared across all content types
+- **Future:** Notes will support drag-to-folder (matching bookmarks) and multi-folder membership (`folderIDs: [UUID]` instead of `folderID: UUID?`)
+
+---
+
+## 20. File Reference
 
 | File | Contains |
 |------|----------|
@@ -955,14 +1128,22 @@ When building or modifying any UI component, verify:
 | `Utilities/ButtonStyles.swift` | Shared button styles: CiderAccentButtonStyle, CiderDestructiveButtonStyle, CiderSecondaryButtonStyle |
 | `Utilities/ContainerStyles.swift` | Container modifiers: `.sectionContainer()`, `.cardContainer(isHovered:)` |
 | `Utilities/HoverState.swift` | Shared hover state modifier: `.hoverState($isHovered)` with Reduce Motion respect |
+| `Utilities/HighlightedText.swift` | Search match highlighting for Text views |
+| `Utilities/CardContextMenu.swift` | NSMenu-based context menus replacing SwiftUI `.contextMenu` |
 | `Views/Shared/AcrylicPanelBackground.swift` | Acrylic background + shadow implementation |
 | `Views/Shared/PanelEdgeResizeView.swift` | All-edge resize handle NSView |
 | `Views/Shared/CiderTabBar.swift` | Tab bar component |
 | `Views/Shared/CiderPanelShell.swift` | Shared panel shell: sidebar container, traffic lights, title bar, compact mode, resize handles, shadow padding |
 | `Views/Shared/FolderSidebarView.swift` | Sidebar content (folders, projects) |
 | `Views/Shared/EmptyStateView.swift` | Shared empty state: icon + title + optional subtitle/action button |
+| `Views/Shared/MasonryLayout.swift` | Variable-height masonry grid layout |
+| `Views/Shared/ViewOptionsDropdown.swift` | Display mode toggle + card size slider |
+| `Views/Shared/LibraryTableView.swift` | Unified table list view (self-contained + embeddable) |
+| `Views/Shared/FolderContentView.swift` | Mixed-content folder view |
 | `Views/CiderPanelView.swift` | Main panel (uses CiderPanelShell, provides tab/folder/search logic) |
-| `Docs/ACRYLIC_STYLE.md` | Detailed acrylic/shadow implementation guide |
+| `Docs/Design/ACRYLIC_IMPLEMENTATION.md` | Detailed acrylic/shadow implementation guide |
+| `Docs/Features/DETAIL_PANEL_SPEC.md` | Detail view layout specification |
+| `Docs/Features/INTEGRATION_DESIGN.md` | Obsidian/knowledge-base integration design |
 
 ---
 
@@ -970,6 +1151,7 @@ When building or modifying any UI component, verify:
 
 | Date | Change |
 |------|--------|
+| 2026-03-18 | Absorbed SHARED_COMPONENTS.md: added component catalog (§18), cross-tab patterns (§19). Trimmed acrylic section to overview + cross-ref to ACRYLIC_IMPLEMENTATION.md. Expanded file reference (§20). |
 | 2026-02-16 | Added CiderFont typography tokens (§3.5), button styles (§15), container modifiers, hover state. Complete rewrite as binding specification. Documented exact panel layout, sidebar structure, padding chain, resize handles, compact mode. Replaced outdated component specs. |
 | 2026-02-04 | Rewrote for command palette focus, replaced Liquid Glass with acrylic style |
 | 2026-02-02 | Initial design system |
