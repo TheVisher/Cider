@@ -1,6 +1,16 @@
 # Cider 1.0 Roadmap
 
-> **This is the active roadmap from beta to 1.0 release.** The beta launch roadmap (`BETA_ROADMAP.md`) is complete and archived. Every agent session should check this doc first. If the user gets sidetracked with post-1.0 ideas, acknowledge and redirect.
+> **This is the active roadmap from beta to 1.0 release.** The beta launch roadmap (`BETA_ROADMAP.md`) is complete and archived.
+
+## Agent Rules
+
+- Check this doc and `Docs/Product/USER_FEEDBACK.md` when asked "what should we work on?" — point to next `Not Started` item
+- Also check `Shared/FEATURE_PARITY.md` to see if iOS or Web are missing something Desktop already has
+- Redirect post-1.0 ideas to the backlog section below
+- Never mark features Complete — only the user does that after testing
+- Run code review after implementing any feature
+- Update this doc after gate transitions
+- After user confirms a feature is complete, update `Shared/FEATURE_PARITY.md` to reflect the change
 
 **Created:** 2026-02-28
 **Target:** Stable 1.0 release (out of beta)
