@@ -29,40 +29,17 @@ Cider is a native macOS floating panel app for bookmarks, notes, and projects. D
 
 ## Docs Reference
 
-Read the relevant doc BEFORE writing code in that area:
+Read the relevant doc BEFORE writing code in that area. Docs are organized by folder:
 
-| When... | Read |
-|---------|------|
-| Cross-platform context | `Shared/ECOSYSTEM.md` |
-| Sync work | `Shared/SYNC_PROTOCOL.md` |
-| Schema / data model | `Shared/DATA_MODEL.md` |
-| Cross-platform design | `Shared/DESIGN_LANGUAGE.md` |
-| Feature parity check | `Shared/FEATURE_PARITY.md` |
-| Any UI work | `Docs/DESIGN_SYSTEM.md` |
-| Acrylic/materials | `Docs/ACRYLIC_STYLE.md` |
-| Any Swift code | `Docs/CONVENTIONS.md` |
-| Panel architecture | `Docs/FLOATING_PANEL.md` |
-| Panel layout, display modes, search, settings internals | `Docs/ARCHITECTURE.md` |
-| SwiftUI + NSPanel pitfalls | `Docs/SWIFTUI_GOTCHAS.md` |
-| TipTap/notes editor | `Docs/TIPTAP_EDITOR.md` |
-| Concurrency/storage patterns | `Docs/TECH_STACK.md` |
-| Adding/modifying card storage | `Docs/STORAGE.md` |
-| Adding settings | `Docs/USER_PREFERENCES.md` |
-| Reusable components | `Docs/SHARED_COMPONENTS.md` |
-| Detail views | `Docs/DETAIL_PANEL_SPEC.md` |
-| AI features & chat | `Docs/AI.md` |
-| Terminal / AI Chat panel | `Docs/TERMINAL.md` |
-| Cider Web sync | `Shared/SYNC_PROTOCOL.md` |
-| Display/perf bugs | `Docs/TROUBLESHOOTING.md` |
-| Code health/debt | `Docs/CODE_HEALTH.md` |
-| Pre-release QA | `Docs/RELEASE_CHECKLIST.md` |
-| QA, audits, code quality | `Docs/QA/` folder |
-| Code audit loop | `Docs/QA/AUDIT_LOOP.md` |
-| QA testing plan | `Docs/QA/QA_TESTING_PLAN.md` |
-
-Tab vision docs: `Docs/{TAB_NAME}_VISION.md` (HOME, BOOKMARKS, NOTES, WHITEBOARD, CLIPBOARD, LINKED_SOURCES)
-Future tabs (Books, Todos, Documents): `Docs/FUTURE_TABS.md`
-Long-term vault direction: `Docs/VAULT_VISION.md`
+| Folder | Contents |
+|--------|----------|
+| `Docs/Architecture/` | Panel architecture, floating panel, storage, tech stack, SwiftUI gotchas |
+| `Docs/Design/` | Design system, acrylic style, shared components, detail panel spec |
+| `Docs/Conventions/` | Code conventions, code health, user preferences, troubleshooting |
+| `Docs/Features/` | TipTap editor, AI/chat, terminal |
+| `Docs/Product/` | 1.0 roadmap, tab vision docs, future tabs, vault vision, user feedback |
+| `Docs/QA/` | QA testing plan, code audit loop, release checklist, build status |
+| `Shared/` | Cross-platform: ecosystem, sync protocol, data model, design language, feature parity |
 
 ## Quick Reference
 
