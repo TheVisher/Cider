@@ -1,6 +1,8 @@
 # Cider Conventions
 
-> **Read this before writing code.** This document defines Swift style, SwiftUI patterns, performance guidelines, and how to add new features consistently.
+> **Read this before writing code.** This document defines Swift style, SwiftUI patterns, and how to add new features consistently.
+>
+> For performance patterns, memory management, and known issues, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
@@ -43,24 +45,24 @@ struct NoteWindow: View {
     // MARK: - Properties (in this order)
     // 1. Environment
     @Environment(\.dismiss) private var dismiss
-    
+
     // 2. State/Binding
     @State private var title = ""
     @StateObject private var viewModel: NoteViewModel
-    
+
     // 3. Constants
     private let cornerRadius: CGFloat = 14
-    
+
     // MARK: - Body
     var body: some View {
         // ...
     }
-    
+
     // MARK: - Subviews (extracted as computed properties)
     private var headerView: some View {
         // ...
     }
-    
+
     // MARK: - Methods
     private func save() {
         // ...
@@ -86,8 +88,8 @@ func loadConfig() throws -> CiderConfig
 func fetchThumbnail(for url: URL) async throws -> NSImage
 
 // Never force unwrap in production code
-// ❌ let window = windows.first!
-// ✅ guard let window = windows.first else { return }
+// BAD  let window = windows.first!
+// GOOD guard let window = windows.first else { return }
 ```
 
 ---
@@ -102,7 +104,7 @@ Keep views small. Extract subviews when:
 - The same pattern repeats
 
 ```swift
-// ❌ One giant view
+// BAD: One giant view
 struct CommandPaletteView: View {
     var body: some View {
         VStack {
@@ -113,7 +115,7 @@ struct CommandPaletteView: View {
     }
 }
 
-// ✅ Composed from smaller views
+// GOOD: Composed from smaller views
 struct CommandPaletteView: View {
     var body: some View {
         VStack(spacing: 0) {
@@ -138,13 +140,13 @@ struct CommandPaletteView: View {
 @Environment(\.colorScheme) var colorScheme
 
 // Never put business logic in views
-// ❌ Bad
+// BAD
 Button("Save") {
     let data = try? JSONEncoder().encode(note)
     FileManager.default.createFile(at: path, contents: data)
 }
 
-// ✅ Good
+// GOOD
 Button("Save") {
     viewModel.save()
 }
@@ -155,12 +157,12 @@ Button("Save") {
 **Always use spring animations for interactive elements:**
 
 ```swift
-// ✅ Spring animation
+// GOOD: Spring animation
 withAnimation(.spring(duration: 0.3, bounce: 0.05)) {
     isExpanded.toggle()
 }
 
-// ❌ Linear or easeInOut for UI motion
+// BAD: Linear or easeInOut for UI motion
 withAnimation(.easeInOut) { // Don't do this
     isExpanded.toggle()
 }
@@ -169,17 +171,17 @@ withAnimation(.easeInOut) { // Don't do this
 **Use animation tokens from Constants.swift:**
 
 ```swift
-// ✅ Use SwiftUI animation presets (aliased in CiderAnimation)
+// GOOD: Use SwiftUI animation presets (aliased in CiderAnimation)
 withAnimation(.snappy) {
     // ...
 }
 
-// ✅ Or use custom springs from CiderAnimation
+// GOOD: Or use custom springs from CiderAnimation
 withAnimation(CiderAnimation.hoverMagnify) {
     scale = 1.08
 }
 
-// ❌ Don't create ad-hoc springs
+// BAD: Don't create ad-hoc springs
 withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
     // ...
 }
@@ -190,12 +192,12 @@ withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
 ```swift
 @Environment(\.accessibilityReduceMotion) var reduceMotion
 
-// ✅ Standard pattern — disable animation entirely
+// GOOD: Standard pattern — disable animation entirely
 withAnimation(reduceMotion ? .none : .snappy) {
     isExpanded.toggle()
 }
 
-// ✅ Alternative — use linear fade if some motion is needed
+// GOOD: Alternative — use linear fade if some motion is needed
 withAnimation(reduceMotion ? CiderAnimation.reduceMotion : CiderAnimation.hoverMagnify) {
     scale = 1.08
 }
@@ -206,18 +208,18 @@ withAnimation(reduceMotion ? CiderAnimation.reduceMotion : CiderAnimation.hoverM
 **For command palette, use the acrylic color palette:**
 
 ```swift
-// ✅ Acrylic palette colors (command palette)
+// GOOD: Acrylic palette colors (command palette)
 Text("Title")
     .foregroundStyle(CiderColors.primary)  // or .white
 
 Rectangle()
     .fill(Color.white.opacity(0.2))  // Dividers
 
-// ✅ Semantic colors (settings, standard views)
+// GOOD: Semantic colors (settings, standard views)
 Text("Title")
     .foregroundStyle(.primary)
 
-// ❌ Hardcoded hex colors
+// BAD: Hardcoded hex colors
 Rectangle()
     .fill(Color(hex: "#333333"))
 ```
@@ -227,210 +229,17 @@ Rectangle()
 **Use spacing tokens, never magic numbers:**
 
 ```swift
-// ✅ Tokens
+// GOOD: Tokens
 VStack(spacing: Spacing.md) {
     // ...
 }
 .padding(Spacing.lg)
 
-// ❌ Magic numbers
+// BAD: Magic numbers
 VStack(spacing: 12) {
     // ...
 }
 .padding(16)
-```
-
----
-
-## Performance Guidelines
-
-### SwiftUI Optimization
-
-**List Virtualization:**
-```swift
-// ✅ Use List (auto-virtualizes, only renders visible rows)
-List(items) { item in
-    ItemRow(item: item)
-}
-
-// ❌ ScrollView + ForEach (renders everything)
-ScrollView {
-    ForEach(items) { item in
-        ItemRow(item: item)
-    }
-}
-```
-
-**View Identity:**
-```swift
-// ✅ Use explicit .id() for reorderable items
-List(items) { item in
-    ItemRow(item: item)
-        .id(item.id)
-}
-```
-
-**Equatable Views:**
-```swift
-// ✅ Implement Equatable for complex row content
-struct BookmarkRow: View, Equatable {
-    let bookmark: Bookmark
-    
-    static func == (lhs: BookmarkRow, rhs: BookmarkRow) -> Bool {
-        lhs.bookmark.id == rhs.bookmark.id &&
-        lhs.bookmark.updatedAt == rhs.bookmark.updatedAt
-    }
-    
-    var body: some View {
-        // Complex layout
-    }
-}
-
-// Usage
-List(bookmarks) { bookmark in
-    BookmarkRow(bookmark: bookmark)
-        .equatable()
-}
-```
-
-**@Published Gotcha:**
-```swift
-// ❌ Don't @Published entire large arrays
-class ViewModel: ObservableObject {
-    @Published var allItems: [LibraryItem] = [] // Triggers full UI rebuild on any change
-}
-
-// ✅ Use fine-grained updates
-class ViewModel: ObservableObject {
-    @Published var displayedItems: [LibraryItem] = []
-    
-    func loadMore() {
-        // Append incrementally
-        displayedItems.append(contentsOf: nextBatch)
-    }
-}
-```
-
-**LazyVStack/LazyHStack:**
-```swift
-// Only use when List doesn't fit the design
-LazyVStack(spacing: Spacing.md) {
-    ForEach(items) { item in
-        ItemCard(item: item)
-    }
-}
-```
-
-### Content Loading
-
-**Lazy Loading Pattern:**
-```swift
-// ✅ Show metadata only in list views
-struct LibraryItemMetadata {
-    let id: UUID
-    let title: String
-    let type: ContentType
-    let createdAt: Date
-    let thumbnailURL: URL? // URL, not loaded image
-    let preview: String? // Short text preview
-}
-
-// Load full content only when opened
-func openItem(_ metadata: LibraryItemMetadata) async {
-    let fullContent = await loadFullContent(id: metadata.id)
-    // Display full content
-}
-```
-
-**Image Handling:**
-```swift
-// ✅ Async load thumbnails
-struct ThumbnailView: View {
-    let url: URL?
-    @State private var image: NSImage?
-    
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                ProgressView()
-            }
-        }
-        .task {
-            image = await ThumbnailCache.shared.load(url: url)
-        }
-    }
-}
-```
-
-**Debouncing:**
-```swift
-// ✅ 300ms delay on search input
-@State private var searchText = ""
-@State private var debouncedSearchText = ""
-
-var body: some View {
-    TextField("Search", text: $searchText)
-        .onChange(of: searchText) { _, newValue in
-            Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                if searchText == newValue { // Still the same query
-                    debouncedSearchText = newValue
-                }
-            }
-        }
-}
-```
-
-### Threading
-
-**Main Thread:**
-```swift
-// ✅ Only UI updates on main thread
-@MainActor
-func updateUI() {
-    self.items = newItems
-}
-
-// ❌ Never block main thread
-func loadData() {
-    let data = heavyComputation() // Freezes UI
-    self.items = data
-}
-```
-
-**Background Threads:**
-```swift
-// ✅ All heavy work on background
-func searchLibrary(query: String) async {
-    let results = await Task.detached(priority: .userInitiated) {
-        // Heavy database query on background
-        return performSearch(query)
-    }.value
-    
-    await MainActor.run {
-        self.searchResults = results
-    }
-}
-```
-
-**Combine Pattern:**
-```swift
-// ✅ Use .receive(on: DispatchQueue.main) for UI updates
-searchPublisher
-    .debounce(for: 0.3, scheduler: DispatchQueue.main)
-    .sink { [weak self] query in
-        Task {
-            let results = await self?.search(query)
-            await MainActor.run {
-                self?.searchResults = results ?? []
-            }
-        }
-    }
-    .store(in: &cancellables)
 ```
 
 ---
@@ -464,67 +273,6 @@ guard let imageArray = CGSHWCaptureWindowList(connectionID, &wid, 1, kCGSCapture
 
 ---
 
-## Memory Management
-
-### Avoid Retain Cycles
-
-```swift
-// ✅ Weak self in closures
-somePublisher.sink { [weak self] value in
-    self?.update(value)
-}
-
-// ✅ Unowned for non-optional guaranteed references
-Timer.scheduledTimer(withTimeInterval: 1.0) { [unowned self] _ in
-    self.tick()
-}
-
-// ❌ Strong reference creates retain cycle
-Timer.scheduledTimer(withTimeInterval: 1.0) { _ in
-    self.tick() // Retains self
-}
-```
-
-### NSCache for Caching
-
-```swift
-// ✅ Use NSCache (auto-evicts under memory pressure)
-private let thumbnailCache = NSCache<NSURL, NSImage>()
-
-thumbnailCache.countLimit = 100
-thumbnailCache.totalCostLimit = 50 * 1024 * 1024 // 50 MB
-
-// ❌ Don't use Dictionary for caching
-private var thumbnailCache: [URL: NSImage] = [:] // Never evicts
-```
-
-### Dispose of Observers
-
-```swift
-// ✅ Cancel subscriptions in deinit
-class ViewModel: ObservableObject {
-    private var cancellables = Set<AnyCancellable>()
-    
-    init() {
-        setupPublishers()
-    }
-    
-    deinit {
-        cancellables.removeAll()
-    }
-}
-```
-
-### Instruments Profiling
-
-Use Instruments to catch:
-- **Leaks**: Retain cycles, abandoned objects
-- **Allocations**: Memory growth over time
-- **Time Profiler**: CPU bottlenecks
-- **SwiftUI**: View rendering performance
-
----
-
 ## Error Handling & Logging
 
 ### Service Layer Errors
@@ -551,7 +299,7 @@ enum ConfigError: LocalizedError {
 ### Graceful Degradation
 
 ```swift
-// ✅ Fail gracefully with fallback
+// GOOD: Fail gracefully with fallback
 func loadThumbnail() -> NSImage {
     guard let image = try? NSImage(contentsOf: url) else {
         return NSImage(systemSymbolName: "doc", accessibilityDescription: nil)!
@@ -559,7 +307,7 @@ func loadThumbnail() -> NSImage {
     return image
 }
 
-// ❌ Don't crash on failure
+// BAD: Don't crash on failure
 func loadThumbnail() -> NSImage {
     return try! NSImage(contentsOf: url) // Crashes if file missing
 }
@@ -570,15 +318,15 @@ func loadThumbnail() -> NSImage {
 Cider currently uses `NSLog` for logging (prefixed with `[Cider]`):
 
 ```swift
-// ✅ Current pattern
+// GOOD: Current pattern
 NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
 NSLog("[Cider] Focusing window: \(window.title)")
 
-// ⚠️ print() output is lost when launching with &>/dev/null &
+// WARNING: print() output is lost when launching with &>/dev/null &
 // For debugging, use file-based logging (FileHandle) instead of print()
 
 // Never log sensitive data
-// ❌ NSLog("[Cider] User password: \(password)")
+// BAD: NSLog("[Cider] User password: \(password)")
 ```
 
 ---
@@ -588,13 +336,13 @@ NSLog("[Cider] Focusing window: \(window.title)")
 ### VoiceOver Labels
 
 ```swift
-// ✅ Every interactive element needs a label
+// GOOD: Every interactive element needs a label
 Button(action: close) {
     Image(systemName: "xmark")
 }
 .accessibilityLabel("Close window")
 
-// ✅ Describe complex views
+// GOOD: Describe complex views
 HStack {
     Image(systemName: "bookmark")
     Text(bookmark.title)
@@ -602,7 +350,7 @@ HStack {
 .accessibilityElement(children: .combine)
 .accessibilityLabel("Bookmark: \(bookmark.title)")
 
-// ✅ Add hints for non-obvious actions
+// GOOD: Add hints for non-obvious actions
 Button("Save") { save() }
     .accessibilityLabel("Save note")
     .accessibilityHint("Saves your note to the library")
@@ -611,18 +359,18 @@ Button("Save") { save() }
 ### Keyboard Navigation
 
 ```swift
-// ✅ Support tab navigation
+// GOOD: Support tab navigation
 List(items) { item in
     ItemRow(item)
         .focusable()
 }
 
-// ✅ Keyboard shortcuts with VoiceOver announcements
+// GOOD: Keyboard shortcuts with VoiceOver announcements
 Button("New Note") { createNote() }
     .keyboardShortcut("n", modifiers: .command)
     .accessibilityLabel("New note, Command N")
 
-// ✅ Focus management
+// GOOD: Focus management
 @FocusState private var focusedField: Field?
 
 TextField("Title", text: $title)
@@ -637,12 +385,12 @@ TextField("Title", text: $title)
 ```swift
 @Environment(\.accessibilityReduceMotion) var reduceMotion
 
-// ✅ Disable animations when reduce motion is on
+// GOOD: Disable animations when reduce motion is on
 withAnimation(reduceMotion ? .none : .spring()) {
     isExpanded.toggle()
 }
 
-// ✅ Replace parallax with crossfade
+// GOOD: Replace parallax with crossfade
 if reduceMotion {
     // Static view
 } else {
@@ -653,7 +401,7 @@ if reduceMotion {
 ### Color Contrast
 
 ```swift
-// ✅ Always meet minimum contrast ratios
+// GOOD: Always meet minimum contrast ratios
 // Normal text: 4.5:1
 // Large text (18pt+): 3:1
 
@@ -667,11 +415,11 @@ Text("Title")
 ### Dynamic Type
 
 ```swift
-// ✅ Support Dynamic Type
+// GOOD: Support Dynamic Type
 Text("Title")
     .font(.headline) // Scales with user preference
 
-// ✅ Layouts that adapt to size changes
+// GOOD: Layouts that adapt to size changes
 VStack(alignment: .leading, spacing: Spacing.sm) {
     Text("Title")
         .font(.headline)
@@ -732,140 +480,6 @@ protocol WindowManaging {
 
 ---
 
-## App Performance
-
-### Launch Optimization
-
-```swift
-// ✅ Defer non-critical initialization
-@main
-struct CiderApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
-}
-
-class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // Critical: Set up panels, start detectors immediately
-        configureCommandPalette()
-        startDoubleTapDetection()
-
-        // Defer: Non-critical setup
-        DispatchQueue.global(qos: .utility).async {
-            self.setupStatusItem()
-        }
-    }
-}
-```
-
-### Asset Optimization
-
-```swift
-// ✅ Use SF Symbols when possible (0 bytes, perfect rendering)
-Image(systemName: "bookmark")
-
-// ✅ Compress custom images with ImageOptim or similar
-// Target: <50 KB per image
-
-// ✅ Use vector PDFs for icons (scale to any size without blur)
-Image("custom-icon") // PDF in Assets.xcassets
-    .resizable()
-    .frame(width: 24, height: 24)
-```
-
-### Bundle Size
-
-- Remove unused assets
-- Use asset catalogs (auto-optimize for device)
-- Enable app thinning
-- Avoid bundling large frameworks unnecessarily
-
----
-
-## Modern Concurrency
-
-### Async/Await
-
-```swift
-// ✅ Use async/await for async operations
-func captureSnapshots(for windowIDs: [CGWindowID]) async {
-    for windowID in windowIDs {
-        if let image = captureWindowPrivate(windowID: windowID) {
-            previews[windowID] = image
-        }
-    }
-}
-
-// ✅ Call from view with .task
-.task {
-    await previewService.startCapturing(windowIDs: visibleWindowIDs)
-}
-
-// ❌ Old completion handler style (avoid)
-func captureSnapshot(windowID: CGWindowID, completion: @escaping (NSImage?) -> Void) {
-    // Don't use this pattern anymore
-}
-```
-
-### Actor for Shared State
-
-> **Note:** Cider doesn't currently use actors, but this is the recommended pattern for future thread-safe shared state.
-
-```swift
-// ✅ Use actor for thread-safe state
-actor ClipboardHistory {
-    private var items: [String] = []
-
-    func add(_ item: String) {
-        items.append(item)
-    }
-
-    func getRecent(count: Int) -> [String] {
-        Array(items.suffix(count))
-    }
-
-    func clear() {
-        items.removeAll()
-    }
-}
-
-// Usage (automatically safe)
-let history = ClipboardHistory()
-await history.add(newItem)
-let recent = await history.getRecent(count: 10)
-```
-
-### TaskGroup for Concurrent Operations
-
-```swift
-// ✅ Load multiple window previews concurrently
-func captureAll(windowIDs: [CGWindowID]) async -> [CGWindowID: NSImage] {
-    await withTaskGroup(of: (CGWindowID, NSImage?).self) { group in
-        for wid in windowIDs {
-            group.addTask {
-                let image = await WindowPreviewService.shared.captureWindowPrivate(windowID: wid)
-                return (wid, image)
-            }
-        }
-
-        var results: [CGWindowID: NSImage] = [:]
-        for await (wid, image) in group {
-            if let image {
-                results[wid] = image
-            }
-        }
-        return results
-    }
-}
-```
-
----
-
 ## Adding a New Companion Window (Future)
 
 > **Note:** Companion windows are not yet implemented. This section describes the planned pattern for when they are added.
@@ -890,11 +504,11 @@ struct Timer: Identifiable, Codable {
 // ViewModels/TimerViewModel.swift
 class TimerViewModel: ObservableObject {
     @Published var timer: Timer
-    
+
     init(timer: Timer = Timer(id: UUID(), duration: 300, remaining: 300, isRunning: false)) {
         self.timer = timer
     }
-    
+
     func start() { /* ... */ }
     func pause() { /* ... */ }
     func reset() { /* ... */ }

@@ -1,6 +1,8 @@
-# Troubleshooting: Known Issues and Fixes
+# Troubleshooting: Known Issues, Fixes, and Performance Best Practices
 
-> Solutions to layout, sizing, and rendering issues encountered during development. Reference this when similar problems arise.
+> Solutions to layout, sizing, and rendering issues encountered during development. Also includes performance patterns and memory management guidelines. Reference this when similar problems arise.
+>
+> For tracked code health issues (open and resolved), see [CODE_HEALTH.md](CODE_HEALTH.md).
 
 ---
 
@@ -158,7 +160,7 @@ struct CardSizing {
 
 ---
 
-## Performance
+## Performance Issues
 
 ### Problem: NotesStorage filesystem watcher causes ~100% CPU at idle
 
@@ -249,7 +251,7 @@ if rebuiltIndex != previousIndex {
 
 ### Watch For: Image decoding on the main thread
 
-**Status:** Implemented. All card types now decode images async on background threads:
+**Status:** Resolved. All card types now decode images async on background threads:
 - **Bookmarks:** `BookmarkThumbnailView` and `BookmarkDetailsHeroPreview` use `.task(id: fingerprint)` + `Task.detached` + `CGImageSourceCreateWithURL`. Fingerprint combines path + metadataUpdatedAt + remoteURLString.
 - **Notes:** `NoteCardData.load()` on `Task.detached` with `CGImageSourceCreateThumbnailAtIndex` (240px max). `resolvedContent` called once, passed to `stripMarkup`/`countWords`/`imageURLs(from:)` to avoid repeated disk I/O.
 - **Contacts:** `ContactCardCardView` and `ContactListRow` use `CGImageSourceCreateThumbnailAtIndex` with 120px max dimension inside `Task.detached`.
@@ -296,6 +298,371 @@ if rebuiltIndex != previousIndex {
 - Add `Equatable` conformance to card data structs — SwiftUI can skip diffing unchanged cards.
 - Use the existing `didSet` guard pattern (`if self.value != newValue`) to prevent redundant `@Published` updates, especially in notification handlers.
 - Long-term: migrating to `@Observable` (Swift Observation framework) gives per-property tracking instead of whole-object invalidation. Not urgent.
+
+---
+
+## Performance Best Practices
+
+> Moved from CONVENTIONS.md. These are patterns to follow when writing new code.
+
+### SwiftUI Optimization
+
+**List Virtualization:**
+```swift
+// GOOD: Use List (auto-virtualizes, only renders visible rows)
+List(items) { item in
+    ItemRow(item: item)
+}
+
+// BAD: ScrollView + ForEach (renders everything)
+ScrollView {
+    ForEach(items) { item in
+        ItemRow(item: item)
+    }
+}
+```
+
+**View Identity:**
+```swift
+// GOOD: Use explicit .id() for reorderable items
+List(items) { item in
+    ItemRow(item: item)
+        .id(item.id)
+}
+```
+
+**Equatable Views:**
+```swift
+// GOOD: Implement Equatable for complex row content
+struct BookmarkRow: View, Equatable {
+    let bookmark: Bookmark
+
+    static func == (lhs: BookmarkRow, rhs: BookmarkRow) -> Bool {
+        lhs.bookmark.id == rhs.bookmark.id &&
+        lhs.bookmark.updatedAt == rhs.bookmark.updatedAt
+    }
+
+    var body: some View {
+        // Complex layout
+    }
+}
+
+// Usage
+List(bookmarks) { bookmark in
+    BookmarkRow(bookmark: bookmark)
+        .equatable()
+}
+```
+
+**@Published Gotcha:**
+```swift
+// BAD: Don't @Published entire large arrays
+class ViewModel: ObservableObject {
+    @Published var allItems: [LibraryItem] = [] // Triggers full UI rebuild on any change
+}
+
+// GOOD: Use fine-grained updates
+class ViewModel: ObservableObject {
+    @Published var displayedItems: [LibraryItem] = []
+
+    func loadMore() {
+        // Append incrementally
+        displayedItems.append(contentsOf: nextBatch)
+    }
+}
+```
+
+**LazyVStack/LazyHStack:**
+```swift
+// Only use when List doesn't fit the design
+LazyVStack(spacing: Spacing.md) {
+    ForEach(items) { item in
+        ItemCard(item: item)
+    }
+}
+```
+
+### Content Loading
+
+**Lazy Loading Pattern:**
+```swift
+// GOOD: Show metadata only in list views
+struct LibraryItemMetadata {
+    let id: UUID
+    let title: String
+    let type: ContentType
+    let createdAt: Date
+    let thumbnailURL: URL? // URL, not loaded image
+    let preview: String? // Short text preview
+}
+
+// Load full content only when opened
+func openItem(_ metadata: LibraryItemMetadata) async {
+    let fullContent = await loadFullContent(id: metadata.id)
+    // Display full content
+}
+```
+
+**Image Handling:**
+```swift
+// GOOD: Async load thumbnails
+struct ThumbnailView: View {
+    let url: URL?
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            image = await ThumbnailCache.shared.load(url: url)
+        }
+    }
+}
+```
+
+**Debouncing:**
+```swift
+// GOOD: 300ms delay on search input
+@State private var searchText = ""
+@State private var debouncedSearchText = ""
+
+var body: some View {
+    TextField("Search", text: $searchText)
+        .onChange(of: searchText) { _, newValue in
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                if searchText == newValue { // Still the same query
+                    debouncedSearchText = newValue
+                }
+            }
+        }
+}
+```
+
+### Threading
+
+**Main Thread:**
+```swift
+// GOOD: Only UI updates on main thread
+@MainActor
+func updateUI() {
+    self.items = newItems
+}
+
+// BAD: Never block main thread
+func loadData() {
+    let data = heavyComputation() // Freezes UI
+    self.items = data
+}
+```
+
+**Background Threads:**
+```swift
+// GOOD: All heavy work on background
+func searchLibrary(query: String) async {
+    let results = await Task.detached(priority: .userInitiated) {
+        // Heavy database query on background
+        return performSearch(query)
+    }.value
+
+    await MainActor.run {
+        self.searchResults = results
+    }
+}
+```
+
+**Combine Pattern:**
+```swift
+// GOOD: Use .receive(on: DispatchQueue.main) for UI updates
+searchPublisher
+    .debounce(for: 0.3, scheduler: DispatchQueue.main)
+    .sink { [weak self] query in
+        Task {
+            let results = await self?.search(query)
+            await MainActor.run {
+                self?.searchResults = results ?? []
+            }
+        }
+    }
+    .store(in: &cancellables)
+```
+
+### Memory Management
+
+**Avoid Retain Cycles:**
+```swift
+// GOOD: Weak self in closures
+somePublisher.sink { [weak self] value in
+    self?.update(value)
+}
+
+// GOOD: Unowned for non-optional guaranteed references
+Timer.scheduledTimer(withTimeInterval: 1.0) { [unowned self] _ in
+    self.tick()
+}
+
+// BAD: Strong reference creates retain cycle
+Timer.scheduledTimer(withTimeInterval: 1.0) { _ in
+    self.tick() // Retains self
+}
+```
+
+**NSCache for Caching:**
+```swift
+// GOOD: Use NSCache (auto-evicts under memory pressure)
+private let thumbnailCache = NSCache<NSURL, NSImage>()
+
+thumbnailCache.countLimit = 100
+thumbnailCache.totalCostLimit = 50 * 1024 * 1024 // 50 MB
+
+// BAD: Don't use Dictionary for caching
+private var thumbnailCache: [URL: NSImage] = [:] // Never evicts
+```
+
+**Dispose of Observers:**
+```swift
+// GOOD: Cancel subscriptions in deinit
+class ViewModel: ObservableObject {
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        setupPublishers()
+    }
+
+    deinit {
+        cancellables.removeAll()
+    }
+}
+```
+
+**Instruments Profiling:**
+
+Use Instruments to catch:
+- **Leaks**: Retain cycles, abandoned objects
+- **Allocations**: Memory growth over time
+- **Time Profiler**: CPU bottlenecks
+- **SwiftUI**: View rendering performance
+
+### App Launch & Assets
+
+**Launch Optimization:**
+```swift
+// GOOD: Defer non-critical initialization
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Critical: Set up panels, start detectors immediately
+        configureCommandPalette()
+        startDoubleTapDetection()
+
+        // Defer: Non-critical setup
+        DispatchQueue.global(qos: .utility).async {
+            self.setupStatusItem()
+        }
+    }
+}
+```
+
+**Asset Optimization:**
+```swift
+// GOOD: Use SF Symbols when possible (0 bytes, perfect rendering)
+Image(systemName: "bookmark")
+
+// GOOD: Compress custom images with ImageOptim or similar
+// Target: <50 KB per image
+
+// GOOD: Use vector PDFs for icons (scale to any size without blur)
+Image("custom-icon") // PDF in Assets.xcassets
+    .resizable()
+    .frame(width: 24, height: 24)
+```
+
+**Bundle Size:**
+- Remove unused assets
+- Use asset catalogs (auto-optimize for device)
+- Enable app thinning
+- Avoid bundling large frameworks unnecessarily
+
+### Modern Concurrency
+
+**Async/Await:**
+```swift
+// GOOD: Use async/await for async operations
+func captureSnapshots(for windowIDs: [CGWindowID]) async {
+    for windowID in windowIDs {
+        if let image = captureWindowPrivate(windowID: windowID) {
+            previews[windowID] = image
+        }
+    }
+}
+
+// GOOD: Call from view with .task
+.task {
+    await previewService.startCapturing(windowIDs: visibleWindowIDs)
+}
+
+// BAD: Old completion handler style (avoid)
+func captureSnapshot(windowID: CGWindowID, completion: @escaping (NSImage?) -> Void) {
+    // Don't use this pattern anymore
+}
+```
+
+**Actor for Shared State:**
+
+> **Note:** Cider doesn't currently use actors, but this is the recommended pattern for future thread-safe shared state.
+
+```swift
+// GOOD: Use actor for thread-safe state
+actor ClipboardHistory {
+    private var items: [String] = []
+
+    func add(_ item: String) {
+        items.append(item)
+    }
+
+    func getRecent(count: Int) -> [String] {
+        Array(items.suffix(count))
+    }
+
+    func clear() {
+        items.removeAll()
+    }
+}
+
+// Usage (automatically safe)
+let history = ClipboardHistory()
+await history.add(newItem)
+let recent = await history.getRecent(count: 10)
+```
+
+**TaskGroup for Concurrent Operations:**
+```swift
+// GOOD: Load multiple window previews concurrently
+func captureAll(windowIDs: [CGWindowID]) async -> [CGWindowID: NSImage] {
+    await withTaskGroup(of: (CGWindowID, NSImage?).self) { group in
+        for wid in windowIDs {
+            group.addTask {
+                let image = await WindowPreviewService.shared.captureWindowPrivate(windowID: wid)
+                return (wid, image)
+            }
+        }
+
+        var results: [CGWindowID: NSImage] = [:]
+        for await (wid, image) in group {
+            if let image {
+                results[wid] = image
+            }
+        }
+        return results
+    }
+}
+```
 
 ---
 
