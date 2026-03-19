@@ -414,6 +414,11 @@ final class SyncService: ObservableObject {
                 syncConfig.lastSyncTimestamp = effectiveTime
                 syncConfig.save()
 
+                // Upload note attachment images in background (fire-and-forget)
+                if !dirtyNotes.isEmpty {
+                    self.uploadNoteAttachments(dirtyNotes: dirtyNotes, token: token)
+                }
+
                 self.isSyncing = false
             } catch {
                 self.consecutiveFailures += 1
@@ -911,6 +916,106 @@ final class SyncService: ObservableObject {
             "deleted": true,
             "deletedAt": nowMs,
         ]
+    }
+
+    // MARK: - Note Attachment Upload
+
+    /// Upload note attachment images that are referenced in content but not yet on the server.
+    private func uploadNoteAttachments(dirtyNotes: [Note], token: String) {
+        let config = CiderConfig.load()
+        let siteURL = config.syncURL
+        guard !siteURL.isEmpty else { return }
+
+        // Collect all (noteSyncId, filename, fileURL) tuples from dirty notes
+        var pending: [(noteSyncId: String, filename: String, fileURL: URL)] = []
+        for note in dirtyNotes {
+            let content = note.resolvedContent
+            let urls = note.imageURLs(from: content)
+            for url in urls {
+                // Only upload local file attachments (not remote URLs)
+                guard url.isFileURL else { continue }
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                let filename = url.lastPathComponent
+                pending.append((
+                    noteSyncId: note.id.uuidString.lowercased(),
+                    filename: filename,
+                    fileURL: url
+                ))
+            }
+        }
+
+        guard !pending.isEmpty else { return }
+
+        Task.detached { [weak self] in
+            guard let self else { return }
+
+            // Step 1: Check which attachments already exist on server
+            let checkURL = URL(string: "\(siteURL)/api/sync/note-attachments-check")!
+            var checkRequest = URLRequest(url: checkURL)
+            checkRequest.httpMethod = "POST"
+            checkRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            checkRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let items = pending.map { ["noteSyncId": $0.noteSyncId, "filename": $0.filename] }
+            checkRequest.httpBody = try? JSONSerialization.data(withJSONObject: ["items": items])
+
+            var needsUpload = pending // default: upload all if check fails
+            if let (data, response) = try? await URLSession.shared.data(for: checkRequest),
+               let httpResponse = response as? HTTPURLResponse,
+               httpResponse.statusCode == 200,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let results = json["results"] as? [[String: Any]] {
+                // Filter to only those that don't exist
+                needsUpload = []
+                for (i, result) in results.enumerated() where i < pending.count {
+                    if result["exists"] as? Bool != true {
+                        needsUpload.append(pending[i])
+                    }
+                }
+            }
+
+            let totalCount = pending.count
+            guard !needsUpload.isEmpty else {
+                await MainActor.run {
+                    self.logger.debug("Note attachments: all \(totalCount) already on server")
+                }
+                return
+            }
+
+            let uploadCount = needsUpload.count
+            await MainActor.run {
+                self.logger.info("Note attachments: uploading \(uploadCount) of \(totalCount)")
+            }
+
+            // Step 2: Upload each missing attachment
+            for item in needsUpload {
+                do {
+                    let fileData = try Data(contentsOf: item.fileURL)
+                    let uploadURL = URL(string: "\(siteURL)/api/sync/upload-note-attachment")!
+                    var request = URLRequest(url: uploadURL)
+                    request.httpMethod = "POST"
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    request.setValue(item.noteSyncId, forHTTPHeaderField: "X-Cider-Note-Sync-Id")
+                    request.setValue(item.filename, forHTTPHeaderField: "X-Cider-Attachment-Filename")
+                    // Infer content type from extension
+                    let ext = item.fileURL.pathExtension.lowercased()
+                    let contentType = ext == "png" ? "image/png" : ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "application/octet-stream"
+                    request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+                    request.httpBody = fileData
+
+                    let (_, response) = try await URLSession.shared.data(for: request)
+                    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                        await MainActor.run {
+                            self.logger.debug("Uploaded attachment: \(item.filename) for note \(item.noteSyncId)")
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.logger.error("Failed to upload attachment \(item.filename): \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - URL conversion
