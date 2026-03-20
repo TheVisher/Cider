@@ -11,20 +11,20 @@ final class MLXModelManager: ObservableObject {
 
     /// Model options based on available RAM.
     enum ModelTier: String, CaseIterable {
-        case small = "mlx-community/Qwen3.5-4B-MLX-4bit"   // ~2.5 GB, for 8GB Macs
-        case large = "mlx-community/Qwen3.5-9B-MLX-4bit"   // ~5.5 GB, for 16GB+ Macs
+        case small = "mlx-community/Qwen2.5-3B-Instruct-4bit"   // ~1.8 GB, for 8GB Macs
+        case large = "mlx-community/Qwen2.5-7B-Instruct-4bit"   // ~4.0 GB, for 16GB+ Macs
 
         var displayName: String {
             switch self {
-            case .small: "Qwen 3.5 4B (Recommended for 8GB)"
-            case .large: "Qwen 3.5 9B (Recommended for 16GB+)"
+            case .small: "Qwen 2.5 3B (Recommended for 8GB)"
+            case .large: "Qwen 2.5 7B (Recommended for 16GB+)"
             }
         }
 
         var downloadSizeGB: Double {
             switch self {
-            case .small: 2.5
-            case .large: 5.5
+            case .small: 1.8
+            case .large: 4.0
             }
         }
     }
@@ -51,9 +51,15 @@ final class MLXModelManager: ObservableObject {
     }
 
     /// Currently selected model ID (from UserDefaults or recommended).
+    /// Falls back to recommended if the saved value references an unsupported model.
     var selectedModelID: String {
         get {
-            UserDefaults.standard.string(forKey: "cider.mlxModelID") ?? recommendedTier.rawValue
+            let saved = UserDefaults.standard.string(forKey: "cider.mlxModelID") ?? ""
+            // Reset if saved model is unsupported (e.g. Qwen 3.5 before library support)
+            if saved.isEmpty || saved.contains("Qwen3.5") {
+                return recommendedTier.rawValue
+            }
+            return saved
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "cider.mlxModelID")

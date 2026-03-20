@@ -360,7 +360,7 @@ struct AIAssistantPanelView: View {
                         .foregroundColor(.green)
                         .frame(width: 14, alignment: .center)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Qwen 3.5 (Local)")
+                        Text("Local Model")
                             .font(CiderFont.label)
                             .foregroundColor(CiderColors.primary)
                         Text(localModelSubtitle)
