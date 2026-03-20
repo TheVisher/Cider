@@ -329,6 +329,8 @@ All tools are defined in `Services/AI/AIAssistantTools.swift` and registered in 
 | `addBookmark` | "Save this URL as a bookmark" | Saves URL with optional title, folder, and tag |
 | `summarizeText` | "Summarize this and save as a note" | Summarizes text via AI, optionally saves as a note in a folder |
 | `deleteItem` | "Delete the Untitled bookmark" | Moves bookmark or note to trash (recoverable via undo) |
+| `renameFolder` | "Rename Products to Shopping" | Renames an existing folder |
+| `unfileItems` | "Remove Vans from its folder" | Moves items out of their folder back to root level |
 
 **How tool calling works:**
 1. User asks "how many bookmarks do I have?"

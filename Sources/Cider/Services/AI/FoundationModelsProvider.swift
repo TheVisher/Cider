@@ -41,7 +41,9 @@ final class FoundationModelsProvider: AIAssistantProvider {
         SummarizeTextTool(),
         AddBookmarkTool(),
         GetCurrentItemTool(),
-        DeleteItemTool()
+        DeleteItemTool(),
+        RenameFolderTool(),
+        UnfileItemsTool()
     ]
 
     var isAvailable: Bool {
@@ -179,8 +181,8 @@ final class FoundationModelsProvider: AIAssistantProvider {
         }
 
         let estimatedTokens = charCount / 4
-        // Add ~1300 tokens for tool definitions (21 tools × ~63 tokens each)
-        let totalEstimate = estimatedTokens + 1300
+        // Add ~1450 tokens for tool definitions (23 tools × ~63 tokens each)
+        let totalEstimate = estimatedTokens + 1450
         contextUsage = min(1.0, Double(totalEstimate) / Double(contextWindowSize))
     }
 

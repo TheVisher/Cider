@@ -125,13 +125,17 @@ struct SearchItemsTool: Tool {
             if matches.count > 10 { results.append("...and \(matches.count - 10) more bookmarks") }
         }
 
-        // Search notes
+        // Search notes (title + content preview)
         if searchAll || typeFilter == "notes" || typeFilter == "note" {
             let matches = NotesStorage.shared.notes.filter { note in
-                note.title.localizedStandardContains(query)
+                note.title.localizedStandardContains(query) ||
+                note.contentPreview.localizedStandardContains(query)
             }
             for n in matches.prefix(10) {
-                results.append("Note: \"\(n.title)\"")
+                var desc = "Note: \"\(n.title)\""
+                let preview = String(n.contentPreview.prefix(80))
+                if !preview.isEmpty { desc += " — \(preview)" }
+                results.append(desc)
             }
             if matches.count > 10 { results.append("...and \(matches.count - 10) more notes") }
         }
@@ -1154,5 +1158,84 @@ struct DeleteItemTool: Tool {
         }
 
         return "Unknown item type '\(type)'. Use 'bookmark' or 'note'."
+    } }
+}
+
+// MARK: - Rename Folder Tool
+
+/// Renames an existing folder.
+struct RenameFolderTool: Tool {
+    let name = "renameFolder"
+    let description = "Rename an existing folder."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Current name of the folder to rename")
+        var currentName: String
+
+        @Guide(description: "New name for the folder")
+        var newName: String
+    }
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let current = arguments.currentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newName = arguments.newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty else { return "New name cannot be empty." }
+
+        guard let folder = VaultFolderService.shared.folders.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(current) == .orderedSame
+        }) else {
+            let available = VaultFolderService.shared.folders.map(\.name).joined(separator: ", ")
+            return "No folder named \"\(current)\". Available folders: \(available)"
+        }
+
+        let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)
+        if success {
+            return "Renamed folder \"\(current)\" → \"\(newName)\"."
+        }
+        return "Failed to rename folder \"\(current)\". The name \"\(newName)\" may already be taken."
+    } }
+}
+
+// MARK: - Unfile Items Tool
+
+/// Moves items out of a folder back to root (unfiled).
+struct UnfileItemsTool: Tool {
+    let name = "unfileItems"
+    let description = """
+    Remove items from their folder, making them unfiled (root level). \
+    Searches by keyword and removes folder assignment.
+    """
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Keyword to find items to unfile (searches titles)")
+        var searchQuery: String
+    }
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        var unfiled: [String] = []
+
+        let matchingBookmarks = BookmarksStorage.shared.bookmarks.filter {
+            $0.title.localizedStandardContains(query) && $0.folderID != nil
+        }
+        for bookmark in matchingBookmarks {
+            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
+            unfiled.append("Bookmark: \"\(bookmark.title)\"")
+        }
+
+        let matchingNotes = NotesStorage.shared.notes.filter {
+            $0.title.localizedStandardContains(query) && $0.folderID != nil
+        }
+        for note in matchingNotes {
+            _ = NotesStorage.shared.assignNote(note.id, toFolder: nil)
+            unfiled.append("Note: \"\(note.title)\"")
+        }
+
+        if unfiled.isEmpty {
+            return "No filed items found matching \"\(query)\"."
+        }
+        return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
     } }
 }
