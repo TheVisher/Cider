@@ -6,36 +6,73 @@ struct AIAssistantBubbleView: View {
     var isStreaming = false
 
     @State private var isHovered = false
+    @State private var showCopied = false
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        return f
+    }()
 
     var body: some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            if message.role == .user {
-                Spacer(minLength: Spacing.xxxl)
-            }
+        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                if message.role == .user {
+                    Spacer(minLength: Spacing.xxxl)
+                }
 
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Spacing.xxs) {
+                VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Spacing.xxs) {
+                    if message.role == .assistant {
+                        MarkdownContentView(text: message.content)
+                    } else {
+                        Text(message.content)
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.primary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if isStreaming {
+                        BouncingDotsView()
+                    }
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .background(bubbleBackground)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+
                 if message.role == .assistant {
-                    MarkdownContentView(text: message.content)
-                } else {
-                    Text(message.content)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.primary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if isStreaming {
-                    BouncingDotsView()
+                    Spacer(minLength: Spacing.xxxl)
                 }
             }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
-            .background(bubbleBackground)
-            .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
 
-            if message.role == .assistant {
-                Spacer(minLength: Spacing.xxxl)
+            // Timestamp + copy button (visible on hover)
+            HStack(spacing: Spacing.xs) {
+                if isHovered || showCopied {
+                    Text(Self.timeFormatter.string(from: message.timestamp))
+                        .font(.system(size: 10))
+                        .foregroundColor(CiderColors.quaternary)
+
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(message.content, forType: .string)
+                        showCopied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            showCopied = false
+                        }
+                    } label: {
+                        Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(showCopied ? CiderColors.successMuted : CiderColors.quaternary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy message")
+                }
             }
+            .frame(height: isHovered || showCopied ? nil : 0)
+            .clipped()
+            .animation(.snappy, value: isHovered)
         }
         .onHover { isHovered = $0 }
     }
