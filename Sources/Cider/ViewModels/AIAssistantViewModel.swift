@@ -105,9 +105,10 @@ final class AIAssistantViewModel: ObservableObject {
                 logger.error("AI response error: \(error.localizedDescription, privacy: .public)")
                 await finishTypewriter()
                 if streamingText.isEmpty {
+                    let errorDetail = error.localizedDescription
                     let errorMessage = AIAssistantMessage(
                         role: .assistant,
-                        content: "Sorry, I couldn't generate a response. Please try again."
+                        content: "Error: \(errorDetail)"
                     )
                     messages.append(errorMessage)
                 } else {
