@@ -15,8 +15,12 @@ final class AIAssistantViewModel: ObservableObject {
     /// Text revealed to the UI via typewriter effect — lags behind `streamingText`.
     @Published var displayedStreamingText = ""
 
+    /// Current conversation ID (nil = no active conversation yet).
+    @Published var currentConversationID: UUID?
+
     private let logger = Logger(subsystem: "com.cider.app", category: "AIAssistant")
     private var provider: AIAssistantProvider
+    private let storage = AIConversationStorage.shared
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
 
@@ -38,6 +42,11 @@ final class AIAssistantViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
 
+        // Start a new conversation if none active
+        if currentConversationID == nil {
+            currentConversationID = UUID()
+        }
+
         let userMessage = AIAssistantMessage(role: .user, content: trimmed)
         messages.append(userMessage)
 
@@ -53,7 +62,6 @@ final class AIAssistantViewModel: ObservableObject {
                 for try await chunk in stream {
                     streamingText += chunk
                 }
-                // Wait for typewriter to catch up before committing
                 await finishTypewriter()
                 let assistantMessage = AIAssistantMessage(role: .assistant, content: streamingText)
                 messages.append(assistantMessage)
@@ -75,12 +83,14 @@ final class AIAssistantViewModel: ObservableObject {
             streamingText = ""
             displayedStreamingText = ""
             isStreaming = false
+
+            // Auto-save after each exchange
+            saveCurrentConversation()
         }
     }
 
     // MARK: - Typewriter Effect
 
-    /// Reveals text from `streamingText` into `displayedStreamingText` word by word.
     private func startTypewriterLoop() {
         typewriterTask?.cancel()
         typewriterTask = Task {
@@ -97,11 +107,9 @@ final class AIAssistantViewModel: ObservableObject {
                     continue
                 }
 
-                // Skip whitespace/newlines (reveal instantly)
                 while charOffset < chars.count && chars[charOffset].isWhitespace {
                     charOffset += 1
                 }
-                // Advance through the next word
                 while charOffset < chars.count && !chars[charOffset].isWhitespace {
                     charOffset += 1
                 }
@@ -112,7 +120,6 @@ final class AIAssistantViewModel: ObservableObject {
         }
     }
 
-    /// Instantly reveal remaining text and cancel the typewriter loop.
     private func finishTypewriter() async {
         typewriterTask?.cancel()
         typewriterTask = nil
@@ -133,12 +140,69 @@ final class AIAssistantViewModel: ObservableObject {
         streamingText = ""
         displayedStreamingText = ""
         isStreaming = false
+        saveCurrentConversation()
     }
 
     func clearConversation() {
         stopStreaming()
         messages.removeAll()
+        currentConversationID = nil
         provider.resetSession()
+    }
+
+    /// Start a new conversation (saves current one first).
+    func newConversation() {
+        saveCurrentConversation()
+        stopStreaming()
+        messages.removeAll()
+        currentConversationID = nil
+        provider.resetSession()
+    }
+
+    // MARK: - Persistence
+
+    /// Save the current conversation to disk.
+    private func saveCurrentConversation() {
+        guard let id = currentConversationID, !messages.isEmpty else { return }
+        let title = conversationTitle
+        storage.save(id: id, title: title, messages: messages, model: providerName)
+    }
+
+    /// Load a previous conversation by ID.
+    func loadConversation(_ conversationID: UUID) {
+        guard let loadedMessages = storage.loadMessages(for: conversationID) else { return }
+        // Save current conversation first
+        saveCurrentConversation()
+
+        stopStreaming()
+        messages = loadedMessages
+        currentConversationID = conversationID
+        provider.resetSession()
+    }
+
+    /// Delete a conversation from disk.
+    func deleteConversation(_ conversationID: UUID) {
+        storage.delete(conversationID: conversationID)
+        if currentConversationID == conversationID {
+            clearConversation()
+        }
+    }
+
+    /// Export current conversation as markdown.
+    func exportCurrentAsMarkdown() -> String? {
+        guard let id = currentConversationID else { return nil }
+        saveCurrentConversation()
+        return storage.exportAsMarkdown(conversationID: id)
+    }
+
+    /// Auto-generated title from the first user message.
+    private var conversationTitle: String {
+        guard let firstUserMessage = messages.first(where: { $0.role == .user }) else {
+            return "New Chat"
+        }
+        let title = firstUserMessage.content
+        if title.count <= 50 { return title }
+        return String(title.prefix(47)) + "..."
     }
 
     // MARK: - Context Updates

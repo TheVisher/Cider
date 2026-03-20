@@ -4,6 +4,8 @@ import SwiftUI
 struct AIAssistantPanelView: View {
     @ObservedObject var viewModel: AIAssistantViewModel
 
+    @ObservedObject private var conversationStorage = AIConversationStorage.shared
+    @State private var showConversationList = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -68,6 +70,35 @@ struct AIAssistantPanelView: View {
             // Context usage indicator
             if viewModel.contextUsage > 0.1 {
                 contextUsageIndicator
+            }
+
+            // New conversation
+            Button {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    viewModel.newConversation()
+                }
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("New conversation")
+
+            // Conversation history
+            if !conversationStorage.conversations.isEmpty {
+                Button {
+                    showConversationList.toggle()
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Conversation history")
+                .popover(isPresented: $showConversationList, arrowEdge: .bottom) {
+                    conversationListPopover
+                }
             }
 
             if !viewModel.messages.isEmpty {
@@ -204,6 +235,81 @@ struct AIAssistantPanelView: View {
     private func scrollToBottom(proxy: ScrollViewProxy) {
         withAnimation(reduceMotion ? .none : .snappy) {
             proxy.scrollTo("bottom", anchor: .bottom)
+        }
+    }
+
+    // MARK: - Conversation List Popover
+
+    private var conversationListPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("History")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .padding(.horizontal, Spacing.md)
+                .padding(.top, Spacing.sm)
+                .padding(.bottom, Spacing.xs)
+
+            ScrollView {
+                LazyVStack(spacing: Spacing.xxs) {
+                    ForEach(conversationStorage.conversations) { conv in
+                        conversationRow(conv)
+                    }
+                }
+                .padding(.horizontal, Spacing.xs)
+            }
+            .frame(maxHeight: 300)
+        }
+        .padding(.vertical, Spacing.xs)
+        .frame(width: 260)
+    }
+
+    private func conversationRow(_ conv: AIConversationSummary) -> some View {
+        let isActive = viewModel.currentConversationID == conv.id
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+
+        return Button {
+            viewModel.loadConversation(conv.id)
+            showConversationList = false
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(conv.title)
+                        .font(CiderFont.label)
+                        .foregroundColor(isActive ? CiderColors.controlAccent : CiderColors.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    HStack(spacing: Spacing.xs) {
+                        Text(formatter.localizedString(for: conv.updated, relativeTo: Date()))
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+
+                        Text("·")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+
+                        Text("\(conv.messageCount) msgs")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isActive ? CiderColors.accentSubtle : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Delete", role: .destructive) {
+                viewModel.deleteConversation(conv.id)
+            }
         }
     }
 }
