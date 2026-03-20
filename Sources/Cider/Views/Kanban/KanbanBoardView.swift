@@ -10,6 +10,9 @@ struct KanbanBoardView: View {
     @State private var addingCardToColumn: String?
     @State private var newCardTitle = ""
     @State private var draggingCardID: String?
+    @State private var renamingColumnID: String?
+    @State private var columnNameDraft = ""
+    @State private var editingCard: KanbanCard?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -22,6 +25,13 @@ struct KanbanBoardView: View {
                 boardHeader(board)
                 Divider().background(CiderColors.separator)
                 columnsArea(board)
+            }
+            .sheet(item: $editingCard) { card in
+                KanbanCardDetailView(
+                    card: card,
+                    boardID: boardID,
+                    storage: storage
+                )
             }
         } else {
             emptyState
@@ -96,18 +106,45 @@ struct KanbanBoardView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
-                    ForEach(column.cards) { card in
+                    ForEach(Array(column.cards.enumerated()), id: \.element.id) { index, card in
                         cardView(card)
+                            .onTapGesture {
+                                editingCard = card
+                            }
                             .draggable(card.id) {
                                 cardDragPreview(card)
                             }
+                            .dropDestination(for: String.self) { cardIDs, _ in
+                                guard let cardID = cardIDs.first, cardID != card.id else { return false }
+                                withAnimation(reduceMotion ? .none : .spring) {
+                                    storage.moveCard(
+                                        boardID: boardID,
+                                        cardID: cardID,
+                                        toColumnID: column.id,
+                                        toIndex: index
+                                    )
+                                }
+                                return true
+                            }
                     }
 
-                    // Add card button or inline field
+                    // Add card button or inline field — also a drop target for appending
                     if addingCardToColumn == column.id {
                         addCardField(columnID: column.id)
                     } else {
                         addCardButton(columnID: column.id)
+                            .dropDestination(for: String.self) { cardIDs, _ in
+                                guard let cardID = cardIDs.first else { return false }
+                                withAnimation(reduceMotion ? .none : .spring) {
+                                    storage.moveCard(
+                                        boardID: boardID,
+                                        cardID: cardID,
+                                        toColumnID: column.id,
+                                        toIndex: column.cards.count
+                                    )
+                                }
+                                return true
+                            }
                     }
                 }
             }
@@ -134,9 +171,27 @@ struct KanbanBoardView: View {
 
     private func columnHeader(_ column: KanbanColumn) -> some View {
         HStack(spacing: Spacing.xs) {
-            Text(column.name)
-                .font(CiderFont.labelSemibold)
-                .foregroundColor(CiderColors.primary)
+            if renamingColumnID == column.id {
+                TextField("Column name", text: $columnNameDraft)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .onSubmit {
+                        let trimmed = columnNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            storage.renameColumn(boardID: boardID, columnID: column.id, name: trimmed)
+                        }
+                        renamingColumnID = nil
+                    }
+            } else {
+                Text(column.name)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .onTapGesture(count: 2) {
+                        columnNameDraft = column.name
+                        renamingColumnID = column.id
+                    }
+            }
 
             Text("\(column.cards.count)")
                 .font(CiderFont.captionSemibold)
@@ -151,7 +206,8 @@ struct KanbanBoardView: View {
 
             Menu {
                 Button("Rename") {
-                    // TODO: inline rename
+                    columnNameDraft = column.name
+                    renamingColumnID = column.id
                 }
                 if !column.isDoneColumn {
                     Button("Mark as Done column") {

@@ -11,10 +11,12 @@ struct CiderTabBar: View {
     var onRenameTab: ((UUID, String) -> Void)?
     var onAddTab: (() -> Void)?
     var onReopenTab: ((UUID) -> Void)?
+    var onOpenBoard: ((KanbanBoard) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
+    @ObservedObject private var kanbanStorage = KanbanStorage.shared
 
     @State private var draggingTabID: String?
     @State private var renamingTabID: UUID?
@@ -180,6 +182,46 @@ struct CiderTabBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            // Boards not yet open as tabs
+            let openBoardIDs = Set(savedViewStorage.savedViews.compactMap { sv -> String? in
+                if case .kanban(let id) = sv.kind, savedViewStorage.tabOrder.contains(sv.id) { return id }
+                return nil
+            })
+            let unopenedBoards = kanbanStorage.boards.filter { !openBoardIDs.contains($0.id) }
+            if !unopenedBoards.isEmpty {
+                Divider()
+                    .padding(.vertical, Spacing.xxs)
+
+                Text("Boards")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.xs)
+                    .padding(.bottom, Spacing.xxs)
+
+                ForEach(unopenedBoards) { board in
+                    Button {
+                        onOpenBoard?(board)
+                        showAddTabPopover = false
+                    } label: {
+                        HStack(spacing: Spacing.sm) {
+                            Image(systemName: "square.split.2x1")
+                                .font(CiderFont.bodyMedium)
+                                .frame(width: Spacing.lg, alignment: .center)
+                            Text(board.name)
+                                .font(CiderFont.body)
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(CiderColors.secondary)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             if !closedTabs.isEmpty {
                 Divider()

@@ -27,7 +27,13 @@ extension CiderPanelView {
             onReorderTab: { from, to in savedViewStorage.moveTab(from: from, to: to) },
             onRenameTab: { id, name in savedViewStorage.renameSavedView(id, to: name) },
             onAddTab: { createSavedViewFromCurrentState() },
-            onReopenTab: reopenTab
+            onReopenTab: reopenTab,
+            onOpenBoard: { board in
+                let savedView = savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
+                savedViewStorage.addToTabOrder(savedView.id)
+                selectedFolderID = nil
+                selectedTab = .savedView(id: savedView.id, name: savedView.name)
+            }
         )
         .frame(maxWidth: .infinity)
 
