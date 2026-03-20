@@ -179,8 +179,8 @@ final class FoundationModelsProvider: AIAssistantProvider {
         }
 
         let estimatedTokens = charCount / 4
-        // Add ~1100 tokens for tool definitions (18 tools × ~63 tokens each)
-        let totalEstimate = estimatedTokens + 1100
+        // Add ~1300 tokens for tool definitions (21 tools × ~63 tokens each)
+        let totalEstimate = estimatedTokens + 1300
         contextUsage = min(1.0, Double(totalEstimate) / Double(contextWindowSize))
     }
 
@@ -231,18 +231,24 @@ final class FoundationModelsProvider: AIAssistantProvider {
 
     private func buildInstructions(context: AIAssistantContext) -> String {
         var instructions = """
-        You are a helpful assistant built into Cider, a macOS app for bookmarks, \
-        notes, events, todos, contacts, and projects. You have access to tools that \
-        let you look up the user's data. Always use the appropriate tool when the \
-        user asks about their items, counts, folders, tags, or schedule. \
-        Be concise, friendly, and accurate. When reporting results from tools, \
-        present the information clearly. If you don't know something, say so — \
-        don't make things up.
+        You are a helpful assistant built into Cider, a macOS app for managing \
+        bookmarks, notes, events, todos, contacts, and projects.
+
+        Rules:
+        - Always use tools to answer questions about the user's data. Never guess.
+        - When the user says "this", "this bookmark", "this note", etc., use \
+        getCurrentItem to find what they're viewing.
+        - For multi-step requests like "find X and move it to Y", use searchItems \
+        first, then the appropriate action tool.
+        - Be concise. Present tool results clearly without repeating raw data.
+        - If a tool returns no results, say so honestly.
+        - When creating or modifying items, confirm what you did.
+        - Use markdown formatting (bold, lists) for readability.
         """
 
         let contextDesc = context.contextDescription
         if !contextDesc.isEmpty {
-            instructions += "\n\nCurrent context:\n\(contextDesc)"
+            instructions += "\n\nThe user is currently viewing:\n\(contextDesc)"
         }
 
         return instructions
