@@ -46,13 +46,13 @@ struct AIAssistantBubbleView: View {
                 }
             }
 
-            // Timestamp + copy button (visible on hover)
+            // Timestamp (always visible) + copy button (on hover)
             HStack(spacing: Spacing.xs) {
-                if isHovered || showCopied {
-                    Text(Self.timeFormatter.string(from: message.timestamp))
-                        .font(.system(size: 10))
-                        .foregroundColor(CiderColors.quaternary)
+                Text(Self.timeFormatter.string(from: message.timestamp))
+                    .font(.system(size: 10))
+                    .foregroundColor(CiderColors.quaternary)
 
+                if isHovered || showCopied {
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(message.content, forType: .string)
@@ -68,10 +68,9 @@ struct AIAssistantBubbleView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Copy message")
+                    .transition(.opacity)
                 }
             }
-            .frame(height: isHovered || showCopied ? nil : 0)
-            .clipped()
             .animation(.snappy, value: isHovered)
         }
         .onHover { isHovered = $0 }
