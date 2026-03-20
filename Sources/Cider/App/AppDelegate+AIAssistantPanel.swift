@@ -44,6 +44,16 @@ extension AppDelegate {
             }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: .showAIAssistantPanel)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, let panel = self.aiAssistantPanel else { return }
+                if !panel.isVisible {
+                    self.showAIAssistantPanel()
+                }
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: .dismissAIAssistantPanel)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in

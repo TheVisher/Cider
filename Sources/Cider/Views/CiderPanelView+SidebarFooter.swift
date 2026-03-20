@@ -233,28 +233,32 @@ extension CiderPanelView {
     }
 
     /// Quick actions based on current context.
+    /// Captures item names at render time so they survive detail panel closing.
     private var aiQuickActions: [AIQuickAction] {
         var actions: [AIQuickAction] = []
         let vm = AIAssistantViewModel.shared
 
-        // Context-specific actions (when viewing an item)
-        if vm.context.currentBookmark != nil {
+        // Context-specific actions (capture names so they work even if detail closes)
+        if let bookmark = vm.context.currentBookmark {
+            let title = bookmark.title
             actions.append(AIQuickAction(icon: "text.quote", label: "Summarize Bookmark") {
-                sendQuickMessage("Summarize this bookmark for me")
+                sendQuickMessage("Summarize the bookmark \"\(title)\"")
             })
             actions.append(AIQuickAction(icon: "rectangle.stack", label: "Find Similar") {
-                sendQuickMessage("Find bookmarks similar to this one")
+                sendQuickMessage("Find bookmarks similar to \"\(title)\"")
             })
             actions.append(AIQuickAction(icon: "tag", label: "Suggest Tags") {
-                sendQuickMessage("What tags would you suggest for this bookmark?")
+                sendQuickMessage("What tags would you suggest for the bookmark \"\(title)\"?")
             })
-        } else if vm.context.currentNote != nil {
+        } else if let note = vm.context.currentNote {
+            let title = note.title
             actions.append(AIQuickAction(icon: "text.quote", label: "Summarize Note") {
-                sendQuickMessage("Summarize this note")
+                sendQuickMessage("Summarize the note \"\(title)\"")
             })
-        } else if vm.context.currentFolder != nil {
+        } else if let folder = vm.context.currentFolder {
+            let name = folder.name
             actions.append(AIQuickAction(icon: "folder.badge.gearshape", label: "Organize Folder") {
-                sendQuickMessage("How should I organize the items in this folder?")
+                sendQuickMessage("How should I organize the items in the \"\(name)\" folder?")
             })
         }
 
@@ -274,7 +278,8 @@ extension CiderPanelView {
 
     /// Send a message to the AI assistant (opens panel if needed).
     private func sendQuickMessage(_ message: String) {
-        NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+        // Show panel (no-op if already visible — won't toggle it off)
+        NotificationCenter.default.post(name: .showAIAssistantPanel, object: nil)
         // Small delay to let the panel appear before sending
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             AIAssistantViewModel.shared.send(message)
