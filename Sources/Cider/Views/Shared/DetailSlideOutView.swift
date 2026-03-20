@@ -279,6 +279,14 @@ struct DetailSlideOutView: View {
             .buttonStyle(.plain)
             .help("Close")
 
+            // AI actions
+            if let bookmark {
+                AIDetailActionsButton(
+                    bookmarkTitle: bookmark.title,
+                    bookmarkURL: bookmark.urlString
+                )
+            }
+
             Spacer(minLength: 0)
 
             // Hero mode buttons (URL bookmarks only)

@@ -203,6 +203,37 @@ private struct EditableTitleLabel: View {
     }
 }
 
+extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
+    init(
+        title: String,
+        detailViewMode: DetailViewMode,
+        width: CGFloat = 0,
+        maxWidth: CGFloat = 0,
+        showDragHandle: Bool = true,
+        showTitle: Bool = true,
+        scrollsContent: Bool = true,
+        onResize: @escaping (CGFloat) -> Void = { _ in },
+        onClose: @escaping () -> Void,
+        onModeChange: @escaping (DetailViewMode) -> Void,
+        @ViewBuilder trailingExtra: @escaping () -> TrailingExtra,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.detailViewMode = detailViewMode
+        self.width = width
+        self.maxWidth = maxWidth
+        self.showDragHandle = showDragHandle
+        self.showTitle = showTitle
+        self.scrollsContent = scrollsContent
+        self.onResize = onResize
+        self.onClose = onClose
+        self.onModeChange = onModeChange
+        self.toolbarExtra = { EmptyView() }
+        self.trailingExtra = trailingExtra
+        self.content = content
+    }
+}
+
 extension GenericItemDetailPanel where TrailingExtra == EmptyView {
     init(
         title: String,

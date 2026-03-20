@@ -96,7 +96,8 @@ extension CiderPanelView {
                     detailSlideOutWidth = clamped
                 },
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) }
             ) {
                 DateCardDetailView(
                     dateCard: dateCard,
@@ -118,7 +119,8 @@ extension CiderPanelView {
                     detailSlideOutWidth = clamped
                 },
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) }
             ) {
                 ContactDetailView(
                     contact: contact,
@@ -137,7 +139,8 @@ extension CiderPanelView {
                 width: BookmarksDesign.detailsSlideOutMinWidth,
                 maxWidth: BookmarksDesign.detailsSlideOutMinWidth,
                 onClose: closeGenericDetail,
-                onModeChange: { _ in }
+                onModeChange: { _ in },
+                trailingExtra: { AIDetailActionsButton(todoTitle: todoCard.title) }
             ) {
                 TodoDetailView(
                     todoCard: todoCard,

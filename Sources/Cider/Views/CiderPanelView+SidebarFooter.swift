@@ -232,48 +232,20 @@ extension CiderPanelView {
         }
     }
 
-    /// Quick actions based on current context.
-    /// Captures item names at render time so they survive detail panel closing.
+    /// Quick actions — general actions always available in sidebar.
+    /// Context-specific actions (Summarize, Find Similar, etc.) live in the detail panel toolbar.
     private var aiQuickActions: [AIQuickAction] {
-        var actions: [AIQuickAction] = []
-        let vm = AIAssistantViewModel.shared
-
-        // Context-specific actions (capture names so they work even if detail closes)
-        if let bookmark = vm.context.currentBookmark {
-            let title = bookmark.title
-            actions.append(AIQuickAction(icon: "text.quote", label: "Summarize Bookmark") {
-                sendQuickMessage("Summarize the bookmark \"\(title)\"")
-            })
-            actions.append(AIQuickAction(icon: "rectangle.stack", label: "Find Similar") {
-                sendQuickMessage("Find bookmarks similar to \"\(title)\"")
-            })
-            actions.append(AIQuickAction(icon: "tag", label: "Suggest Tags") {
-                sendQuickMessage("What tags would you suggest for the bookmark \"\(title)\"?")
-            })
-        } else if let note = vm.context.currentNote {
-            let title = note.title
-            actions.append(AIQuickAction(icon: "text.quote", label: "Summarize Note") {
-                sendQuickMessage("Summarize the note \"\(title)\"")
-            })
-        } else if let folder = vm.context.currentFolder {
-            let name = folder.name
-            actions.append(AIQuickAction(icon: "folder.badge.gearshape", label: "Organize Folder") {
-                sendQuickMessage("How should I organize the items in the \"\(name)\" folder?")
-            })
-        }
-
-        // General actions (always available)
-        actions.append(AIQuickAction(icon: "chart.bar", label: "Library Summary") {
-            sendQuickMessage("Give me a summary of my entire library")
-        })
-        actions.append(AIQuickAction(icon: "clock", label: "Recent Activity") {
-            sendQuickMessage("What did I save in the last 7 days?")
-        })
-        actions.append(AIQuickAction(icon: "exclamationmark.circle", label: "Overdue Tasks") {
-            sendQuickMessage("Do I have any overdue todos?")
-        })
-
-        return actions
+        [
+            AIQuickAction(icon: "chart.bar", label: "Library Summary") {
+                sendQuickMessage("Give me a summary of my entire library")
+            },
+            AIQuickAction(icon: "clock", label: "Recent Activity") {
+                sendQuickMessage("What did I save in the last 7 days?")
+            },
+            AIQuickAction(icon: "exclamationmark.circle", label: "Overdue Tasks") {
+                sendQuickMessage("Do I have any overdue todos?")
+            }
+        ]
     }
 
     /// Send a message to the AI assistant (opens panel if needed).
