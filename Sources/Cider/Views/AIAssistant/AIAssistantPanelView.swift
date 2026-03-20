@@ -200,7 +200,10 @@ struct AIAssistantPanelView: View {
                                 .id(message.id)
                         }
 
-                        if viewModel.isStreaming {
+                        if modelManager.isDownloading || modelManager.isLoading {
+                            modelLoadingView
+                                .id("loading")
+                        } else if viewModel.isStreaming {
                             AIAssistantBubbleView(
                                 message: AIAssistantMessage(
                                     role: .assistant,
@@ -262,6 +265,44 @@ struct AIAssistantPanelView: View {
     private func scrollToBottom(proxy: ScrollViewProxy) {
         withAnimation(reduceMotion ? .none : .snappy) {
             proxy.scrollTo("bottom", anchor: .bottom)
+        }
+    }
+
+    // MARK: - Model Loading View
+
+    private var modelLoadingView: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.sm) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(modelManager.isDownloading ? "Downloading AI model..." : "Loading AI model...")
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                }
+
+                if modelManager.isDownloading {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ProgressView(value: modelManager.downloadProgress)
+                            .tint(.green)
+
+                        Text("\(Int(modelManager.downloadProgress * 100))% — \(String(format: "%.1f", modelManager.recommendedTier.downloadSizeGB)) GB total")
+                            .font(.system(size: 10))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                }
+
+                Text("First-time setup. The model is stored locally and works offline after this.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+            .background(CiderColors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+
+            Spacer(minLength: Spacing.xxxl)
         }
     }
 
