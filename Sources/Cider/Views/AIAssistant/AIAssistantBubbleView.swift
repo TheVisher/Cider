@@ -46,32 +46,28 @@ struct AIAssistantBubbleView: View {
                 }
             }
 
-            // Timestamp (always visible) + copy button (on hover)
+            // Timestamp + copy button
             HStack(spacing: Spacing.xs) {
                 Text(Self.timeFormatter.string(from: message.timestamp))
                     .font(.system(size: 10))
                     .foregroundColor(CiderColors.quaternary)
 
-                if isHovered || showCopied {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(message.content, forType: .string)
-                        showCopied = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(1.5))
-                            showCopied = false
-                        }
-                    } label: {
-                        Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10))
-                            .foregroundColor(showCopied ? CiderColors.successMuted : CiderColors.quaternary)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(message.content, forType: .string)
+                    showCopied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        showCopied = false
                     }
-                    .buttonStyle(.plain)
-                    .help("Copy message")
-                    .transition(.opacity)
+                } label: {
+                    Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundColor(showCopied ? CiderColors.successMuted : CiderColors.quaternary)
                 }
+                .buttonStyle(.plain)
+                .help("Copy message")
             }
-            .animation(.snappy, value: isHovered)
         }
         .onHover { isHovered = $0 }
     }
