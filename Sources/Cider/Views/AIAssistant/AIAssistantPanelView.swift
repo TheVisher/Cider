@@ -5,7 +5,9 @@ struct AIAssistantPanelView: View {
     @ObservedObject var viewModel: AIAssistantViewModel
 
     @ObservedObject private var conversationStorage = AIConversationStorage.shared
+    @ObservedObject private var modelManager = MLXModelManager.shared
     @State private var showConversationList = false
+    @State private var showModelPicker = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -63,6 +65,31 @@ struct AIAssistantPanelView: View {
 
             if !viewModel.context.isEmpty {
                 contextBadge
+            }
+
+            // Model selector pill
+            Button {
+                showModelPicker.toggle()
+            } label: {
+                HStack(spacing: Spacing.xxs) {
+                    Circle()
+                        .fill(viewModel.isUsingLocalModel ? Color.green : CiderColors.controlAccent)
+                        .frame(width: 6, height: 6)
+                    Text(viewModel.isUsingLocalModel ? "Local" : "Apple")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Switch AI model")
+            .popover(isPresented: $showModelPicker, arrowEdge: .bottom) {
+                modelPickerPopover
             }
 
             Spacer()
@@ -235,6 +262,116 @@ struct AIAssistantPanelView: View {
     private func scrollToBottom(proxy: ScrollViewProxy) {
         withAnimation(reduceMotion ? .none : .snappy) {
             proxy.scrollTo("bottom", anchor: .bottom)
+        }
+    }
+
+    // MARK: - Model Picker Popover
+
+    private var modelPickerPopover: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("AI Model")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .padding(.horizontal, Spacing.md)
+                .padding(.top, Spacing.sm)
+
+            // Apple Intelligence option
+            Button {
+                viewModel.switchProvider(useLocalModel: false)
+                showModelPicker = false
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "apple.logo")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 14, alignment: .center)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Apple Intelligence")
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.primary)
+                        Text("On-device, 4K context")
+                            .font(.system(size: 10))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer()
+                    if !viewModel.isUsingLocalModel {
+                        Image(systemName: "checkmark")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.controlAccent)
+                    }
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.horizontal, Spacing.md)
+
+            // Local model option
+            Button {
+                viewModel.switchProvider(useLocalModel: true)
+                showModelPicker = false
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "desktopcomputer")
+                        .font(CiderFont.caption)
+                        .foregroundColor(.green)
+                        .frame(width: 14, alignment: .center)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Qwen 3.5 (Local)")
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.primary)
+                        Text(localModelSubtitle)
+                            .font(.system(size: 10))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer()
+                    if viewModel.isUsingLocalModel {
+                        Image(systemName: "checkmark")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(.green)
+                    }
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Download progress
+            if modelManager.isDownloading {
+                VStack(spacing: Spacing.xxs) {
+                    ProgressView(value: modelManager.downloadProgress)
+                        .tint(.green)
+                    Text("Downloading model... \(Int(modelManager.downloadProgress * 100))%")
+                        .font(.system(size: 10))
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.bottom, Spacing.xs)
+            }
+
+            if let error = modelManager.loadError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundColor(CiderColors.destructive)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.xs)
+            }
+        }
+        .padding(.vertical, Spacing.xs)
+        .frame(width: 240)
+    }
+
+    private var localModelSubtitle: String {
+        if modelManager.isModelLoaded {
+            return "32K context, loaded"
+        } else if modelManager.isLoading {
+            return "Loading..."
+        } else {
+            let tier = modelManager.recommendedTier
+            return "32K context, ~\(String(format: "%.1f", tier.downloadSizeGB)) GB download"
         }
     }
 

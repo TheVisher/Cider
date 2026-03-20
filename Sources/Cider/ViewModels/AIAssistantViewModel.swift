@@ -27,15 +27,40 @@ final class AIAssistantViewModel: ObservableObject {
     var isAvailable: Bool { provider.isAvailable }
     var providerName: String { provider.displayName }
 
+    /// Whether the local MLX model is active.
+    var isUsingLocalModel: Bool { provider is MLXProvider }
+
     /// Context window usage (0.0–1.0). Only available for Foundation Models.
     var contextUsage: Double {
         (provider as? FoundationModelsProvider)?.contextUsage ?? 0
     }
 
+    private let foundationModelsProvider = FoundationModelsProvider()
+    private let mlxProvider = MLXProvider()
+
     init(provider: AIAssistantProvider? = nil) {
-        self.provider = provider ?? FoundationModelsProvider()
+        if let provider {
+            self.provider = provider
+        } else if MLXModelManager.shared.isLocalModelEnabled {
+            self.provider = MLXProvider()
+        } else {
+            self.provider = FoundationModelsProvider()
+        }
         // Auto-resume most recent conversation
         resumeLastConversation()
+    }
+
+    /// Switch between Apple Intelligence and local MLX model.
+    func switchProvider(useLocalModel: Bool) {
+        clearConversation()
+        if useLocalModel {
+            provider = mlxProvider
+        } else {
+            provider = foundationModelsProvider
+            // Unload MLX model to free memory
+            MLXModelManager.shared.unloadModel()
+        }
+        MLXModelManager.shared.isLocalModelEnabled = useLocalModel
     }
 
     /// Load the most recent conversation on startup.
