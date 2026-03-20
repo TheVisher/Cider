@@ -261,3 +261,41 @@ A contextual GIF search tool powered by AI. Instead of guessing keywords in Disc
 **The value is in tone detection:** AI understands that "sure, that's fine" is passive-aggressive and returns the right GIF, not a literal thumbs up. Built-in GIF search can't do this because it's keyword-only.
 
 Full concept doc: `~/Documents/GifGenius-App-Concept.md`
+
+### Recipe Capture (Requires AI + OCR + Bookmark Pipeline)
+
+Automatically extract structured recipe data from saved content — TikTok links, Instagram posts, screenshots of recipe cards, photos of cookbooks, or any URL. Turns unstructured "I saved this for later" into a clean, searchable recipe with ingredients and steps.
+
+**Capture flows:**
+
+- **URL capture (TikTok, Instagram, YouTube, blogs):** Save a link as a bookmark → AI enrichment pipeline detects recipe content → extracts title, ingredients list, and step-by-step instructions from the page/video description. For video-only recipes (TikTok/Reels with no written recipe), use captions/transcript if available.
+- **OCR capture (screenshots, photos):** Screenshot a recipe from any app, or photograph a cookbook page → existing OCR pipeline (`OCRService`) extracts text → AI parses the raw text into structured recipe fields (title, servings, ingredients, steps, cook time).
+- **Manual entry:** Quick-capture a recipe inline with a structured template (title, ingredients, steps) for recipes dictated by a friend or remembered from memory.
+
+**Structured recipe data model:**
+
+- `title: String` — recipe name
+- `servings: String?` — yield (e.g., "4 servings", "12 cookies")
+- `prepTime: String?` / `cookTime: String?`
+- `ingredients: [String]` — ingredient list, preserving order
+- `steps: [String]` — numbered instructions
+- `sourceURL: URL?` — original link if captured from a URL
+- `sourceImage: Data?` — original screenshot/photo if captured via OCR
+- `tags: [String]` — auto-generated from AI (cuisine type, dietary info, meal type)
+
+**Why it fits Cider:** Recipes are one of the most common "save for later" items that get lost in bookmarks, screenshots, and saved posts. Cider already has the capture pipeline (bookmarks + OCR), AI enrichment (NLP + embeddings), and card-based browsing. A recipe is just a bookmark with structured metadata extracted by AI. Recipes would surface naturally in the library feed, be taggable with labels, and work with stacks (e.g., a "Meal Planning" stack, a "Quick Weeknight Dinners" saved view).
+
+**Integration with existing systems:**
+
+- Stored as a bookmark with a `recipeData` metadata extension — not a new entity type
+- Reader Mode could render a clean recipe view (ingredients sidebar + steps) instead of the raw article
+- Dominant color extraction from food photos for visual browsing in grid/masonry
+- NLEmbedding vectors enable "similar recipes" suggestions
+- Stacks and labels work out of the box (label recipes by cuisine, meal type, or occasion)
+
+**Stretch goals:**
+
+- Grocery list generation from selected recipes (aggregate ingredients, deduplicate)
+- Serving size scaling (multiply/divide ingredient quantities)
+- Cooking mode: step-by-step view with large text, optimized for kitchen use (keep-awake, tap to advance)
+- Import/export as standard recipe formats (e.g., Recipe JSON-LD, Paprika `.paprikarecipes`)

@@ -6,7 +6,7 @@
 
 ## Overview
 
-Cider uses a modern, native macOS tech stack with zero external dependencies:
+Cider uses a modern, native macOS tech stack:
 
 | Layer | Technology | Version | Why |
 |-------|-----------|---------|-----|
@@ -17,8 +17,11 @@ Cider uses a modern, native macOS tech stack with zero external dependencies:
 | Reactive State | Combine | macOS 26+ | @Published properties, reactive ViewModels |
 | Storage | UserDefaults + JSON | macOS 26+ | Simple config persistence via Codable |
 | Build System | Swift Package Manager | 6.2+ | No Xcode project, pure SPM |
+| Auto-Updates | Sparkle | 2.6+ | macOS update framework |
+| Sync | convex-swift | 0.8+ | Convex backend client |
+| Local AI | mlx-swift-lm | 2.29.x | Apple MLX inference (Qwen 2.5) |
 
-**No external dependencies.** `Package.swift` has `dependencies: []`.
+Three external dependencies via SPM. All are well-maintained, permissively licensed libraries.
 
 ---
 
@@ -34,9 +37,22 @@ Cider uses **Swift 6.2 language mode** with Swift Package Manager:
 let package = Package(
     name: "Cider",
     platforms: [.macOS(.v26)],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+        .package(url: "https://github.com/get-convex/convex-swift", from: "0.8.1"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm/", .upToNextMinor(from: "2.29.1")),
+    ],
     targets: [
-        .executableTarget(name: "Cider", path: "Sources/Cider")
+        .target(
+            name: "Cider",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "ConvexMobile", package: "convex-swift"),
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+            ],
+            path: "Sources/Cider"
+        )
     ]
 )
 ```
@@ -443,6 +459,6 @@ When implementing any feature, verify:
 
 ---
 
-**Last Updated**: February 2026
+**Last Updated**: March 2026
 
-**This document reflects the actual Cider tech stack: Swift 6.2, SwiftUI, AppKit, Combine, UserDefaults. No external dependencies.**
+**This document reflects the actual Cider tech stack: Swift 6.2, SwiftUI, AppKit, Combine, UserDefaults, plus three SPM dependencies (Sparkle, convex-swift, mlx-swift-lm).**
