@@ -133,6 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SidecarService.shared.loadAll()
         VaultFileService.shared.scan()
 
+        // Sync Kanban board YAML files with tab entries and start file watching
+        KanbanStorage.shared.syncTabsWithBoards()
+        KanbanStorage.shared.startWatching()
+
         // Start Cider Web sync if configured
         SyncService.shared.startIfEnabled()
 

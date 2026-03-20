@@ -60,6 +60,11 @@ extension CiderPanelView {
             }
         }
 
+        // For kanban tabs, delete the board YAML file
+        if case .kanban(let boardID) = savedView.kind {
+            KanbanStorage.shared.deleteBoard(id: boardID)
+        }
+
         let wasSelected = selectedTab == tab
         savedViewStorage.deleteSavedView(id)
         if wasSelected {
@@ -73,6 +78,9 @@ extension CiderPanelView {
             if let trashItem = WhiteboardStorage.shared.deleteCanvas(canvasID) {
                 CiderUndoManager.shared.record(.deletedToTrash(itemType: .whiteboard, trashItem: trashItem))
             }
+        }
+        if case .kanban(let boardID) = savedView.kind {
+            KanbanStorage.shared.deleteBoard(id: boardID)
         }
         savedViewStorage.deleteSavedView(savedView.id)
     }

@@ -1,0 +1,369 @@
+import SwiftUI
+
+/// Renders a Kanban board as horizontal scrolling columns with draggable cards.
+struct KanbanBoardView: View {
+    let boardID: String
+
+    @ObservedObject private var storage = KanbanStorage.shared
+    @State private var editingBoardName = false
+    @State private var boardNameDraft = ""
+    @State private var addingCardToColumn: String?
+    @State private var newCardTitle = ""
+    @State private var draggingCardID: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var board: KanbanBoard? {
+        storage.boards.first { $0.id == boardID }
+    }
+
+    var body: some View {
+        if let board {
+            VStack(spacing: 0) {
+                boardHeader(board)
+                Divider().background(CiderColors.separator)
+                columnsArea(board)
+            }
+        } else {
+            emptyState
+        }
+    }
+
+    // MARK: - Board Header
+
+    private func boardHeader(_ board: KanbanBoard) -> some View {
+        HStack(spacing: Spacing.sm) {
+            if editingBoardName {
+                TextField("Board name", text: $boardNameDraft)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .onSubmit {
+                        storage.renameBoard(id: boardID, name: boardNameDraft)
+                        editingBoardName = false
+                    }
+            } else {
+                Text(board.name)
+                    .font(CiderFont.headingSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .onTapGesture(count: 2) {
+                        boardNameDraft = board.name
+                        editingBoardName = true
+                    }
+            }
+
+            Text("\(board.columns.reduce(0) { $0 + $1.cards.count }) cards")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+
+            Spacer()
+
+            Button {
+                withAnimation(reduceMotion ? .none : .spring) {
+                    let name = "New Column"
+                    storage.addColumn(boardID: boardID, name: name)
+                }
+            } label: {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "plus")
+                    Text("Column")
+                }
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.controlAccent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+    }
+
+    // MARK: - Columns
+
+    private func columnsArea(_ board: KanbanBoard) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                ForEach(board.columns) { column in
+                    columnView(column, board: board)
+                }
+            }
+            .padding(Spacing.lg)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func columnView(_ column: KanbanColumn, board: KanbanBoard) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            columnHeader(column)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: Spacing.sm) {
+                    ForEach(column.cards) { card in
+                        cardView(card)
+                            .draggable(card.id) {
+                                cardDragPreview(card)
+                            }
+                    }
+
+                    // Add card button or inline field
+                    if addingCardToColumn == column.id {
+                        addCardField(columnID: column.id)
+                    } else {
+                        addCardButton(columnID: column.id)
+                    }
+                }
+            }
+        }
+        .padding(Spacing.sm)
+        .frame(width: 260)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+        )
+        .dropDestination(for: String.self) { cardIDs, _ in
+            guard let cardID = cardIDs.first else { return false }
+            withAnimation(reduceMotion ? .none : .spring) {
+                storage.moveCard(
+                    boardID: boardID,
+                    cardID: cardID,
+                    toColumnID: column.id,
+                    toIndex: column.cards.count
+                )
+            }
+            return true
+        }
+    }
+
+    private func columnHeader(_ column: KanbanColumn) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Text(column.name)
+                .font(CiderFont.labelSemibold)
+                .foregroundColor(CiderColors.primary)
+
+            Text("\(column.cards.count)")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .padding(.horizontal, Spacing.xs)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+
+            Spacer()
+
+            Menu {
+                Button("Rename") {
+                    // TODO: inline rename
+                }
+                if !column.isDoneColumn {
+                    Button("Mark as Done column") {
+                        storage.setColumnDone(boardID: boardID, columnID: column.id, isDone: true)
+                    }
+                } else {
+                    Button("Unmark as Done column") {
+                        storage.setColumnDone(boardID: boardID, columnID: column.id, isDone: false)
+                    }
+                }
+                Divider()
+                Button("Delete Column", role: .destructive) {
+                    withAnimation(reduceMotion ? .none : .spring) {
+                        storage.deleteColumn(boardID: boardID, columnID: column.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, Spacing.xs)
+    }
+
+    // MARK: - Cards
+
+    private func cardView(_ card: KanbanCard) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            // Color accent bar
+            if let color = card.color {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(kanbanColor(color))
+                    .frame(height: 3)
+            }
+
+            Text(card.title)
+                .font(CiderFont.label)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(2)
+
+            if let notes = card.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(3)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                if let priority = card.priority {
+                    priorityBadge(priority)
+                }
+                if let agent = card.agent {
+                    HStack(spacing: Spacing.xxs) {
+                        Image(systemName: "cpu")
+                        Text(agent)
+                    }
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.controlAccent)
+                }
+                if !card.tags.isEmpty {
+                    ForEach(card.tags.prefix(2), id: \.self) { tag in
+                        Text(tag)
+                            .font(CiderFont.micro)
+                            .foregroundColor(CiderColors.tertiary)
+                            .padding(.horizontal, Spacing.xxs)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                    }
+                }
+                Spacer()
+            }
+        }
+        .padding(Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+        .contextMenu {
+            Button("Delete Card", role: .destructive) {
+                withAnimation(reduceMotion ? .none : .spring) {
+                    storage.deleteCard(boardID: boardID, cardID: card.id)
+                }
+            }
+        }
+    }
+
+    private func cardDragPreview(_ card: KanbanCard) -> some View {
+        Text(card.title)
+            .font(CiderFont.label)
+            .foregroundColor(CiderColors.primary)
+            .padding(Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceElevated)
+            )
+    }
+
+    // MARK: - Add Card
+
+    private func addCardButton(columnID: String) -> some View {
+        Button {
+            addingCardToColumn = columnID
+            newCardTitle = ""
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: "plus")
+                Text("Add card")
+            }
+            .font(CiderFont.caption)
+            .foregroundColor(CiderColors.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xs)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func addCardField(columnID: String) -> some View {
+        VStack(spacing: Spacing.xs) {
+            TextField("Card title...", text: $newCardTitle)
+                .textFieldStyle(.plain)
+                .font(CiderFont.label)
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceElevated)
+                )
+                .onSubmit {
+                    let trimmed = newCardTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        withAnimation(reduceMotion ? .none : .spring) {
+                            storage.addCard(boardID: boardID, columnID: columnID, title: trimmed)
+                        }
+                    }
+                    newCardTitle = ""
+                    addingCardToColumn = nil
+                }
+
+            HStack {
+                Button("Add") {
+                    let trimmed = newCardTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        withAnimation(reduceMotion ? .none : .spring) {
+                            storage.addCard(boardID: boardID, columnID: columnID, title: trimmed)
+                        }
+                    }
+                    newCardTitle = ""
+                    addingCardToColumn = nil
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.controlAccent)
+
+                Spacer()
+
+                Button("Cancel") {
+                    addingCardToColumn = nil
+                    newCardTitle = ""
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(.horizontal, Spacing.xs)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func kanbanColor(_ color: KanbanCardColor) -> Color {
+        switch color {
+        case .blue: CiderColors.controlAccent
+        case .green: CiderColors.success
+        case .orange: CiderColors.warning
+        case .red: CiderColors.destructive
+        case .purple: CiderColors.controlAccent.opacity(0.7)
+        }
+    }
+
+    private func priorityBadge(_ priority: KanbanPriority) -> some View {
+        let (text, color): (String, Color) = switch priority {
+        case .high: ("High", CiderColors.destructive)
+        case .medium: ("Med", CiderColors.warning)
+        case .low: ("Low", CiderColors.tertiary)
+        }
+        return Text(text)
+            .font(CiderFont.micro)
+            .foregroundColor(color)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "square.split.2x1")
+                .font(CiderFont.settingsEmptyIcon)
+                .foregroundColor(CiderColors.quaternary)
+            Text("Board not found")
+                .font(CiderFont.headingSemibold)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}

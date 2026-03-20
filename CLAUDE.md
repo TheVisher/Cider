@@ -13,6 +13,15 @@ Native macOS floating panel app for bookmarks, notes, and projects. Double-tap O
 - **Acrylic style** — `NSVisualEffectView` with `.underWindowBackground`, NOT `.glassEffect()`
 - **Use `os.Logger`** — not `print()` (invisible from Dock launch)
 - **Delete via TrashStorage** — never direct file deletion, always TrashStorage + CiderUndoManager
+- **Update Kanban boards** — when starting, completing, or adding work, update the YAML boards in `~/CiderVault/.cider/boards/`. Move cards between columns (backlog → in_progress → testing → done). The app watches these files and updates live.
+
+## Kanban Boards
+
+YAML files in `~/CiderVault/.cider/boards/`. Two active boards:
+- `a1b2c3.yaml` — **Cider Roadmap** (features, backlog, in progress, done)
+- `d4e5f6.yaml` — **Cider Bugs** (high/medium/low priority, fixed)
+
+When you start work on a feature, move its card to `in_progress`. When done, move to `done` (or `testing` if it needs manual testing). When fixing a bug, move it to `fixed`. If you build something new that isn't on the board, add a card.
 
 ## Build
 

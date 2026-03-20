@@ -29,6 +29,12 @@ extension CiderPanelView {
             savedViewStorage.addToTabOrder(savedView.id)
             selectedFolderID = nil
             selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        case .newKanban:
+            let board = KanbanStorage.shared.createBoard(name: "Untitled Board")
+            let savedView = savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
+            savedViewStorage.addToTabOrder(savedView.id)
+            selectedFolderID = nil
+            selectedTab = .savedView(id: savedView.id, name: savedView.name)
         case .saveSession:
             Task {
                 let vm = BrowserSessionsViewModel()

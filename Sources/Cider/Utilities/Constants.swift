@@ -90,6 +90,7 @@ extension Notification.Name {
     static let toggleAIAssistantPanel = Notification.Name("cider.toggleAIAssistantPanel")
     static let showAIAssistantPanel = Notification.Name("cider.showAIAssistantPanel")
     static let dismissAIAssistantPanel = Notification.Name("cider.dismissAIAssistantPanel")
+    static let kanbanBoardsChanged = Notification.Name("cider.kanbanBoardsChanged")
 }
 
 // MARK: - Snap Target
