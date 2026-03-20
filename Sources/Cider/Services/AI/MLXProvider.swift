@@ -7,9 +7,6 @@ final class MLXProvider: AIAssistantProvider {
     private let logger = Logger(subsystem: "com.cider.app", category: "MLXProvider")
     private let modelManager = MLXModelManager.shared
 
-    /// Conversation history for multi-turn.
-    private var conversationHistory: [(role: String, content: String)] = []
-
     var isAvailable: Bool {
         modelManager.isLocalModelEnabled
     }
@@ -20,7 +17,7 @@ final class MLXProvider: AIAssistantProvider {
     }
 
     func resetSession() {
-        conversationHistory.removeAll()
+        // No persistent state to clear — conversation context comes from messages parameter
     }
 
     func streamResponse(
@@ -58,16 +55,6 @@ final class MLXProvider: AIAssistantProvider {
                     )
 
                     continuation.yield(response)
-
-                    // Store in conversation history for multi-turn
-                    conversationHistory.append((role: "user", content: lastUserMessage.content))
-                    conversationHistory.append((role: "assistant", content: response))
-
-                    // Keep history manageable (last 10 exchanges)
-                    if conversationHistory.count > 20 {
-                        conversationHistory = Array(conversationHistory.suffix(20))
-                    }
-
                     continuation.finish()
                 } catch {
                     logger.error("MLX error: \(error.localizedDescription, privacy: .public)")

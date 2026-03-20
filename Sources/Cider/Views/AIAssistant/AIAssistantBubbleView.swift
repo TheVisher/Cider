@@ -5,7 +5,6 @@ struct AIAssistantBubbleView: View {
     let message: AIAssistantMessage
     var isStreaming = false
 
-    @State private var isHovered = false
     @State private var showCopied = false
 
     private static let timeFormatter: DateFormatter = {
@@ -49,7 +48,7 @@ struct AIAssistantBubbleView: View {
             // Timestamp + copy button
             HStack(spacing: Spacing.xs) {
                 Text(Self.timeFormatter.string(from: message.timestamp))
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.quaternary)
 
                 Button {
@@ -62,14 +61,13 @@ struct AIAssistantBubbleView: View {
                     }
                 } label: {
                     Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10))
+                        .font(CiderFont.caption)
                         .foregroundColor(showCopied ? CiderColors.successMuted : CiderColors.quaternary)
                 }
                 .buttonStyle(.plain)
                 .help("Copy message")
             }
         }
-        .onHover { isHovered = $0 }
     }
 
     private var bubbleBackground: some View {

@@ -28,6 +28,8 @@ Build verified with `swift build` after each fix batch.
 | Views/Shared/ | PASS | 100+ fixed, +6 fixed, +1 fixed, +4 fixed | 3/3 | 2026-03-18 |
 | Views/Search/ | PASS | 9 fixed (pass #1) + 1 fixed (pass #2) + 5 fixed (pass #3) | 3/3 | 2026-03-18 |
 | Views/Settings/ | PASS | 42 fixed, +1 fixed | 3/3 | 2026-03-18 |
+| Views/AIAssistant/ | PASS | 15 fixed | 3/3 | 2026-03-20 |
+| Services/AI/ | PASS | 0 | 3/3 | 2026-03-20 |
 
 ---
 

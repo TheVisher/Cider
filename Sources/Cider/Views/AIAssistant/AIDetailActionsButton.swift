@@ -124,7 +124,8 @@ struct AIDetailActionsButton: View {
 
     private func sendMessage(_ message: String) {
         NotificationCenter.default.post(name: .showAIAssistantPanel, object: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
             AIAssistantViewModel.shared.send(message)
         }
     }

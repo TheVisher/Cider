@@ -73,10 +73,10 @@ struct AIAssistantPanelView: View {
             } label: {
                 HStack(spacing: Spacing.xxs) {
                     Circle()
-                        .fill(viewModel.isUsingLocalModel ? Color.green : CiderColors.controlAccent)
+                        .fill(viewModel.isUsingLocalModel ? CiderColors.success : CiderColors.controlAccent)
                         .frame(width: 6, height: 6)
                     Text(viewModel.isUsingLocalModel ? "Local" : "Apple")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
                 .padding(.horizontal, Spacing.xs)
@@ -173,7 +173,7 @@ struct AIAssistantPanelView: View {
     private var contextBadge: some View {
         HStack(spacing: Spacing.xxs) {
             Image(systemName: "link")
-                .font(.system(size: 9))
+                .font(CiderFont.micro)
             Text("Context")
                 .font(CiderFont.captionMedium)
         }
@@ -239,7 +239,7 @@ struct AIAssistantPanelView: View {
             Spacer()
 
             Image(systemName: "sparkles")
-                .font(.system(size: 32))
+.font(CiderFont.settingsEmptyIcon)
                 .foregroundColor(CiderColors.quaternary)
 
             Text("Ask me anything")
@@ -284,10 +284,10 @@ struct AIAssistantPanelView: View {
                 if modelManager.isDownloading {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         ProgressView(value: modelManager.downloadProgress)
-                            .tint(.green)
+                            .tint(CiderColors.success)
 
                         Text("\(Int(modelManager.downloadProgress * 100))% — \(String(format: "%.1f", modelManager.recommendedTier.downloadSizeGB)) GB total")
-                            .font(.system(size: 10))
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
                 }
@@ -331,7 +331,7 @@ struct AIAssistantPanelView: View {
                             .font(CiderFont.label)
                             .foregroundColor(CiderColors.primary)
                         Text("On-device, 4K context")
-                            .font(.system(size: 10))
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
                     Spacer()
@@ -357,21 +357,21 @@ struct AIAssistantPanelView: View {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "desktopcomputer")
                         .font(CiderFont.caption)
-                        .foregroundColor(.green)
+                        .foregroundColor(CiderColors.success)
                         .frame(width: 14, alignment: .center)
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Local Model")
                             .font(CiderFont.label)
                             .foregroundColor(CiderColors.primary)
                         Text(localModelSubtitle)
-                            .font(.system(size: 10))
+                            .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
                     Spacer()
                     if viewModel.isUsingLocalModel {
                         Image(systemName: "checkmark")
                             .font(CiderFont.captionSemibold)
-                            .foregroundColor(.green)
+                            .foregroundColor(CiderColors.success)
                     }
                 }
                 .padding(.horizontal, Spacing.md)
@@ -384,9 +384,9 @@ struct AIAssistantPanelView: View {
             if modelManager.isDownloading {
                 VStack(spacing: Spacing.xxs) {
                     ProgressView(value: modelManager.downloadProgress)
-                        .tint(.green)
+                        .tint(CiderColors.success)
                     Text("Downloading model... \(Int(modelManager.downloadProgress * 100))%")
-                        .font(.system(size: 10))
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                 }
                 .padding(.horizontal, Spacing.md)
@@ -395,7 +395,7 @@ struct AIAssistantPanelView: View {
 
             if let error = modelManager.loadError {
                 Text(error)
-                    .font(.system(size: 10))
+                    .font(CiderFont.caption)
                     .foregroundColor(CiderColors.destructive)
                     .padding(.horizontal, Spacing.md)
                     .padding(.bottom, Spacing.xs)

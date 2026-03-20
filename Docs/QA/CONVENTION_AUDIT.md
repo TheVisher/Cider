@@ -33,6 +33,8 @@ Build verified with `swift build` after each fix batch.
 | Views/Shared/ | PASS | 0 | 3/3 | 2026-03-18 |
 | Views/Search/ | PASS | 0 | 3/3 | 2026-03-18 |
 | Views/Settings/ | PASS | 0 | 3/3 | 2026-03-18 |
+| Views/AIAssistant/ | PASS | 0 | 3/3 | 2026-03-20 |
+| Services/AI/ | PASS | 0 (removeItem is internal AI state, not user content) | 3/3 | 2026-03-20 |
 
 ---
 
