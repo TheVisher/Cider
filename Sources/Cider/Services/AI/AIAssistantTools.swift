@@ -975,3 +975,131 @@ struct AddBookmarkTool: Tool {
         return actions.joined(separator: ", ") + "."
     } }
 }
+
+// MARK: - Get Current Item Tool
+
+/// Returns details about whatever the user is currently viewing in Cider.
+struct GetCurrentItemTool: Tool {
+    let name = "getCurrentItem"
+    let description = """
+    Get full details about the item the user is currently viewing in Cider. \
+    Use this when the user says "this bookmark", "this note", "summarize this", \
+    "tell me about this", etc. without specifying which item.
+    """
+
+    @Generable
+    struct Arguments {}
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let context = AIAssistantViewModel.shared.context
+
+        if let bookmark = context.currentBookmark {
+            // Find full bookmark data
+            if let full = BookmarksStorage.shared.bookmarks.first(where: {
+                $0.urlString == bookmark.url
+            }) {
+                var details = "Currently viewing bookmark:"
+                details += "\n  Title: \"\(full.title)\""
+                details += "\n  URL: \(full.urlString)"
+                if let summary = full.aiSummary { details += "\n  Summary: \(summary)" }
+                if !full.notes.isEmpty { details += "\n  Notes: \(full.notes)" }
+                if !full.tags.isEmpty { details += "\n  Tags: \(full.tags.joined(separator: ", "))" }
+                let labels = full.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
+                if !labels.isEmpty { details += "\n  Labels: \(labels.joined(separator: ", "))" }
+                if let folderID = full.folderID, let folder = VaultFolderService.shared.folder(for: folderID) {
+                    details += "\n  Folder: \(folder.name)"
+                }
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                details += "\n  Saved: \(formatter.string(from: full.createdAt))"
+                return details
+            }
+            return "Currently viewing bookmark: \"\(bookmark.title)\" (\(bookmark.url))"
+        }
+
+        if let note = context.currentNote {
+            return "Currently viewing note: \"\(note.title)\"\n  Content preview: \(note.excerpt)"
+        }
+
+        if let event = context.currentEvent {
+            var details = "Currently viewing event: \"\(event.title)\" on \(event.date)"
+            if !event.location.isEmpty { details += " at \(event.location)" }
+            return details
+        }
+
+        if let contact = context.currentContact {
+            var details = "Currently viewing contact: \"\(contact.name)\""
+            if !contact.email.isEmpty { details += " (\(contact.email))" }
+            return details
+        }
+
+        if let todo = context.currentTodo {
+            return "Currently viewing todo: \"\(todo.title)\" (\(todo.status))"
+        }
+
+        if let folder = context.currentFolder {
+            return "Currently browsing folder: \"\(folder.name)\" containing \(folder.itemCount) items."
+        }
+
+        return "The user is not currently viewing any specific item. They may be on the home screen or library view."
+    } }
+}
+
+// MARK: - Delete Item Tool
+
+/// Deletes (trashes) a bookmark or note by title.
+struct DeleteItemTool: Tool {
+    let name = "deleteItem"
+    let description = """
+    Delete a bookmark or note by moving it to the trash. Searches by title keyword. \
+    Items can be recovered from trash later.
+    """
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Title (or part of it) of the item to delete")
+        var searchQuery: String
+
+        @Guide(description: "Type of item to delete: bookmark or note")
+        var itemType: String
+    }
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let type = arguments.itemType.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if type == "bookmark" || type == "bookmarks" {
+            let matches = BookmarksStorage.shared.bookmarks.filter {
+                $0.title.localizedStandardContains(query)
+            }
+            guard let bookmark = matches.first else {
+                return "No bookmark found matching \"\(query)\"."
+            }
+            if matches.count > 1 {
+                let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
+                return "Multiple bookmarks match \"\(query)\": \(titles). Please be more specific."
+            }
+            let trashItem = BookmarksStorage.shared.remove(bookmark)
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: trashItem))
+            return "Moved bookmark \"\(bookmark.title)\" to trash. It can be recovered from the trash."
+        }
+
+        if type == "note" || type == "notes" {
+            let matches = NotesStorage.shared.notes.filter {
+                $0.title.localizedStandardContains(query)
+            }
+            guard let note = matches.first else {
+                return "No note found matching \"\(query)\"."
+            }
+            if matches.count > 1 {
+                let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
+                return "Multiple notes match \"\(query)\": \(titles). Please be more specific."
+            }
+            let trashItem = NotesStorage.shared.delete(note: note)
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .note, trashItem: trashItem))
+            return "Moved note \"\(note.title)\" to trash. It can be recovered from the trash."
+        }
+
+        return "Unknown item type '\(type)'. Use 'bookmark' or 'note'."
+    } }
+}

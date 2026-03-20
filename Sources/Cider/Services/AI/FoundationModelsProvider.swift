@@ -38,7 +38,9 @@ final class FoundationModelsProvider: AIAssistantProvider {
         RenameBookmarkTool(),
         CreateNoteTool(),
         SummarizeTextTool(),
-        AddBookmarkTool()
+        AddBookmarkTool(),
+        GetCurrentItemTool(),
+        DeleteItemTool()
     ]
 
     var isAvailable: Bool {

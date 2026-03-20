@@ -314,6 +314,7 @@ All tools are defined in `Services/AI/AIAssistantTools.swift` and registered in 
 | `getFolderContents` | "What's in my Applications folder?" | Lists everything inside a specific folder |
 | `getBrowserSessions` | "Show my saved sessions" | Saved browser tab groups with tab counts |
 | `findSimilar` | "Find bookmarks similar to this one" | Cosine similarity via `EmbeddingStore` vectors |
+| `getCurrentItem` | "Tell me about this" / "Summarize this" | Returns full details of whatever item the user is currently viewing |
 
 **Write Tools — Organize & Create:**
 
@@ -326,6 +327,7 @@ All tools are defined in `Services/AI/AIAssistantTools.swift` and registered in 
 | `createNote` | "Create a note called Meeting Notes" | Creates note with title/content, optionally in a folder |
 | `addBookmark` | "Save this URL as a bookmark" | Saves URL with optional title, folder, and tag |
 | `summarizeText` | "Summarize this and save as a note" | Summarizes text via AI, optionally saves as a note in a folder |
+| `deleteItem` | "Delete the Untitled bookmark" | Moves bookmark or note to trash (recoverable via undo) |
 
 **How tool calling works:**
 1. User asks "how many bookmarks do I have?"
