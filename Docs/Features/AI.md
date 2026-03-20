@@ -352,25 +352,18 @@ All tools are defined in `Services/AI/AIAssistantTools.swift` and registered in 
 - `EmbeddingStore.shared` — vector embeddings for semantic similarity
 - `SummaryService.shared` — AI text summarization
 
-### Phase 1: Chat UI Polish (Next)
+### Shipped: Chat UI + Context
 
-**Markdown rendering** — render bold, italics, lists, code blocks in assistant responses. Currently plain text only.
+- **Markdown rendering** — bold, italic, code blocks, lists, links in responses
+- **Conversation persistence** — JSONL files in `~/CiderVault/.cider/ai-conversations/`
+- **Conversation history** — clock icon popover, resume, delete, export as markdown
+- **Auto-resume** — most recent conversation loads on app launch
+- **Copy button + timestamps** — on every message
+- **Context injection** — AI knows what bookmark/note/folder/event/contact/todo you're viewing
+- **Quick actions sidebar** — collapsible section with context-sensitive one-click actions
+- **Context window management** — usage indicator, auto-summarize at 70%, error recovery
 
-**Citations** — when the AI references a bookmark or note, show a clickable card/link the user can tap to open it. Users need to verify what the AI tells them.
-
-**Conversation persistence** — save conversations as JSONL files in the vault (see [Conversation Storage](#conversation-storage)). One file per conversation, append-only.
-
-**Message actions:**
-- Copy button on messages
-- Regenerate/retry button on assistant messages
-- Timestamp display
-
-**Conversation management:**
-- Conversation list sidebar or popover
-- Resume previous conversations
-- Delete/archive conversations
-
-### Phase 2: Confirmation UI for Write Actions
+### Next: Confirmation UI for Write Actions
 
 Add a confirm/cancel step before write tools execute, so the model proposes an action and the user approves.
 
@@ -384,9 +377,13 @@ AI: I'll create a "Products" folder and move 3 shoe-related
     [Confirm] [Cancel]
 ```
 
-### Phase 3: MLX / Qwen 3.5 Integration
+### Next: Citations
 
-Add the downloadable local model as an alternative backend. Only after tool calling is solid — tools are what make the AI capable, the model quality makes conversations smoother.
+When the AI references a bookmark or note, show a clickable card/link the user can tap to open it. Users need to verify what the AI tells them.
+
+### Next: MLX / Qwen 3.5 Integration
+
+Add the downloadable local model as an alternative backend. 23 tools × ~63 tokens = ~1450 tokens of tool definitions alone, which eats 35% of Apple Intelligence's 4096 token window. Qwen's 32K context makes this a non-issue.
 
 - `MLXProvider` conforming to `AIAssistantProvider`
 - Model download UI in settings (see [Local Model Strategy](#local-model-strategy))
