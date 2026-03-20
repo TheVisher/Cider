@@ -34,6 +34,17 @@ final class AIAssistantViewModel: ObservableObject {
 
     init(provider: AIAssistantProvider? = nil) {
         self.provider = provider ?? FoundationModelsProvider()
+        // Auto-resume most recent conversation
+        resumeLastConversation()
+    }
+
+    /// Load the most recent conversation on startup.
+    private func resumeLastConversation() {
+        guard let recent = storage.conversations.first else { return }
+        if let loaded = storage.loadMessages(for: recent.id) {
+            messages = loaded
+            currentConversationID = recent.id
+        }
     }
 
     // MARK: - Send Message

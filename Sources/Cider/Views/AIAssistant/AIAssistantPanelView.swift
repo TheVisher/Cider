@@ -307,6 +307,21 @@ struct AIAssistantPanelView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                if let md = AIConversationStorage.shared.exportAsMarkdown(conversationID: conv.id) {
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+                    panel.nameFieldStringValue = "\(conv.title).md"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        try? md.write(to: url, atomically: true, encoding: .utf8)
+                    }
+                }
+            } label: {
+                Label("Export as Markdown", systemImage: "square.and.arrow.up")
+            }
+
+            Divider()
+
             Button("Delete", role: .destructive) {
                 viewModel.deleteConversation(conv.id)
             }
