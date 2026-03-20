@@ -90,6 +90,11 @@ extension CiderPanelView {
                 userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
             )
         }
+
+        // Update AI context
+        AIAssistantViewModel.shared.updateContext(
+            bookmark: (title: bookmark.title, url: bookmark.urlString, summary: bookmark.aiSummary)
+        )
     }
 
     func closeBookmarkDetails() {
@@ -98,6 +103,7 @@ extension CiderPanelView {
         detailsDraft = nil
         detailsErrorMessage = nil
         detailWebViewStore.reset()
+        AIAssistantViewModel.shared.clearContext()
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
@@ -120,6 +126,13 @@ extension CiderPanelView {
                 userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
             )
         }
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        AIAssistantViewModel.shared.updateContext(
+            event: (title: dateCard.title, date: formatter.string(from: dateCard.startAt), location: dateCard.location)
+        )
     }
 
     func openContactDetail(_ contact: ContactCard) {
@@ -141,6 +154,10 @@ extension CiderPanelView {
                 userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
             )
         }
+
+        AIAssistantViewModel.shared.updateContext(
+            contact: (name: contact.displayName, email: contact.email)
+        )
     }
 
     func openTodoDetail(_ todoCard: TodoCard) {
@@ -162,6 +179,11 @@ extension CiderPanelView {
                 userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
             )
         }
+
+        let status = todoCard.isCompleted ? "completed" : "incomplete"
+        AIAssistantViewModel.shared.updateContext(
+            todo: (title: todoCard.title, status: status)
+        )
     }
 
     func openVaultFileDetail(_ file: VaultFile) {
@@ -230,6 +252,7 @@ extension CiderPanelView {
         selectedNote = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
+        AIAssistantViewModel.shared.clearContext()
         if anyOpen {
             NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
         }

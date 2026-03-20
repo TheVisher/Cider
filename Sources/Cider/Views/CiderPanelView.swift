@@ -219,7 +219,7 @@ struct CiderPanelView: View {
             debouncedSearchText = ""
             closeAllDetails()
         }
-        .onChange(of: selectedFolderID) { _, _ in
+        .onChange(of: selectedFolderID) { _, newFolderID in
             selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()
             focusedItemID = nil
@@ -228,6 +228,17 @@ struct CiderPanelView: View {
             sidebarSearchText = ""
             debouncedSearchText = ""
             closeAllDetails()
+            // Update AI context with folder info
+            if let fid = newFolderID,
+               let folder = VaultFolderService.shared.folder(for: fid) {
+                let itemCount = BookmarksStorage.shared.bookmarks.filter { $0.folderID == fid }.count
+                    + NotesStorage.shared.notes.filter { $0.folderID == fid }.count
+                AIAssistantViewModel.shared.updateContext(
+                    folder: (name: folder.name, itemCount: itemCount)
+                )
+            } else {
+                AIAssistantViewModel.shared.clearContext()
+            }
         }
         .onChange(of: tagsCollapsed) { _, newVal in
             var config = CiderConfig.load()

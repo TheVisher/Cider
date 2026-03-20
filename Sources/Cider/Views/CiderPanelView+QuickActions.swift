@@ -75,6 +75,11 @@ extension CiderPanelView {
                 userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
             )
         }
+
+        let excerpt = String(note.contentPreview.prefix(200))
+        AIAssistantViewModel.shared.updateContext(
+            note: (title: note.title, excerpt: excerpt)
+        )
     }
 
     func closeNoteDetail() {
@@ -83,6 +88,7 @@ extension CiderPanelView {
         selectedNote = nil
         notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
+        AIAssistantViewModel.shared.clearContext()
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 }

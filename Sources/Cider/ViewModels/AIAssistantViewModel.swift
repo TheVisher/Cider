@@ -210,10 +210,16 @@ final class AIAssistantViewModel: ObservableObject {
     func updateContext(bookmark: (title: String, url: String, summary: String?)? = nil,
                        note: (title: String, excerpt: String)? = nil,
                        folder: (name: String, itemCount: Int)? = nil,
+                       event: (title: String, date: String, location: String)? = nil,
+                       contact: (name: String, email: String)? = nil,
+                       todo: (title: String, status: String)? = nil,
                        selectedCount: Int = 0) {
         context.currentBookmark = bookmark
         context.currentNote = note
         context.currentFolder = folder
+        context.currentEvent = event
+        context.currentContact = contact
+        context.currentTodo = todo
         context.selectedItemCount = selectedCount
     }
 

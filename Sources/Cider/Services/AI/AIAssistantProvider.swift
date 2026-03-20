@@ -25,10 +25,14 @@ struct AIAssistantContext {
     var currentBookmark: (title: String, url: String, summary: String?)?
     var currentNote: (title: String, excerpt: String)?
     var currentFolder: (name: String, itemCount: Int)?
+    var currentEvent: (title: String, date: String, location: String)?
+    var currentContact: (name: String, email: String)?
+    var currentTodo: (title: String, status: String)?
     var selectedItemCount: Int = 0
 
     var isEmpty: Bool {
-        currentBookmark == nil && currentNote == nil && currentFolder == nil
+        currentBookmark == nil && currentNote == nil && currentFolder == nil &&
+        currentEvent == nil && currentContact == nil && currentTodo == nil
     }
 
     /// Builds a context string for injection into the system prompt.
@@ -45,6 +49,19 @@ struct AIAssistantContext {
         }
         if let folder = currentFolder {
             parts.append("The user is browsing folder \"\(folder.name)\" containing \(folder.itemCount) items.")
+        }
+        if let event = currentEvent {
+            var desc = "The user is viewing an event: \"\(event.title)\" on \(event.date)"
+            if !event.location.isEmpty { desc += " at \(event.location)" }
+            parts.append(desc)
+        }
+        if let contact = currentContact {
+            var desc = "The user is viewing a contact: \"\(contact.name)\""
+            if !contact.email.isEmpty { desc += " (\(contact.email))" }
+            parts.append(desc)
+        }
+        if let todo = currentTodo {
+            parts.append("The user is viewing a todo: \"\(todo.title)\" (\(todo.status))")
         }
         if selectedItemCount > 1 {
             parts.append("The user has \(selectedItemCount) items selected.")
