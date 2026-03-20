@@ -69,4 +69,7 @@ protocol AIAssistantProvider {
         messages: [AIAssistantMessage],
         context: AIAssistantContext
     ) -> AsyncThrowingStream<String, Error>
+
+    /// Reset conversation state (called when user clears the chat).
+    func resetSession()
 }

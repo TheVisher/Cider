@@ -65,6 +65,11 @@ struct AIAssistantPanelView: View {
 
             Spacer()
 
+            // Context usage indicator
+            if viewModel.contextUsage > 0.1 {
+                contextUsageIndicator
+            }
+
             if !viewModel.messages.isEmpty {
                 Button {
                     withAnimation(reduceMotion ? .none : .snappy) {
@@ -81,6 +86,30 @@ struct AIAssistantPanelView: View {
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: AIAssistantPanelDesign.titleBarHeight)
+    }
+
+    private var contextUsageIndicator: some View {
+        let usage = viewModel.contextUsage
+        let color: Color = usage > 0.85 ? CiderColors.destructive :
+                           usage > 0.6 ? CiderColors.warning : CiderColors.tertiary
+        return HStack(spacing: Spacing.xxs) {
+            // Thin progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(CiderColors.surfaceInput)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(color)
+                        .frame(width: geo.size.width * usage)
+                }
+            }
+            .frame(width: 32, height: 3)
+
+            Text("\(Int(usage * 100))%")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(color)
+        }
+        .help("Context window usage — \(Int(usage * 100))% of \(4096) tokens. Clears automatically when full.")
     }
 
     private var contextBadge: some View {

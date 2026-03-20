@@ -23,6 +23,11 @@ final class AIAssistantViewModel: ObservableObject {
     var isAvailable: Bool { provider.isAvailable }
     var providerName: String { provider.displayName }
 
+    /// Context window usage (0.0–1.0). Only available for Foundation Models.
+    var contextUsage: Double {
+        (provider as? FoundationModelsProvider)?.contextUsage ?? 0
+    }
+
     init(provider: AIAssistantProvider? = nil) {
         self.provider = provider ?? FoundationModelsProvider()
     }
@@ -133,6 +138,7 @@ final class AIAssistantViewModel: ObservableObject {
     func clearConversation() {
         stopStreaming()
         messages.removeAll()
+        provider.resetSession()
     }
 
     // MARK: - Context Updates
