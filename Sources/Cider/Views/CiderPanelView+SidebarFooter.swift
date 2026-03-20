@@ -1,35 +1,20 @@
 import SwiftUI
 
+/// A quick action button for the AI sidebar section.
+private struct AIQuickAction {
+    let icon: String
+    let label: String
+    let execute: () -> Void
+}
+
 extension CiderPanelView {
 
     // MARK: - Sidebar Footer
 
     var sidebarFooterView: some View {
         VStack(spacing: Spacing.sm) {
-            // AI Assistant button
-            Button {
-                NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
-            } label: {
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "sparkles")
-                        .font(CiderFont.bodyMedium)
-                        .foregroundColor(CiderColors.controlAccent)
-                    Text("AI Assistant")
-                        .font(CiderFont.labelMedium)
-                        .foregroundColor(CiderColors.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceSubtle)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .help("Open AI Assistant")
-            .padding(.horizontal, Spacing.sm)
+            // AI Quick Actions + Assistant button
+            aiSidebarSection
 
             Divider()
                 .background(CiderColors.separator)
@@ -152,6 +137,148 @@ extension CiderPanelView {
                 showNewItemPicker = false
             }
         )
+    }
+
+    // MARK: - AI Sidebar Section
+
+    @ViewBuilder
+    var aiSidebarSection: some View {
+        VStack(spacing: Spacing.xs) {
+            // Header: sparkles + label + chevron, click to expand
+            Button {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    aiSectionExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "sparkles")
+                        .font(CiderFont.bodyMedium)
+                        .foregroundColor(CiderColors.controlAccent)
+                    Text("AI")
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.secondary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(CiderColors.quaternary)
+                        .rotationEffect(.degrees(aiSectionExpanded ? 90 : 0))
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceSubtle)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Spacing.sm)
+
+            // Expanded: quick actions + open chat button
+            if aiSectionExpanded {
+                VStack(spacing: Spacing.xxs) {
+                    // Context-sensitive quick actions
+                    ForEach(aiQuickActions, id: \.label) { action in
+                        Button {
+                            action.execute()
+                        } label: {
+                            HStack(spacing: Spacing.sm) {
+                                Image(systemName: action.icon)
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.controlAccent)
+                                    .frame(width: 14, alignment: .center)
+                                Text(action.label)
+                                    .font(CiderFont.label)
+                                    .foregroundColor(CiderColors.primary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.xs)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Divider()
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xxs)
+
+                    // Open full chat
+                    Button {
+                        NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+                    } label: {
+                        HStack(spacing: Spacing.sm) {
+                            Image(systemName: "bubble.left.and.bubble.right")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.controlAccent)
+                                .frame(width: 14, alignment: .center)
+                            Text("Open Chat")
+                                .font(CiderFont.label)
+                                .foregroundColor(CiderColors.primary)
+                            Spacer()
+                            Text("⌥A")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xs)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, Spacing.sm)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    /// Quick actions based on current context.
+    private var aiQuickActions: [AIQuickAction] {
+        var actions: [AIQuickAction] = []
+        let vm = AIAssistantViewModel.shared
+
+        // Context-specific actions (when viewing an item)
+        if vm.context.currentBookmark != nil {
+            actions.append(AIQuickAction(icon: "text.quote", label: "Summarize Bookmark") {
+                sendQuickMessage("Summarize this bookmark for me")
+            })
+            actions.append(AIQuickAction(icon: "rectangle.stack", label: "Find Similar") {
+                sendQuickMessage("Find bookmarks similar to this one")
+            })
+            actions.append(AIQuickAction(icon: "tag", label: "Suggest Tags") {
+                sendQuickMessage("What tags would you suggest for this bookmark?")
+            })
+        } else if vm.context.currentNote != nil {
+            actions.append(AIQuickAction(icon: "text.quote", label: "Summarize Note") {
+                sendQuickMessage("Summarize this note")
+            })
+        } else if vm.context.currentFolder != nil {
+            actions.append(AIQuickAction(icon: "folder.badge.gearshape", label: "Organize Folder") {
+                sendQuickMessage("How should I organize the items in this folder?")
+            })
+        }
+
+        // General actions (always available)
+        actions.append(AIQuickAction(icon: "chart.bar", label: "Library Summary") {
+            sendQuickMessage("Give me a summary of my entire library")
+        })
+        actions.append(AIQuickAction(icon: "clock", label: "Recent Activity") {
+            sendQuickMessage("What did I save in the last 7 days?")
+        })
+        actions.append(AIQuickAction(icon: "exclamationmark.circle", label: "Overdue Tasks") {
+            sendQuickMessage("Do I have any overdue todos?")
+        })
+
+        return actions
+    }
+
+    /// Send a message to the AI assistant (opens panel if needed).
+    private func sendQuickMessage(_ message: String) {
+        NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+        // Small delay to let the panel appear before sending
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            AIAssistantViewModel.shared.send(message)
+        }
     }
 
     var showFolderViewOptions: Bool {

@@ -323,6 +323,7 @@ All tools are defined in `Services/AI/AIAssistantTools.swift` and registered in 
 | `createFolder` | "Create a Products folder" | Creates a new folder, optionally inside a parent |
 | `moveToFolder` | "Move shoe bookmarks to Products" | Searches by keyword, moves matching items to a folder |
 | `applyTag` | "Tag shoe bookmarks as Footwear" | Searches by keyword, applies tag (creates tag if needed) |
+| `removeTag` | "Remove the Footwear tag from Vans" | Searches by keyword, removes specified tag |
 | `renameBookmark` | "Rename 'Untitled' to 'Vans Store'" | Finds bookmark by current title, sets new title |
 | `createNote` | "Create a note called Meeting Notes" | Creates note with title/content, optionally in a folder |
 | `addBookmark` | "Save this URL as a bookmark" | Saves URL with optional title, folder, and tag |

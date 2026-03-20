@@ -67,6 +67,7 @@ struct CiderPanelView: View {
     @State var selectionAnchorID: String?
     @State var scrollToItemID: String?
     @State var keyboardMonitor: Any?
+    @State var aiSectionExpanded: Bool = false
 
     var allTabs: [CiderTab] {
         savedViewTabs + sourceTabs + dynamicTabs

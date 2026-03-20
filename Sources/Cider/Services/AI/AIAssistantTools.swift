@@ -722,6 +722,59 @@ struct ApplyTagTool: Tool {
     } }
 }
 
+// MARK: - Remove Tag Tool
+
+/// Removes a tag from items.
+struct RemoveTagTool: Tool {
+    let name = "removeTag"
+    let description = "Remove a tag/label from items. Searches for items by keyword and removes the specified tag."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Keyword to find items to untag (searches titles)")
+        var searchQuery: String
+
+        @Guide(description: "Tag name to remove")
+        var tagName: String
+    }
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tagName = arguments.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let label = CardLabelStorage.shared.labels.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(tagName) == .orderedSame
+        }) else {
+            return "No tag named \"\(tagName)\" found."
+        }
+
+        var untagged: [String] = []
+        let lid = label.id
+
+        let matchingBookmarks = BookmarksStorage.shared.bookmarks.filter {
+            ($0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query))
+            && $0.labelIDs.contains(lid)
+        }
+        for bookmark in matchingBookmarks {
+            _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: lid)
+            untagged.append("Bookmark: \"\(bookmark.title)\"")
+        }
+
+        let matchingNotes = NotesStorage.shared.notes.filter {
+            $0.title.localizedStandardContains(query) && $0.labelIDs.contains(lid)
+        }
+        for note in matchingNotes {
+            _ = NotesStorage.shared.removeLabel(note.id, labelID: lid)
+            untagged.append("Note: \"\(note.title)\"")
+        }
+
+        if untagged.isEmpty {
+            return "No items matching \"\(query)\" have the tag \"\(label.name)\"."
+        }
+        return "Removed tag \"\(label.name)\" from \(untagged.count) item(s):\n" + untagged.joined(separator: "\n")
+    } }
+}
+
 // MARK: - Rename Bookmark Tool
 
 /// Renames a bookmark.

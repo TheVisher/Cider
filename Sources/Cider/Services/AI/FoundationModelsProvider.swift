@@ -35,6 +35,7 @@ final class FoundationModelsProvider: AIAssistantProvider {
         CreateFolderTool(),
         MoveToFolderTool(),
         ApplyTagTool(),
+        RemoveTagTool(),
         RenameBookmarkTool(),
         CreateNoteTool(),
         SummarizeTextTool(),
