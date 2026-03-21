@@ -173,6 +173,31 @@ extension CiderPanelView {
         }
     }
 
+    func openOrCreateSessionsTab() {
+        // Check if a sessions tab already exists in the tab bar
+        if let existing = savedViewStorage.savedViews.first(where: {
+            if case .sessions = $0.kind { return true }; return false
+        }), savedViewStorage.tabOrder.contains(existing.id) {
+            selectedTab = .savedView(id: existing.id, name: existing.name)
+            selectedFolderID = nil
+            return
+        }
+        // Reopen closed sessions tab if one exists
+        if let existing = savedViewStorage.savedViews.first(where: {
+            if case .sessions = $0.kind { return true }; return false
+        }) {
+            savedViewStorage.addToTabOrder(existing.id)
+            selectedTab = .savedView(id: existing.id, name: existing.name)
+            selectedFolderID = nil
+            return
+        }
+        // Create a new sessions tab
+        let savedView = savedViewStorage.createSessionsView()
+        savedViewStorage.addToTabOrder(savedView.id)
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
+        selectedFolderID = nil
+    }
+
     func expandPathToFolder(_ folderID: UUID) {
         let folderByID = Dictionary(uniqueKeysWithValues: bookmarksViewModel.folders.map { ($0.id, $0) })
         var cursorID: UUID? = folderID

@@ -7,6 +7,7 @@ enum SavedViewKind: Codable, Hashable {
     case library
     case whiteboard(canvasID: UUID)
     case kanban(boardID: String)
+    case sessions
 
     // MARK: - Codable (tagged object for future extensibility)
 
@@ -26,6 +27,8 @@ enum SavedViewKind: Codable, Hashable {
         case "kanban":
             let boardID = try container.decode(String.self, forKey: .boardID)
             self = .kanban(boardID: boardID)
+        case "sessions":
+            self = .sessions
         default:
             self = .library
         }
@@ -42,6 +45,8 @@ enum SavedViewKind: Codable, Hashable {
         case .kanban(let boardID):
             try container.encode("kanban", forKey: .type)
             try container.encode(boardID, forKey: .boardID)
+        case .sessions:
+            try container.encode("sessions", forKey: .type)
         }
     }
 }

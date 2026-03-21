@@ -12,6 +12,7 @@ struct CiderTabBar: View {
     var onAddTab: (() -> Void)?
     var onReopenTab: ((UUID) -> Void)?
     var onOpenBoard: ((KanbanBoard) -> Void)?
+    var onOpenSessionsTab: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
@@ -223,6 +224,35 @@ struct CiderTabBar: View {
                 }
             }
 
+            // Sessions tab — show if not already open
+            let hasOpenSessionsTab = savedViewStorage.savedViews.contains { sv in
+                if case .sessions = sv.kind, savedViewStorage.tabOrder.contains(sv.id) { return true }
+                return false
+            }
+            if !hasOpenSessionsTab {
+                Divider()
+                    .padding(.vertical, Spacing.xxs)
+
+                Button {
+                    onOpenSessionsTab?()
+                    showAddTabPopover = false
+                } label: {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "terminal")
+                            .font(CiderFont.bodyMedium)
+                            .frame(width: Spacing.lg, alignment: .center)
+                        Text("Sessions")
+                            .font(CiderFont.body)
+                    }
+                    .foregroundColor(CiderColors.secondary)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
             if !closedTabs.isEmpty {
                 Divider()
                     .padding(.vertical, Spacing.xxs)
@@ -240,7 +270,7 @@ struct CiderTabBar: View {
                         showAddTabPopover = false
                     } label: {
                         HStack(spacing: Spacing.sm) {
-                            Image(systemName: { if case .whiteboard = sv.kind { return "scribble" }; if case .kanban = sv.kind { return "square.split.2x1" }; return "square.grid.2x2" }())
+                            Image(systemName: { if case .whiteboard = sv.kind { return "scribble" }; if case .kanban = sv.kind { return "square.split.2x1" }; if case .sessions = sv.kind { return "terminal" }; return "square.grid.2x2" }())
                                 .font(CiderFont.bodyMedium)
                                 .frame(width: Spacing.lg, alignment: .center)
                             Text(sv.name)

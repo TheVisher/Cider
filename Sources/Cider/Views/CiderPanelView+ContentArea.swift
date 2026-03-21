@@ -125,6 +125,8 @@ extension CiderPanelView {
                         WhiteboardTabView(canvasID: canvasID, viewModel: whiteboardViewModel)
                     } else if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID)
+                    } else if case .sessions = savedView.kind {
+                        ClaudeSessionsTabView()
                     } else if savedView.isOnboarding {
                         OnboardingTabView(onDismiss: {
                             dismissOnboardingTab(id: id)
@@ -409,6 +411,7 @@ private struct ClosedTabCard: View {
     private var icon: String {
         if case .whiteboard = savedView.kind { return "scribble" }
         if case .kanban = savedView.kind { return "square.split.2x1" }
+        if case .sessions = savedView.kind { return "terminal" }
         return "square.grid.2x2"
     }
 
