@@ -14,10 +14,24 @@ struct KanbanBoardView: View {
     @State private var columnNameDraft = ""
     @State private var editingCard: KanbanCard?
     @State private var showDeleteConfirmation = false
+    @State private var searchText = ""
+    @State private var compactCards = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
         storage.boards.first { $0.id == boardID }
+    }
+
+    /// Filter cards by search text across title, notes, agent, and tags.
+    private func filteredCards(_ cards: [KanbanCard]) -> [KanbanCard] {
+        guard !searchText.isEmpty else { return cards }
+        let query = searchText.lowercased()
+        return cards.filter { card in
+            card.title.localizedStandardContains(query) ||
+            (card.notes ?? "").localizedStandardContains(query) ||
+            (card.agent ?? "").localizedStandardContains(query) ||
+            card.tags.contains { $0.localizedStandardContains(query) }
+        }
     }
 
     var body: some View {
@@ -67,6 +81,46 @@ struct KanbanBoardView: View {
                 .foregroundColor(CiderColors.tertiary)
 
             Spacer()
+
+            // Search field
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: "magnifyingglass")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                TextField("Filter cards...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(CiderFont.caption)
+                    .frame(width: 100)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+
+            // Compact toggle
+            Button {
+                withAnimation(reduceMotion ? .none : .spring) {
+                    compactCards.toggle()
+                }
+            } label: {
+                Image(systemName: compactCards ? "list.bullet" : "rectangle.grid.1x2")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help(compactCards ? "Expanded view" : "Compact view")
 
             Button {
                 withAnimation(reduceMotion ? .none : .spring) {
@@ -136,8 +190,9 @@ struct KanbanBoardView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
-                    ForEach(Array(column.cards.enumerated()), id: \.element.id) { index, card in
-                        cardView(card)
+                    let cards = filteredCards(column.cards)
+                    ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
+                        cardView(card, compact: compactCards)
                             .onTapGesture {
                                 editingCard = card
                             }
@@ -269,8 +324,8 @@ struct KanbanBoardView: View {
 
     // MARK: - Cards
 
-    private func cardView(_ card: KanbanCard) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+    private func cardView(_ card: KanbanCard, compact: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
             // Color accent bar
             if let color = card.color {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -278,43 +333,54 @@ struct KanbanBoardView: View {
                     .frame(height: 3)
             }
 
-            Text(card.title)
-                .font(CiderFont.label)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(2)
+            HStack(spacing: Spacing.xs) {
+                Text(card.title)
+                    .font(compact ? CiderFont.caption : CiderFont.label)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(compact ? 1 : 2)
 
-            if let notes = card.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(3)
+                if compact {
+                    Spacer()
+                    if let priority = card.priority {
+                        priorityBadge(priority)
+                    }
+                }
             }
 
-            HStack(spacing: Spacing.xs) {
-                if let priority = card.priority {
-                    priorityBadge(priority)
+            if !compact {
+                if let notes = card.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(3)
                 }
-                if let agent = card.agent {
-                    HStack(spacing: Spacing.xxs) {
-                        Image(systemName: "cpu")
-                        Text(agent)
+
+                HStack(spacing: Spacing.xs) {
+                    if let priority = card.priority {
+                        priorityBadge(priority)
                     }
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.controlAccent)
-                }
-                if !card.tags.isEmpty {
-                    ForEach(card.tags.prefix(2), id: \.self) { tag in
-                        Text(tag)
-                            .font(CiderFont.micro)
-                            .foregroundColor(CiderColors.tertiary)
-                            .padding(.horizontal, Spacing.xxs)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(CiderColors.surfaceInput)
-                            )
+                    if let agent = card.agent {
+                        HStack(spacing: Spacing.xxs) {
+                            Image(systemName: "cpu")
+                            Text(agent)
+                        }
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.controlAccent)
                     }
+                    if !card.tags.isEmpty {
+                        ForEach(card.tags.prefix(2), id: \.self) { tag in
+                            Text(tag)
+                                .font(CiderFont.micro)
+                                .foregroundColor(CiderColors.tertiary)
+                                .padding(.horizontal, Spacing.xxs)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(CiderColors.surfaceInput)
+                                )
+                        }
+                    }
+                    Spacer()
                 }
-                Spacer()
             }
         }
         .padding(Spacing.sm)
