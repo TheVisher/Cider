@@ -52,23 +52,6 @@ final class KanbanStorage: ObservableObject {
         boards = loaded.sorted { $0.created > $1.created }
     }
 
-    private func reloadBoard(id: String) {
-        let url = boardsDir.appendingPathComponent("\(id).yaml")
-        if let board = load(from: url) {
-            if let index = boards.firstIndex(where: { $0.id == id }) {
-                if boards[index] != board {
-                    boards[index] = board
-                }
-            } else {
-                boards.append(board)
-                boards.sort { $0.created > $1.created }
-            }
-        } else {
-            // File was deleted externally
-            boards.removeAll { $0.id == id }
-        }
-    }
-
     private func load(from url: URL) -> KanbanBoard? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         do {

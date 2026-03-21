@@ -41,11 +41,6 @@ struct FolderKanbanView: View {
         uncategorizedItems.filter { matchesSearch($0) }
     }
 
-    private var totalVisibleCount: Int {
-        let columnCount = columns.reduce(0) { $0 + resolvedItems(for: $1).count }
-        return columnCount + filteredUncategorized.count
-    }
-
     // MARK: - Body
 
     var body: some View {

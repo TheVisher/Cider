@@ -174,11 +174,11 @@ struct KanbanCardDetailView: View {
                     .frame(width: 24, height: 24)
                     .overlay(
                         Circle()
-                            .strokeBorder(card.color == color ? CiderColors.primary : Color.clear, lineWidth: 2)
+                            .strokeBorder(card.color == color ? CiderColors.primary : Color.clear, lineWidth: CiderBorder.colorPickerRingWidth)
                     )
             } else {
                 Circle()
-                    .strokeBorder(CiderColors.borderDefault, lineWidth: 1)
+                    .strokeBorder(CiderColors.borderDefault, lineWidth: CiderBorder.thinStrokeWidth)
                     .frame(width: 24, height: 24)
                     .overlay(
                         card.color == nil

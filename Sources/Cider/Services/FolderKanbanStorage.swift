@@ -14,7 +14,6 @@ final class FolderKanbanStorage: ObservableObject {
     @Published private var configs: [UUID: FolderKanbanConfig] = [:]
 
     private let logger = Logger(subsystem: "com.cider.app", category: "FolderKanbanStorage")
-    private var isMutating = false
 
     private var storageDir: URL {
         StoragePaths.directoryURL(for: .folderKanban)
@@ -79,10 +78,8 @@ final class FolderKanbanStorage: ObservableObject {
         if configs[folderID] == nil {
             configs[folderID] = FolderKanbanConfig(columns: [])
         }
-        isMutating = true
         body(&configs[folderID]!)
         save(folderID: folderID)
-        isMutating = false
     }
 
     // MARK: - Public API

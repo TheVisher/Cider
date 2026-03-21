@@ -110,6 +110,8 @@ enum CiderBorder {
     static let hairlineStrokeWidth: CGFloat = 0.5
     /// Width of the selection ring on color-picker swatches
     static let colorPickerRingWidth: CGFloat = 2
+    /// Thin 1pt stroke for subtle borders (e.g. unselected color pickers)
+    static let thinStrokeWidth: CGFloat = 1
 }
 
 // MARK: - Safe URL Opening
@@ -144,6 +146,15 @@ enum Radius {
     static let md: CGFloat = 10
     static let lg: CGFloat = 14
     static let xl: CGFloat = 20
+}
+
+// MARK: - Kanban Design Tokens
+
+enum KanbanDesign {
+    /// Corner radius for the thin color accent bar on cards
+    static let accentBarRadius: CGFloat = 2
+    /// Height of the color accent bar on cards
+    static let accentBarHeight: CGFloat = 3
 }
 
 // MARK: - Animation Presets

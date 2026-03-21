@@ -9,7 +9,6 @@ struct KanbanBoardView: View {
     @State private var boardNameDraft = ""
     @State private var addingCardToColumn: String?
     @State private var newCardTitle = ""
-    @State private var draggingCardID: String?
     @State private var renamingColumnID: String?
     @State private var columnNameDraft = ""
     @State private var editingCard: KanbanCard?
@@ -328,9 +327,9 @@ struct KanbanBoardView: View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
             // Color accent bar
             if let color = card.color {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                RoundedRectangle(cornerRadius: KanbanDesign.accentBarRadius, style: .continuous)
                     .fill(kanbanColor(color))
-                    .frame(height: 3)
+                    .frame(height: KanbanDesign.accentBarHeight)
             }
 
             HStack(spacing: Spacing.xs) {
@@ -445,7 +444,7 @@ struct KanbanBoardView: View {
                 .onSubmit {
                     let trimmed = newCardTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
-                        withAnimation(reduceMotion ? .none : .spring) {
+                        _ = withAnimation(reduceMotion ? .none : .spring) {
                             storage.addCard(boardID: boardID, columnID: columnID, title: trimmed)
                         }
                     }
@@ -457,7 +456,7 @@ struct KanbanBoardView: View {
                 Button("Add") {
                     let trimmed = newCardTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
-                        withAnimation(reduceMotion ? .none : .spring) {
+                        _ = withAnimation(reduceMotion ? .none : .spring) {
                             storage.addCard(boardID: boardID, columnID: columnID, title: trimmed)
                         }
                     }
