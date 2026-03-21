@@ -35,7 +35,7 @@ Tell Claude: **"Run the threading safety loop"** — it will read this doc and k
 Each area requires 3 independent clean scans before PASS. If any scan finds a new violation, fix it and reset to 1/3.
 
 ## Areas (scan order)
-App/ → Services/ → ViewModels/ → Views/Shared/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Search/ → Views/Settings/
+App/ → Services/ → Services/AI/ → ViewModels/ → Views/Shared/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Search/ → Views/Settings/ → Views/AIAssistant/
 
 Note: Models/ and Utilities/ are excluded — they are pure data types and static tokens with no concurrency concerns.
 

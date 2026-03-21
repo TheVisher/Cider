@@ -14,12 +14,12 @@ Cider's floating panels combine three layers:
 
 The command palette is a fixed-size panel (no resize). This document covers the **resizable** variant, first used by the Notes panel.
 
-### Fixed-Size Panel Variant (Command Palette)
+### Fixed-Size Panel Variant
 
-Fixed-size panels like the command palette differ from resizable panels in a few key ways:
+Fixed-size panels (e.g., toast panels) differ from resizable panels in a few key ways:
 
 ```swift
-final class CommandPalettePanel: NSPanel {
+final class MyFixedPanel: NSPanel {
     init() {
         let initialFrame = NSRect(x: 0, y: 0, width: 600, height: 500)
         super.init(contentRect: initialFrame,
@@ -45,7 +45,7 @@ final class CommandPalettePanel: NSPanel {
 }
 ```
 
-Key differences from resizable panels: `isMovable = false` (panel stays put), `acceptsMouseMovedEvents = true` (for hover tracking in search results), and `.transient` in `collectionBehavior` (dismissed when switching spaces, unlike persistent panels).
+Key differences from resizable panels: `isMovable = false` (panel stays put), `acceptsMouseMovedEvents = true` (for hover tracking), and `.transient` in `collectionBehavior` (dismissed when switching spaces, unlike persistent panels).
 
 ---
 
@@ -84,7 +84,7 @@ final class MyPanel: NSPanel {
 |----------|-------|-----|
 | `.borderless` | yes | No system chrome — we draw everything |
 | `.nonactivatingPanel` | yes | Never steals focus from other apps |
-| `hasShadow = false` | yes | We draw our own shadow as a blurred shape via `PaletteBackgroundView` |
+| `hasShadow = false` | yes | We draw our own shadow as a blurred shape via `AcrylicPanelBackground` |
 | `isMovableByWindowBackground` | `true` | Drag the panel from any non-interactive area |
 | `collectionBehavior` | no `.transient` | Panel persists across spaces (unlike command palette which uses `.transient`) |
 | `.resizable` | **omitted** | System resize handles don't work with shadow padding — we implement resize ourselves |
@@ -140,7 +140,7 @@ final class MyPanelHostingView<Content: View>: NSHostingView<Content> {
 
 ## Shadow Padding (AppDelegate wiring)
 
-The custom shadow (a blurred black shape inside `PaletteBackgroundView`) needs space to render without clipping. The panel frame must be larger than the visible content.
+The custom shadow (a blurred black shape inside `AcrylicPanelBackground`) needs space to render without clipping. The panel frame must be larger than the visible content.
 
 ```swift
 private func updateMyPanelView() {
@@ -210,7 +210,7 @@ struct MyPanelView: View {
     var body: some View {
         ZStack {
             // Acrylic background with custom shadow + rounded corners + border
-            PaletteBackgroundView(cornerRadius: MyDesign.cornerRadius)
+            AcrylicPanelBackground(cornerRadius: MyDesign.cornerRadius)
 
             VStack(spacing: 0) {
                 // Title bar, content, status bar, etc.
@@ -223,7 +223,7 @@ struct MyPanelView: View {
 }
 ```
 
-`PaletteBackgroundView` handles:
+`AcrylicPanelBackground` handles:
 - Custom shadow (blurred black `RoundedRectangle`, offset down 18pt, opacity 0.7)
 - Acrylic material (`VisualEffectView` + dark/highlight overlays)
 - Rounded corners via `.clipShape()`
@@ -375,7 +375,7 @@ final class ResizeHandleNSView: NSView {
 
 `NSVisualEffectView` with `.behindWindow` blending is composited by the window server using the rectangular window frame. SwiftUI's `.clipShape()` doesn't affect the compositor — the blur bleeds past rounded corners.
 
-**Solution:** External shadow padding makes the panel frame larger than the visible content. `PaletteBackgroundView` clips the acrylic material to a `RoundedRectangle` inside the padding, so the rectangular window frame never cuts into the rounded corners.
+**Solution:** External shadow padding makes the panel frame larger than the visible content. `AcrylicPanelBackground` clips the acrylic material to a `RoundedRectangle` inside the padding, so the rectangular window frame never cuts into the rounded corners.
 
 ### SwiftUI DragGesture + window resize = bounce
 
@@ -413,49 +413,16 @@ enum MyDesign {
 
 ---
 
-## DetailPopoverPanel
-
-A secondary floating panel (`App/DetailPopoverPanel.swift`) for showing bookmark/note detail views alongside the main CiderPanel.
-
-### Two display modes
-
-**Popover mode** — panel appears adjacent to CiderPanel (right by default, left if no room):
-```swift
-NotificationCenter.default.post(name: .showDetailPopover, object: nil, userInfo: [
-    "view": AnyView(MyDetailView()),
-    "preferredWidth": CGFloat(600)   // optional, defaults to 600
-])
-```
-
-**Expand mode** — CiderPanel widens to accommodate an inline detail view:
-```swift
-// Before showing: saves CiderPanel frame and expands it
-NotificationCenter.default.post(name: .expandCiderPanelForDetailModal, object: nil, userInfo: [
-    "minimumWidth": CGFloat(900)
-])
-// After dismissing: restores CiderPanel to saved frame
-NotificationCenter.default.post(name: .restoreCiderPanelAfterDetailModal, object: nil)
-```
-
-### Key behaviors
-- `canBecomeKey = true` so the detail panel can receive keyboard input
-- `isMovableByWindowBackground = true` — user can drag it freely after initial placement
-- Sidebar collapses automatically when CiderPanel expands for detail modal, restores when dismissed
-- AppDelegate owns the `DetailPopoverPanel` instance (singleton, reused across show calls)
-- Dismiss via `.dismissDetailPopover` notification or when CiderPanel is hidden
-
----
-
 ## Checklist for new floating panels
 
 1. Create `NSPanel` subclass — borderless, non-activating, no system shadow
 2. Create `NSHostingView` subclass with `acceptsFirstMouse` override
-3. Use `PaletteBackgroundView` for acrylic + shadow + corners
+3. Use `AcrylicPanelBackground` for acrylic + shadow + corners
 4. Apply external shadow padding in AppDelegate wiring
 5. Add AppKit-based resize handle with `mouseDownCanMoveWindow = false` and `nextEvent` loop
 6. Add design constants to `Constants.swift`
 7. Wire show/hide/toggle in AppDelegate with notification observers
-8. Add hotkey detector if needed (follow `TileHotkeyDetector` pattern)
+8. Add hotkey detector if needed (follow `BookmarksHotkeyDetector` / `NotesHotkeyDetector` pattern)
 
 ### Companion Window Defaults (Notes/Bookmarks baseline)
 
@@ -466,7 +433,7 @@ Apply these defaults to any new companion window unless there is a strong reason
 3. Resizable bottom-right handle with consistent minimum size and clamp-to-screen behavior.
 4. Respect `remember...PanelPosition` settings when opening/reopening.
 5. Route global Ctrl+Option tiling hotkeys to the panel when it is focused or hovered.
-6. Keep panel acrylic/chrome behavior consistent (`PaletteBackgroundView`, custom shadow padding).
+6. Keep panel acrylic/chrome behavior consistent (`AcrylicPanelBackground`, custom shadow padding).
 
 ---
 
@@ -475,5 +442,5 @@ Apply these defaults to any new companion window unless there is a strong reason
 - `CiderPanel.swift` — Main NSPanel implementation (resizable, draggable, cross-monitor movement)
 - `CiderPanelView.swift` — Main panel view with sidebar, tab bar, inline note editor, resize handles
 - <!-- Removed: NotesPanel.swift / NotesPanelView.swift — standalone panels removed in Feb 2026 consolidation -->
-- `PaletteBackgroundView.swift` — Shared acrylic + shadow background component
-- `ACRYLIC_IMPLEMENTATION.md` — Full shadow/border/material documentation
+- `AcrylicPanelBackground.swift` (`Views/Shared/`) — Shared acrylic + shadow background component
+- `Docs/Design/ACRYLIC_IMPLEMENTATION.md` — Full shadow/border/material documentation

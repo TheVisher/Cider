@@ -1,6 +1,6 @@
 # Sync Protocol
 
-> Last validated: 2026-03-19 (iOS now expects purge + tag management routes — see Planned Endpoints below; iOS SyncService adds generation counter for stale-pull safety)
+> Last validated: 2026-03-21 (auth section deduplicated to AUTH.md; Desktop transport corrected to Convex SDK; remaining Desktop folder issue moved to fixed; note attachment endpoints documented; Desktop push/pull triggers corrected from "5s poll" to event-driven)
 
 > Canonical sync specification for all three Cider apps. Consolidates the per-app `SYNC_COLLABORATION.md` docs into one source of truth.
 >
@@ -8,115 +8,23 @@
 
 ## Overview
 
-All three clients sync bookmarks and folders through Convex HTTP endpoints. Web also uses direct Convex mutations for its own saves (bypassing the REST layer), but exposes the REST API for Desktop and iOS.
+All three clients sync bookmarks, folders, and notes through Convex. Desktop uses the **Convex Swift SDK** (`ConvexMobile`) over WebSocket, calling Convex actions (`sync:push`, `sync:pull`, etc.) directly. iOS uses the **REST HTTP endpoints** in `http.ts`. Web uses direct Convex mutations and real-time subscriptions (bypassing the REST/action layer entirely).
 
 ```
-Desktop (macOS)  ── REST ──>  Convex Backend  <── REST ──  iOS
-                                    ^
-                              Web (direct mutations + subscriptions)
+Desktop (macOS)  ── Convex SDK (WebSocket) ──>  Convex Backend  <── REST (HTTP) ──  iOS
+                                                       ^
+                                                 Web (direct mutations + subscriptions)
 ```
 
-**Auth**: All REST sync endpoints require `Authorization: Bearer <sync_token>`. Desktop and iOS obtain tokens automatically via the native auth endpoints (login/signup). Web uses `@convex-dev/auth` session cookies.
+**Auth**: REST sync endpoints require `Authorization: Bearer <sync_token>`. Convex SDK actions use `sync:authenticate` to validate the token. Desktop and iOS obtain tokens automatically via the native auth endpoints (login/signup). Web uses `@convex-dev/auth` session cookies.
 
 **Base URL**: `https://dashing-fennec-334.convex.site`
 
-## Native Auth Endpoints (Desktop + iOS)
+## Auth
 
-Desktop and iOS authenticate via email/password. On login or signup, the server auto-creates a sync token and returns it. The client stores the token in Keychain and uses it for all sync requests.
+See **AUTH.md** for the full auth specification: login/signup flow, token management, password hashing, connected devices, and per-platform details.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/auth/login` | Sign in with email + password → returns sync token |
-| POST | `/api/auth/signup` | Create account with email + password → returns sync token |
-| POST | `/api/auth/account` | Get account info (requires Bearer token) |
-| POST | `/api/auth/devices` | List connected devices (requires Bearer token) |
-| POST | `/api/auth/devices/revoke` | Revoke a device's sync token (requires Bearer token) |
-
-### Login Request
-
-```json
-{
-  "email": "user@example.com",
-  "password": "password123",
-  "deviceName": "MacBook Pro"
-}
-```
-
-### Login Response (200)
-
-```json
-{
-  "token": "aBcDeFgH-iJkLmNoP-qRsTuVwX-yZaBcDeF",
-  "userId": "convex_user_id",
-  "email": "user@example.com"
-}
-```
-
-### Error Response (401 login / 400 signup)
-
-```json
-{
-  "error": "Invalid email or password"
-}
-```
-
-### Auth Flow
-
-1. User enters email + password in Settings
-2. Client calls `/api/auth/login` (or `/api/auth/signup`)
-3. Server verifies credentials against `@convex-dev/auth` password hashes
-4. Server creates or reuses a sync token for this device
-5. Client stores token in Keychain, sets `syncEnabled = true`
-6. All subsequent sync calls use `Authorization: Bearer <token>`
-
-### Device Name
-
-Each device gets a named sync token (e.g., "MacBook Pro", "iPhone"). If the user logs in again from the same device name, the existing token is reused instead of creating a new one.
-
-### Sign Out
-
-Client clears the stored token and email, sets `syncEnabled = false`. The sync token remains valid on the server (can be revoked via Connected Devices).
-
-### Connected Devices
-
-All three apps display a Connected Devices view in Settings, showing every device that has a sync token. Users can revoke tokens to log out other devices.
-
-#### List Devices (`/api/auth/devices`)
-
-**Request**: POST with `Authorization: Bearer <token>`. No body required.
-
-**Response (200)**:
-```json
-{
-  "devices": [
-    {
-      "_id": "token_doc_id",
-      "name": "MacBook Pro",
-      "createdAt": 1709766000000,
-      "lastUsedAt": 1709800000000,
-      "revoked": false
-    }
-  ]
-}
-```
-
-#### Revoke Device (`/api/auth/devices/revoke`)
-
-**Request**:
-```json
-{
-  "tokenId": "token_doc_id"
-}
-```
-
-**Response (200)**:
-```json
-{
-  "success": true
-}
-```
-
-Revoking a device marks its sync token as `revoked: true`. The token will be rejected on subsequent sync requests. The server tracks `lastUsedAt` for each token, updated on every authenticated request.
+**Quick reference**: Desktop and iOS authenticate via email/password (`/api/auth/login` or `/api/auth/signup`), which returns a sync token stored in Keychain. All sync requests include `Authorization: Bearer <token>`. Web uses `@convex-dev/auth` session cookies.
 
 ## Sync Endpoints
 
@@ -126,6 +34,8 @@ Revoking a device marks its sync token as `revoked: true`. The token will be rej
 | POST | `/api/sync/pull` | Pull changes since a timestamp |
 | POST | `/api/sync/reconcile` | Full manifest of all bookmark `ciderSyncId` + `updatedAt` pairs (drift detection) |
 | POST | `/api/sync/upload-thumbnail` | Upload thumbnail image for a bookmark (multipart or raw binary) |
+| POST | `/api/sync/upload-note-attachment` | Upload note image attachment (Desktop) |
+| POST | `/api/sync/note-attachments-check` | Batch check which note attachments already exist on server |
 | POST | `/api/capture` | Quick-capture a URL (creates bookmark with `enrichmentStatus: "pending"`) |
 
 ### Planned Endpoints (not yet in `http.ts` — iOS client code calls these as of 2026-03-18)
@@ -250,7 +160,7 @@ To delete a bookmark, push a tombstone:
 
 Both Desktop and iOS use a dedicated push-only type to prevent accidental extra fields:
 
-- **Desktop**: `SyncPushBookmark` / `SyncPushFolder` (Encodable structs in SyncService.swift)
+- **Desktop**: `bookmarkPayload()` / `folderPayload()` / `notePayload()` (static functions in SyncService.swift returning `[String: ConvexEncodable?]` dictionaries)
 - **iOS**: `PushBookmark` (Codable struct in Shared/Bookmark.swift)
 
 **Any new client must follow this pattern.** Never serialize a full model object directly into a push payload.
@@ -323,12 +233,13 @@ When timestamps are equal, the **server is canonical** for folder assignment. On
 
 | Behavior | Desktop | iOS | Web |
 |----------|---------|-----|-----|
-| **Push trigger** | Every 5s poll (dirty-only) | On save/delete/edit | Direct Convex mutation (no REST push) |
-| **Pull trigger** | Every 5s poll | Launch + foreground + pull-to-refresh | Convex real-time subscriptions |
+| **Transport** | Convex Swift SDK (WebSocket actions) | REST HTTP endpoints | Direct Convex mutations + subscriptions |
+| **Push trigger** | Event-driven via `pushAfterLocalChange()` (2s debounce, dirty-only) + 30s timer for notes | On save/delete/edit | Direct Convex mutation (no REST push) |
+| **Pull trigger** | Reactive via WebSocket `changeSignal` subscription (3s debounce) | Launch + foreground + pull-to-refresh | Convex real-time subscriptions |
 | **Dirty tracking** | `lastSuccessfulPushAt` filter | Pushes only affected bookmark(s) | N/A |
 | **Failure handling** | Consecutive failure counter, pauses after 3+ | Shows user-facing error | Convex handles retries |
 | **Stale-pull guard** | N/A | Generation counter — stop/restart increments gen; results from stale gen are discarded (prevents sign-out race) | N/A |
-| **Enrichment** | Runs enrichment pipeline locally, pushes `"complete"` | Pushes `"pending"` | Pushes `"pending"`, has server-side enrichment action |
+| **Enrichment** | Runs enrichment pipeline locally, pushes AI data but does NOT yet push `enrichmentStatus: "complete"` (known gap) | Pushes `"pending"` | Pushes `"pending"`, has server-side enrichment action |
 | **Thumbnail upload** | Not yet (planned) | Not yet | Endpoint exists (`/api/sync/upload-thumbnail`) |
 
 ## Historical Bugs (All Fixed)
@@ -344,9 +255,11 @@ These caused a "bounce-back" cycle. Documented here so no one reintroduces them.
 | Pushed ALL bookmarks every 5s | Dirty-only push via `lastSuccessfulPushAt` filter | SyncService.swift |
 | Push failures were silent | Consecutive failure counter, pauses after 3+ failures | SyncService.swift |
 
-### Remaining Desktop Issue
+### Desktop Bugs (Fixed, cont.)
 
-`updateFromSync()` uses `if let folderID` to set folder — when remote has no folder, this is a no-op and Desktop keeps the stale local `folderID`. Web's equal-timestamp defense handles this, but Desktop should unconditionally assign `folderID` (including nil) to match the server.
+| Bug | Fix | File |
+|-----|-----|------|
+| `updateFromSync()` used `if let folderID` — when remote had no folder, Desktop kept stale local folderID | Now explicitly handles nil `remoteFolderSyncId` by setting `syncFolderID = nil` | SyncService.swift (lines 565-572) |
 
 ## Verification Checklist
 

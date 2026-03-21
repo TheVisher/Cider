@@ -22,7 +22,7 @@
 
 ## WebView Configuration
 
-- **Access scope:** `allowingReadAccessTo` is set to `NSHomeDirectory()` — the editor can load images from any path under the user's home directory (notes, attachments, dragged images).
+- **Access scope:** `allowingReadAccessTo` is set to the TipTapEditor bundle directory (for JS/CSS loading). Vault images are served via the `cider-vault://` custom URL scheme (`CiderVaultSchemeHandler`) instead of direct file access, avoiding the constraint that `allowingReadAccessTo` must cover both the app bundle and the vault simultaneously.
 - **Navigation policy:** Deny-by-default: only `file://` and `about:` are allowed; all other schemes are blocked regardless of how the navigation was triggered. User-clicked external links are opened in the system browser then cancelled.
 - **Panel drag exclusion:** `isInDraggableArea()` in `CiderPanel.swift` checks `if v is WKWebView { return false }` — without this, dragging inside the editor moves the entire panel.
 

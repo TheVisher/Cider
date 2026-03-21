@@ -20,7 +20,7 @@ Build a fast, low-friction bookmarking system in Cider with strong capture flows
 - Context menus on cards/rows with Open in Browser, Show Details, Move to Folder, Delete (shared CardContextMenu component).
 - **Reader Mode** — Three-mode hero area in the detail panel: thumbnail preview, Readability.js reader view, and live WKWebView. Toolbar buttons (`photo`, `doc.richtext`, `globe`) switch between modes. State resets on bookmark change; each mode is lazy-activated and kept alive on first use.
 - **Dominant Color Extraction** — k-means palette extracted from bookmark thumbnails via `ColorExtractionService`. Stored as `dominantColors: [String]?` (hex). Displayed as color swatches in the detail panel's Intelligence section.
-- **AI Enrichment Pipeline (Phase 1)** — On capture: NaturalLanguage keyword extraction for auto-tagging (`AutoTagService`), NLEmbedding vector computation (`EmbeddingStore`), Vision OCR text extraction (`OCRService`), color palette extraction (`ColorExtractionService`). All on-device, all background.
+- **AI Enrichment Pipeline (Phase 1)** — On capture: NaturalLanguage keyword extraction for auto-tagging (in `BookmarkAIEnrichment`), NLEmbedding vector computation (`EmbeddingStore`), Vision OCR text extraction (`OCRService`), color palette extraction (`ColorExtractionService`). All on-device, all background.
 - **Intelligence section in detail panel** — Shows `aiSummary` text, dominant color swatches, and related items (`RelatedItemsView`, up to 3 by vector similarity). Visible for all URL bookmarks.
 - **Foundation Models summary integration** — `SummaryService` (Foundation Models on macOS 26+) generates summaries from Reader Mode article text. Triggered on first reader open if no existing `aiSummary`. Stored on the Bookmark model.
 
@@ -558,7 +558,7 @@ When something is copied, the capture toast shows a preview of the item. Hoverin
 - What is the preferred UX for failed/blocked thumbnail fetches (badge vs details warning)?
 
 ## Known Issues — Content Capture
-- **Opt+B hotkey only works in Chrome** — `ActiveBrowserCaptureService` AppleScript needs work for Safari, Arc, Firefox, Zen, and other browsers. Each browser has different AppleScript/JXA support for getting the frontmost tab URL.
+- ~~**Opt+B hotkey only works in Chrome**~~ — Resolved. `ActiveBrowserCaptureService` now supports Chrome, Arc, Safari, Dia, Zen, Comet, Firefox, and other browsers via per-browser AppleScript/JXA paths.
 - **Reader view right-click thumbnail** — Allow right-clicking an image in the reader/browser view and setting it as the bookmark's thumbnail (noted above in detail panel actions).
 - **Reddit image CDN** — `external-preview.redd.it` returns HTTP 403 on direct download (hotlink protection). No known workaround — users can drag replacement thumbnails from the browser.
 - **Instagram oEmbed deprecated** — Meta deprecated `api.instagram.com/oembed` (2025). Falls through to WebView/screenshot, which captures login wall. Would need Graph API credentials for real support.

@@ -90,9 +90,9 @@ Fetched HTML is now stripped of all `<script>` tags before being loaded into the
 
 ### ~~CH-S11 — External URL launches are not scheme-restricted~~ ✅ Fixed 2026-03-13
 
-Added `openURLSafely()` utility that only allows `http`/`https` schemes. Applied to all webview navigation delegates handling untrusted content: `BookmarkReaderView`, `BookmarkWebView`, `TipTapEditorView` (link clicks and navigation), and `DetailWebViewStore` (web load delegate). User-initiated "Open in Browser" actions from trusted UI buttons are unchanged.
+Added `openURLSafely()` utility that only allows `http`/`https` schemes. Applied to all webview navigation delegates handling untrusted content: `BookmarkReaderView`, `BookmarkWebView`, and `TipTapEditorView` (link clicks and navigation). `DetailWebViewStore`'s preload delegate intentionally omits `decidePolicyFor` — it blocks new windows via `SuppressingUIDelegate` instead. User-initiated "Open in Browser" actions from trusted UI buttons are unchanged.
 
-- File refs: `Sources/Cider/Utilities/Constants.swift`, `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`, `Sources/Cider/Views/Bookmarks/BookmarkWebView.swift`, `Sources/Cider/Views/Notes/TipTapEditorView.swift`, `Sources/Cider/Services/DetailWebViewStore.swift`
+- File refs: `Sources/Cider/Utilities/Constants.swift`, `Sources/Cider/Views/Bookmarks/BookmarkReaderView.swift`, `Sources/Cider/Views/Bookmarks/BookmarkWebView.swift`, `Sources/Cider/Views/Notes/TipTapEditorView.swift`
 
 ### ~~CH-S12 — Sync endpoint validation is still missing before token use~~ ✅ Fixed 2026-03-13
 
@@ -222,13 +222,11 @@ Bookmarks, folders, and notes created on Cider Web or Cider iOS that lack a `cid
 
 - File refs: `Sources/Cider/Services/SyncService.swift`, `Cider-Web/convex/sync.ts`
 
-### CH-C22 — Note editor sandboxing broke local attachment rendering
+### ~~CH-C22 — Note editor sandboxing broke local attachment rendering~~ ✅ Fixed 2026-03-21
 
-**Severity:** High
+Vault images are now served via a `cider-vault://` custom URL scheme (`CiderVaultSchemeHandler`), bypassing the `allowingReadAccessTo` constraint. `NotesMarkdownPathCodec` rewrites attachment paths to `cider-vault:///absolute/path` URLs, and the editor's `WKWebView` is configured with the scheme handler. This lets the editor sandbox `file://` access to only the TipTapEditor bundle while still rendering vault attachments.
 
-The TipTap editor webview now only has `file://` read access to the bundled `TipTapEditor` directory, but note content is still rewritten to absolute attachment/image paths under the notes directory. Existing note attachments and newly dropped images therefore no longer render reliably inside the editor.
-
-- File refs: `Sources/Cider/Services/NotesMarkdownPathCodec.swift`, `Sources/Cider/ViewModels/NotesViewModel.swift`
+- File refs: `Sources/Cider/Services/CiderVaultSchemeHandler.swift`, `Sources/Cider/Services/NotesMarkdownPathCodec.swift`, `Sources/Cider/ViewModels/NotesViewModel.swift`
 
 ### CH-C23 — Sync-driven note deletes bypass orphan attachment cleanup
 
@@ -314,9 +312,7 @@ Added `CiderFont.scale: CGFloat` public property. Changed `emptyStateIcon` from 
 
 ### ~~CH-D06 — Docs index/status drift from implemented product model~~ ✅ Fixed 2026-02-28
 
-Fixed DOCS_INDEX.md linked sources status (🔲 → ✅). Updated QUICK_REFERENCE.md tab status table to reflect F-02 SavedView architecture (no fixed "Bookmarks"/"Notes" tabs).
-
-- File refs: `Docs/DOCS_INDEX.md`, `Docs/QUICK_REFERENCE.md`
+Fixed DOCS_INDEX.md linked sources status (🔲 → ✅). Updated QUICK_REFERENCE.md tab status table to reflect F-02 SavedView architecture (no fixed "Bookmarks"/"Notes" tabs). (Note: both files have since been deleted as part of docs restructuring.)
 
 ### ~~CH-D07 — Missing reduce motion guard in AppDelegate panel expand/restore~~ ✅ Fixed 2026-02-24
 
@@ -340,7 +336,7 @@ Both views used `withAnimation(.snappy)` without `reduceMotion` check. Added `@E
 
 Four instances of `.font(.system(size: 8/9))` on small icon elements did not scale with `CiderFont.scale`. Multiplied by `CiderFont.scale` to respect user text-size preference.
 
-- File refs: `Sources/Cider/Views/Bookmarks/BookmarkDetailsSheet.swift`
+- File refs: `Sources/Cider/Views/Bookmarks/BookmarkDetailsDraft.swift`
 
 ### ~~CH-D11 — Hardcoded `.foregroundColor(.white)` instead of CiderColors.textOnColor~~ ✅ Fixed 2026-02-24
 
@@ -380,7 +376,7 @@ Source detail views don't respond well to view option changes (grid, masonry, li
 
 The new panel-position persistence uses only backing pixel dimensions as the per-screen key. Two identical monitors therefore overwrite each other's saved frame, so the feature is not actually per-display on common multi-monitor setups.
 
-- File refs: `Sources/Cider/Services/CiderPanelPositionStore.swift`, `Sources/Cider/App/AppDelegate+CiderPanel.swift`
+- File refs: `Sources/Cider/Services/CiderPanelPositionStore.swift`, `Sources/Cider/App/AppDelegate.swift`
 
 ### ~~CH-D18 — `Docs/ARCHITECTURE.md` no longer matches the current panel and sync architecture~~ Resolved
 
@@ -394,7 +390,7 @@ The architecture reference previously described removed UI concepts (Projects se
 
 **Severity:** Low
 
-AppDelegate was split into 5 focused extension files (Toasts, CiderPanel, ScreenCapture, ClipboardPanel, AIChatPanel) in March 2026. The main file is now 573 lines. The responsibilities are still coordinated through AppDelegate, but the extension split reduces regression risk and improves navigability. Further extraction into standalone services is possible but not warranted at current scale.
+AppDelegate was split into 5 focused extension files (Toasts, CiderPanel, ScreenCapture, ClipboardPanel, AIAssistantPanel) in March 2026. The main file is now ~600 lines. The responsibilities are still coordinated through AppDelegate, but the extension split reduces regression risk and improves navigability. Further extraction into standalone services is possible but not warranted at current scale.
 
 - File refs: `Sources/Cider/App/AppDelegate.swift`, `Sources/Cider/App/AppDelegate+*.swift`
 
@@ -404,7 +400,7 @@ AppDelegate was split into 5 focused extension files (Toasts, CiderPanel, Screen
 
 ### ~~CH-L01 — Stale feature flags with no runtime gating~~ ✅ Fixed 2026-02-21
 
-`enableDateCards`, `enableStacks`, `enableCalendarProjection` removed from `CiderConfig` (CodingKeys, var declarations, `default`, memberwise `init`, `init(from:)`). `enableSavedViewTabs` and `enableLinkedSources` kept — both actively gate behavior in `CiderPanelView` and `FolderSidebarView`.
+`enableDateCards`, `enableStacks`, `enableCalendarProjection` removed from `CiderConfig` (CodingKeys, var declarations, `default`, memberwise `init`, `init(from:)`). `enableLinkedSources` kept — actively gates behavior in `FolderSidebarView`. (`enableSavedViewTabs` was also kept at the time but has since been removed.)
 
 ### ~~CH-L02 — Dead code artifacts~~ ✅ Fixed 2026-02-21
 
@@ -549,7 +545,7 @@ Files over 500 lines are candidates for decomposition. **32 files exceed the thr
 | `Views/Bookmarks/BookmarkThumbnailView.swift` | 602 | *New.* Extract thumbnail layout variants. |
 | `Services/SearchService.swift` | 585 | *New.* Extract per-entity search logic. |
 | `Views/Stacks/StackManagerSheet.swift` | 583 | *New.* Extract stack item renderers. |
-| `App/AppDelegate.swift` | 573 | Already split into extensions (CH-D15). Monitor but acceptable. |
+| `App/AppDelegate.swift` | ~600 | Already split into extensions (CH-D15). Monitor but acceptable. |
 | `Services/VaultStructureMigration.swift` | 561 | *New.* Extract per-version migration steps. |
 | `Views/Settings/SettingsView+SubcategoryContent.swift` | 554 | *New.* Extract individual subcategory views. |
 | `Services/ContactStorage.swift` | 537 | *New.* Extract vCard serialization. |
@@ -593,12 +589,11 @@ These items remain unresolved from prior code reviews:
 |---|---|---|
 | CH-C18 | Medium | Folder parent resolution during pull is order-dependent (deferred — sync protocol) |
 | CH-C21 | Medium | Web/iOS-created items without `ciderSyncId` skipped on desktop pull (deferred — sync protocol) |
-| CH-C22 | **High** | Note editor sandboxing broke local attachment rendering |
 | CH-C23 | Medium | Sync-driven note deletes bypass orphan attachment cleanup |
 | CH-D16 | Medium | List view and display modes inconsistent across card types |
 | CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
 
 **Priority recommendations:**
 
-1. **CH-C22 (High)** — Note editor attachment rendering — is the only open High-severity item and directly impacts user-facing functionality. This should be the next fix target.
+1. **No open High-severity items.** CH-C22 was resolved via the `cider-vault://` scheme handler.
 2. **Large file growth on Desktop** — 13 files newly crossed the 500-line threshold. `BookmarksStorage.swift` at 2,418 lines remains the most critical decomposition target. Consider a focused refactoring sprint to extract codecs, parsers, and per-entity builders before these files grow further.

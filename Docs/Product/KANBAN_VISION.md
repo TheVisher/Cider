@@ -145,4 +145,4 @@ Combined with a daily briefing, the agent wakes up, reads the Kanban, knows exac
 
 ## Status
 
-Planning complete. Ready for Phase 1 implementation.
+Phase 1 (Projects Tab) is implemented. Kanban boards, cards, columns, drag-and-drop, board picker, card filtering, and compact view are shipped. Phase 2 (Folder Kanban View) is implemented — `FolderKanbanView` is wired into `FolderDetailView` as a `.kanban` display mode, backed by `FolderKanbanStorage`.

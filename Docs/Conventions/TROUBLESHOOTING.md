@@ -23,7 +23,7 @@
 2. **NSHostingView's compression resistance** prevented the window from shrinking past the content's ideal width.
 
 **Fix:**
-1. In `BookmarkMasonryLayout.resolvedLayoutWidth`, return `rawWidth` directly (no floor):
+1. In `MasonryLayout.resolvedLayoutWidth`, return `rawWidth` directly (no floor):
    ```swift
    // GOOD — layout accepts whatever width is proposed
    return rawWidth
@@ -133,10 +133,10 @@ return cardWidth * aspectRatio
 
 ### Architecture: CardSizing struct
 
-The card size slider uses a continuous `Double` (0-3) instead of the discrete `BookmarkCardSize` enum. The `CardSizing` struct interpolates all dimensions:
+The card size slider uses a continuous `Double` (0-3) instead of the discrete `BookmarkCardSize` enum. The `LibraryCardSizing` struct interpolates all dimensions:
 
 ```swift
-struct CardSizing {
+struct LibraryCardSizing {
     let scale: Double  // 0 = compact, 1 = comfortable, 2 = large, 3 = extraLarge
 
     var cardMinWidth: CGFloat { interpolate(196, 240, 340, 520) }
@@ -153,7 +153,7 @@ struct CardSizing {
 - `BookmarksViewModel.cardSizeScale: Double` — the source of truth
 - `CiderConfig.bookmarksCardSizeScale: Double?` — persistence (optional for migration)
 - `ViewOptionsDropdown` — binds to `cardSizeScale` with `Slider(value:in: 0...3)`
-- `BookmarksBrowserView` — computes `CardSizing(scale: cardSizeScale)` for all card rendering
+- `HomeDashboardView`, `FolderDetailView`, `SavedViewTabContent` — compute `LibraryCardSizing(scale: cardSizeScale)` for card rendering
 - `SettingsViewModel` — syncs `bookmarksCardSizeScale` when the discrete `BookmarkCardSize` picker changes
 
 **Key insight:** The `BookmarkCardSize` enum is retained for settings UI (discrete S/M/L/XL picker) and initial migration. The continuous scale is the actual runtime value.
@@ -177,10 +177,14 @@ scanNotes() → saveIndex() → writes index file → watcher fires → scanNote
 **Fix:** Make `NoteIndexEntry` conform to `Equatable`, then compare the rebuilt index against the previous snapshot before writing:
 
 ```swift
-private struct NoteIndexEntry: Codable, Equatable {
-    let filename: String
-    let folderID: UUID?
-    let createdAt: Date
+private struct NoteIndexEntry: Codable, Equatable, Sendable {
+    var filename: String
+    var folderID: UUID?
+    var labelIDs: [UUID]?
+    var createdAt: Date?
+    var sourceURL: String?
+    var sourceImageFilename: String?
+    var isPinned: Bool?
 }
 
 // In scanNotes():
@@ -682,4 +686,4 @@ func captureAll(windowIDs: [CGWindowID]) async -> [CGWindowID: NSImage] {
 
 7. **All images in scrollable views must load async.** Use `.task(id:)` with `Task.detached` and `CGImageSource` decoding on a background thread. Never call `NSImage(contentsOfFile:)` or `NSImage(data:)` on the main thread during scroll — it causes frame drops in masonry/grid views.
 
-8. **Never call `CiderConfig.load()` in view body or computed properties.** Use cached paths (`StoragePaths.cachedCiderDataDirectoryURL`, `StoragePaths.notesDirectoryPath`) or `@State config` instead. Each `CiderConfig.load()` does a UserDefaults read + JSONDecoder decode.
+8. **Never call `CiderConfig.load()` in view body or computed properties.** Use cached paths (`StoragePaths.cachedVaultDirectoryURL`) or `@State config` instead. Each `CiderConfig.load()` does a UserDefaults read + JSONDecoder decode.

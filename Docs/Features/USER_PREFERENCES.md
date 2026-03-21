@@ -6,114 +6,57 @@
 
 ## Current Settings Model
 
-Cider uses `CiderConfig`, a Codable struct stored in UserDefaults as JSON:
+Cider uses `CiderConfig`, a Codable struct stored in UserDefaults as JSON. The struct has grown significantly and now contains ~60+ fields across behavior, content, capture, appearance, intelligence, data management, and sync categories. Key fields include:
 
 ```swift
 struct CiderConfig: Codable {
-    // Behavior
-    var autoHideApps: Bool = false           // Hide other apps when switching, like Stage Manager
-    var activationMode: ActivationMode = .doubleTap  // Double tap vs single tap
-    var enableOptionTabCycling: Bool = true   // Enable Option+Tab window cycling
-    var optionTabCycleAllScreens: Bool = true // Cycle windows on all screens vs current only
-    var rememberPaletteState: Bool = false    // Keep folders open between palette sessions
-
-    // System
-    var showMenuBarIcon: Bool = true
-
-    // Appearance
-    var textSize: TextSize = .medium
-    var paletteSize: PaletteSize = .medium
+    var showMenuBarIcon: Bool
+    var textSize: TextSize
+    var activationMode: ActivationMode
+    var activationSpeed: Double
+    var enableNotesHotkey: Bool
+    var enableBookmarksHotkey: Bool
+    var enableBookmarksCaptureHotkey: Bool
+    var autoCaptureCopiedURLs: Bool
+    var vaultDirectory: String                  // Root directory for all Cider data (~/CiderVault)
+    var rememberPanelPosition: Bool
+    var bookmarksDefaultViewMode: BookmarkDisplayMode
+    var notesDefaultViewMode: NoteDisplayMode
+    var detailViewMode: DetailViewMode
+    var enableLinkedSources: Bool
+    var trashRetentionDays: Int
+    var enableSpotlightIndexing: Bool
+    var enableAutoTagging: Bool
+    var enableEmbeddings: Bool
+    var enablePageSummaries: Bool
+    var enableOCRIndexing: Bool
+    var enableColorExtraction: Bool
+    var enableClipboardHistory: Bool
+    var syncEnabled: Bool
+    var openOnMouseScreen: Bool
+    // ... and many more — see Models/CiderConfig.swift for the full list
 }
 ```
+
+> **Note:** The full CiderConfig has ~60+ properties. See `Sources/Cider/Models/CiderConfig.swift` for the definitive list. The above shows representative fields.
 
 **Not stored in CiderConfig:**
 `launchAtLogin` is managed via `SMAppService`.
 
-### Enums
+### Key Enums
+
+`ActivationMode` and `TextSize` are in `Models/CiderConfig.swift`. `PaletteSize` has been removed (panel is now freely resizable). Other config enums include `NotesEditorTextSize`, `ClipboardPanelPosition`, `BookmarkDisplayMode`, `NoteDisplayMode`, `DetailViewMode`, `LibraryDisplayMode`, `LibrarySortMode`, `ToastPosition`, and more.
 
 ```swift
 enum ActivationMode: String, Codable, CaseIterable {
     case doubleTap
     case singleTap
-
-    var displayName: String {
-        switch self {
-        case .doubleTap: return "Double tap"
-        case .singleTap: return "Single tap"
-        }
-    }
 }
 
 enum TextSize: String, Codable, CaseIterable {
     case small, medium, large
-
-    var scale: CGFloat {
-        switch self {
-        case .small: return 0.85
-        case .medium: return 1.0
-        case .large: return 1.18
-        }
-    }
-
-    var bodySize: CGFloat {
-        switch self {
-        case .small: return 12
-        case .medium: return 14
-        case .large: return 16
-        }
-    }
-
-    var captionSize: CGFloat {
-        switch self {
-        case .small: return 10
-        case .medium: return 12
-        case .large: return 14
-        }
-    }
-
-    var headlineSize: CGFloat {
-        switch self {
-        case .small: return 14
-        case .medium: return 16
-        case .large: return 18
-        }
-    }
-
-    var displayName: String {
-        rawValue.capitalized
-    }
-}
-
-enum PaletteSize: String, Codable, CaseIterable {
-    case small, medium, large
-
-    var width: CGFloat {
-        switch self {
-        case .small: return 480
-        case .medium: return 600
-        case .large: return 760
-        }
-    }
-
-    var minHeight: CGFloat {
-        switch self {
-        case .small: return 320
-        case .medium: return 400
-        case .large: return 480
-        }
-    }
-
-    var maxHeight: CGFloat {
-        switch self {
-        case .small: return 480
-        case .medium: return 600
-        case .large: return 720
-        }
-    }
-
-    var displayName: String {
-        rawValue.capitalized
-    }
+    // scale: 0.85, 1.0, 1.18
+    // bodySize: 12, 14, 16
 }
 ```
 
@@ -127,15 +70,13 @@ When adding new fields to `CiderConfig`, use custom decoding to handle existing 
 init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 
-    // Use decodeIfPresent with defaults for all fields
-    autoHideApps = try container.decodeIfPresent(Bool.self, forKey: .autoHideApps) ?? false
+    // Use decodeIfPresent with defaults for all fields — pattern shown for representative fields
     showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
     textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
-    paletteSize = try container.decodeIfPresent(PaletteSize.self, forKey: .paletteSize) ?? .medium
     activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
-    enableOptionTabCycling = try container.decodeIfPresent(Bool.self, forKey: .enableOptionTabCycling) ?? true
-    optionTabCycleAllScreens = try container.decodeIfPresent(Bool.self, forKey: .optionTabCycleAllScreens) ?? true
-    rememberPaletteState = try container.decodeIfPresent(Bool.self, forKey: .rememberPaletteState) ?? false
+    activationSpeed = try container.decodeIfPresent(Double.self, forKey: .activationSpeed) ?? 0.3
+    enableAutoTagging = try container.decodeIfPresent(Bool.self, forKey: .enableAutoTagging) ?? true
+    // ... (all ~60+ fields follow the same pattern)
 }
 ```
 
@@ -154,18 +95,14 @@ extension CiderConfig {
         do {
             return try JSONDecoder().decode(CiderConfig.self, from: data)
         } catch {
-            NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
-            UserDefaults.standard.removeObject(forKey: storageKey)
-            let defaults = CiderConfig.default
-            defaults.save()
-            return defaults
+            logger.error("Config decode error: \(error, privacy: .public). Using defaults (saved config preserved).")
+            return .default
         }
     }
 
     func save() {
         if let data = try? JSONEncoder().encode(self) {
             UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
-            UserDefaults.standard.synchronize()  // Force immediate write
         }
     }
 }
@@ -175,52 +112,19 @@ extension CiderConfig {
 
 ## Settings UI Structure
 
-Settings window has 5 tabs: General, Pinned Apps, Appearance, Advanced, About.
+Settings window uses 7 categories with subcategories (see `Views/Settings/SettingsEnums.swift`):
 
-### General Tab
+| Category | Subcategories |
+|----------|--------------|
+| **General** | Startup, Activation, Panel, Shortcuts |
+| **Content** | Bookmarks, Notes |
+| **Capture** | Bookmarks, Clipboard, Storage |
+| **Appearance** | Text & Menu Bar, Sounds, Toasts |
+| **Intelligence** | Features (auto-tagging, embeddings, summaries, OCR, colors) |
+| **Data** | Directories, Trash, Notifications, Import & Export |
+| **About** | Overview |
 
-| Setting | Type | Default | Notes |
-|---------|------|---------|-------|
-| Launch at login | Toggle | Off | Via SMAppService |
-| Activation mode | Picker | Double tap | Double tap or Single tap |
-| Double-tap speed | Slider | 0.3s | 0.2–0.5s range, shown only in double-tap mode. **UI only — not yet persisted in CiderConfig.** |
-| Option+Tab cycling | Toggle | On | |
-| Cycle all screens | Toggle | On | Shown only when cycling enabled |
-| Remember palette state | Toggle | Off | Keep folders open between sessions |
-
-### Pinned Apps Tab
-
-| Setting | Type | Default |
-|---------|------|---------|
-| Pinned apps list | Drag-to-reorder list | — |
-| Add app | Button | — |
-| Remove app | Button | — |
-| App folders | Folder management | — |
-| Import from Dock | Button | — |
-
-### Appearance Tab
-
-| Setting | Type | Default |
-|---------|------|---------|
-| Text size | Picker | Medium |
-| Palette size | Picker | Medium |
-| Show menu bar icon | Toggle | On |
-
-### Advanced Tab
-
-| Setting | Type | Default | Notes |
-|---------|------|---------|-------|
-| Auto-hide inactive apps | Toggle | Off | Stage Manager-like behavior |
-| Show Cider on | Picker | Screen containing mouse | **UI only — not yet persisted in CiderConfig.** Also: Main screen, Last used screen |
-| Open Accessibility Settings | Button | — | Links to System Settings |
-| Reset All Settings | Button | — | **Not yet wired — action is a no-op.** |
-
-### About Tab
-
-| Content | Type |
-|---------|------|
-| App version | Label |
-| Credits | Label |
+> **Note:** The old "5 tabs" structure (General, Pinned Apps, Appearance, Advanced, About) was replaced. Pinned Apps and window cycling features were removed during the pivot from command palette to floating panel.
 
 ---
 
@@ -267,40 +171,32 @@ struct SettingOption {
 }
 ```
 
-### Example: Command Palette Feature
+### Example: Bookmarks Feature
 
 ```swift
-struct CommandPaletteSettings: FeatureSettings {
-    static let featureName = "Command Palette"
+struct BookmarksSettings: FeatureSettings {
+    static let featureName = "Bookmarks"
 
     static let configurableOptions: [SettingOption] = [
         SettingOption(
-            key: "palette.activationKey",
-            name: "Activation Key",
-            description: "Double-tap this key to toggle the palette",
-            type: .picker(options: ["Option", "Command", "Control"]),
-            requiresRestart: false
-        ),
-        SettingOption(
-            key: "palette.autoHideApps",
-            name: "Auto-Hide Apps",
-            description: "Hide other apps when focusing a window",
+            key: "bookmarks.autoCaptureCopiedURLs",
+            name: "Auto-Capture Copied URLs",
+            description: "Automatically save copied URLs as bookmarks",
             type: .toggle,
             requiresRestart: false
         ),
         SettingOption(
-            key: "palette.showPreviews",
-            name: "Show Window Previews",
-            description: "Display thumbnail previews of windows",
+            key: "bookmarks.enableCaptureHotkey",
+            name: "Capture Hotkey",
+            description: "Enable Option+Shift+B to capture active browser tab",
             type: .toggle,
             requiresRestart: false
         )
     ]
 
     static let defaults: [String: Any] = [
-        "palette.activationKey": "Option",
-        "palette.autoHideApps": false,
-        "palette.showPreviews": false
+        "bookmarks.autoCaptureCopiedURLs": false,
+        "bookmarks.enableCaptureHotkey": true
     ]
 }
 ```
@@ -354,11 +250,10 @@ Operational note:
 ### Reading Settings
 
 ```swift
-class WindowListViewModel: ObservableObject {
-    func focus(window: WindowInfo) {
-        let config = CiderConfig.load()
-        windowManager.focus(window: window, stageOthers: config.autoHideApps)
-    }
+// Typical usage pattern:
+let config = CiderConfig.load()
+if config.enableAutoTagging {
+    // run auto-tagging pipeline
 }
 ```
 
@@ -413,7 +308,7 @@ extension EnvironmentValues {
 }
 
 // Apply at root view
-CommandPaletteView()
+CiderPanelView()
     .environment(\.textScale, config.textSize.scale)
 
 // Use in child views
@@ -431,50 +326,16 @@ struct SomeView: View {
 
 ## Testing Settings
 
-> **Note:** No tests exist in the repo yet. The examples below show the recommended pattern using Swift Testing for when tests are added.
-
-### Test Setting Persistence
-
-```swift
-import Testing
-
-@Test("Settings persist across save/load")
-func settingsPersist() throws {
-    var config = CiderConfig.default
-    config.autoHideApps = true
-    config.save()
-
-    let loaded = CiderConfig.load()
-    #expect(loaded.autoHideApps == true)
-}
-```
-
-### Test Backward Compatibility
-
-```swift
-@Test("Old config loads with defaults for missing fields")
-func loadingOldConfig() throws {
-    let oldConfigJSON = """
-    {"textSize":"medium","paletteSize":"medium"}
-    """
-    UserDefaults.standard.set(oldConfigJSON.data(using: .utf8), forKey: "CiderConfig")
-
-    let config = CiderConfig.load()
-
-    #expect(config.autoHideApps == false)
-    #expect(config.activationMode == .doubleTap)
-    #expect(config.enableOptionTabCycling == true)
-}
-```
+Backward compatibility tests exist in `Tests/CiderTests/CiderConfigBackwardCompatTests.swift` using Swift Testing. They verify that empty JSON, minimal JSON, and unknown keys all decode correctly with proper defaults.
 
 ---
 
 ## Benefits
 
-1. **Single source of truth**: All persisted settings in one Codable struct (except `launchAtLogin` via SMAppService; `hotkeyDoubleTapInterval` and `showOnScreen` are UI-only and not yet wired into CiderConfig)
+1. **Single source of truth**: All persisted settings in one Codable struct (except `launchAtLogin` via SMAppService)
 2. **Type-safe**: Enums for constrained values
 3. **Backward compatible**: Custom decoding handles missing fields
-4. **Immediate save**: `synchronize()` ensures persistence
+4. **Immediate save**: UserDefaults persistence on every save
 5. **Easy to test**: Pure data model, no dependencies
 
 ---

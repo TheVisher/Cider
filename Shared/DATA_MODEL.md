@@ -4,7 +4,7 @@
 >
 > **If the schema changes, update this doc. If this doc and the schema disagree, the schema wins.**
 >
-> **Last updated**: 2026-03-17
+> **Last updated**: 2026-03-21
 
 ## Bookmarks Table
 
@@ -209,6 +209,10 @@ tabs: defineTable({
 ### Cleanup Note
 
 Tabs are hard-deleted immediately by the cleanup cron when `deleted: true` — no 30-day purge cycle like bookmarks, notes, and folders.
+
+## Note Attachments Table
+
+> **TODO**: This table exists in `schema.ts` but has not been documented here yet. It stores metadata for note image attachments uploaded via `/api/sync/upload-note-attachment`. Check `Cider-Web/convex/schema.ts` for the current schema definition.
 
 ## Auth Tables
 

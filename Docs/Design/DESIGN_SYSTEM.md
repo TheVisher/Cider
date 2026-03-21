@@ -195,8 +195,6 @@ Usage: `.stroke(color, lineWidth: CiderBorder.innerStrokeWidth)` with `.padding(
 | `.gradientTint` | 0.8 | Palette/thumbnail gradient tint opacity |
 | `.dividerPrimaryOpacity` | 0.28 | Primary settings divider dim |
 | `.dividerSecondaryOpacity` | 0.22 | Secondary settings divider dim |
-| `.shadowShapeFullOpacity` | 0.7 | Full panel shadow blur shape |
-| `.shadowShapeCompactOpacity` | 0.52 | Compact panel shadow blur shape |
 | `.disabledOpacity` | 0.55 | Disabled element view opacity |
 
 ### 3.5 Typography
@@ -209,35 +207,51 @@ Cider uses **SF Pro** (macOS system font) exclusively. All font declarations use
 
 | Token | Size | Weight | Usage |
 |-------|------|--------|-------|
-| `.body` | 11pt | Regular | Body text, descriptions, metadata |
-| `.bodyMedium` | 11pt | Medium | Emphasized body, item labels, sidebar rows |
-| `.bodySemibold` | 11pt | Semibold | Section headers, folder names, icon labels |
-| `.bodyItalic` | 11pt | Regular Italic | Empty note placeholder |
+| `.badge` | 8pt | Bold | Tab bar badge count |
+| `.badgeSemibold` | 8pt | Semibold | Badge variant |
+| `.micro` | 9pt | Semibold | Small sidebar chevrons |
+| `.microMedium` | 9pt | Medium | Resize icon, decorative labels |
+| `.microBold` | 9pt | Bold | Sidebar confirm/cancel icons |
 | `.caption` | 10pt | Regular | Metadata, timestamps, word counts |
 | `.captionMedium` | 10pt | Medium | Secondary labels, sidebar counts, tab badges |
 | `.captionSemibold` | 10pt | Semibold | Small emphasized labels, footer pill icon |
 | `.captionBold` | 10pt | Bold | Folder item badges |
+| `.body` | 11pt | Regular | Body text, descriptions, metadata |
+| `.bodyMedium` | 11pt | Medium | Emphasized body, item labels, sidebar rows |
+| `.bodySemibold` | 11pt | Semibold | Section headers, folder names, icon labels |
+| `.bodyItalic` | 11pt | Regular Italic | Empty note placeholder |
+| `.toolbarIcon` | 11pt | Medium | Toolbar icon sizing |
+| `.monospacedBody` | 11pt | Medium Mono | Monospaced body text |
 | `.label` | 12pt | Regular | Form text, editor content, search fields |
 | `.labelMedium` | 12pt | Medium | Form labels, action labels |
 | `.labelSemibold` | 12pt | Semibold | Root folder headers, emphasized section headers |
 | `.subheading` | 13pt | Regular | Search palette text |
 | `.subheadingMedium` | 13pt | Medium | Card titles, note titles |
 | `.subheadingSemibold` | 13pt | Semibold | Bold card titles, view icons |
+| `.heading` | 14pt | Regular | Heading base |
 | `.headingMedium` | 14pt | Medium | Dashboard section headers, search categories |
 | `.headingSemibold` | 14pt | Semibold | Settings section title |
+| `.headingBold` | 14pt | Bold | Bold heading variant |
 | `.navTitle` | 15pt | Semibold | Settings navigation title |
 | `.title` | 16pt | Regular | Search palette input, about version |
 | `.titleMedium` | 16pt | Medium | Panel headers, dashboard section titles |
 | `.display` | 20pt | Regular | Folder overview icon, settings icon |
 | `.displaySemibold` | 20pt | Semibold | Settings panel title, dashboard heading |
 | `.displayBold` | 20pt | Bold | Home dashboard title |
-| `.microMedium` | 9pt | Medium | Resize icon, decorative labels |
-| `.micro` | 9pt | Semibold | Small sidebar chevrons |
-| `.microBold` | 9pt | Bold | Sidebar confirm/cancel icons |
-| `.badge` | 8pt | Bold | Tab bar badge count |
 | `.heroFallback` | 28pt | Bold | Bookmark hero fallback letter |
+| `.settingsEmptyIcon` | 28pt | Regular | Settings empty state icon |
+| `.dragPreviewIcon` | 32pt | Medium | Drag preview icon |
+| `.vaultCardIcon` | 32pt | Light | Vault card decorative icon |
+| `.fileIconLarge` | 32pt | Regular | Large file type icon |
 | `.emptyStateIcon` | 36pt × scale | Regular | Empty state icon (scales with global text size) |
+| `.vaultDetailIcon` | 48pt | Light | Vault detail decorative icon |
 | `.appIcon` | 64pt | Regular | About screen app icon (fixed — decorative) |
+
+#### NSFont Tokens
+
+| Token | Size | Weight | Usage |
+|-------|------|--------|-------|
+| `.captureLabel` | 11pt | Medium Mono Digit | Screen capture label (NSFont) |
 
 #### Responsive Tokens (textScale-based)
 
@@ -265,11 +279,6 @@ Available: `body`, `bodyMedium`, `bodySemibold`, `caption`, `captionMedium`, `ca
 | Smooth | `.smooth` | Default transitions, chevron reveal |
 | Snappy | `.snappy` | Sidebar toggle, tab selection, hover states, folder expand |
 | Bouncy | `.bouncy` | Sidebar toggle button appearance |
-
-| Custom Spring | API | Usage |
-|---------------|-----|-------|
-| `hoverMagnify` | `.spring(duration: 0.25, bounce: 0.05)` | Icon hover scale |
-| `listReorder` | `.spring(duration: 0.3, bounce: 0.08)` | Drag-and-drop reorder |
 
 **Reduce Motion:** Check `@Environment(\.accessibilityReduceMotion)`. Replace springs with `.none` (instant) or `.linear(duration: 0.2)` opacity crossfade.
 
@@ -331,49 +340,43 @@ The main panel (`CiderPanelView`) is the reference implementation. All measureme
 |----------|-------|-------|
 | Default width | `CiderPanelDesign.defaultWidth` | 780pt |
 | Default height | `CiderPanelDesign.defaultHeight` | 640pt |
-| Min width | `CiderPanelDesign.minWidth` | 540pt |
+| Min width | `CiderPanelDesign.minWidth` | 400pt |
 | Min height | `CiderPanelDesign.minHeight` | 440pt |
 | Corner radius | `CiderPanelDesign.cornerRadius` | 14pt (`Radius.lg`) |
 
 ### 5.2 Window Padding (Shadow Space)
 
-The NSWindow is larger than the visible panel to give shadows room to render.
+All shadow padding values are now `0`. The NSWindow frame matches the visible panel exactly — no extra padding for shadow rendering.
 
-| Edge | Token | Value | Notes |
-|------|-------|-------|-------|
-| Horizontal | `shadowPadding` | 40pt | Both left and right |
-| Top | `topPadding` | 28pt | Less than sides (panel floats high) |
-| Bottom (expanded) | `shadowPadding + bottomPadding` | 55pt (40+15) | Extra room for downward shadow |
-| Bottom (collapsed) | `collapsedBottomPadding` | 28pt | Matches top |
+| Edge | Token | Value |
+|------|-------|-------|
+| Shadow padding | `CiderPanelDesign.shadowPadding` | 0pt |
+| Top | `CiderPanelDesign.topPadding` | 0pt |
+| Bottom | `CiderPanelDesign.bottomPadding` | 0pt |
+| Bottom (collapsed) | `CiderPanelDesign.collapsedBottomPadding` | 0pt (equals `topPadding`) |
 
 ### 5.3 Panel Structure Diagram
 
 ```
-NSWindow frame (includes shadow padding)
+NSWindow frame (equals visible panel — no shadow padding)
 ┌─────────────────────────────────────────────────────────────┐
-│                        28pt top padding                      │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │ 40pt          Visible acrylic panel (14pt corners)  40pt│ │
-│  │ left  ┌───────────────────────────────────────────┐right│ │
-│  │  pad  │                                           │ pad │ │
-│  │       │   HStack(spacing: 0)                      │     │ │
-│  │       │   ┌──────────┬────────────────────────┐   │     │ │
-│  │       │   │ Sidebar  │  Right Column           │   │     │ │
-│  │       │   │ Column   │  (VStack, spacing: 0)   │   │     │ │
-│  │       │   │          │  ┌────────────────────┐ │   │     │ │
-│  │       │   │          │  │ Title Bar (40pt h)  │ │   │     │ │
-│  │       │   │          │  ├────────────────────┤ │   │     │ │
-│  │       │   │          │  │ Divider (14pt inset)│ │   │     │ │
-│  │       │   │          │  ├────────────────────┤ │   │     │ │
-│  │       │   │          │  │ Content Area        │ │   │     │ │
-│  │       │   │          │  │ (tab content)       │ │   │     │ │
-│  │       │   │          │  │                     │ │   │     │ │
-│  │       │   │          │  └────────────────────┘ │   │     │ │
-│  │       │   └──────────┴────────────────────────┘   │     │ │
-│  │       │                                           │     │ │
-│  │       └───────────────────────────────────────────┘     │ │
-│  └─────────────────────────────────────────────────────────┘ │
-│                     55pt bottom padding (expanded)           │
+│  Visible acrylic panel (14pt corners)                        │
+│  ┌───────────────────────────────────────────────────────┐   │
+│  │   HStack(spacing: 0)                                  │   │
+│  │   ┌──────────┬────────────────────────┐               │   │
+│  │   │ Sidebar  │  Right Column           │               │   │
+│  │   │ Column   │  (VStack, spacing: 0)   │               │   │
+│  │   │          │  ┌────────────────────┐ │               │   │
+│  │   │          │  │ Title Bar (40pt h)  │ │               │   │
+│  │   │          │  ├────────────────────┤ │               │   │
+│  │   │          │  │ Divider (14pt inset)│ │               │   │
+│  │   │          │  ├────────────────────┤ │               │   │
+│  │   │          │  │ Content Area        │ │               │   │
+│  │   │          │  │ (tab content)       │ │               │   │
+│  │   │          │  │                     │ │               │   │
+│  │   │          │  └────────────────────┘ │               │   │
+│  │   └──────────┴────────────────────────┘               │   │
+│  └───────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -471,7 +474,7 @@ The tab bar (`CiderTabBar`) is a horizontal scroll view inside the title bar.
 CiderTabBar
 └── ScrollView(.horizontal)
     └── HStack(spacing: 2pt = tabSpacing)
-        ├── Tab Button: [icon] [label] [badge?] [close?]
+        ├── Tab Button: [icon] [label] [badge?]
         ├── Tab Button: ...
         └── ...
     .padding(.horizontal, 4pt = tabHorizontalPadding)
@@ -492,7 +495,6 @@ CiderTabBar
 | Label (selected) | 12pt semibold |
 | Label (inactive) | 12pt regular |
 | Badge | 10pt medium, capsule background |
-| Close button | 8pt bold, 14×14 frame |
 | Tab-to-tab gap | 2pt (`CiderPanelDesign.tabSpacing`) |
 
 ---
@@ -727,10 +729,10 @@ Each zone shows the appropriate `NSCursor.frameResize(position:directions:)` cur
 
 ### 10.3 Resize Constraints
 
-| Constraint | Value |
-|------------|-------|
-| Min width | `panelMinWidth` = 540pt + 80pt shadow = 620pt window |
-| Min height | `panelMinHeight` = 440pt + 28pt top + 55pt bottom = 523pt window |
+| Constraint | Token | Value |
+|------------|-------|-------|
+| Min width | `panelMinWidth` | 400pt (= `minWidth` + 0 shadow) |
+| Min height | `panelMinHeight` | 440pt (= `minHeight` + 0 padding) |
 
 ---
 
@@ -787,11 +789,13 @@ The search palette is an overlay inside the main panel.
 | Property | Token | Value |
 |----------|-------|-------|
 | Width | `SearchPaletteDesign.paletteWidth` | 560pt |
-| Max height | `SearchPaletteDesign.paletteMaxHeight` | 480pt |
 | Results max height | `SearchPaletteDesign.resultsMaxHeight` | 400pt |
 | Search field height | `SearchPaletteDesign.searchFieldHeight` | 52pt |
-| Backdrop opacity | `SearchPaletteDesign.backdropOpacity` | 0.28 |
-| Vertical offset | `SearchPaletteDesign.paletteVerticalOffset` | 60pt |
+| Shadow color | `SearchPaletteDesign.shadowColor` | `.black` |
+| Shadow blur radius | `SearchPaletteDesign.shadowBlurRadius` | 24pt |
+| Shadow Y offset | `SearchPaletteDesign.shadowYOffset` | 12pt |
+| Shadow opacity | `SearchPaletteDesign.shadowOpacity` | 0.7 |
+| Top offset factor | `SearchPaletteDesign.topOffsetFactor` | 0.22 (fraction of container height) |
 
 ---
 
@@ -865,6 +869,7 @@ Every card view MUST use:
 func cardContainer(
     isHovered: Bool,
     isSelected: Bool = false,       // selected border (selectedBorder + innerStrokeWidth)
+    isFocused: Bool = false,        // focus ring (controlAccent stroke)
     isDropTargeted: Bool = false,   // drop highlight (dropTargetBorderStrong + innerStrokeWidth); overrides hover, overridden by isSelected
     cornerRadius: CGFloat = BookmarksDesign.cardCornerRadius
 ) -> some View
@@ -968,10 +973,10 @@ When building a new feature, check this section first. If a component already ex
 - **What:** Unified table list view — all item types (bookmarks, notes, todos, events, contacts, files) render in the same row with column headers. 9 columns: Name (flexible), Type, Tags, Folder, Created, Modified, URL, Words, Priority. Resizable column dividers, column visibility toggling via `+` button. Config persisted in `CiderConfig.tableColumnConfig`.
 - **Note:** `LibraryTableView` owns its own scroll (used by HomeDashboardView). `LibraryTableRows` is embeddable inside existing ScrollViews (used by FolderDetailView, SavedViewTabContent).
 
-#### FolderContentView / RootFolderOverviewView
-- **Files:** `Views/Shared/FolderContentView.swift`, `Views/Shared/RootFolderOverviewView.swift`
+#### FolderDetailView
+- **File:** `Views/Shared/FolderDetailView.swift`
 - **Used by:** CiderPanelView (when a folder is selected in sidebar)
-- **What:** Mixed-content views showing bookmarks + notes within a folder
+- **What:** Mixed-content view showing bookmarks + notes within a folder
 
 #### AcrylicPanelBackground
 - **File:** `Views/Shared/AcrylicPanelBackground.swift`
@@ -998,7 +1003,7 @@ When building a new feature, check this section first. If a component already ex
 
 #### EmptyStateView
 - **File:** `Views/Shared/EmptyStateView.swift`
-- **Used by:** NotesTabContent, SearchTabContent, ProjectTabContent, FolderContentView, RootFolderOverviewView
+- **Used by:** FolderDetailView, CiderPanelView+ContentArea, SearchTabContent, InlineNoteEditorView, StackDetailSheet, StackManagerSheet
 - **What:** Vertically centered empty state with icon (36pt), title, optional subtitle, optional action button
 - **Params:** `icon: String`, `title: String`, `subtitle: String?`, `actionLabel: String?`, `action: (() -> Void)?`
 - **Note:** BookmarksBrowserView has its own inline empty state that scales with `textScale` — don't use this shared component there
@@ -1040,7 +1045,7 @@ When building a new feature, check this section first. If a component already ex
 
 #### SearchPaletteView
 - **File:** `Views/Search/SearchPaletteView.swift`
-- **What:** Center-screen overlay palette (Cmd+K). Debounces search 100ms via `@State searchTask: Task`. Shows four result sections (Bookmarks, Notes, Date Cards, Contacts). Recent section shows 2 bookmarks + 2 notes + 2 date cards + 2 contacts when query is empty.
+- **What:** Center-screen overlay palette (Cmd+K). Debounces search 100ms via `@State searchTask: Task`. Shows four result sections (Bookmarks, Notes, Date Cards, Contacts). Recent section shows 3 bookmarks + 2 notes + 2 date cards + 2 contacts when query is empty.
 - **Snippet rendering:** `snippetAttributedString(_:)` -> `AttributedString` with `.swiftUI.foregroundColor` per range (tertiary/primary/tertiary).
 
 #### SearchTabContent
@@ -1082,7 +1087,7 @@ These aren't single components but established patterns that should be followed 
 - **What:** Two `ViewModifier`s for common container background + border patterns
 - **Modifiers:**
   - `.sectionContainer(cornerRadius:)` — static elevated container: `surfaceElevated` fill + `borderDefault` stroke + `innerStrokeWidth`. Default radius: `Radius.md`. For sidebar columns, panel sections, folder cards.
-  - `.cardContainer(isHovered:, cornerRadius:)` — hover-aware card: `surfaceElevated`/`surfaceHover` fill + `borderSubtle`/`borderHover` stroke + clipShape + contentShape. Default radius: `BookmarksDesign.cardCornerRadius`. For masonry/grid cards.
+  - `.cardContainer(isHovered:, isSelected:, isFocused:, isDropTargeted:, cornerRadius:)` — hover-aware card: `surfaceElevated`/`surfaceHover` fill + `borderSubtle`/`borderHover` stroke + clipShape + contentShape. Default radius: `BookmarksDesign.cardCornerRadius`. For masonry/grid cards.
 - **When NOT to use:** Containers with conditional backgrounds (FolderSidebarView's `showBackground` flag) or cards with custom stroke logic (BookmarksBrowserView's drop-target border)
 
 ### 19.5 Button Styles
@@ -1139,7 +1144,7 @@ These aren't single components but established patterns that should be followed 
 | `Views/Shared/MasonryLayout.swift` | Variable-height masonry grid layout |
 | `Views/Shared/ViewOptionsDropdown.swift` | Display mode toggle + card size slider |
 | `Views/Shared/LibraryTableView.swift` | Unified table list view (self-contained + embeddable) |
-| `Views/Shared/FolderContentView.swift` | Mixed-content folder view |
+| `Views/Shared/FolderDetailView.swift` | Mixed-content folder view |
 | `Views/CiderPanelView.swift` | Main panel (uses CiderPanelShell, provides tab/folder/search logic) |
 | `Docs/Design/ACRYLIC_IMPLEMENTATION.md` | Detailed acrylic/shadow implementation guide |
 | `Docs/Features/DETAIL_PANEL_SPEC.md` | Detail view layout specification |

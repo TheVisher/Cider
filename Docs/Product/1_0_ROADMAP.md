@@ -1,6 +1,6 @@
 # Cider 1.0 Roadmap
 
-> **This is the active roadmap from beta to 1.0 release.** The beta launch roadmap (`BETA_ROADMAP.md`) is complete and archived.
+> **This is the active roadmap from beta to 1.0 release.** The beta launch roadmap (`Docs/_archive/BETA_ROADMAP.md`) is complete and archived.
 
 ## Agent Rules
 
@@ -565,7 +565,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-11 | Drag Out to External Apps | 2 | ✅ Complete |
 | R-12 | Clipboard Viewer | 2 | ✅ Complete |
 | R-13 | Advanced Search | 2 | ✅ Complete |
-| R-20 | Screen Capture Polish | 2 | Deferred → Vault Roadmap |
+| R-20 | Screen Capture Polish | 2 | Testing |
 | R-21 | Keyboard Shortcuts Reference | 2 | ✅ Complete |
 | R-14 | Bookmark Detail View V2 | 3 | ✅ Complete |
 | R-15 | GIF/Video/Carousel Bookmarks | 3 | ✅ Complete |
@@ -575,7 +575,7 @@ If time allows before 1.0. Otherwise, first post-1.0 priorities.
 | R-19 | Excalidraw Whiteboard Tab | 4 | ✅ Complete |
 | R-22 | Browser Session Cards | 4 | ✅ Complete |
 
-**Completed:** 18/22 (4 deferred to Vault Roadmap)
+**Completed:** 18/22 (3 deferred to Vault Roadmap, 1 in testing)
 
 ---
 

@@ -92,7 +92,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Connected Devices (view/revoke) | Yes | Yes | Yes |
 | OAuth (Google/GitHub/Apple) | No | Planned | No |
 | Account-based sync (replace tokens) | Yes (login returns sync token) | Planned | Yes (login returns sync token) |
-| Background sync | Yes (5s poll) | Yes (real-time subscriptions) | Yes (30s poll + offline queue) |
+| Background sync | Yes (event-driven via WebSocket changeSignal) | Yes (real-time subscriptions) | Yes (30s poll + offline queue) |
 | Dirty-only push | Yes | N/A | Yes (offline queue + immediate push) |
 | Failure handling / retry | Yes (pause after 3) | N/A (Convex retries) | Yes (user-facing errors) |
 | Reconciliation (drift detection) | Yes | Yes (endpoint exists) | No |

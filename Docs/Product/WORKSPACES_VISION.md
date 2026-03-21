@@ -6,7 +6,7 @@
 > - ✅ Phase 1 — Universal Folders (complete)
 > - ✅ Phase 2 — Center Search Palette (complete)
 > - ✅ Phase 3 — Custom Saved View Tabs (complete)
-> - ~~🔲 Phase 4 — Projects UI~~ — **Removed.** Projects removed from UI; `ProjectStorage` retained but dormant. See decision below.
+> - ~~🔲 Phase 4 — Projects UI~~ — **Removed.** Projects removed from UI and codebase. See decision below.
 > - ✅ "New Tab" in +New popover (complete, Feb 2026)
 > - 🔲 Phase 4 (new) — Saved View expansion: manual item refs + "Send to view" context action
 > - 🔲 Phase 5 — Kanban display mode on Saved Views
@@ -21,7 +21,7 @@ Projects were removed from the UI because:
 2. **Scope creep risk.** The "project workspace" concept (Kanban, timelines, team collaboration) belongs to heavier tools like Linear or Notion — not what Cider is.
 3. **Saved Views can absorb the use case.** Everything Projects was trying to do can be done via Saved Views with future enhancements (see roadmap below).
 
-`ProjectStorage`, `Project` model, and `ProjectItem` model are retained but dormant — dormant data layer, no UI. If the concept is revisited, the storage is ready.
+`ProjectStorage`, `Project` model, and `ProjectItem` model have been removed from the codebase. If the concept is revisited, the models would need to be recreated.
 
 ---
 
@@ -286,22 +286,25 @@ SOURCES
 - Clicking a folder opens a standalone folder view (deselects the current tab).
 - Clicking any tab exits the folder view.
 - Folders show item counts.
-- Notes can be assigned to folders (new capability — notes currently have no folder system).
+- Notes can be assigned to folders.
 
 ---
 
 ## Data Model Changes
 
 ### Current State
-- `Bookmark` has `folderID: UUID?` pointing to `BookmarkFolder`.
-- `BookmarkFolder` has `parentID: UUID?` for nesting.
-- `Note` has no folder/project relationship.
+- `Bookmark` has `folderID: UUID?` pointing to `Folder`.
+- `Folder` has `parentID: UUID?` for nesting (renamed from `BookmarkFolder`).
+- `Note` has `folderID: UUID?` — notes belong to folders.
 
-### Required Changes
+### Completed Changes
 
-1. **Rename `BookmarkFolder` → `Folder`** — folders are universal, not bookmark-specific.
-2. **Add `folderID: UUID?` to `Note`** — notes can belong to folders.
-3. **New `Project` model:**
+1. ✅ **Renamed `BookmarkFolder` → `Folder`** — folders are universal, not bookmark-specific.
+2. ✅ **Added `folderID: UUID?` to `Note`** — notes can belong to folders.
+
+### Historical (Projects — Removed)
+
+3. **`Project` model (dormant):**
    ```
    Project {
      id: UUID

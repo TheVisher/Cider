@@ -88,7 +88,7 @@ Tell Claude: **"Run the code audit loop"** — it will read this doc and know wh
 Each area requires 3 independent clean scans before PASS. If any scan finds a new violation, fix it and reset to 1/3. This ensures thoroughness — single passes consistently miss edge cases.
 
 ## Areas (scan order)
-App/ → Models/ → Utilities/ → Services/ → ViewModels/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Shared/ → Views/Search/ → Views/Settings/
+App/ → Models/ → Utilities/ → Services/ → Services/AI/ → ViewModels/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Shared/ → Views/Search/ → Views/Settings/ → Views/AIAssistant/
 
 ## Progress tracking
 Results are logged in `Docs/QA/CODE_AUDIT.md` with a progress tracker table and detailed fix log.

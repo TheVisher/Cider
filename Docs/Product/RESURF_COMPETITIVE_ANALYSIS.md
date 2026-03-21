@@ -134,10 +134,12 @@ type Capture = {
 **Notable fields Cider doesn't have:**
 - `triageStatus` — explicit inbox/later/archive state machine (see section 7)
 - `snoozeUntil` — defer a capture to resurface at a specific time
-- `colorPalette` — auto-extracted dominant colors (Cider has this in the `BOOKMARKS_VISION.md` Detail V2 spec but not implemented)
-- `embedding` — vector for semantic search (AI-powered similarity)
 - `processingStatus` — async enrichment pipeline with failure tracking
 - `isHidden` — soft-hide without deleting
+
+**Fields Cider now has equivalents for:**
+- `colorPalette` — ✅ `dominantColors` on Bookmark, extracted by `ColorExtractionService`
+- `embedding` — ✅ NLEmbedding vectors stored via `EmbeddingStore`, used for related items
 
 ### Storage Format
 
@@ -228,25 +230,23 @@ This is the area where Resurf has the most to teach Cider.
 
 ### Web Viewer
 
-**Cider:** No in-app web viewer. All URL opens go to the system browser.
+**Cider:** ✅ Embedded WKWebView in the bookmark detail panel's "Web" tab (shipped in R-14, Detail V2). Live page rendering inside the panel without leaving Cider.
 
 **Resurf:** Full embedded web viewer — an Electron `BrowserView`/`WebContentsView` that renders live pages inside the app. You can browse the web without leaving Resurf.
 
-**Assessment:** An embedded web viewer is a natural fit for Cider's bookmark tab. When you click "Open" on a bookmark, instead of launching the full browser, the link opens in a lightweight WKWebView inside the panel (same technology Cider already uses for the TipTap editor). The panel becomes a reading surface, not just a link list. This is the "Cider as a browser companion that is also a mini-browser" concept.
-
-**Implementation path for Cider:** This is the "Web tab" in the Detail V2 spec (`BOOKMARKS_VISION.md` Phase 2). Already planned, just needs to be prioritized. WKWebView is already embedded in the app for TipTap — adding a second WKWebView for page viewing is low additional complexity.
+**Assessment:** Both apps now have in-app web viewing. Cider's WKWebView approach is more memory-efficient than Resurf's Chromium WebView.
 
 ### Reader Mode
 
 | | Cider | Resurf |
 |---|---|---|
-| **Status** | 🔲 Planned (vision doc) | ✅ Beta feature |
-| **Parser** | `@mozilla/readability` (planned) | `@mozilla/readability` |
-| **Rendering** | WKWebView (planned) | Chromium WebView |
-| **Stored at capture** | ❌ (would re-fetch) | ✅ (`articleContent` + `articleHtml` stored) |
+| **Status** | ✅ Shipped (R-14, Detail V2) | ✅ Beta feature |
+| **Parser** | Readability.js (`BookmarkReaderView`) | `@mozilla/readability` |
+| **Rendering** | WKWebView | Chromium WebView |
+| **Stored at capture** | ❌ (re-fetches on open) | ✅ (`articleContent` + `articleHtml` stored) |
 | **Offline capable** | ❌ | ✅ (content stored at capture time) |
 
-**Key difference:** Resurf stores the Readability-parsed article body at capture time. Reader Mode is instant and works offline because there's nothing to fetch. Cider's planned Reader Mode would need to re-fetch and re-parse the live URL. **High-value steal:** store `articleContent` and `articleHtml` at bookmark capture time (add to the enrichment pipeline). No extra work at reading time.
+**Key difference:** Resurf stores the Readability-parsed article body at capture time. Cider's Reader Mode re-fetches and re-parses the live URL on each open. **High-value steal:** store `articleContent` and `articleHtml` at bookmark capture time (add to the enrichment pipeline). No extra work at reading time.
 
 ### PDF Viewer
 
@@ -259,7 +259,7 @@ This is the area where Resurf has the most to teach Cider.
 
 ### Screenshot / Screen Capture
 
-**Cider:** `VNRecognizeTextRequest` (OCR) is in the AI vision doc but not implemented. No area-select screenshot tool exists yet.
+**Cider:** ✅ Implemented. `ScreenCaptureService` provides area-select capture (Opt+Cmd+2), `OCRService` runs `VNRecognizeTextRequest` for text extraction. OCR text routes to note/date card/contact creation via capture toast. R-20 (Screen Capture Polish) is in testing.
 
 **Resurf:**
 ```typescript
@@ -270,7 +270,7 @@ hasScreenPermission: () => Promise<boolean>
 
 They have a working native area-select screenshot capture that saves the image as an attachment. Requires Screen Recording permission.
 
-**Assessment:** This is a genuine gap. Resurf ships screenshot capture. Cider has it in a vision doc. The implementation is clear — macOS provides `CGWindowListCreateImage` or `SCScreenshotManager` (newer, ScreenCaptureKit). Combined with `VNRecognizeTextRequest` for OCR, this becomes a "capture anything visible on screen" feature. **Prioritize this over OCR — screenshot is more broadly useful than OCR-only.**
+**Assessment:** Near parity. Both apps ship screenshot capture with OCR. Cider's implementation routes captured text to typed cards (notes, date cards, contacts) via OCR — a more structured approach than Resurf's generic attachment.
 
 ### Tweet Embedding
 
@@ -307,14 +307,14 @@ This is more sophisticated than anything Resurf shows. The V2 spec is already we
 | Tags | ✅ (comma text) | ✅ (chip UI) | ✅ (chip UI) |
 | Notes/annotation | ✅ | ✅ | ✅ |
 | Source URL | ✅ | ✅ | ✅ |
-| Dominant colors | ❌ | ✅ (planned) | ✅ |
-| TLDR / AI summary | ❌ | ✅ (planned) | ✅ (AI-generated) |
+| Dominant colors | ✅ | ✅ | ✅ |
+| TLDR / AI summary | ✅ (Foundation Models) | ✅ | ✅ (AI-generated) |
 | Triage status | ❌ | ❌ | ✅ |
 | Snooze | ❌ | ❌ | ✅ |
 | Pin | ✅ | ✅ | ✅ |
 | Hidden toggle | ❌ | ❌ | ✅ |
 | Created / Updated | ✅ | ✅ | ✅ |
-| Content tabs (Preview/Reader/Web) | ❌ | ✅ (planned) | ✅ (web viewer) |
+| Content tabs (Preview/Reader/Web) | ✅ | ✅ | ✅ (web viewer) |
 | Reprocess / refresh | ❌ | ❌ | ✅ |
 
 ---
@@ -343,9 +343,9 @@ Both apps use TipTap v3. The architecture is nearly identical — a WKWebView/Ch
 |---|---|---|
 | **AI model** | Apple Foundation Models (on-device, macOS 26+) + tiered fallback | OpenAI via Vercel AI SDK (BYOK only) |
 | **Privacy model** | On-device first, cloud optional | Always off-device (BYOK, their servers aren't involved but OpenAI is) |
-| **TLDR/summaries** | 🔲 Planned (tiered: metadata → extractive → AI) | ✅ |
-| **Vector embeddings** | ❌ | ✅ (stored per capture, enables semantic search) |
-| **Auto-tagging** | 🔲 (AI vision doc) | ❌ |
+| **TLDR/summaries** | ✅ (Foundation Models on macOS 26+) | ✅ |
+| **Vector embeddings** | ✅ (`EmbeddingStore`, NLEmbedding) | ✅ (stored per capture, enables semantic search) |
+| **Auto-tagging** | ✅ (NLP keyword extraction in `BookmarkAIEnrichment`) | ❌ |
 | **Semantic search** | ❌ | ✅ (via embeddings, sort by relevance) |
 | **AI key required** | No (on-device works without) | Yes (BYOK, feature is off without a key) |
 | **Space instructions** | N/A | ✅ (`instruction` field on Space — AI can use this as context) |
@@ -432,7 +432,7 @@ Ranked by implementation value vs. effort:
 
 ### High Value, Medium Effort
 
-7. **In-app web viewer** — Open bookmarks in an embedded WKWebView inside the panel instead of launching the full browser. Cider already has WKWebView infrastructure. This is the "Web tab" in the Detail V2 spec — it just needs to be built and prioritized.
+7. ~~**In-app web viewer**~~ — ✅ Shipped (R-14 Detail V2, Web tab). Bookmarks open in embedded WKWebView inside the detail panel.
 
 8. **Area screenshot capture (Cmd+Shift+S equivalent)** — Select an area of the screen and capture it as an image capture. Requires Screen Recording permission. Uses `SCScreenshotManager` or `CGWindowListCreateImage`. Resurf ships this, Cider doesn't.
 
@@ -444,7 +444,7 @@ Ranked by implementation value vs. effort:
 
 11. **Voice recording capture** — Resurf has voice as a first-class capture type (dedicated widget step, 200×36 mini window). This is a meaningful differentiator but would require significant work (audio recording, transcription, playback). Worth tracking but not stealing immediately.
 
-12. **Vector embeddings** — Store a vector embedding per capture for semantic search. Requires AI integration. Cider's Apple Foundation Models path will enable this more elegantly (on-device, no API key) — wait for Foundation Models rather than copying Resurf's OpenAI approach.
+12. ~~**Vector embeddings**~~ — ✅ Shipped. `EmbeddingStore` uses NLEmbedding for on-device vector storage. `RelatedItemsView` shows similar items by cosine similarity.
 
 13. **Space AI instructions** — `Space.instruction` field that gives AI context about what the space is for. Only relevant once AI is working. Low effort to add the field now, high value once AI is live.
 
@@ -489,20 +489,20 @@ These are genuine Cider advantages — not features to copy but reasons why user
 | Mixed content (notes + bookmarks + calendar) | ✅ | ⚠️ Captures only | Cider advantage |
 | Screenshot at capture | ❌ | ✅ | Steal this |
 | Article body at capture | ❌ | ✅ | Steal this |
-| In-app web viewer | 🔲 Planned | ✅ | Prioritize |
-| Area screenshot capture | 🔲 Planned | ✅ | Prioritize |
-| Reader Mode | 🔲 Planned | ✅ Beta | Prioritize |
+| In-app web viewer | ✅ (Detail V2 Web tab) | ✅ | Parity |
+| Area screenshot capture | ✅ Testing (R-20) | ✅ | Near parity |
+| Reader Mode | ✅ (Detail V2 Reader tab) | ✅ Beta | Parity |
 | PDF viewer | 🔲 Planned | ✅ Beta | Planned path is better (PDFKit) |
 | Voice recording | ❌ | ✅ | Different direction |
 | Triage (inbox/later/archive) | ❌ | ✅ | Steal this |
 | Snooze | ❌ | ✅ | Steal this |
 | Folder/space colors | ❌ | ✅ | Low effort, steal |
-| Color extraction from images | 🔲 Planned (Detail V2) | ✅ | On roadmap |
+| Color extraction from images | ✅ (`ColorExtractionService`) | ✅ | Parity |
 | Tweet embedding | ❌ | ✅ | Skip (Web tab covers it) |
 | iCloud sync | ❌ | ✅ | Major gap, different problem |
 | Auto-backup | ❌ | ✅ | Low effort, high trust signal |
-| AI summaries | 🔲 Planned (tiered) | ✅ BYOK | Cider's approach is better |
-| Semantic/vector search | ❌ | ✅ | Wait for Foundation Models |
+| AI summaries | ✅ (Foundation Models, on-device) | ✅ BYOK | Cider's approach is better |
+| Semantic/vector search | ✅ (NLEmbedding, on-device) | ✅ | Parity (different approach) |
 | Sort by random | ❌ | ✅ | One-line steal |
 | Processing status feedback | ⚠️ Shimmer only | ✅ Explicit states | Improve feedback |
 | Canvas / Whiteboard | 🔲 Planned | 🔲 Behind flag | Both future |

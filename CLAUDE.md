@@ -38,7 +38,7 @@ Read the relevant doc BEFORE writing code in that area:
 | `Docs/Architecture/` | Panel architecture, floating panel, storage, tech stack, SwiftUI gotchas |
 | `Docs/Design/` | Design system (incl. component catalog, cross-tab patterns), acrylic implementation |
 | `Docs/Conventions/` | Code conventions, code health, troubleshooting + performance best practices |
-| `Docs/Features/` | TipTap editor, AI/chat, terminal, detail panel spec, integration design, user preferences |
+| `Docs/Features/` | TipTap editor, AI/chat, detail panel spec, integration design, user preferences |
 | `Docs/Product/` | 1.0 roadmap, tab vision docs, future tabs, vault vision, user feedback |
 | `Docs/QA/` | QA testing, audit loops, release checklist, build status |
 | `Shared/` | Cross-platform: ecosystem, sync protocol, data model, design language, feature parity |

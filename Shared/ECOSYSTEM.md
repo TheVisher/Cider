@@ -3,18 +3,19 @@
 > **Every agent working on any Cider app must read this file first.**
 > This is the single source of truth for how the three Cider apps relate to each other and to the shared backend.
 >
-> **Last updated**: 2026-03-15
+> **Last updated**: 2026-03-21
 
 ## Architecture
 
 ```
-Desktop (Cider macOS)  <-->  Convex Backend  <-->  iOS (Cider iOS)
-      native Swift/SwiftUI         ^                 native Swift/SwiftUI
-                              Cider Web
-                          React + Convex client
+Desktop (Cider macOS)  ── SDK (WebSocket) ──>  Convex Backend  <── REST (HTTP) ──  iOS (Cider iOS)
+      native Swift/SwiftUI                           ^                              native Swift/SwiftUI
+                                                Cider Web
+                                          React + Convex client
+                                       (direct mutations + subscriptions)
 ```
 
-All three clients share one Convex deployment. Desktop and iOS talk to it via REST endpoints. Web uses Convex's real-time client directly (subscriptions for reads, mutations for writes) and only uses the REST layer for the sync API that Desktop/iOS call.
+All three clients share one Convex deployment. Desktop uses the Convex Swift SDK (`ConvexMobile`) over WebSocket to call Convex actions directly. iOS uses REST HTTP endpoints. Web uses Convex's real-time client directly (subscriptions for reads, mutations for writes) and hosts the REST endpoints that iOS calls.
 
 ## The Three Apps
 
@@ -24,7 +25,7 @@ All three clients share one Convex deployment. Desktop and iOS talk to it via RE
 | **Tech** | Swift 6, SwiftUI, AppKit (NSPanel) | React 19, Convex, TanStack Router, Tailwind v4 | Swift 6, SwiftUI (iOS 17+) |
 | **Role** | Primary app. Local-first with cloud sync. Bookmarks, notes, projects, AI enrichment. | Web companion + Convex backend host. Bookmark capture, browse, organize. | Mobile capture companion. Bookmarks + Share Extension. |
 | **Storage** | Local files in `~/CiderVault/` + Convex sync | Convex (server-side only) | SwiftData local persistence + offline queue + disk image cache (App Group shared) |
-| **Sync method** | REST polling every 5s (`/api/sync/push`, `/api/sync/pull`) | Direct Convex mutations + subscriptions | REST push/pull (same endpoints as Desktop) + offline queue (QueueDrainer) |
+| **Sync method** | Convex Swift SDK (`ConvexMobile`) over WebSocket — event-driven push (2s debounce on local change) + reactive pull via `changeSignal` subscription (3s debounce) | Direct Convex mutations + subscriptions | REST push/pull (`/api/sync/push`, `/api/sync/pull`) + offline queue (QueueDrainer) |
 | **Deploy** | Direct (macOS app, Sparkle updates) | Vercel (auto-deploy from main) at cider.so | Xcode / TestFlight |
 
 ## Convex Backend
@@ -32,7 +33,7 @@ All three clients share one Convex deployment. Desktop and iOS talk to it via RE
 - **Dev deployment** (currently live): `dashing-fennec-334`
 - **HTTP base URL**: `https://dashing-fennec-334.convex.site`
 - **Prod deployment** (unused): `spotted-sockeye-736`
-- **Auth model**: Email/password accounts via `@convex-dev/auth`. All three native clients (Desktop, iOS, Web) authenticate via `/api/auth/login` (returns sync token automatically). Web also uses Convex session cookies for its direct client. Legacy sync tokens still work for backward compatibility. Connected Devices management available on all platforms via `/api/auth/devices`.
+- **Auth model**: Email/password accounts via `@convex-dev/auth`. Desktop and iOS authenticate via `/api/auth/login` (returns sync token automatically). Web uses Convex session cookies for its direct client. Connected Devices management available on all platforms via `/api/auth/devices`. See `Shared/AUTH.md` for full details.
 - **Schema lives in**: `Cider-Web/convex/schema.ts`
 - **Sync API lives in**: `Cider-Web/convex/sync.ts` + `Cider-Web/convex/http.ts`
 
@@ -52,7 +53,7 @@ These conventions must be identical across all three apps:
 |-----|----------------|
 | `ECOSYSTEM.md` | You're reading it. How the apps relate, universal rules. |
 | `AUTH.md` | Authentication: login/signup flow, token management, password hashing, connected devices, per-platform details. |
-| `SYNC_PROTOCOL.md` | REST endpoints, request/response schemas, push/pull contract, conflict resolution details, known edge cases. |
+| `SYNC_PROTOCOL.md` | Sync endpoints (REST + Convex SDK), request/response schemas, push/pull contract, conflict resolution details, known edge cases. |
 | `DATA_MODEL.md` | Canonical Convex schema — every table, every field, every index. |
 | `DESIGN_LANGUAGE.md` | Cross-platform design principles shared by all three apps. |
 | `FEATURE_PARITY.md` | What features each app has. Updated regularly. |

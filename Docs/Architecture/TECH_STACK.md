@@ -16,12 +16,13 @@ Cider uses a modern, native macOS tech stack:
 | Concurrency | Swift Concurrency | 6.2+ | Async/await, actors, structured concurrency |
 | Reactive State | Combine | macOS 26+ | @Published properties, reactive ViewModels |
 | Storage | UserDefaults + JSON | macOS 26+ | Simple config persistence via Codable |
-| Build System | Swift Package Manager | 6.2+ | No Xcode project, pure SPM |
+| Build System | Swift Package Manager | 6.2+ | SPM for dependencies + compilation; Xcode project wraps SPM for code signing |
 | Auto-Updates | Sparkle | 2.6+ | macOS update framework |
 | Sync | convex-swift | 0.8+ | Convex backend client |
 | Local AI | mlx-swift-lm | 2.29.x | Apple MLX inference (Qwen 2.5) |
+| YAML Parsing | Yams | 5.1+ | Kanban board YAML serialization |
 
-Three external dependencies via SPM. All are well-maintained, permissively licensed libraries.
+Four external dependencies via SPM. All are well-maintained, permissively licensed libraries.
 
 ---
 
@@ -41,6 +42,7 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
         .package(url: "https://github.com/get-convex/convex-swift", from: "0.8.1"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm/", .upToNextMinor(from: "2.29.1")),
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
     ],
     targets: [
         .target(
@@ -50,6 +52,7 @@ let package = Package(
                 .product(name: "ConvexMobile", package: "convex-swift"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "Yams", package: "Yams"),
             ],
             path: "Sources/Cider"
         )
@@ -64,11 +67,10 @@ Most code runs on the main actor by default. ViewModels and services use `@MainA
 ```swift
 // ✅ Standard ViewModel pattern used throughout Cider
 @MainActor
-final class CommandPaletteViewModel: ObservableObject {
-    @Published var pinnedApps: [AppInfo] = []
-    @Published var windowGroups: [WindowAppGroup] = []
-    @Published var isVisible = false
+final class BookmarksViewModel: ObservableObject {
     @Published var searchText: String = ""
+    @Published var displayMode: BookmarkDisplayMode
+    @Published var isVisible = false
 
     private var cancellables = Set<AnyCancellable>()
 }
@@ -92,16 +94,10 @@ nonisolated func heavyComputation() async -> Result {
 
 ```swift
 // ✅ Value types are implicitly Sendable
-struct WindowInfo: Sendable {
-    let id: CGWindowID
-    let title: String
-    let ownerPID: pid_t
-}
-
-// ✅ Final classes with immutable properties
-final class Configuration: Sendable {
-    let apiKey: String
-    let timeout: TimeInterval
+struct Bookmark: Sendable, Identifiable {
+    let id: UUID
+    var title: String
+    var urlString: String
 }
 
 // ✅ Use OSAllocatedUnfairLock for lightweight thread safety
@@ -142,58 +138,38 @@ Cider uses `ObservableObject` with `@Published` properties for all ViewModels. *
 ```swift
 // ✅ Standard ViewModel pattern used throughout Cider
 @MainActor
-final class WindowListViewModel: ObservableObject {
-    @Published var groups: [WindowAppGroup] = []
-    @Published var monitors: [MonitorInfo] = []
+final class LibraryViewModel: ObservableObject {
+    @Published private(set) var items: [LibraryItemV2] = []
+    @Published private(set) var recentItems: [LibraryItemV2] = []
 
-    let windowManager: WindowManager
-    private var cancellable: AnyCancellable?
-    private var monitorCancellable: AnyCancellable?
+    private var cancellables = Set<AnyCancellable>()
 
-    init(windowManager: WindowManager = WindowManager()) {
-        self.windowManager = windowManager
-
-        // Subscribe to monitor changes via Combine
-        monitorCancellable = MonitorManager.shared.$monitors
+    init() {
+        // Subscribe to storage changes via Combine
+        BookmarksStorage.shared.$bookmarks
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] monitors in
-                self?.monitors = monitors
-                self?.refresh()
-            }
+            .sink { [weak self] _ in self?.rebuildItems() }
+            .store(in: &cancellables)
 
-        monitors = MonitorManager.shared.monitors
-        refresh()
-        startTimer()
+        NotesStorage.shared.$notes
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildItems() }
+            .store(in: &cancellables)
+
+        rebuildItems()
     }
 
-    private func startTimer() {
-        cancellable = Timer.publish(every: 1.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.refresh()
-            }
-    }
-
-    func refresh() {
-        let allWindows = windowManager.fetchWindows()
-        // Group by app, sort alphabetically
-        // ...
-    }
-}
-
-// ✅ Local state with @State
-struct PaletteSearchBar: View {
-    @Binding var text: String
-    @State private var isFocused = false
-
-    var body: some View {
+    func rebuildItems() {
+        // Merge all storage types into unified feed
+        // Pre-compute recentItems (top 8 by updatedDate)
         // ...
     }
 }
 
 // ✅ Dependency injection
-struct CommandPaletteView: View {
-    @ObservedObject var viewModel: CommandPaletteViewModel
+struct CiderPanelView: View {
+    @ObservedObject var bookmarksViewModel: BookmarksViewModel
+    @ObservedObject var libraryViewModel: LibraryViewModel
 
     var body: some View {
         // ...
@@ -209,15 +185,16 @@ Cider uses **Combine extensively** for reactive state management:
 
 ```swift
 // Data flows from services → ViewModels → Views via Combine subscriptions
-final class CommandPaletteViewModel: ObservableObject {
-    @Published var windowGroups: [WindowAppGroup] = []
+@MainActor
+final class BookmarksViewModel: ObservableObject {
+    @Published var searchText: String = ""
     private var cancellables = Set<AnyCancellable>()
 
-    init(windowListViewModel: WindowListViewModel) {
-        windowListViewModel.$groups
+    init() {
+        BookmarksStorage.shared.$bookmarks
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] groups in
-                self?.windowGroups = groups
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
             }
             .store(in: &cancellables)
     }
@@ -232,7 +209,7 @@ final class CommandPaletteViewModel: ObservableObject {
 | View → ViewModel binding | Combine (@ObservedObject, @Published) |
 | Service → ViewModel sync | Combine (.sink, .receive(on:)) |
 | One-shot operations | async/await (Task, await) |
-| Window management API calls | Synchronous (AXUIElement is sync) |
+| Browser capture (AXUIElement) | Synchronous (AX APIs are sync) |
 | Timer-based updates | Timer + @Published |
 | Config change notifications | NotificationCenter + Combine |
 
@@ -246,14 +223,14 @@ Cider uses **UserDefaults + Codable** for all persistence. No database.
 
 ```swift
 struct CiderConfig: Codable {
-    var autoHideApps: Bool
     var showMenuBarIcon: Bool
     var textSize: TextSize
-    var paletteSize: PaletteSize
     var activationMode: ActivationMode
-    var enableOptionTabCycling: Bool
-    var optionTabCycleAllScreens: Bool
-    var rememberPaletteState: Bool
+    var activationSpeed: Double
+    var vaultDirectory: String
+    var rememberPanelPosition: Bool
+    var bookmarksDefaultViewMode: BookmarkDisplayMode
+    // ... 40+ properties (see Models/CiderConfig.swift)
 
     static let storageKey = "CiderConfig"
 
@@ -275,44 +252,36 @@ struct CiderConfig: Codable {
     func save() {
         if let data = try? JSONEncoder().encode(self) {
             UserDefaults.standard.set(data, forKey: CiderConfig.storageKey)
-            UserDefaults.standard.synchronize()
         }
     }
 
-    // Custom decoding for backward compatibility
+    // Custom decoding — every property uses decodeIfPresent + fallback
+    // for backward compatibility when new fields are added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        autoHideApps = try container.decodeIfPresent(Bool.self, forKey: .autoHideApps) ?? false
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
         textSize = try container.decodeIfPresent(TextSize.self, forKey: .textSize) ?? .medium
-        paletteSize = try container.decodeIfPresent(PaletteSize.self, forKey: .paletteSize) ?? .medium
         activationMode = try container.decodeIfPresent(ActivationMode.self, forKey: .activationMode) ?? .doubleTap
-        enableOptionTabCycling = try container.decodeIfPresent(Bool.self, forKey: .enableOptionTabCycling) ?? true
-        optionTabCycleAllScreens = try container.decodeIfPresent(Bool.self, forKey: .optionTabCycleAllScreens) ?? true
-        rememberPaletteState = try container.decodeIfPresent(Bool.self, forKey: .rememberPaletteState) ?? false
+        // ... all properties follow this pattern
     }
 }
 ```
 
-### Pinned Apps Storage
+### Content Storage
 
-Pinned apps are stored as JSON in UserDefaults:
-- Key: `"PinnedApps"`
-- Format: Array of `AppInfo` (bundle ID, name, path)
-- Loaded at app launch, saved on changes
-
-### Folders Storage
-
-App folders are stored as JSON in UserDefaults:
-- Key: `"AppFolders"`
-- Format: Array of folder objects (name, app bundle IDs)
-- Managed by `CommandPaletteViewModel`
+All user content is stored as standard files in `~/CiderVault/` (see `Docs/Architecture/STORAGE.md` for full details):
+- Bookmarks: `.webloc` files + per-folder `.cider-meta.json` sidecar
+- Notes: `.md` files
+- Contacts: `.vcf` files
+- Date Cards / Todos: `.ics` files
+- App metadata: JSON indexes in `~/CiderVault/.cider/{type}/`
+- App config: `CiderConfig` struct in UserDefaults (key: `"CiderConfig"`)
 
 **Why not a database?**
-- Simple data model (< 100 items)
-- No complex queries needed
-- Fast reads/writes with Codable
-- Atomic updates with UserDefaults
+- Files are the source of truth — users can browse in Finder
+- Standard formats (`.webloc`, `.md`, `.vcf`, `.ics`) open in native apps
+- Simple read/write with Codable indexes for fast startup
+- Atomic updates with `.atomic` write options
 
 ---
 
@@ -374,9 +343,9 @@ withAnimation(.snappy) {
     isExpanded.toggle()
 }
 
-// ✅ Custom springs from CiderAnimation
-withAnimation(CiderAnimation.hoverMagnify) {
-    scale = 1.08
+// ✅ Spring presets from CiderAnimation
+withAnimation(CiderAnimation.snappy) {
+    isExpanded.toggle()
 }
 
 // ✅ Respect Reduce Motion
@@ -392,20 +361,13 @@ withAnimation(reduceMotion ? .none : .snappy) {
 
 > NSPanel setup patterns are documented in `Docs/Architecture/FLOATING_PANEL.md`.
 
-### Window Management (AXUIElement)
+### NSPanel Integration
 
-```swift
-import ApplicationServices
-
-// WindowManager uses CGWindowListCopyWindowInfo for enumeration
-// and AXUIElement for manipulation (focus, close, move, resize)
-
-// Key patterns:
-// - CGWindowList coordinates: bottom-left origin, Y up
-// - AX coordinates: top-left origin, Y down
-// - Use convertToAXPosition() to convert between them
-// - When resizing + moving: resize first, then position
-```
+NSPanel setup patterns (borderless, non-activating, custom shadow, resize handles) are documented in `Docs/Architecture/FLOATING_PANEL.md`. Key types:
+- `CiderPanel` — main resizable panel (`App/CiderPanel.swift`)
+- `CiderPanelShell` — SwiftUI shell with sidebar, resize, compact mode (`Views/Shared/CiderPanelShell.swift`)
+- `AcrylicPanelBackground` — acrylic + shadow + corners (`Views/Shared/AcrylicPanelBackground.swift`)
+- `PanelEdgeResizeView` — all-edge AppKit resize handles (`Views/Shared/PanelEdgeResizeView.swift`)
 
 ---
 
@@ -419,15 +381,15 @@ import Testing
 @Test("Config loads with defaults for missing fields")
 func configLoadsDefaults() throws {
     let oldJSON = """
-    {"textSize":"medium","paletteSize":"medium"}
+    {"textSize":"medium"}
     """
     UserDefaults.standard.set(oldJSON.data(using: .utf8), forKey: "CiderConfig")
 
     let config = CiderConfig.load()
 
-    #expect(config.autoHideApps == false)
+    #expect(config.showMenuBarIcon == true)
     #expect(config.activationMode == .doubleTap)
-    #expect(config.enableOptionTabCycling == true)
+    #expect(config.textSize == .medium)
 }
 ```
 
@@ -461,4 +423,4 @@ When implementing any feature, verify:
 
 **Last Updated**: March 2026
 
-**This document reflects the actual Cider tech stack: Swift 6.2, SwiftUI, AppKit, Combine, UserDefaults, plus three SPM dependencies (Sparkle, convex-swift, mlx-swift-lm).**
+**This document reflects the actual Cider tech stack: Swift 6.2, SwiftUI, AppKit, Combine, UserDefaults, plus four SPM dependencies (Sparkle, convex-swift, mlx-swift-lm, Yams).**

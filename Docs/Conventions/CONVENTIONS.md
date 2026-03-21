@@ -176,9 +176,9 @@ withAnimation(.snappy) {
     // ...
 }
 
-// GOOD: Or use custom springs from CiderAnimation
-withAnimation(CiderAnimation.hoverMagnify) {
-    scale = 1.08
+// GOOD: Or use CiderAnimation presets
+withAnimation(CiderAnimation.snappy) {
+    isExpanded.toggle()
 }
 
 // BAD: Don't create ad-hoc springs
@@ -198,7 +198,7 @@ withAnimation(reduceMotion ? .none : .snappy) {
 }
 
 // GOOD: Alternative — use linear fade if some motion is needed
-withAnimation(reduceMotion ? CiderAnimation.reduceMotion : CiderAnimation.hoverMagnify) {
+withAnimation(reduceMotion ? .linear(duration: 0.2) : .spring(duration: 0.25, bounce: 0.05)) {
     scale = 1.08
 }
 ```
@@ -244,33 +244,6 @@ VStack(spacing: 12) {
 
 ---
 
-## Window Preview Thumbnails
-
-Cider uses `WindowPreviewService` for window thumbnail capture via private CoreGraphics API `CGSHWCaptureWindowList`. This avoids the Screen Recording permission prompt that `CGWindowListCreateImage` triggers.
-
-```swift
-// Actual pattern: private Window Server API (WindowPreviewService.swift)
-@_silgen_name("CGSHWCaptureWindowList")
-private func CGSHWCaptureWindowList(
-    _ cid: CGSConnectionID,
-    _ windowIDs: UnsafeMutablePointer<CGWindowID>,
-    _ windowCount: UInt32,
-    _ options: UInt32
-) -> CFArray?
-
-// Capture returns a CFArray of CGImage
-guard let imageArray = CGSHWCaptureWindowList(connectionID, &wid, 1, kCGSCaptureIgnoreGlobalClipShape) else {
-    return nil
-}
-```
-
-**Guidelines for window thumbnails:**
-- `WindowPreviewService` is a singleton (`WindowPreviewService.shared`) with `startCapturing`/`stopAllStreams` lifecycle
-- Captures run on a 0.1s interval loop (10fps) while active
-- Black-frame detection rejects mostly-black captures (minimized/hidden windows)
-- Freeze/unfreeze API prevents re-capturing windows mid-animation
-- Show a placeholder (app icon or SF Symbol) when thumbnail is unavailable
-
 ---
 
 ## Error Handling & Logging
@@ -315,18 +288,22 @@ func loadThumbnail() -> NSImage {
 
 ### Logging
 
-Cider currently uses `NSLog` for logging (prefixed with `[Cider]`):
+Cider uses `os.Logger` for structured logging:
 
 ```swift
-// GOOD: Current pattern
-NSLog("[Cider] Config decode error: \(error). Resetting to defaults.")
-NSLog("[Cider] Focusing window: \(window.title)")
+import os
 
-// WARNING: print() output is lost when launching with &>/dev/null &
-// For debugging, use file-based logging (FileHandle) instead of print()
+private let logger = Logger(subsystem: "com.cider.app", category: "ConfigService")
+
+// GOOD: Current pattern
+logger.error("Config decode error: \(error.localizedDescription). Resetting to defaults.")
+logger.info("Focusing window: \(window.title)")
+
+// WARNING: print() output is lost when launching from Dock
+// Always use os.Logger, never print()
 
 // Never log sensitive data
-// BAD: NSLog("[Cider] User password: \(password)")
+// BAD: logger.info("User password: \(password)")
 ```
 
 ---
@@ -529,7 +506,7 @@ struct TimerWindow: View {
             controls
         }
         .frame(width: 200, height: 150)
-        .background(PaletteBackgroundView(cornerRadius: Radius.xl))
+        .background(AcrylicPanelBackground(cornerRadius: Radius.xl))
     }
 
     private var headerView: some View {
@@ -585,6 +562,7 @@ All constants should be defined in a central location:
 ```swift
 // Utilities/Constants.swift
 enum Spacing {
+    static let hairline: CGFloat = 1
     static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
@@ -596,16 +574,7 @@ enum Spacing {
 }
 
 enum CiderAnimation {
-    static let smooth: Animation = .smooth
     static let snappy: Animation = .snappy
-    static let bouncy: Animation = .bouncy
-
-    // Reduce Motion: 0.2s opacity crossfade
-    static let reduceMotion: Animation = .linear(duration: 0.2)
-
-    // Custom springs
-    static let hoverMagnify = Animation.spring(duration: 0.25, bounce: 0.05)
-    static let listReorder = Animation.spring(duration: 0.3, bounce: 0.08)
 }
 ```
 

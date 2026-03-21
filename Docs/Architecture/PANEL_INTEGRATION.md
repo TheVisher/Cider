@@ -29,11 +29,11 @@ CiderPanelView
 │           ├── Saved view tabs
 │           │   ├── HomeDashboardView (standard saved/library views)
 │           │   ├── WhiteboardTabView
+│           │   ├── KanbanBoardView
 │           │   ├── OnboardingTabView
 │           │   └── Blank-tab welcome state
 │           ├── SearchTabContent (spawned searches)
 │           ├── Tag manager tab
-│           ├── AIChatView (when docked as a tab)
 │           └── Empty state (when no tabs exist)
 ├── compactOverlaySidebar (< 680pt, slides over content)
 ├── SearchPaletteView (overlay)
@@ -77,7 +77,7 @@ Card sizing: Continuous slider (0-3 scale) via CardSizing struct
   - Existing legacy thumbnails are normalized on load
 - Async thumbnail loading: `.task(id: fingerprint)` + `Task.detached` + `CGImageSourceCreateWithURL` — never `NSImage(contentsOfFile:)` on main thread
 
-View options: Dropdown popover in sidebar header (ViewOptionsDropdown.swift)
+View options: Dropdown popover in sidebar footer (ViewOptionsDropdown.swift)
 ```
 
 ---
@@ -128,9 +128,9 @@ use the shared table component instead of per-type list rows:
 - Default visible: Name, Type, Tags, Created, Modified
 - Hidden by default: Folder, URL, Words, Priority (toggled via + button)
 
-LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard(DateCard) | .contact(ContactCard)
+LibraryItemV2 discriminated union: .bookmark(Bookmark) | .note(Note) | .dateCard(DateCard) | .contact(ContactCard) | .todo(TodoCard) | .externalFile(ExternalFile) | .vaultFile(VaultFile) | .session(BrowserSession)
 - dateAnchor: Date? — key property for calendar projection; dateCards use startAt, contacts use birthday, bookmarks/notes nil
-- isCompleted: Bool — only meaningful for dateCards; used by stack surfacing rules like pinUntilDone
+- isCompleted: Bool — only meaningful for dateCards/todos; used by stack surfacing rules like pinUntilDone
 
 LibraryViewModel — unified query engine reading from all 4 storages; rebuilds on any storage change
 - Produces: filtered library feed, calendar buckets, stack resolutions
@@ -177,7 +177,7 @@ Two search systems: **SearchService** (search palette / search tab) and **Librar
 
 ## Settings Architecture
 
-Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Notes, Bookmarks, Appearance, Data, Advanced, About. Data subcategories: Directories (vault root + per-type override pickers), Trash (`StorageSettingsView`), Notifications (toast position pickers), Cider Web Sync (`SyncSettingsView`). Notes subcategories: Behavior, Editor. Bookmarks subcategory: Behavior (no directory picker — moved to Data → Directories). Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category). The sync token field is persisted through `SyncService.saveSyncToken()` into Keychain; `CiderConfig.syncToken` remains as a legacy migration path, not the primary storage location.
+Settings categories live in `SettingsCategory` enum. Adding a new top-level settings section requires: (1) new case in `SettingsCategory`, (2) add to `primaryCategories`, (3) new case(s) in `SettingsSubcategory`, (4) wire in `subcategories` switch and `selectedSubcategoryContent` switch. Current categories: General, Content, Capture, Appearance, Intelligence, Data, About, Account. General subcategories: Startup, Activation, Panel Behavior, Shortcuts. Content subcategories: Bookmarks, Notes. Capture subcategories: Bookmarks, Clipboard, Storage. Appearance subcategories: Text, Sounds, Toasts. Intelligence subcategory: Features. Data subcategories: Directories, Trash, Notifications, Import/Export. Deep-link string for "View Trash" undo toast is `"data"` (navigates to `.data` category). The sync token field is persisted through `SyncService.saveSyncToken()` into Keychain; `CiderConfig.syncToken` remains as a legacy migration path, not the primary storage location.
 
 ## Cider Web Sync
 
@@ -248,7 +248,7 @@ Cider Web is a companion web app that lets users capture bookmarks from their ph
 
 ## Popovers
 
-- **Always use SwiftUI `.popover()`, never manual NSPopover:** SwiftUI's `.popover(isPresented:, arrowEdge:)` positions correctly for views inside `NSHostingView` in non-activating panels. Manual `NSPopover.show(relativeTo:of:)` with a `PopoverAnchorView` NSView is unreliable — the NSView's reported frame in the AppKit hierarchy is misaligned with the visual position due to coordinate system inconsistencies between the flipped `NSHostingView` and its non-flipped NSView children. `PopoverAnchorView.swift` is kept only for possible future use but should not be used for popover anchoring.
+- **Always use SwiftUI `.popover()`, never manual NSPopover:** SwiftUI's `.popover(isPresented:, arrowEdge:)` positions correctly for views inside `NSHostingView` in non-activating panels. Manual `NSPopover.show(relativeTo:of:)` is unreliable — the NSView's reported frame in the AppKit hierarchy is misaligned with the visual position due to coordinate system inconsistencies between the flipped `NSHostingView` and its non-flipped NSView children.
 - **ViewBridge/RemoteViewService crash in `.popover()` content (non-activating panel):** SwiftUI popovers render content in a remote XPC process (RemoteViewService). Two things crash it: (1) `@FocusState` + async `.task { focused = true }` inside popover forms — async focus events fire into a partially-ready XPC context; (2) `withAnimation` / `.animation()` on content that changes height — animated popover resizes over XPC fail and call back through a nil function pointer (crash at `0x00000000`, "Unable to obtain a task name port right" in logs). Fix: no `@FocusState` in popover forms, no animation on content changes. Simple SwiftUI popovers with static content (e.g. `ViewOptionsDropdown`) are fine. Also: never use `DatePicker(.field)` or `DatePicker(.compact)` inside a popover in a non-activating panel — both open popup calendars that crash the same way. Use plain `TextField` with date string parsing instead.
 - **+New popover (`NewItemPopover.swift`):** 3x2 grid of type cards: Bookmark, Note, Event, Contact, Folder, Tab. No `@FocusState` or animations anywhere in the popover. Event form uses plain text fields for date ("Feb 21, 2026") and time ("2:30 PM") with `DateFormatter` multi-format parsing. Tab form creates a `SavedView` (isTabPinned: true) with selected entity type filter; panel navigates immediately to the new tab.
 
@@ -278,7 +278,7 @@ Cider Web is a companion web app that lets users capture bookmarks from their ph
 - **Card container contract:** Every card view (BookmarkCard, NoteCardView, DateCardCardView, ContactCardCardView) MUST use `.cardContainer(isHovered:isSelected:isDropTargeted:)` — never inline a `RoundedRectangle` with manual background/border/clip. Border priority inside `cardContainer`: selected > dropTargeted > hovered > default. `isDropTargeted` defaults to `false` so existing call sites need no changes when adding drop support.
 - **BookmarkCard thumbnail drop is self-contained:** `BookmarkCard` calls `BookmarksStorage.shared.assignThumbnail(...)` directly and posts `.showBookmarkCaptureToast` itself. There are NO `onAssignThumbnailFrom*` callback properties — do not add them back. Any view that renders `BookmarkCard` gets drag-and-drop thumbnail assignment for free with no wiring.
 - **Bookmark image memory model:** Render bookmark cards from `thumbnailFileURL` (downsampled asset), not `originalImageFileURL`. Full-size originals are for explicit user actions (open/export) only.
-- **Shared view parameter changes:** `BookmarksBrowserView` is used by `CiderPanelView` (and potentially multiple call sites within it). When adding required parameters, update ALL call sites.
+- **Shared view parameter changes:** Shared views like `HomeDashboardView`, `FolderDetailView`, and `SavedViewTabContent` are used by `CiderPanelView` (and potentially multiple call sites within it). When adding required parameters, update ALL call sites.
 
 ## AppKit Integration Gotchas
 
@@ -288,7 +288,7 @@ Cider Web is a companion web app that lets users capture bookmarks from their ph
 - **SourceKit false positives:** "Cannot find 'CiderFont' in scope" (and similar cross-file type errors) are SourceKit indexing noise, not real build errors. Ignore them — verify with `swift build` instead.
 - **System sounds:** `NSSound` fails silently in `.accessory` activation apps (`AddInstanceForFactory` error). Use `AudioServicesPlaySystemSound` (AudioToolbox) instead. See `CiderSoundEffect.swift`.
 - **`nonisolated static` for View helpers called off main thread:** Pure utility static methods on SwiftUI `View` structs that are called from `NSItemProvider` callbacks (non-isolated background threads) must be marked `nonisolated static`. Without it, the compiler emits a main-actor isolation warning. Example: `BookmarkCard.preferredImageFileExtension(for:)`.
-- **DetailPopoverPanel:** Secondary floating NSPanel (`App/DetailPopoverPanel.swift`) that shows detail views adjacent to the main CiderPanel. Triggered via `.showDetailPopover` notification with `userInfo["view"]` (AnyView) and optional `userInfo["preferredWidth"]` (CGFloat). Positions to the right of the main panel by default, falls back to left if no screen space. Expand mode: post `.expandCiderPanelForDetailModal` with `userInfo["minimumWidth"]` — AppDelegate saves and widens CiderPanel, then restores via `.restoreCiderPanelAfterDetailModal`. Sidebar collapses automatically during expand mode.
+- **Detail overlays:** Bookmark/note detail views display inline within the CiderPanel as full-panel overlays, slide-out sheets, or page-style views. No separate floating detail panel — all detail display happens within the main panel's view hierarchy.
 
 ## Caching & Performance
 
@@ -300,7 +300,7 @@ Cider Web is a companion web app that lets users capture bookmarks from their ph
 
 - **Xcode + SPM hybrid project:** `Cider.xcodeproj` wraps the SPM package for code signing. Only open one at a time — having both `Package.swift` and `.xcodeproj` open in Xcode simultaneously causes "Couldn't load package" / "Missing package product" errors.
 - **SWIFT_MODULE_NAME on app target:** The Xcode app target sets `SWIFT_MODULE_NAME = CiderApp` to avoid a Swift module name collision with the SPM library (both would default to "Cider" from `PRODUCT_NAME = Cider`). Do not remove this setting.
-- **Bundle.module vs Bundle.main:** Resources excluded from SPM via `exclude:` in `Package.swift` (TipTapEditor, ReaderMode) are owned by the Xcode target. Those call sites use `Bundle.main`, not `Bundle.module`. If adding new SPM-excluded resources, update the call site too.
+- **Bundle.module vs Bundle.main:** Resources excluded from SPM via `exclude:` in `Package.swift` (TipTapEditor, ExcalidrawEditor, ReaderMode) are owned by the Xcode target. Those call sites use `Bundle.main`, not `Bundle.module`. If adding new SPM-excluded resources, update the call site too.
 - **Nested types in dead files:** Before deleting a "dead" file, grep for ALL types it defines (not just the primary struct). BookmarksBrowserView.swift contained `BookmarkThumbnailView` and `BookmarkVisualStyle` used elsewhere.
 
 ## Storage & Data Integrity

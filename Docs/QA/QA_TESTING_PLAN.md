@@ -125,7 +125,7 @@ The detail panel in all its view modes, plus reader and web views.
 
 ## Round 5: Notes
 
-Creating, editing, and managing notes. Reference `Docs/NOTES_EDITOR_SMOKE_CHECKLIST.md` for deeper editor tests.
+Creating, editing, and managing notes. Reference `Docs/QA/NOTES_EDITOR_SMOKE_CHECKLIST.md` for deeper editor tests.
 
 | # | Test Step | Result | Issues / Notes |
 |---|-----------|--------|----------------|

@@ -72,10 +72,10 @@ Each platform adapts the shared language to its native conventions:
 - **Colors**: `CiderColors.*` — includes acrylic material palette (NSVisualEffectView)
 - **Typography**: macOS system font sizes (10pt caption through 20pt display)
 - **Animations**: SwiftUI `.spring()` variants (smooth, snappy, bouncy)
-- **Full spec**: `Cider/Docs/DESIGN_SYSTEM.md`
+- **Full spec**: `Cider/Docs/Design/DESIGN_SYSTEM.md`
 
 ### iOS
-- **Token files**: `CiderApp/Design/CiderColors.swift`, `CiderFont.swift`, `CiderSpacing.swift`
+- **Token files**: `Shared/CiderColors.swift`, `Shared/CiderFont.swift`, `Shared/CiderSpacing.swift`
 - **Colors**: Same opacity scale as Desktop, adapted for iOS rendering
 - **Typography**: Scaled up from Desktop for mobile reading distance (12pt caption through 24pt display)
 - **Animations**: SwiftUI `.spring()`, respects `accessibilityReduceMotion`

@@ -37,7 +37,7 @@ Tell Claude: **"Run the convention enforcement loop"** — it will read this doc
 Each area requires 3 independent clean scans before PASS. If any scan finds a new violation, fix it and reset to 1/3. This ensures thoroughness.
 
 ## Areas (scan order)
-App/ → Models/ → Utilities/ → Services/ → ViewModels/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Shared/ → Views/Search/ → Views/Settings/
+App/ → Models/ → Utilities/ → Services/ → Services/AI/ → ViewModels/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Shared/ → Views/Search/ → Views/Settings/ → Views/AIAssistant/
 
 ## Progress tracking
 

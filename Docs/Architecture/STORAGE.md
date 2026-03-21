@@ -228,9 +228,13 @@ All app-internal data lives inside `~/CiderVault/.cider/`, a hidden directory th
 ├── todos/               # Task items
 ├── clipboard/           # Clipboard history
 ├── whiteboards/         # Freeform canvas boards
+├── sessions/            # Browsing session snapshots
+├── boards/              # Kanban board YAML files
+├── folder-kanban/       # Per-folder kanban board data
 ├── folders/             # Folder metadata: index.json, covers/, .trash/
 ├── ai-chat/             # AI Chat conversation history per model
 ├── ai/                  # NL embedding vectors (embeddings.json)
+├── ai-conversations/    # AI conversation history (persistent threads)
 └── index.json           # Vault-wide item index
 ```
 

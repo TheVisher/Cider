@@ -143,7 +143,7 @@ CiderPanelShell(
 
 ### BookmarkMetadataSidebar
 
-Extracted struct in `BookmarkDetailsSheet.swift`. Used by both the slide-out panel and fullPanel/page modes. Contains: URL field, action buttons (Open/Copy/Open Image), Title, Tags, Notes, Folder picker, timestamps, Delete/Cancel/Save buttons. Has its own `surfaceInput` background + `borderStrong` border + shadow.
+Extracted struct in `BookmarkDetailsDraft.swift`. Used by both the slide-out panel and fullPanel/page modes. Contains: URL field, action buttons (Open/Copy/Open Image), Title, Tags, Notes, Folder picker, timestamps, Delete/Cancel/Save buttons. Has its own `surfaceInput` background + `borderStrong` border + shadow.
 
 ### BookmarkDetailsHeroPreview
 

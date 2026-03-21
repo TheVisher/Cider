@@ -1,6 +1,6 @@
 # Sparkle Auto-Updater Setup
 
-The code integration is complete (`SparkleUpdaterService`, Settings UI, AppDelegate wiring). These manual steps remain to activate update checking.
+The code integration is complete (`SparkleUpdaterService`, Settings UI, AppDelegate wiring). Steps 1-3 are done. These steps remain for publishing updates.
 
 ## 1. Add Sparkle to the Xcode Project
 
@@ -13,35 +13,23 @@ The SPM `Package.swift` already has the dependency, but Xcode needs to know abou
 5. When prompted, add the **Sparkle** library to the **Cider** app target
 6. Build to verify it links correctly
 
-## 2. Generate Ed25519 Signing Keys
+## 2. Generate Ed25519 Signing Keys (DONE)
 
-Sparkle signs updates with Ed25519. You need a key pair:
+Sparkle signs updates with Ed25519. Key pair has been generated.
 
 ```bash
 # The generate_keys tool is inside the downloaded Sparkle framework
 .build/artifacts/sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework/Resources/bin/generate_keys
 ```
 
-This prints:
-- A **private key** — save it in your Keychain or a secure location. You'll need it to sign `.dmg` files before publishing updates.
-- A **public key** — goes into Info.plist (next step).
-
 **Keep the private key safe.** If you lose it, existing users can't verify future updates.
 
-## 3. Configure Info.plist
+## 3. Configure Info.plist (DONE)
 
-Add these two keys to `Sources/Cider/Resources/Info.plist`:
+`Sources/Cider/Resources/Info.plist` already contains `SUFeedURL` and `SUPublicEDKey`.
 
-```xml
-<key>SUFeedURL</key>
-<string>https://thevisher.github.io/Cider/appcast.xml</string>
-
-<key>SUPublicEDKey</key>
-<string>YOUR_PUBLIC_ED25519_KEY_HERE</string>
-```
-
-- `SUFeedURL`: Where Sparkle checks for updates. Can be GitHub Pages, a raw GitHub URL, or any HTTPS endpoint.
-- `SUPublicEDKey`: The public key from step 2.
+- `SUFeedURL`: `https://thevisher.github.io/Cider/appcast.xml`
+- `SUPublicEDKey`: Set to the generated public key.
 
 ## 4. Set Up the Appcast
 

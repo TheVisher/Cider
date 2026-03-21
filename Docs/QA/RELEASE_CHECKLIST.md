@@ -26,11 +26,11 @@
 - [ ] Panel resizable from all edges.
 - [ ] Sidebar auto-hides at compact width.
 - [ ] Panel remembers position per-screen.
-- [ ] Escape key or click outside dismisses panel.
+- [ ] Option tap dismisses panel (Escape walks back states, click outside does NOT dismiss).
 - [ ] Settings persist across launches.
 
 ## Title Bar QA
-- [ ] Tab bar shows Home tab (only fixed tab). Saved view tabs, search tabs, and external source tabs appear as created.
+- [ ] Tab bar shows saved view tabs, search tabs, and external source tabs as created (Home tab was removed).
 - [ ] Sidebar toggle button works.
 - [ ] View options dropdown (bookmarks tab) — slider + view mode icons.
 - [ ] Capture button (bookmarks tab) — captures active browser tab.
@@ -50,7 +50,7 @@
 - [ ] Thumbnail drag-and-drop assignment works.
 
 ## Notes Editor QA
-- [ ] Run `Docs/NOTES_EDITOR_SMOKE_CHECKLIST.md` end-to-end.
+- [ ] Run `Docs/QA/NOTES_EDITOR_SMOKE_CHECKLIST.md` end-to-end.
 - [ ] Notes appear in folder sidebar.
 - [ ] Note panel opens correctly.
 

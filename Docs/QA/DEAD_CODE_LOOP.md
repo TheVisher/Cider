@@ -45,7 +45,7 @@ After removal: `swift build` must pass. If build fails, the code wasn't actually
 Each area requires 3 independent clean scans before PASS. If any scan finds new dead code, remove it and reset to 1/3.
 
 ## Areas (scan order)
-App/ → Models/ → Utilities/ → Services/ → ViewModels/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Shared/ → Views/Search/ → Views/Settings/
+App/ → Models/ → Utilities/ → Services/ → Services/AI/ → ViewModels/ → Views/Bookmarks/ → Views/Notes/ → Views/Home/ → Views/Shared/ → Views/Search/ → Views/Settings/ → Views/AIAssistant/
 
 ## Progress tracking
 

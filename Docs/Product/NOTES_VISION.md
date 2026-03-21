@@ -278,10 +278,10 @@ Support `.txt` files alongside `.md`. Some users prefer plain text — no format
 - `strippedContent` skips markdown regex for plain text; `imageURLs` returns `[]`
 - Screen captures always create `.md` (embed `<img>` tags)
 - Rename preserves existing extension
-- Full plan: `.claude/plans/encapsulated-splashing-harbor.md`
+- Full plan was in `.claude/plans/encapsulated-splashing-harbor.md` (since deleted)
 
 ### Drag Out to External Apps
-Drag a note card out of Cider onto Finder, a text editor, or a CLI and it drops the actual `.md` file. Currently drag providers only register internal Cider IDs — adding `public.file-url` with the note's resolved file path enables this. Full spec in `WORKSPACES_VISION.md` → "Drag Out to External Apps".
+✅ **Implemented (R-11).** Drag a note card out of Cider onto Finder, a text editor, or a CLI and it drops the actual `.md` file via `public.file-url`. Full spec in `WORKSPACES_VISION.md` → "Drag Out to External Apps".
 
 ### UX Ideas from Note App Research
 
@@ -316,7 +316,7 @@ This means any visible text on screen — a chat message, a document, a code sni
 
 ### Todos / Planner Tab
 
-Now has its own vision doc: `Docs/TODOS_VISION.md`. The core idea remains: separate actionable items (todos) from captured thoughts (notes) and freeform brainstorming (whiteboard).
+Now has its own vision doc: `Docs/_archive/TODOS_VISION.md`. The core idea remains: separate actionable items (todos) from captured thoughts (notes) and freeform brainstorming (whiteboard).
 
 ---
 

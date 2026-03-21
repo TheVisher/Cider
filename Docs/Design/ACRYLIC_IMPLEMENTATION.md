@@ -15,7 +15,7 @@ We use `NSVisualEffectView` with `.underWindowBackground` material and `.behindW
 ### Background View (SwiftUI)
 
 ```swift
-struct PaletteBackgroundView: View {
+struct AcrylicPanelBackground: View {
     let cornerRadius: CGFloat
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -30,27 +30,16 @@ struct PaletteBackgroundView: View {
     @ViewBuilder
     private var acrylicBackground: some View {
         ZStack {
-            // Shadow layer - drawn as blurred shape (not .shadow() modifier)
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.black)
-                .blur(radius: 18)
-                .offset(y: 18)
-                .opacity(0.7)
-
-            // Main acrylic content
-            ZStack {
-                VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                Color.black.opacity(0.45)  // Dark tint
-                Color.white.opacity(0.03)  // Subtle highlight
-            }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                // Border stroke - use .stroke() not .strokeBorder() for proper alignment
-                RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: CiderBorder.innerStrokeWidth)
-                    .padding(CiderBorder.innerStrokeInset)
-            )
+            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+            CiderColors.acrylicTint
+            CiderColors.surfaceHighlight
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
+                .stroke(CiderColors.borderPanel, lineWidth: CiderBorder.innerStrokeWidth)
+                .padding(CiderBorder.innerStrokeInset)
+        )
     }
 
     @ViewBuilder
@@ -60,7 +49,7 @@ struct PaletteBackgroundView: View {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
-                    .stroke(CiderColors.separator.opacity(0.5), lineWidth: CiderBorder.innerStrokeWidth)
+                    .stroke(CiderColors.separatorStrong, lineWidth: CiderBorder.innerStrokeWidth)
                     .padding(CiderBorder.innerStrokeInset)
             )
     }
@@ -76,18 +65,36 @@ import AppKit
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode
+    let state: NSVisualEffectView.State
+
+    init(material: NSVisualEffectView.Material,
+         blendingMode: NSVisualEffectView.BlendingMode,
+         state: NSVisualEffectView.State = .active) {
+        self.material = material
+        self.blendingMode = blendingMode
+        self.state = state
+    }
 
     func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+        let view = PassthroughVisualEffectView()
         view.material = material
         view.blendingMode = blendingMode
-        view.state = .active
+        view.state = state
+        view.wantsLayer = true
         return view
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
         nsView.material = material
         nsView.blendingMode = blendingMode
+        nsView.state = state
+    }
+}
+
+private final class PassthroughVisualEffectView: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Allow clicks to pass through to SwiftUI content.
+        return nil
     }
 }
 ```
@@ -99,10 +106,17 @@ struct VisualEffectView: NSViewRepresentable {
 All floating panels must be configured correctly:
 
 ```swift
-final class CommandPalettePanel: NSPanel {
+final class CiderPanel: NSPanel {
     init() {
+        let initialFrame = NSRect(
+            x: 0,
+            y: 0,
+            width: CiderPanelDesign.panelContentWidth,
+            height: CiderPanelDesign.panelContentHeight
+        )
+
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
+            contentRect: initialFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -111,14 +125,21 @@ final class CommandPalettePanel: NSPanel {
         isFloatingPanel = true
         level = .floating
         hidesOnDeactivate = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false  // We draw our own shadow
+        hasShadow = false
 
-        isMovable = false
-        acceptsMouseMovedEvents = true
+        isMovableByWindowBackground = false
+        isReleasedWhenClosed = false
+
+        self.minSize = NSSize(
+            width: CiderPanelDesign.panelMinWidth,
+            height: CiderPanelDesign.panelMinHeight
+        )
+
+        contentView?.wantsLayer = true
     }
 
     override var canBecomeKey: Bool { true }
@@ -147,18 +168,20 @@ RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     .opacity(0.7)
 ```
 
-**Window padding:** The panel must be larger than the visible content to give shadows room to render:
+**Window padding:** Shadow padding is now `0` everywhere (`CiderPanelDesign.shadowPadding = 0`). The NSWindow frame matches the visible panel exactly — no extra padding is needed for shadow rendering. The panel content width and height are computed directly from the design tokens:
 
 ```swift
-let shadowPadding: CGFloat = 45
-let paletteView = CommandPaletteView(viewModel: viewModel)
-    .padding(.horizontal, shadowPadding)
-    .padding(.top, 20)
-    .padding(.bottom, shadowPadding + 15)
+// CiderPanelDesign (Constants.swift)
+static let shadowPadding: CGFloat = 0
+static let topPadding: CGFloat = 0
+static let bottomPadding: CGFloat = 0
 
-let width = paletteSize.width + shadowPadding * 2
-let height = paletteSize.maxHeight + 20 + shadowPadding + 15
-panel.setContentSize(NSSize(width: width, height: height))
+static var panelContentWidth: CGFloat {
+    defaultWidth + shadowPadding * 2   // 780pt
+}
+static var panelContentHeight: CGFloat {
+    defaultHeight + topPadding + shadowPadding + bottomPadding  // 640pt
+}
 ```
 
 ---
@@ -166,8 +189,8 @@ panel.setContentSize(NSSize(width: width, height: height))
 ## Border & Divider Guidelines
 
 ### Border Stroke
-- Width: `1.5px`
-- Color: `Color.white.opacity(0.25)`
+- Width: `CiderBorder.innerStrokeWidth` (1.5px)
+- Color: `CiderColors.borderPanel`
 - Use `.stroke()` with inset, not `.strokeBorder()` to avoid corner artifacts
 
 ### Internal Dividers
@@ -194,16 +217,15 @@ Rectangle()
 
 The acrylic style uses a limited, dark color palette:
 
-| Element | Color |
-|---------|-------|
-| Background tint | `Color.black.opacity(0.45)` |
-| Highlight layer | `Color.white.opacity(0.03)` |
-| Border | `Color.white.opacity(0.25)` |
-| Dividers | `Color.white.opacity(0.2)` |
-| Hover states | `Color.white.opacity(0.08)` |
-| Selected states | `Color.white.opacity(0.1)` |
-| Button backgrounds | `Color.white.opacity(0.05)` |
-| Footer background | `Color.white.opacity(0.03)` |
+| Element | Token | Raw Value |
+|---------|-------|-----------|
+| Background tint | `CiderColors.acrylicTint` | `Color.black.opacity(0.45)` |
+| Highlight layer | `CiderColors.surfaceHighlight` | `Color.white.opacity(0.03)` |
+| Border | `CiderColors.borderPanel` | `Color.white.opacity(0.25)` |
+| Dividers | `CiderColors.separator` | semantic |
+| Hover states | `CiderColors.surfaceInput` | `Color.white.opacity(0.08)` |
+| Selected states | `CiderColors.surfaceHover` | `Color.white.opacity(0.1)` |
+| Footer background | `CiderColors.surfaceHighlight` | `Color.white.opacity(0.03)` |
 
 ---
 
@@ -269,7 +291,7 @@ RoundedRectangle(cornerRadius: cornerRadius - 0.75, style: .continuous)
 
 ## File References
 
-- `PaletteBackgroundView.swift` - Command palette background
-- `SettingsBackgroundView` - Settings window background (in SettingsView.swift)
-- `CommandPalettePanel.swift` - NSPanel configuration
+- `AcrylicPanelBackground.swift` - Panel acrylic background (`Views/Shared/`)
+- `SettingsBackgroundView` - Settings window background (in `SettingsComponents.swift`)
+- `CiderPanel.swift` - NSPanel configuration (`App/`)
 - `SettingsWindow.swift` - Settings NSWindow configuration

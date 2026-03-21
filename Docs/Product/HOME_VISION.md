@@ -32,10 +32,10 @@ The Home tab is the library — the unified view of all Cider content. A sticky 
 
 ### Architecture
 
-- `LibraryItemV2` discriminated union: `.bookmark(Bookmark)` / `.note(Note)` / `.dateCard(DateCard)` / `.contact(ContactCard)` — all entity types flow through a single unified feed
-- `LibraryItemV2.dateAnchor: Date?` — the key property for calendar projection; dateCards use `startAt`, contacts use `birthday`, bookmarks and notes have nil
-- `LibraryItemV2.isCompleted: Bool` — only meaningful for dateCards; used by surfacing rules like `pinUntilDone`
-- `LibraryViewModel` — unified query engine reading from all four storages; produces filtered feeds, calendar buckets, and stack resolutions; rebuilds on any storage change
+- `LibraryItemV2` discriminated union: `.bookmark(Bookmark)` / `.note(Note)` / `.dateCard(DateCard)` / `.contact(ContactCard)` / `.todo(TodoCard)` / `.externalFile(ExternalFile)` / `.vaultFile(VaultFile)` / `.session(BrowserSession)` — all entity types flow through a single unified feed
+- `LibraryItemV2.dateAnchor: Date?` — the key property for calendar projection; dateCards use `startAt`, contacts use `birthday`, todos use `earliestApproachingDate`, others have nil
+- `LibraryItemV2.isCompleted: Bool` — meaningful for dateCards and todos; used by surfacing rules like `pinUntilDone`
+- `LibraryViewModel` — unified query engine reading from all storages; produces filtered feeds, calendar buckets, and stack resolutions; rebuilds on any storage change
 - `LibraryViewModel.recentItems` — pre-sorted top 8 by `updatedDate`, computed in `rebuildItems()` so Home body doesn't sort on every render
 - `LibraryDisplayMode` enum conforming to `DisplayModeOption` — plugs into ViewOptionsDropdown
 - `LibraryCardSizing` struct with 4-stop interpolation, produces `bookmarkSizing` and `noteSizing` for downstream components
@@ -144,7 +144,7 @@ Date cards are calendar-linked items — events, reminders, deadlines, and recur
 
 ### Storage
 
-Date cards are stored as standard `.ics` files (iCalendar VEVENT, RFC 5545). See `Docs/PER_FILE_STORAGE.md` for the full spec.
+Date cards are stored as standard `.ics` files (iCalendar VEVENT, RFC 5545). See `Docs/Architecture/STORAGE.md` for the full spec.
 
 ### Problem: Library Clutter from Past Events
 
@@ -227,7 +227,7 @@ Alternatively (or additionally), the Continue section on Home could mix in 1-2 r
 
 ### AI-Enhanced Discovery
 
-With Apple Intelligence (see `AI_VISION.md`):
+With Apple Intelligence (see `Docs/Features/AI.md`):
 - **Similar items** — when viewing a bookmark, Cider suggests related items via NaturalLanguage embedding similarity. "You might also want to revisit these."
 - **Contextual resurfacing** — AI notices you're saving React articles and surfaces that React tutorial you bookmarked 8 months ago but never opened
 - These suggestions could appear in the detail popover, as a sidebar section, or as cards in the Resurfacing saved view

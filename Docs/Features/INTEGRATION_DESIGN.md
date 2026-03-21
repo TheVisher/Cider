@@ -1,7 +1,7 @@
 # Cider Integration Design
 
 > **Status:** Phase 1 (panel refactor) ✅ complete. Phase 2 (Obsidian vault) — foundation in place via Linked Sources; vault-specific pieces remain. Phases 3+ are future.
-> **Companion to:** `PIVOT_STRATEGY.md`, `LINKED_SOURCES_VISION.md`
+> **Companion to:** `Docs/_archive/PIVOT_STRATEGY.md` (archived), `Docs/Product/LINKED_SOURCES_VISION.md`
 
 This document defines how Cider integrates with Obsidian and other knowledge bases, the sync adapter architecture, data format decisions, and cross-platform considerations.
 
@@ -283,6 +283,8 @@ The clipboard monitor (`BookmarksClipboardMonitor`) already watches for copied U
 ---
 
 ## Storage Layout
+
+> **Note:** This section references the old storage path `~/Documents/Cider/`. Cider now uses `~/CiderVault/` as the vault root, with a `.cider/` subdirectory for internal data. The conceptual layout below is directionally correct but paths need updating when this integration is implemented.
 
 ### Cider Local Storage (always present)
 

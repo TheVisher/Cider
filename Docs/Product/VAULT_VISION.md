@@ -247,23 +247,26 @@ Shared vaults are harder with CloudKit (`CKShare` is more record-level than work
 
 ## AI Chat Panel
 
-### Current Implementation (Option A: Styled Terminal)
+### Current Implementation: Native AI Assistant
 
-A slide-out companion panel that opens alongside the main Cider panel. Underneath it's a real PTY-backed terminal (SwiftTerm), but styled to feel like a chat window:
+> **Note:** The original plan was a styled SwiftTerm terminal (Option A below). The actual implementation went directly to a native chat UI with MLX local models.
 
-- **Slide-out panel** — separate `NSPanel` that appears to the right of the main panel, usable simultaneously
-- **Model selector** — dropdown at the top (Claude, ChatGPT, Codex, custom) that auto-launches the selected CLI tool. No need to type commands.
-- **Chat-like styling** — Cider's acrylic aesthetic, rounded corners, warm colors instead of "hacker terminal" look
-- **Working directory** pre-seeded to `CiderVault/`
-- **Toggle** via button in sidebar footer or keyboard shortcut
+A slide-out companion panel (`AIAssistantPanelView`) that opens alongside the main Cider panel:
 
-### Why This Fits "Bring Your Own AI"
+- **Floating NSPanel** — separate panel with acrylic background, positioned next to the main panel
+- **Chat bubble UI** — `AIAssistantBubbleView` renders conversation as user/assistant message bubbles
+- **MLX local models** — `MLXModelManager` manages on-device model loading; `AIAssistantViewModel` handles streaming inference
+- **Tool calling** — `MLXToolExecutor` + `AIAssistantTools` let the AI interact with vault content (search, read, organize)
+- **Conversation persistence** — `AIConversationStorage` saves chat history across sessions
+- **Model picker** — select between available MLX models
 
-This doesn't lock users into any AI. It's a terminal underneath — users run whatever they want. The model selector is just a convenience that runs the right CLI command. Users can also type any command directly.
+### Original Plan: Option A — Styled Terminal (Not Implemented)
 
-### Future: Option B — Chat UI with Hidden Terminal
+The original concept was a PTY-backed terminal (SwiftTerm) styled to feel like a chat window, with model selector pills that auto-launch CLI tools. This approach was replaced by the native chat UI above, which provides a better user experience and doesn't require users to have CLI tools installed.
 
-> **Status:** Backlog. Implement after Option A is proven and user feedback confirms demand.
+### Future: Option B — Chat UI with Hidden Terminal (Archived)
+
+> **Status:** Archived. The native AI assistant approach superseded both Option A and Option B.
 
 The ambitious evolution: build a proper chat bubble UI that completely hides the terminal:
 
@@ -368,13 +371,13 @@ This is an evolution, not a rewrite. The roadmap is split into **core milestones
 - [ ] Vault file detail panel polish — match the look/feel of bookmark/note detail panels for all file types (image, PDF, video, audio). Toolbar actions, metadata sidebar, consistent layout, proper sizing.
 
 #### Milestone 3: AI Workspace
-> *Power-user AI workspace inside Cider. Users run any CLI tool against the vault.*
+> *AI workspace inside Cider for interacting with vault content.*
 
-- [x] SwiftTerm-based terminal view in Cider panel
-- [x] Working directory pre-seeded to vault folder
-- [x] Terminal panel toggle in UI
-- [x] Works with Claude Code, Codex, ChatGPT CLI, custom scripts — anything the user has installed
-- [x] AI Chat slide-out panel — separate floating panel with acrylic background, model selector pills (Shell/Claude/ChatGPT/Codex), auto-launches selected CLI tool, positions next to main panel, height persistence
+- [x] AI Assistant panel — `AIAssistantPanelView` as a separate floating NSPanel with acrylic background, chat bubble UI, MLX local model integration (`AIAssistantViewModel` + `MLXModelManager`)
+- [x] Conversation persistence — `AIConversationStorage` for chat history
+- [x] Model picker — select between available MLX models
+- [x] Tool calling — `MLXToolExecutor` + `AIAssistantTools` for vault-aware AI actions
+- ~~SwiftTerm-based terminal~~ — original terminal approach was replaced by the native AI chat panel above
 - [ ] Additional polish — custom model configuration in settings, keyboard shortcut for toggle
 
 #### Milestone 4: Data Migration (Personal)

@@ -69,7 +69,7 @@ Two swappable backends behind the `AIAssistantProvider` protocol:
 | Backend | Model | Context | Tool Calling | Best For |
 |---------|-------|---------|-------------|----------|
 | **Apple Intelligence** | Apple 3B (on-device) | 4,096 tokens | Yes (23 tools via Foundation Models Tool API) | Querying data, taking actions |
-| **Local Model (MLX)** | Qwen 2.5 7B (downloadable) | 32K tokens | Not yet (conversation only) | Longer conversations, reasoning, writing |
+| **Local Model (MLX)** | Qwen 2.5 7B (downloadable) | 32K tokens | Yes (prompt-based, same 23 tools) | Longer conversations, reasoning, writing |
 
 Users switch between them via the model picker pill in the title bar.
 
@@ -80,7 +80,8 @@ Users switch between them via the model picker pill in the title bar.
 | `Services/AI/AIAssistantProvider.swift` | Protocol, message model, context model |
 | `Services/AI/AIAssistantTools.swift` | All 23 tools (read + write) for data access and actions |
 | `Services/AI/FoundationModelsProvider.swift` | Apple Intelligence backend with tool calling + context management |
-| `Services/AI/MLXProvider.swift` | Local Qwen 2.5 backend via MLX Swift |
+| `Services/AI/MLXProvider.swift` | Local Qwen 2.5 backend via MLX Swift with prompt-based tool calling |
+| `Services/AI/MLXToolExecutor.swift` | Executes the same 23 tools for the MLX provider |
 | `Services/AI/MLXModelManager.swift` | Model download, load, unload, idle timeout, memory management |
 | `Services/AI/AIConversationStorage.swift` | JSONL conversation persistence |
 | `ViewModels/AIAssistantViewModel.swift` | Conversation state, streaming, typewriter, provider switching |
@@ -210,7 +211,7 @@ The Foundation Models framework handles the tool call loop automatically — mod
 
 ### Current Status
 
-**Shipped:** Qwen 2.5 via MLX Swift. Conversation only (no tool calling yet).
+**Shipped:** Qwen 2.5 via MLX Swift with prompt-based tool calling (same 23 tools as Apple Intelligence).
 
 **Why Qwen 2.5 instead of 3.5:** Qwen 3.5 architecture (`qwen3_5`) is not yet supported by mlx-swift-lm 2.29.x. Will upgrade when support lands.
 
@@ -285,15 +286,9 @@ This limitation is why the Local Model (32K context) is a major upgrade for conv
 
 ## Roadmap
 
-### Next: Tool Calling for Local Model
+### Shipped: Tool Calling for Local Model ✅
 
-Give the MLX/Qwen model the same 23 tools as Apple Intelligence via prompt-based tool use:
-- Include tool descriptions in system prompt
-- Model outputs tool calls in structured JSON format
-- Parse and execute tool calls
-- Feed results back for final response
-
-This is the highest-priority next step — it makes the local model actually useful for organizing data, not just chatting.
+The MLX/Qwen model now has the same 23 tools as Apple Intelligence via prompt-based tool use (`MLXToolExecutor.swift`). Tool descriptions are included in the system prompt, model outputs `<tool_call>` blocks, which are parsed, executed, and results fed back for the final response. Up to 3 tool-call round-trips per message.
 
 ### Next: Confirmation UI for Write Actions
 
@@ -309,4 +304,4 @@ Clickable item cards in responses — tap to open the referenced bookmark/note i
 - **RAG** — vector search across all items for semantic queries
 - **Custom instructions** — user personality/behavior preferences
 - **Screen context** — feed screenshot OCR into chat via `ScreenCaptureService`
-- **Streaming for MLX** — token-by-token output instead of full response dump
+- **Streaming for MLX** — token-by-token output (currently generates full response then yields)
