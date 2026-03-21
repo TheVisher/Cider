@@ -861,6 +861,18 @@ struct SavedViewTabContent: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .kanban:
+                // Kanban with custom columns requires a folder context — fall back to grid
+                let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
+                LazyVGrid(columns: columns, spacing: Spacing.md) {
+                    ForEach(filteredItems) { item in
+                        itemCard(item)
+                            .modifier(CardContextMenuModifier {
+                                contextMenuItems(for: item)
+                            })
+                    }
+                }
             }
         }
     }

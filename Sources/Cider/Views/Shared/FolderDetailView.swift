@@ -149,11 +149,12 @@ struct FolderDetailView: View {
                                         folderConfig.save()
                                     }
                                 }
+                                let noPadding = displayMode == .list || displayMode == .kanban
                                 libraryFeed
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(displayMode == .list ? 0 : Spacing.xxs)
-                                    .padding(.horizontal, displayMode == .list ? 0 : Spacing.md)
-                                    .padding(.vertical, displayMode == .list ? 0 : Spacing.md)
+                                    .padding(noPadding ? 0 : Spacing.xxs)
+                                    .padding(.horizontal, noPadding ? 0 : Spacing.md)
+                                    .padding(.vertical, noPadding ? 0 : Spacing.md)
                             } else {
                                 EmptyStateView(
                                     icon: "tray",
@@ -594,6 +595,13 @@ struct FolderDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, Spacing.xs)
+
+        case .kanban:
+            FolderKanbanView(
+                folderID: folderID,
+                items: folderItems,
+                onOpen: { item in handleNormalAction { openItem(item) } }
+            )
         }
     }
 

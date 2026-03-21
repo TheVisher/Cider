@@ -205,6 +205,16 @@ struct HomeDashboardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, Spacing.xs)
+
+        case .kanban:
+            // Kanban only supported in folder detail — fall back to grid
+            let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
+            LazyVGrid(columns: columns, spacing: Spacing.md) {
+                ForEach(libraryItems) { item in
+                    libraryCard(item, mode: .grid)
+                        .id(item.id)
+                }
+            }
         }
     }
 

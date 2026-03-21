@@ -147,6 +147,20 @@ struct SourceDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, Spacing.xs)
+
+        case .kanban:
+            // Kanban only supported in folder detail — fall back to list
+            LazyVStack(spacing: Spacing.xxs) {
+                ForEach(files) { file in
+                    SourceCardView(
+                        file: file,
+                        width: containerWidth - Spacing.md * 2,
+                        isSelected: selectedFileID == file.id,
+                        onOpen: { openFile(file) },
+                        onDelete: { deleteFile(file) }
+                    )
+                }
+            }
         }
     }
 

@@ -5,6 +5,7 @@ enum LibraryDisplayMode: String, Codable, CaseIterable {
     case list
     case grid
     case masonry
+    case kanban
 
     var displayName: String {
         switch self {
@@ -14,6 +15,8 @@ enum LibraryDisplayMode: String, Codable, CaseIterable {
             "Grid"
         case .masonry:
             "Masonry"
+        case .kanban:
+            "Kanban"
         }
     }
 
@@ -25,6 +28,8 @@ enum LibraryDisplayMode: String, Codable, CaseIterable {
             "square.grid.2x2"
         case .masonry:
             "rectangle.grid.1x2"
+        case .kanban:
+            "rectangle.split.3x1"
         }
     }
 }
