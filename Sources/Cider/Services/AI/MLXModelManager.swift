@@ -125,17 +125,21 @@ final class MLXModelManager: ObservableObject {
 
     /// Generate a non-streaming response from the loaded model.
     nonisolated func generate(prompt: String, systemPrompt: String) async throws -> String {
+        try await generate(messages: [
+            ["role": "system", "content": systemPrompt],
+            ["role": "user", "content": prompt]
+        ])
+    }
+
+    /// Generate a non-streaming response from a full messages array.
+    /// Used by the tool-calling loop which injects tool results as additional messages.
+    nonisolated func generate(messages: [[String: String]]) async throws -> String {
         let container = await modelContainer
         guard let container else {
             throw MLXError.modelNotLoaded
         }
 
         await resetIdleTimer()
-
-        let messages: [[String: String]] = [
-            ["role": "system", "content": systemPrompt],
-            ["role": "user", "content": prompt]
-        ]
 
         let output: String = try await container.perform { context in
             let input = try await context.processor.prepare(

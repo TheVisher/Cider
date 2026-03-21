@@ -1,0 +1,774 @@
+import Foundation
+import os.log
+
+/// Executes Cider tools by name, reusing the same storage queries as the
+/// Foundation Models tool structs in `AIAssistantTools.swift`.
+@MainActor
+enum MLXToolExecutor {
+
+    private static let logger = Logger(subsystem: "com.cider.app", category: "MLXToolExecutor")
+
+    /// Execute a tool and return its string result.
+    static func execute(name: String, arguments: [String: Any]) -> String {
+        logger.info("Executing tool: \(name, privacy: .public)")
+
+        switch name {
+
+        // MARK: - Read-only tools
+
+        case "countItems":
+            return countItems(arguments)
+        case "searchItems":
+            return searchItems(arguments)
+        case "listFolders":
+            return listFolders()
+        case "listTags":
+            return listTags()
+        case "getRecentItems":
+            return getRecentItems(arguments)
+        case "getItemsByTag":
+            return getItemsByTag(arguments)
+        case "getUpcomingEvents":
+            return getUpcomingEvents(arguments)
+        case "getOverdueTodos":
+            return getOverdueTodos()
+        case "getFolderContents":
+            return getFolderContents(arguments)
+        case "getBrowserSessions":
+            return getBrowserSessions()
+        case "getCurrentItem":
+            return getCurrentItem()
+        case "findSimilar":
+            return findSimilar(arguments)
+
+        // MARK: - Mutating tools
+
+        case "createFolder":
+            return createFolder(arguments)
+        case "moveToFolder":
+            return moveToFolder(arguments)
+        case "applyTag":
+            return applyTag(arguments)
+        case "removeTag":
+            return removeTag(arguments)
+        case "renameBookmark":
+            return renameBookmark(arguments)
+        case "createNote":
+            return createNote(arguments)
+        case "addBookmark":
+            return addBookmark(arguments)
+        case "deleteItem":
+            return deleteItem(arguments)
+        case "renameFolder":
+            return renameFolder(arguments)
+        case "unfileItems":
+            return unfileItems(arguments)
+
+        // MARK: - Special
+
+        case "summarizeText":
+            return "Summarization requires Apple Intelligence and is not available with the local model."
+
+        default:
+            logger.warning("Unknown tool: \(name, privacy: .public)")
+            return "Unknown tool \"\(name)\"."
+        }
+    }
+
+    // MARK: - Argument helpers
+
+    private static func string(_ key: String, from args: [String: Any]) -> String {
+        (args[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func optString(_ key: String, from args: [String: Any]) -> String? {
+        guard let val = args[key] as? String else { return nil }
+        let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func integer(_ key: String, from args: [String: Any], default fallback: Int) -> Int {
+        if let n = args[key] as? Int { return n }
+        if let n = args[key] as? Double { return Int(n) }
+        if let s = args[key] as? String, let n = Int(s) { return n }
+        return fallback
+    }
+
+    private static func bool(_ key: String, from args: [String: Any]) -> Bool {
+        if let b = args[key] as? Bool { return b }
+        if let s = args[key] as? String { return s.lowercased() == "true" }
+        return false
+    }
+
+    // MARK: - Tool implementations
+
+    private static func countItems(_ args: [String: Any]) -> String {
+        let type = string("itemType", from: args).lowercased()
+
+        switch type {
+        case "bookmarks", "bookmark":
+            return "The user has \(BookmarksStorage.shared.bookmarks.count) bookmarks."
+        case "notes", "note":
+            return "The user has \(NotesStorage.shared.notes.count) notes."
+        case "events", "event", "datecards", "datecard", "date cards":
+            let count = DateCardStorage.shared.dateCards.count
+            let upcoming = DateCardStorage.shared.dateCards.filter { $0.startAt > Date() && !$0.isCompleted }.count
+            return "The user has \(count) events (\(upcoming) upcoming)."
+        case "todos", "todo", "tasks", "task":
+            let all = TodoCardStorage.shared.todoCards
+            let incomplete = all.filter { !$0.isCompleted }.count
+            return "The user has \(all.count) todos (\(incomplete) incomplete)."
+        case "contacts", "contact":
+            return "The user has \(ContactStorage.shared.contacts.count) contacts."
+        case "folders", "folder":
+            return "The user has \(VaultFolderService.shared.folders.count) folders."
+        case "tags", "tag", "labels", "label":
+            return "The user has \(CardLabelStorage.shared.labels.count) tags/labels."
+        case "clipboard":
+            return "The clipboard history has \(ClipboardStorage.shared.items.count) items."
+        case "sessions", "session", "browser sessions":
+            return "The user has \(BrowserSessionStorage.shared.sessions.count) saved browser sessions."
+        case "all", "everything", "summary":
+            let b = BookmarksStorage.shared.bookmarks.count
+            let n = NotesStorage.shared.notes.count
+            let e = DateCardStorage.shared.dateCards.count
+            let t = TodoCardStorage.shared.todoCards.count
+            let c = ContactStorage.shared.contacts.count
+            let f = VaultFolderService.shared.folders.count
+            let l = CardLabelStorage.shared.labels.count
+            let s = BrowserSessionStorage.shared.sessions.count
+            return "Library summary: \(b) bookmarks, \(n) notes, \(e) events, \(t) todos, \(c) contacts, \(f) folders, \(l) tags, \(s) browser sessions."
+        default:
+            return "Unknown item type '\(type)'. Valid types: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, sessions, all."
+        }
+    }
+
+    private static func searchItems(_ args: [String: Any]) -> String {
+        let query = string("query", from: args).lowercased()
+        let typeFilter = optString("itemType", from: args)?.lowercased()
+        let searchAll = typeFilter == nil || typeFilter == "all"
+        var results: [String] = []
+
+        if searchAll || typeFilter == "bookmarks" || typeFilter == "bookmark" {
+            let matches = BookmarksStorage.shared.bookmarks.filter {
+                $0.title.localizedStandardContains(query) ||
+                $0.urlString.localizedStandardContains(query) ||
+                $0.notes.localizedStandardContains(query) ||
+                $0.tags.contains(where: { $0.localizedStandardContains(query) }) ||
+                ($0.aiSummary?.localizedStandardContains(query) ?? false)
+            }
+            for b in matches.prefix(10) {
+                var desc = "Bookmark: \"\(b.title)\" (\(b.urlString))"
+                if let summary = b.aiSummary { desc += " — \(summary)" }
+                results.append(desc)
+            }
+            if matches.count > 10 { results.append("...and \(matches.count - 10) more bookmarks") }
+        }
+
+        if searchAll || typeFilter == "notes" || typeFilter == "note" {
+            let matches = NotesStorage.shared.notes.filter {
+                $0.title.localizedStandardContains(query) ||
+                $0.contentPreview.localizedStandardContains(query)
+            }
+            for n in matches.prefix(10) {
+                var desc = "Note: \"\(n.title)\""
+                let preview = String(n.contentPreview.prefix(80))
+                if !preview.isEmpty { desc += " — \(preview)" }
+                results.append(desc)
+            }
+            if matches.count > 10 { results.append("...and \(matches.count - 10) more notes") }
+        }
+
+        if searchAll || typeFilter == "events" || typeFilter == "event" {
+            let matches = DateCardStorage.shared.dateCards.filter {
+                $0.title.localizedStandardContains(query) ||
+                $0.details.localizedStandardContains(query) ||
+                $0.location.localizedStandardContains(query)
+            }
+            let fmt = DateFormatter()
+            fmt.dateStyle = .medium
+            for e in matches.prefix(10) {
+                results.append("Event: \"\(e.title)\" on \(fmt.string(from: e.startAt))")
+            }
+            if matches.count > 10 { results.append("...and \(matches.count - 10) more events") }
+        }
+
+        if searchAll || typeFilter == "todos" || typeFilter == "todo" {
+            let matches = TodoCardStorage.shared.todoCards.filter {
+                $0.title.localizedStandardContains(query) ||
+                $0.details.localizedStandardContains(query)
+            }
+            for t in matches.prefix(10) {
+                let status = t.isCompleted ? "done" : "incomplete"
+                results.append("Todo: \"\(t.title)\" (\(status))")
+            }
+            if matches.count > 10 { results.append("...and \(matches.count - 10) more todos") }
+        }
+
+        if searchAll || typeFilter == "contacts" || typeFilter == "contact" {
+            let matches = ContactStorage.shared.contacts.filter {
+                $0.displayName.localizedStandardContains(query) ||
+                $0.email.localizedStandardContains(query) ||
+                $0.notes.localizedStandardContains(query)
+            }
+            for c in matches.prefix(10) {
+                var desc = "Contact: \"\(c.displayName)\""
+                if !c.email.isEmpty { desc += " (\(c.email))" }
+                results.append(desc)
+            }
+            if matches.count > 10 { results.append("...and \(matches.count - 10) more contacts") }
+        }
+
+        if results.isEmpty {
+            return "No items found matching \"\(string("query", from: args))\"."
+        }
+        return "Found \(results.count) results:\n" + results.joined(separator: "\n")
+    }
+
+    private static func listFolders() -> String {
+        let folders = VaultFolderService.shared.folders
+        if folders.isEmpty { return "No folders exist yet." }
+
+        let bookmarks = BookmarksStorage.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let events = DateCardStorage.shared.dateCards
+        let todos = TodoCardStorage.shared.todoCards
+        let contacts = ContactStorage.shared.contacts
+
+        var lines: [String] = []
+        for folder in folders.sorted(by: { $0.relativePath < $1.relativePath }) {
+            let fid = folder.id
+            let bCount = bookmarks.filter { $0.folderID == fid }.count
+            let nCount = notes.filter { $0.folderID == fid }.count
+            let eCount = events.filter { $0.folderID == fid }.count
+            let tCount = todos.filter { $0.folderID == fid }.count
+            let cCount = contacts.filter { $0.folderID == fid }.count
+            let total = bCount + nCount + eCount + tCount + cCount
+            lines.append("\(folder.name) (\(total) items)")
+        }
+        return "Folders:\n" + lines.joined(separator: "\n")
+    }
+
+    private static func listTags() -> String {
+        let labels = CardLabelStorage.shared.labels
+        if labels.isEmpty { return "No tags/labels exist yet." }
+
+        var lines: [String] = []
+        for label in labels.sorted(by: { $0.name < $1.name }) {
+            let count = CardLabelStorage.shared.itemCount(for: label.id)
+            lines.append("\(label.name) (\(count) items)")
+        }
+        return "Tags:\n" + lines.joined(separator: "\n")
+    }
+
+    private static func getRecentItems(_ args: [String: Any]) -> String {
+        let days = integer("days", from: args, default: 7)
+        let threshold = Date().addingTimeInterval(-Double(days) * 86400)
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        var results: [String] = []
+
+        let recentBookmarks = BookmarksStorage.shared.bookmarks
+            .filter { $0.createdAt >= threshold }
+            .sorted { $0.createdAt > $1.createdAt }
+        for b in recentBookmarks.prefix(10) {
+            results.append("Bookmark: \"\(b.title)\" — \(fmt.string(from: b.createdAt))")
+        }
+        if recentBookmarks.count > 10 { results.append("...and \(recentBookmarks.count - 10) more bookmarks") }
+
+        let recentNotes = NotesStorage.shared.notes
+            .filter { $0.modifiedAt >= threshold }
+            .sorted { $0.modifiedAt > $1.modifiedAt }
+        for n in recentNotes.prefix(10) {
+            results.append("Note: \"\(n.title)\" — \(fmt.string(from: n.modifiedAt))")
+        }
+        if recentNotes.count > 10 { results.append("...and \(recentNotes.count - 10) more notes") }
+
+        let recentEvents = DateCardStorage.shared.dateCards
+            .filter { $0.createdAt >= threshold }
+            .sorted { $0.createdAt > $1.createdAt }
+        for e in recentEvents.prefix(5) {
+            results.append("Event: \"\(e.title)\" — \(fmt.string(from: e.startAt))")
+        }
+
+        let recentTodos = TodoCardStorage.shared.todoCards
+            .filter { $0.createdAt >= threshold }
+            .sorted { $0.createdAt > $1.createdAt }
+        for t in recentTodos.prefix(5) {
+            let status = t.isCompleted ? "done" : "incomplete"
+            results.append("Todo: \"\(t.title)\" (\(status))")
+        }
+
+        if results.isEmpty {
+            return "No items created or modified in the last \(days) day(s)."
+        }
+        return "Items from the last \(days) day(s):\n" + results.joined(separator: "\n")
+    }
+
+    private static func getItemsByTag(_ args: [String: Any]) -> String {
+        let tagName = string("tagName", from: args)
+        guard let label = CardLabelStorage.shared.labels.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(tagName) == .orderedSame
+        }) else {
+            let partial = CardLabelStorage.shared.labels.filter {
+                $0.name.localizedStandardContains(tagName)
+            }
+            if partial.isEmpty {
+                return "No tag named \"\(tagName)\" found. Available tags: \(CardLabelStorage.shared.labels.map(\.name).joined(separator: ", "))"
+            }
+            return "No exact match for \"\(tagName)\". Did you mean: \(partial.map(\.name).joined(separator: ", "))?"
+        }
+
+        let lid = label.id
+        var results: [String] = []
+
+        let bookmarks = BookmarksStorage.shared.bookmarks.filter { $0.labelIDs.contains(lid) }
+        for b in bookmarks.prefix(10) { results.append("Bookmark: \"\(b.title)\"") }
+        if bookmarks.count > 10 { results.append("...and \(bookmarks.count - 10) more bookmarks") }
+
+        let notes = NotesStorage.shared.notes.filter { $0.labelIDs.contains(lid) }
+        for n in notes.prefix(10) { results.append("Note: \"\(n.title)\"") }
+
+        let events = DateCardStorage.shared.dateCards.filter { $0.labelIDs.contains(lid) }
+        for e in events.prefix(5) { results.append("Event: \"\(e.title)\"") }
+
+        let todos = TodoCardStorage.shared.todoCards.filter { $0.labelIDs.contains(lid) }
+        for t in todos.prefix(5) { results.append("Todo: \"\(t.title)\"") }
+
+        let contacts = ContactStorage.shared.contacts.filter { $0.labelIDs.contains(lid) }
+        for c in contacts.prefix(5) { results.append("Contact: \"\(c.displayName)\"") }
+
+        let total = bookmarks.count + notes.count + events.count + todos.count + contacts.count
+        if total == 0 {
+            return "Tag \"\(label.name)\" exists but has no items."
+        }
+        return "\(total) items tagged \"\(label.name)\":\n" + results.joined(separator: "\n")
+    }
+
+    private static func getUpcomingEvents(_ args: [String: Any]) -> String {
+        let days = integer("days", from: args, default: 7)
+        let now = Date()
+        let end = now.addingTimeInterval(Double(days) * 86400)
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+
+        let upcoming = DateCardStorage.shared.dateCards
+            .filter { $0.startAt >= now && $0.startAt <= end && !$0.isCompleted }
+            .sorted { $0.startAt < $1.startAt }
+
+        if upcoming.isEmpty {
+            return "No upcoming events in the next \(days) day(s)."
+        }
+
+        var lines: [String] = []
+        for e in upcoming.prefix(20) {
+            var desc = "\"\(e.title)\" — \(fmt.string(from: e.startAt))"
+            if !e.location.isEmpty { desc += " at \(e.location)" }
+            if e.allDay { desc += " (all day)" }
+            lines.append(desc)
+        }
+        if upcoming.count > 20 { lines.append("...and \(upcoming.count - 20) more") }
+        return "Upcoming events (\(upcoming.count) total):\n" + lines.joined(separator: "\n")
+    }
+
+    private static func getOverdueTodos() -> String {
+        let now = Date()
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+
+        let todos = TodoCardStorage.shared.todoCards.filter { !$0.isCompleted }
+        let overdue = todos.filter { todo in
+            guard let due = todo.dueDate else { return false }
+            return due < now
+        }.sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+
+        let highPriority = todos.filter { $0.priority == .high && $0.dueDate == nil }
+        var results: [String] = []
+
+        if !overdue.isEmpty {
+            results.append("Overdue:")
+            for t in overdue.prefix(15) {
+                results.append("  \"\(t.title)\" — due \(fmt.string(from: t.dueDate!))")
+            }
+        }
+        if !highPriority.isEmpty {
+            results.append("High priority (no due date):")
+            for t in highPriority.prefix(10) {
+                results.append("  \"\(t.title)\"")
+            }
+        }
+
+        if overdue.isEmpty && highPriority.isEmpty {
+            return "No overdue or high-priority todos. \(todos.count) incomplete todo(s) total."
+        }
+        return "\(overdue.count) overdue, \(highPriority.count) high-priority, \(todos.count) incomplete total:\n" + results.joined(separator: "\n")
+    }
+
+    private static func getFolderContents(_ args: [String: Any]) -> String {
+        let name = string("folderName", from: args)
+        let folders = VaultFolderService.shared.folders
+
+        guard let folder = folders.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) ?? folders.first(where: {
+            $0.name.localizedStandardContains(name)
+        }) else {
+            return "No folder named \"\(name)\". Available folders: \(folders.map(\.name).joined(separator: ", "))"
+        }
+
+        let fid = folder.id
+        var results: [String] = []
+
+        let bookmarks = BookmarksStorage.shared.bookmarks.filter { $0.folderID == fid }
+        for b in bookmarks.prefix(15) { results.append("Bookmark: \"\(b.title)\"") }
+        if bookmarks.count > 15 { results.append("...and \(bookmarks.count - 15) more bookmarks") }
+
+        let notes = NotesStorage.shared.notes.filter { $0.folderID == fid }
+        for n in notes.prefix(10) { results.append("Note: \"\(n.title)\"") }
+
+        let events = DateCardStorage.shared.dateCards.filter { $0.folderID == fid }
+        for e in events.prefix(5) { results.append("Event: \"\(e.title)\"") }
+
+        let todos = TodoCardStorage.shared.todoCards.filter { $0.folderID == fid }
+        for t in todos.prefix(5) {
+            let status = t.isCompleted ? "done" : "incomplete"
+            results.append("Todo: \"\(t.title)\" (\(status))")
+        }
+
+        let contacts = ContactStorage.shared.contacts.filter { $0.folderID == fid }
+        for c in contacts.prefix(5) { results.append("Contact: \"\(c.displayName)\"") }
+
+        let total = bookmarks.count + notes.count + events.count + todos.count + contacts.count
+        if total == 0 { return "Folder \"\(folder.name)\" is empty." }
+        return "Folder \"\(folder.name)\" (\(total) items):\n" + results.joined(separator: "\n")
+    }
+
+    private static func getBrowserSessions() -> String {
+        let sessions = BrowserSessionStorage.shared.sessions
+        if sessions.isEmpty { return "No saved browser sessions." }
+
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+
+        var lines: [String] = []
+        for s in sessions.sorted(by: { $0.createdAt > $1.createdAt }).prefix(10) {
+            let browser = s.sourceBrowserName ?? "Unknown"
+            lines.append("\"\(s.name)\" — \(s.tabs.count) tabs from \(browser) (\(fmt.string(from: s.createdAt)))")
+        }
+        if sessions.count > 10 { lines.append("...and \(sessions.count - 10) more sessions") }
+        return "Saved browser sessions (\(sessions.count) total):\n" + lines.joined(separator: "\n")
+    }
+
+    private static func getCurrentItem() -> String {
+        let context = AIAssistantViewModel.shared.context
+
+        if let bookmark = context.currentBookmark {
+            if let full = BookmarksStorage.shared.bookmarks.first(where: { $0.urlString == bookmark.url }) {
+                var details = "Currently viewing bookmark:"
+                details += "\n  Title: \"\(full.title)\""
+                details += "\n  URL: \(full.urlString)"
+                if let summary = full.aiSummary { details += "\n  Summary: \(summary)" }
+                if !full.notes.isEmpty { details += "\n  Notes: \(full.notes)" }
+                if !full.tags.isEmpty { details += "\n  Tags: \(full.tags.joined(separator: ", "))" }
+                let labels = full.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
+                if !labels.isEmpty { details += "\n  Labels: \(labels.joined(separator: ", "))" }
+                if let folderID = full.folderID, let folder = VaultFolderService.shared.folder(for: folderID) {
+                    details += "\n  Folder: \(folder.name)"
+                }
+                let fmt = DateFormatter()
+                fmt.dateStyle = .medium
+                details += "\n  Saved: \(fmt.string(from: full.createdAt))"
+                return details
+            }
+            return "Currently viewing bookmark: \"\(bookmark.title)\" (\(bookmark.url))"
+        }
+        if let note = context.currentNote {
+            return "Currently viewing note: \"\(note.title)\"\n  Content preview: \(note.excerpt)"
+        }
+        if let event = context.currentEvent {
+            var details = "Currently viewing event: \"\(event.title)\" on \(event.date)"
+            if !event.location.isEmpty { details += " at \(event.location)" }
+            return details
+        }
+        if let contact = context.currentContact {
+            var details = "Currently viewing contact: \"\(contact.name)\""
+            if !contact.email.isEmpty { details += " (\(contact.email))" }
+            return details
+        }
+        if let todo = context.currentTodo {
+            return "Currently viewing todo: \"\(todo.title)\" (\(todo.status))"
+        }
+        if let folder = context.currentFolder {
+            return "Currently browsing folder: \"\(folder.name)\" containing \(folder.itemCount) items."
+        }
+        return "The user is not currently viewing any specific item."
+    }
+
+    private static func findSimilar(_ args: [String: Any]) -> String {
+        let query = string("bookmarkTitle", from: args)
+        let bookmarks = BookmarksStorage.shared.bookmarks
+
+        guard let bookmark = bookmarks.first(where: { $0.title.localizedStandardContains(query) }) else {
+            return "No bookmark found matching \"\(query)\"."
+        }
+
+        let similarIDs = SimilarItemsService.findSimilar(to: bookmark.id, in: EmbeddingStore.shared, limit: 5)
+        if similarIDs.isEmpty {
+            return "No similar bookmarks found for \"\(bookmark.title)\". Embeddings may not be computed yet."
+        }
+
+        var results: [String] = []
+        for id in similarIDs {
+            if let similar = bookmarks.first(where: { $0.id == id }) {
+                results.append("\"\(similar.title)\" (\(similar.urlString))")
+            }
+        }
+        return "Bookmarks similar to \"\(bookmark.title)\":\n" + results.joined(separator: "\n")
+    }
+
+    // MARK: - Mutating tools
+
+    private static func createFolder(_ args: [String: Any]) -> String {
+        let name = string("folderName", from: args)
+        guard !name.isEmpty else { return "Folder name cannot be empty." }
+
+        var parentID: UUID?
+        if let parentName = optString("parentFolderName", from: args) {
+            guard let parent = VaultFolderService.shared.folders.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(parentName) == .orderedSame
+            }) else {
+                return "Parent folder \"\(parentName)\" not found. Available folders: \(VaultFolderService.shared.folders.map(\.name).joined(separator: ", "))"
+            }
+            parentID = parent.id
+        }
+
+        guard let folder = VaultFolderService.shared.createFolder(name: name, parentID: parentID) else {
+            return "Failed to create folder \"\(name)\". It may already exist."
+        }
+        let location = parentID != nil ? "inside \"\(optString("parentFolderName", from: args) ?? "")\"" : "at root level"
+        return "Created folder \"\(folder.name)\" \(location)."
+    }
+
+    private static func moveToFolder(_ args: [String: Any]) -> String {
+        let query = string("searchQuery", from: args)
+        let folderName = string("folderName", from: args)
+
+        guard let folder = VaultFolderService.shared.folders.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
+        }) ?? VaultFolderService.shared.folders.first(where: {
+            $0.name.localizedStandardContains(folderName)
+        }) else {
+            return "Folder \"\(folderName)\" not found. Available folders: \(VaultFolderService.shared.folders.map(\.name).joined(separator: ", "))"
+        }
+
+        var moved: [String] = []
+
+        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+            $0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query)
+        }) {
+            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folder.id)
+            moved.append("Bookmark: \"\(bookmark.title)\"")
+        }
+        for note in NotesStorage.shared.notes.filter({ $0.title.localizedStandardContains(query) }) {
+            _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
+            moved.append("Note: \"\(note.title)\"")
+        }
+
+        if moved.isEmpty { return "No items found matching \"\(query)\" to move." }
+        return "Moved \(moved.count) item(s) to \"\(folder.name)\":\n" + moved.joined(separator: "\n")
+    }
+
+    private static func applyTag(_ args: [String: Any]) -> String {
+        let query = string("searchQuery", from: args)
+        let tagName = string("tagName", from: args)
+        guard !tagName.isEmpty else { return "Tag name cannot be empty." }
+
+        let label = CardLabelStorage.shared.findOrCreate(name: tagName)
+        var tagged: [String] = []
+
+        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+            $0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query)
+        }) {
+            if !bookmark.labelIDs.contains(label.id) {
+                _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+                tagged.append("Bookmark: \"\(bookmark.title)\"")
+            }
+        }
+        for note in NotesStorage.shared.notes.filter({ $0.title.localizedStandardContains(query) }) {
+            if !note.labelIDs.contains(label.id) {
+                _ = NotesStorage.shared.assignLabel(note.id, labelID: label.id)
+                tagged.append("Note: \"\(note.title)\"")
+            }
+        }
+
+        if tagged.isEmpty { return "No untagged items found matching \"\(query)\"." }
+        return "Tagged \(tagged.count) item(s) with \"\(label.name)\":\n" + tagged.joined(separator: "\n")
+    }
+
+    private static func removeTag(_ args: [String: Any]) -> String {
+        let query = string("searchQuery", from: args)
+        let tagName = string("tagName", from: args)
+
+        guard let label = CardLabelStorage.shared.labels.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(tagName) == .orderedSame
+        }) else {
+            return "No tag named \"\(tagName)\" found."
+        }
+
+        let lid = label.id
+        var untagged: [String] = []
+
+        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+            ($0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query))
+            && $0.labelIDs.contains(lid)
+        }) {
+            _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: lid)
+            untagged.append("Bookmark: \"\(bookmark.title)\"")
+        }
+        for note in NotesStorage.shared.notes.filter({
+            $0.title.localizedStandardContains(query) && $0.labelIDs.contains(lid)
+        }) {
+            _ = NotesStorage.shared.removeLabel(note.id, labelID: lid)
+            untagged.append("Note: \"\(note.title)\"")
+        }
+
+        if untagged.isEmpty { return "No items matching \"\(query)\" have the tag \"\(label.name)\"." }
+        return "Removed tag \"\(label.name)\" from \(untagged.count) item(s):\n" + untagged.joined(separator: "\n")
+    }
+
+    private static func renameBookmark(_ args: [String: Any]) -> String {
+        let query = string("currentTitle", from: args)
+        let newTitle = string("newTitle", from: args)
+        guard !newTitle.isEmpty else { return "New title cannot be empty." }
+
+        let matches = BookmarksStorage.shared.bookmarks.filter { $0.title.localizedStandardContains(query) }
+        guard let bookmark = matches.first else { return "No bookmark found matching \"\(query)\"." }
+        if matches.count > 1 {
+            let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
+            return "Multiple bookmarks match \"\(query)\": \(titles). Please be more specific."
+        }
+
+        let oldTitle = bookmark.title
+        _ = BookmarksStorage.shared.updateDetails(
+            for: bookmark.id, title: newTitle, notes: bookmark.notes,
+            tags: bookmark.tags, labelIDs: bookmark.labelIDs
+        )
+        return "Renamed \"\(oldTitle)\" to \"\(newTitle)\"."
+    }
+
+    private static func createNote(_ args: [String: Any]) -> String {
+        let title = string("title", from: args)
+        let content = string("content", from: args)
+
+        var note = NotesStorage.shared.createNew(initialContent: content)
+        note.title = title.isEmpty ? "Untitled" : title
+        NotesStorage.shared.save(note: note)
+
+        if let folderName = optString("folderName", from: args) {
+            if let folder = VaultFolderService.shared.folders.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
+            }) {
+                _ = NotesStorage.shared.assignNote(note.id, toFolder: folder.id)
+                return "Created note \"\(note.title)\" in folder \"\(folder.name)\"."
+            }
+            return "Created note \"\(note.title)\" (folder \"\(folderName)\" not found — saved to root)."
+        }
+        return "Created note \"\(note.title)\"."
+    }
+
+    private static func addBookmark(_ args: [String: Any]) -> String {
+        let urlString = string("url", from: args)
+        guard !urlString.isEmpty else { return "URL cannot be empty." }
+
+        let title = optString("title", from: args)
+        guard let bookmark = BookmarksStorage.shared.add(urlString: urlString, title: title) else {
+            return "Failed to create bookmark for \"\(urlString)\"."
+        }
+
+        var actions: [String] = ["Saved bookmark \"\(bookmark.title)\""]
+
+        if let folderName = optString("folderName", from: args),
+           let folder = VaultFolderService.shared.folders.first(where: {
+               $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
+           }) {
+            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folder.id)
+            actions.append("moved to folder \"\(folder.name)\"")
+        }
+        if let tagName = optString("tagName", from: args) {
+            let label = CardLabelStorage.shared.findOrCreate(name: tagName)
+            _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+            actions.append("tagged \"\(label.name)\"")
+        }
+
+        return actions.joined(separator: ", ") + "."
+    }
+
+    private static func deleteItem(_ args: [String: Any]) -> String {
+        let query = string("searchQuery", from: args)
+        let type = string("itemType", from: args).lowercased()
+
+        if type == "bookmark" || type == "bookmarks" {
+            let matches = BookmarksStorage.shared.bookmarks.filter { $0.title.localizedStandardContains(query) }
+            guard let bookmark = matches.first else { return "No bookmark found matching \"\(query)\"." }
+            if matches.count > 1 {
+                let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
+                return "Multiple bookmarks match \"\(query)\": \(titles). Please be more specific."
+            }
+            let trashItem = BookmarksStorage.shared.remove(bookmark)
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: trashItem))
+            return "Moved bookmark \"\(bookmark.title)\" to trash."
+        }
+
+        if type == "note" || type == "notes" {
+            let matches = NotesStorage.shared.notes.filter { $0.title.localizedStandardContains(query) }
+            guard let note = matches.first else { return "No note found matching \"\(query)\"." }
+            if matches.count > 1 {
+                let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
+                return "Multiple notes match \"\(query)\": \(titles). Please be more specific."
+            }
+            let trashItem = NotesStorage.shared.delete(note: note)
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .note, trashItem: trashItem))
+            return "Moved note \"\(note.title)\" to trash."
+        }
+
+        return "Unknown item type '\(type)'. Use 'bookmark' or 'note'."
+    }
+
+    private static func renameFolder(_ args: [String: Any]) -> String {
+        let current = string("currentName", from: args)
+        let newName = string("newName", from: args)
+        guard !newName.isEmpty else { return "New name cannot be empty." }
+
+        guard let folder = VaultFolderService.shared.folders.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(current) == .orderedSame
+        }) else {
+            return "No folder named \"\(current)\". Available folders: \(VaultFolderService.shared.folders.map(\.name).joined(separator: ", "))"
+        }
+
+        let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)
+        if success { return "Renamed folder \"\(current)\" to \"\(newName)\"." }
+        return "Failed to rename folder \"\(current)\". The name \"\(newName)\" may already be taken."
+    }
+
+    private static func unfileItems(_ args: [String: Any]) -> String {
+        let query = string("searchQuery", from: args)
+        var unfiled: [String] = []
+
+        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+            $0.title.localizedStandardContains(query) && $0.folderID != nil
+        }) {
+            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
+            unfiled.append("Bookmark: \"\(bookmark.title)\"")
+        }
+        for note in NotesStorage.shared.notes.filter({
+            $0.title.localizedStandardContains(query) && $0.folderID != nil
+        }) {
+            _ = NotesStorage.shared.assignNote(note.id, toFolder: nil)
+            unfiled.append("Note: \"\(note.title)\"")
+        }
+
+        if unfiled.isEmpty { return "No filed items found matching \"\(query)\"." }
+        return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
+    }
+}
