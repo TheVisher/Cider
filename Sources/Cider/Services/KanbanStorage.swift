@@ -116,14 +116,25 @@ final class KanbanStorage: ObservableObject {
         return board
     }
 
-    func deleteBoard(id: String) {
+    @discardableResult
+    func deleteBoard(id: String) -> TrashItem? {
+        guard let board = boards.first(where: { $0.id == id }) else { return nil }
+        let url = boardsDir.appendingPathComponent("\(id).yaml")
+        let yamlContent = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+
+        let trashItem = TrashStorage.shared.trashKanbanBoard(
+            boardID: id,
+            name: board.name,
+            yamlContent: yamlContent
+        )
+
         isMutating = true
         boards.removeAll { $0.id == id }
-        let url = boardsDir.appendingPathComponent("\(id).yaml")
         try? FileManager.default.removeItem(at: url)
         isMutating = false
-        logger.info("Deleted board: \(id, privacy: .public)")
+        logger.info("Trashed board: \(id, privacy: .public)")
         NotificationCenter.default.post(name: .kanbanBoardsChanged, object: nil)
+        return trashItem
     }
 
     func renameBoard(id: String, name: String) {

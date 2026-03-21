@@ -80,6 +80,7 @@ struct StorageSettingsView: View {
                     (.folder, "Folders"),
                     (.vaultFolder, "Folders"),
                     (.session, "Sessions"),
+                    (.kanbanBoard, "Boards"),
                 ]
 
                 ForEach(groupOrder, id: \.0) { itemType, label in
@@ -140,6 +141,7 @@ private struct TrashItemRow: View {
         case .folder: return "folder"
         case .vaultFolder: return "folder"
         case .session: return "globe"
+        case .kanbanBoard: return "square.split.2x1"
         }
     }
 

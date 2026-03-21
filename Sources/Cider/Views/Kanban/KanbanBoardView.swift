@@ -13,6 +13,7 @@ struct KanbanBoardView: View {
     @State private var renamingColumnID: String?
     @State private var columnNameDraft = ""
     @State private var editingCard: KanbanCard?
+    @State private var showDeleteConfirmation = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -81,6 +82,35 @@ struct KanbanBoardView: View {
                 .foregroundColor(CiderColors.controlAccent)
             }
             .buttonStyle(.plain)
+
+            Menu {
+                Button {
+                    boardNameDraft = board.name
+                    editingBoardName = true
+                } label: {
+                    Label("Rename Board", systemImage: "pencil")
+                }
+                Divider()
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete Board", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .buttonStyle(.plain)
+            .confirmationDialog("Delete \"\(board.name)\"?", isPresented: $showDeleteConfirmation) {
+                Button("Delete Board", role: .destructive) {
+                    if let trashItem = storage.deleteBoard(id: boardID) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
+                    }
+                }
+            } message: {
+                Text("This will permanently delete the board and all its cards. This can't be undone.")
+            }
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)

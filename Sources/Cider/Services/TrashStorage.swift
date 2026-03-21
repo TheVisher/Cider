@@ -312,6 +312,44 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
+    // MARK: - Kanban Board Trash
+
+    func trashKanbanBoard(boardID: String, name: String, yamlContent: String) -> TrashItem {
+        let boardsDir = StoragePaths.directoryURL(for: .kanbanBoards)
+        let trashDir = boardsDir.appendingPathComponent(trashDirName)
+        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        let payload = KanbanBoardTrashPayload(yamlContent: yamlContent, boardID: boardID)
+        let trashItem = TrashItem(
+            itemID: UUID(),
+            itemType: .kanbanBoard,
+            title: name,
+            originalFolderID: nil,
+            kanbanBoardPayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        return trashItem
+    }
+
+    func restoreKanbanBoard(_ trashItem: TrashItem) {
+        guard let payload = trashItem.kanbanBoardPayload else { return }
+
+        let boardsDir = StoragePaths.directoryURL(for: .kanbanBoards)
+        let trashDir = boardsDir.appendingPathComponent(trashDirName)
+
+        // Write the YAML back
+        let fileURL = boardsDir.appendingPathComponent("\(payload.boardID).yaml")
+        try? payload.yamlContent.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // Reload and re-create the tab
+        KanbanStorage.shared.reload()
+        let savedView = SavedViewStorage.shared.createKanbanView(name: trashItem.title, boardID: payload.boardID)
+        SavedViewStorage.shared.addToTabOrder(savedView.id)
+
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+    }
+
     // MARK: - Contact Trash
 
     func trashContact(_ contact: ContactCard, contactsDir: URL, vcfFileURL: URL? = nil) -> TrashItem {
@@ -453,6 +491,8 @@ final class TrashStorage {
             VaultFolderService.shared.restoreFolder(trashItem)
         case .session:
             restoreSession(trashItem)
+        case .kanbanBoard:
+            restoreKanbanBoard(trashItem)
         }
     }
 
@@ -466,6 +506,7 @@ final class TrashStorage {
         let todosDir = StoragePaths.directoryURL(for: .todos)
         let whiteboardsDir = StoragePaths.directoryURL(for: .whiteboards)
         let sessionsDir = StoragePaths.directoryURL(for: .sessions)
+        let kanbanDir = StoragePaths.directoryURL(for: .kanbanBoards)
         var items: [TrashItem] = []
         items += loadManifest(trashDir: bookmarksDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
@@ -474,6 +515,7 @@ final class TrashStorage {
         items += loadManifest(trashDir: todosDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: whiteboardsDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: sessionsDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: kanbanDir.appendingPathComponent(trashDirName))
         // Also check Inbox trash locations
         let inboxBookmarksDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
         let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
@@ -488,7 +530,7 @@ final class TrashStorage {
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .kanbanBoards]
         for type in trashTypes {
             purgeExpired(
                 olderThan: cutoff,
@@ -572,11 +614,14 @@ final class TrashStorage {
         case .session:
             let trashDir = StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+        case .kanbanBoard:
+            let trashDir = StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
+            removeFromManifest(trashItem.id, trashDir: trashDir)
         }
     }
 
     func emptyTrash() {
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .whiteboards]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .whiteboards, .kanbanBoards]
         for type in trashTypes {
             let trashDir = StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
             let items = loadManifest(trashDir: trashDir)
@@ -653,6 +698,8 @@ final class TrashStorage {
             break // Handled by permanentlyDelete above
         case .session:
             break // Sessions are metadata-only, no separate files to delete
+        case .kanbanBoard:
+            break // YAML content stored in payload, no separate files
         }
     }
 

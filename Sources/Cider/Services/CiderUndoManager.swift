@@ -99,7 +99,7 @@ final class CiderUndoManager {
                 TodoCardStorage.shared.assignTodoCard(itemID, toFolder: fromFolderID)
             case .session:
                 BrowserSessionStorage.shared.assignSession(itemID, toFolder: fromFolderID)
-            case .whiteboard, .folder, .vaultFolder:
+            case .whiteboard, .folder, .vaultFolder, .kanbanBoard:
                 break
             }
 
@@ -118,7 +118,7 @@ final class CiderUndoManager {
                     TodoCardStorage.shared.assignTodoCard(item.itemID, toFolder: item.fromFolderID)
                 case .session:
                     BrowserSessionStorage.shared.assignSession(item.itemID, toFolder: item.fromFolderID)
-                case .whiteboard, .folder, .vaultFolder:
+                case .whiteboard, .folder, .vaultFolder, .kanbanBoard:
                     break
                 }
             }
@@ -161,6 +161,8 @@ final class CiderUndoManager {
                 _ = VaultFolderService.shared.renameFolder(itemID, to: oldTitle)
             case .session:
                 BrowserSessionStorage.shared.rename(itemID, to: oldTitle)
+            case .kanbanBoard:
+                break
             }
         }
     }

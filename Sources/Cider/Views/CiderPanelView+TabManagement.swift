@@ -60,9 +60,11 @@ extension CiderPanelView {
             }
         }
 
-        // For kanban tabs, delete the board YAML file
+        // For kanban tabs, trash the board YAML file
         if case .kanban(let boardID) = savedView.kind {
-            KanbanStorage.shared.deleteBoard(id: boardID)
+            if let trashItem = KanbanStorage.shared.deleteBoard(id: boardID) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
+            }
         }
 
         let wasSelected = selectedTab == tab
@@ -80,7 +82,9 @@ extension CiderPanelView {
             }
         }
         if case .kanban(let boardID) = savedView.kind {
-            KanbanStorage.shared.deleteBoard(id: boardID)
+            if let trashItem = KanbanStorage.shared.deleteBoard(id: boardID) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
+            }
         }
         savedViewStorage.deleteSavedView(savedView.id)
     }
