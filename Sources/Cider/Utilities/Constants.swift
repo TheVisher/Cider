@@ -165,6 +165,8 @@ enum SessionsDesign {
     static let statusDotSize: CGFloat = Spacing.sm
     static let chatMaxHeight: CGFloat = 400
     static let inputFieldMinHeight: CGFloat = 36
+    /// Height of the compact cards row at the bottom when one card is expanded
+    static let compactRowHeight: CGFloat = 120
 }
 
 // MARK: - Animation Presets

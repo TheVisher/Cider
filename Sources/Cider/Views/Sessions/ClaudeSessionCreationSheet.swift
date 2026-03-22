@@ -12,7 +12,7 @@ struct ClaudeSessionCreationSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("New Session")
+            Text("New Agent")
                 .font(CiderFont.headingSemibold)
                 .foregroundColor(CiderColors.primary)
 
@@ -21,7 +21,7 @@ struct ClaudeSessionCreationSheet: View {
                 Text("Name")
                     .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.secondary)
-                TextField("Session name", text: $sessionName)
+                TextField("Agent name", text: $sessionName)
                     .textFieldStyle(.plain)
                     .font(CiderFont.body)
                     .padding(Spacing.sm)
@@ -122,7 +122,7 @@ struct ClaudeSessionCreationSheet: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Select"
-        panel.message = "Choose a project directory for the Claude session"
+        panel.message = "Choose a project directory for the Claude agent"
 
         if panel.runModal() == .OK, let url = panel.url {
             projectPath = url.path

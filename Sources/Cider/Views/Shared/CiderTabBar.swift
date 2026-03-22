@@ -61,7 +61,7 @@ struct CiderTabBar: View {
             }
         } label: {
             HStack(spacing: Spacing.xs) {
-                Image(systemName: tab.systemImage)
+                Image(systemName: iconForTab(tab))
                     .font(CiderFont.bodyMedium)
 
                 if renamingTabID == tab.savedViewID, let savedViewID = tab.savedViewID {
@@ -241,7 +241,7 @@ struct CiderTabBar: View {
                         Image(systemName: "terminal")
                             .font(CiderFont.bodyMedium)
                             .frame(width: Spacing.lg, alignment: .center)
-                        Text("Sessions")
+                        Text("Agents")
                             .font(CiderFont.body)
                     }
                     .foregroundColor(CiderColors.secondary)
@@ -298,6 +298,14 @@ struct CiderTabBar: View {
         }
         renamingTabID = nil
         renameText = ""
+    }
+
+    private func iconForTab(_ tab: CiderTab) -> String {
+        if case .savedView(let id, _) = tab,
+           let savedView = savedViewStorage.savedView(for: id) {
+            return savedView.kind.systemImage
+        }
+        return tab.systemImage
     }
 
     private func badgeCount(for tab: CiderTab) -> Int {

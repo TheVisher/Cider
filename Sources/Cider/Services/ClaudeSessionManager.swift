@@ -46,7 +46,7 @@ final class ClaudeSessionManager: ObservableObject {
     @discardableResult
     func createSession(name: String, projectPath: String) -> ClaudeSession {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalName = trimmed.isEmpty ? "Untitled Session" : trimmed
+        let finalName = trimmed.isEmpty ? "Untitled Agent" : trimmed
         let session = ClaudeSession(name: finalName, projectPath: projectPath)
         sessions.append(session)
         persist()

@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// Main tab view for Claude Code sessions — masonry card layout with create button.
+/// Main tab view for Claude Code agents — mosaic layout with dynamic card sizing.
+///
+/// All cards live in one masonry grid. Clicking a card expands it in-place —
+/// it grows taller to show the chat view while others stay compact and reflow around it.
 struct ClaudeSessionsTabView: View {
     @ObservedObject private var manager = ClaudeSessionManager.shared
     @State private var expandedSessionID: UUID?
@@ -11,9 +14,21 @@ struct ClaudeSessionsTabView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("Sessions")
+                Text("Agents")
                     .font(CiderFont.headingSemibold)
                     .foregroundColor(CiderColors.primary)
+
+                if !manager.sessions.isEmpty {
+                    Text("\(manager.sessions.count)")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(CiderColors.separatorLight)
+                        )
+                }
 
                 Spacer()
 
@@ -23,7 +38,7 @@ struct ClaudeSessionsTabView: View {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
                             .font(CiderFont.captionMedium)
-                        Text("New Session")
+                        Text("New Agent")
                             .font(CiderFont.captionMedium)
                     }
                     .foregroundColor(CiderColors.controlAccent)
@@ -39,21 +54,22 @@ struct ClaudeSessionsTabView: View {
             if manager.sessions.isEmpty {
                 EmptyStateView(
                     icon: "terminal",
-                    title: "No sessions yet",
-                    subtitle: "Create a session to start chatting with Claude Code agents.",
-                    actionLabel: "New Session",
+                    title: "No agents yet",
+                    subtitle: "Create an agent to start chatting with Claude Code.",
+                    actionLabel: "New Agent",
                     action: { showCreationSheet = true }
                 )
             } else {
                 ScrollView {
                     MasonryLayout(minimumColumnWidth: SessionsDesign.cardMinWidth, itemSpacing: Spacing.sm) {
                         ForEach(manager.sessions) { session in
+                            let isExpanded = expandedSessionID == session.id
                             ClaudeSessionCard(
                                 session: session,
-                                isExpanded: expandedSessionID == session.id,
+                                isExpanded: isExpanded,
                                 onToggleExpand: {
                                     withAnimation(reduceMotion ? .none : .snappy) {
-                                        expandedSessionID = expandedSessionID == session.id ? nil : session.id
+                                        expandedSessionID = isExpanded ? nil : session.id
                                     }
                                 },
                                 onStop: { manager.stopSession(session.id) },
@@ -65,6 +81,7 @@ struct ClaudeSessionsTabView: View {
                                 },
                                 onSendMessage: { text in manager.sendMessage(text, to: session.id) }
                             )
+                            .masonryColumnSpan(isExpanded ? 2 : 1)
                         }
                     }
                     .padding(Spacing.lg)

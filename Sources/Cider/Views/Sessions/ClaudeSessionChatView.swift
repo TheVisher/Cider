@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Chat UI inside an expanded Claude session card.
+/// Chat UI inside an expanded Claude agent card.
 struct ClaudeSessionChatView: View {
     let session: ClaudeSession
     let onSend: (String) -> Void
@@ -33,15 +33,21 @@ struct ClaudeSessionChatView: View {
                             }
                             .id("working-indicator")
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("chat-bottom")
                     }
                     .padding(Spacing.sm)
                 }
                 .frame(maxHeight: SessionsDesign.chatMaxHeight)
+                .task {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                }
                 .onChange(of: session.messages.count) { _, _ in
-                    if let lastID = session.messages.last?.id {
-                        withAnimation(.snappy) {
-                            proxy.scrollTo(lastID, anchor: .bottom)
-                        }
+                    withAnimation(.snappy) {
+                        proxy.scrollTo("chat-bottom", anchor: .bottom)
                     }
                 }
             }

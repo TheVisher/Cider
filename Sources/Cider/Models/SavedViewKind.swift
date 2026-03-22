@@ -9,6 +9,16 @@ enum SavedViewKind: Codable, Hashable {
     case kanban(boardID: String)
     case sessions
 
+    /// SF Symbol for this tab kind.
+    var systemImage: String {
+        switch self {
+        case .library: "square.grid.2x2"
+        case .whiteboard: "scribble"
+        case .kanban: "square.split.2x1"
+        case .sessions: "terminal"
+        }
+    }
+
     // MARK: - Codable (tagged object for future extensibility)
 
     private enum CodingKeys: String, CodingKey {

@@ -127,7 +127,7 @@ final class SavedViewStorage: ObservableObject {
     @discardableResult
     func createSessionsView() -> SavedView {
         let savedView = SavedView(
-            name: "Sessions",
+            name: "Agents",
             kind: .sessions
         )
         savedViews.append(savedView)
