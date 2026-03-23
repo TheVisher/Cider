@@ -190,6 +190,9 @@ struct CiderConfig: Codable {
         case openOnMouseScreen
         case sessionRestoreBrowserBundleID
         case tableColumnConfig
+        case iMessageBridgeEnabled
+        case iMessageAllowedContacts
+        case iMessageVaultPath
     }
 
     var showMenuBarIcon: Bool
@@ -267,6 +270,11 @@ struct CiderConfig: Codable {
     var sessionRestoreBrowserBundleID: String?  // Bundle ID of preferred browser for restoring session tabs (nil = system default)
     var tableColumnConfig: TableColumnConfig  // Persisted table list view column widths, order, visibility
 
+    // iMessage Bridge
+    var iMessageBridgeEnabled: Bool  // Whether the iMessage bridge assistant is active
+    var iMessageAllowedContacts: [String]  // Phone numbers / emails allowed to trigger the bridge (empty = anyone)
+    var iMessageVaultPath: String  // Working directory for Claude CLI when processing messages
+
     static let storageKey = "CiderConfig"
 
     static var `default`: CiderConfig {
@@ -338,7 +346,10 @@ struct CiderConfig: Codable {
             lastReconciliationAt: 0,
             openOnMouseScreen: false,
             sessionRestoreBrowserBundleID: nil,
-            tableColumnConfig: .default
+            tableColumnConfig: .default,
+            iMessageBridgeEnabled: false,
+            iMessageAllowedContacts: [],
+            iMessageVaultPath: "~/CiderVault"
         )
     }
 
@@ -548,6 +559,9 @@ struct CiderConfig: Codable {
         openOnMouseScreen = try container.decodeIfPresent(Bool.self, forKey: .openOnMouseScreen) ?? false
         sessionRestoreBrowserBundleID = try container.decodeIfPresent(String.self, forKey: .sessionRestoreBrowserBundleID)
         tableColumnConfig = try container.decodeIfPresent(TableColumnConfig.self, forKey: .tableColumnConfig) ?? .default
+        iMessageBridgeEnabled = try container.decodeIfPresent(Bool.self, forKey: .iMessageBridgeEnabled) ?? false
+        iMessageAllowedContacts = try container.decodeIfPresent([String].self, forKey: .iMessageAllowedContacts) ?? []
+        iMessageVaultPath = try container.decodeIfPresent(String.self, forKey: .iMessageVaultPath) ?? "~/CiderVault"
     }
 
     init(
@@ -622,7 +636,10 @@ struct CiderConfig: Codable {
         lastReconciliationAt: Double = 0,
         openOnMouseScreen: Bool = false,
         sessionRestoreBrowserBundleID: String? = nil,
-        tableColumnConfig: TableColumnConfig = .default
+        tableColumnConfig: TableColumnConfig = .default,
+        iMessageBridgeEnabled: Bool = false,
+        iMessageAllowedContacts: [String] = [],
+        iMessageVaultPath: String = "~/CiderVault"
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -696,5 +713,8 @@ struct CiderConfig: Codable {
         self.openOnMouseScreen = openOnMouseScreen
         self.sessionRestoreBrowserBundleID = sessionRestoreBrowserBundleID
         self.tableColumnConfig = tableColumnConfig
+        self.iMessageBridgeEnabled = iMessageBridgeEnabled
+        self.iMessageAllowedContacts = iMessageAllowedContacts
+        self.iMessageVaultPath = iMessageVaultPath
     }
 }

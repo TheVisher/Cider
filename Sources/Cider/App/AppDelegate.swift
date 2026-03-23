@@ -140,6 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start Cider Web sync if configured
         SyncService.shared.startIfEnabled()
 
+        // Start iMessage bridge if enabled
+        if CiderConfig.load().iMessageBridgeEnabled {
+            iMessageBridgeService.shared.start()
+        }
+
         // Start Spotlight indexing.
         // Note: Core Spotlight requires a proper .app bundle to surface results in
         // Spotlight/Raycast. During development (bare SPM executable), items are indexed
