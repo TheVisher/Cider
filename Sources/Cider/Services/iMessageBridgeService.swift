@@ -26,6 +26,10 @@ final class iMessageBridgeService: ObservableObject {
     private var pollingTask: Task<Void, Never>?
     private var lastSeenRowID: Int64 = 0
     private var cachedClaudePath: String?
+    /// Track recently sent reply texts to avoid self-reply loops
+    private var recentReplies: Set<String> = []
+    /// Whether we're currently processing a message (prevents overlapping responses)
+    private var isProcessing = false
 
     private var chatDBURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -86,6 +90,9 @@ final class iMessageBridgeService: ObservableObject {
 
             guard !Task.isCancelled else { break }
 
+            // Skip if we're already processing a message
+            guard !isProcessing else { continue }
+
             let messages = fetchNewMessages()
             let config = CiderConfig.load()
             let allowedContacts = config.iMessageAllowedContacts
@@ -94,6 +101,13 @@ final class iMessageBridgeService: ObservableObject {
                 // Update tracking
                 if msg.rowID > lastSeenRowID {
                     lastSeenRowID = msg.rowID
+                }
+
+                // Skip messages that match our recent replies (self-loop prevention)
+                let trimmedText = msg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if recentReplies.contains(trimmedText) {
+                    recentReplies.remove(trimmedText)
+                    continue
                 }
 
                 // Filter by allowed contacts if the list is non-empty
@@ -105,19 +119,32 @@ final class iMessageBridgeService: ObservableObject {
                 }
 
                 // Skip empty messages
-                guard !msg.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                guard !trimmedText.isEmpty else {
                     continue
                 }
 
-                logger.info("Processing message from \(msg.sender, privacy: .private): \(msg.text.prefix(50), privacy: .private)")
+                // Only respond to messages that start with "Hey Cider" (case-insensitive)
+                let triggerPrefix = "hey cider"
+                guard trimmedText.lowercased().hasPrefix(triggerPrefix) else {
+                    continue
+                }
+                // Strip the trigger phrase from the message before processing
+                let strippedText = String(trimmedText.dropFirst(triggerPrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let messageToProcess = strippedText.isEmpty ? trimmedText : strippedText
+                logger.info("Processing message from \(msg.sender, privacy: .private): \(messageToProcess.prefix(50), privacy: .private)")
                 messageCount += 1
                 lastMessageAt = Date()
+                isProcessing = true
 
-                do {
-                    await processMessage(msg.text, from: msg.sender, chatID: msg.chatID)
-                } catch {
-                    logger.error("Error processing message: \(error.localizedDescription)")
+                await processMessage(messageToProcess, from: msg.sender, chatID: msg.chatID)
+
+                // Re-seed lastSeenRowID after processing to skip any messages
+                // generated during processing (including our own reply)
+                if let currentMax = fetchMaxRowID() {
+                    lastSeenRowID = currentMax
                 }
+                isProcessing = false
             }
         }
     }
@@ -308,6 +335,8 @@ final class iMessageBridgeService: ObservableObject {
         }
 
         logger.info("Sending reply (\(responseText.count) chars) to chat \(chatID, privacy: .private)")
+        // Track this reply so we don't process it as an incoming message
+        recentReplies.insert(responseText.trimmingCharacters(in: .whitespacesAndNewlines))
         iMessageSender.send(responseText, toChatID: chatID)
     }
 
