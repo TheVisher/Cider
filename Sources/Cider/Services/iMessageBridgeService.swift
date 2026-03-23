@@ -113,7 +113,11 @@ final class iMessageBridgeService: ObservableObject {
                 messageCount += 1
                 lastMessageAt = Date()
 
-                await processMessage(msg.text, from: msg.sender, chatID: msg.chatID)
+                do {
+                    await processMessage(msg.text, from: msg.sender, chatID: msg.chatID)
+                } catch {
+                    logger.error("Error processing message: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -179,14 +183,24 @@ final class iMessageBridgeService: ObservableObject {
         var messages: [IncomingMessage] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let rowID = sqlite3_column_int64(stmt, 0)
-            let text = String(cString: sqlite3_column_text(stmt, 1))
+            let text: String
+            if let ptr = sqlite3_column_text(stmt, 1) {
+                text = String(cString: ptr)
+            } else {
+                text = ""
+            }
             let sender: String
             if let senderPtr = sqlite3_column_text(stmt, 2) {
                 sender = String(cString: senderPtr)
             } else {
                 sender = "unknown"
             }
-            let chatRoom = String(cString: sqlite3_column_text(stmt, 3))
+            let chatRoom: String
+            if let ptr = sqlite3_column_text(stmt, 3) {
+                chatRoom = String(cString: ptr)
+            } else {
+                chatRoom = ""
+            }
 
             // Build a chat identifier — for group chats use cache_roomnames, for 1:1 use the sender handle
             let chatID = chatRoom.isEmpty ? "iMessage;\(sender)" : chatRoom
@@ -238,59 +252,63 @@ final class iMessageBridgeService: ObservableObject {
 
         let prompt = "You are responding to an iMessage from \(sender). Keep your response concise and conversational (under 300 words). Here is their message:\n\n\(text)"
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: claudePath)
-        process.arguments = [
-            "-p", prompt,
-            "--output-format", "stream-json",
-            "--verbose",
-            "--dangerously-skip-permissions"
-        ]
-        process.currentDirectoryURL = URL(fileURLWithPath: vaultPath)
+        // Run Claude in a detached task to avoid blocking the main actor
+        let responseText: String = await Task.detached { [maxResponseLength] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: claudePath)
+            process.arguments = [
+                "-p", prompt,
+                "--output-format", "stream-json",
+                "--verbose",
+                "--dangerously-skip-permissions"
+            ]
+            process.currentDirectoryURL = URL(fileURLWithPath: vaultPath)
+            process.standardInput = FileHandle.nullDevice
 
-        // Inherit a usable shell environment
-        process.environment = buildShellEnvironment()
+            // Build environment with expanded PATH
+            var env = ProcessInfo.processInfo.environment
+            let extraPaths = [
+                "/usr/local/bin",
+                "/opt/homebrew/bin",
+                "\(NSHomeDirectory())/.npm/bin",
+                "\(NSHomeDirectory())/.local/bin",
+            ]
+            let existing = env["PATH"] ?? "/usr/bin:/bin"
+            env["PATH"] = (extraPaths + [existing]).joined(separator: ":")
+            process.environment = env
 
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
 
-        do {
-            try process.run()
-        } catch {
-            logger.error("Failed to launch claude process: \(error.localizedDescription)")
-            return
-        }
-
-        // Collect response in the background
-        let responseText: String = await withCheckedContinuation { continuation in
-            Task.detached {
-                process.waitUntilExit()
-                let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                // Parse stream-json: extract assistant text from result events
-                let assembled = Self.extractAssistantText(from: output)
-                continuation.resume(returning: assembled)
+            do {
+                try process.run()
+            } catch {
+                return ""
             }
-        }
+
+            // Read all stdout data, then wait for exit
+            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+
+            let output = String(data: data, encoding: .utf8) ?? ""
+            let assembled = iMessageBridgeService.extractAssistantText(from: output)
+
+            // Truncate for iMessage
+            if assembled.count > maxResponseLength {
+                return String(assembled.prefix(maxResponseLength)) + "..."
+            }
+            return assembled
+        }.value
 
         guard !responseText.isEmpty else {
             logger.warning("Claude returned empty response for message from \(sender, privacy: .private)")
             return
         }
 
-        // Truncate long responses for iMessage
-        let truncated: String
-        if responseText.count > maxResponseLength {
-            truncated = String(responseText.prefix(maxResponseLength)) + "..."
-        } else {
-            truncated = responseText
-        }
-
-        logger.info("Sending reply (\(truncated.count) chars) to chat \(chatID, privacy: .private)")
-        sendReply(truncated, to: chatID)
+        logger.info("Sending reply (\(responseText.count) chars) to chat \(chatID, privacy: .private)")
+        iMessageSender.send(responseText, toChatID: chatID)
     }
 
     /// Parse Claude's stream-json output and extract the final assistant text.
