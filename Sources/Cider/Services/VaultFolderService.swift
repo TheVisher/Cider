@@ -602,12 +602,22 @@ final class VaultFolderService {
 
     // MARK: - Private: FSEvents Handling
 
+    /// Debounced task for vault file adoption after FSEvents settle.
+    private var adoptionDebounceTask: Task<Void, Never>?
+
     private func handleFSEvent() {
         guard !isMutating else { return }
         reconcileWithFilesystem()
         // Reload sidecar metadata and rescan vault files
         SidecarService.shared.loadAll()
         VaultFileService.shared.scan()
+        // Debounced adoption: wait for FSEvents to settle, then scan once
+        adoptionDebounceTask?.cancel()
+        adoptionDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            BookmarksStorage.shared.adoptOrphanedVaultFiles()
+        }
     }
 
     // MARK: - Private: Filesystem Reconciliation

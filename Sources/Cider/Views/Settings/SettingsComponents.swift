@@ -335,9 +335,20 @@ struct SettingsAccountOverviewView: View {
                         .disabled(syncService.isSyncing)
                     }
 
-                    Text("Bookmarks, notes, and folders sync automatically across all your devices.")
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.quaternary)
+                    HStack(spacing: Spacing.sm) {
+                        Text("Bookmarks, notes, and folders sync automatically across all your devices.")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+
+                        Spacer()
+
+                        Button("Force Full Sync") {
+                            syncService.forceReconcile()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(syncService.isSyncing)
+                    }
                 }
             }
         }

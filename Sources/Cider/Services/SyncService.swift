@@ -294,6 +294,14 @@ final class SyncService: ObservableObject {
         performPush(token: token)
     }
 
+    /// Forces a full reconciliation — compares all local items against the server
+    /// and pushes any corrections. Use when folder assignments or data seem out of sync.
+    func forceReconcile() {
+        let token = Self.loadSyncToken()
+        guard !token.isEmpty else { return }
+        performReconciliation(token: token)
+    }
+
     // MARK: - Push after local change (debounced)
 
     private var pushDebounceTask: Task<Void, Never>?

@@ -52,6 +52,13 @@ struct SyncSettingsView: View {
                         Text("Bookmarks, notes, and folders sync automatically across all your devices.")
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.quaternary)
+
+                        Button("Force Full Sync") {
+                            syncService.forceReconcile()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(syncService.isSyncing)
                     }
                 }
             } else {

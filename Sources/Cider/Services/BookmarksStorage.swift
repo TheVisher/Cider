@@ -58,6 +58,7 @@ final class BookmarksStorage: ObservableObject {
                 self.bookmarks = snapshot.bookmarks
                 self.folders = snapshot.folders
                 self.normalizeBookmarkImageAssetsIfNeeded()
+                self.adoptOrphanedVaultFiles()
                 self.scheduleEnrichmentForIncompleteBookmarks()
                 self.runBookmarkFileMigrationIfNeeded()
                 return
@@ -67,6 +68,7 @@ final class BookmarksStorage: ObservableObject {
                 self.bookmarks = migrated.bookmarks
                 self.folders = migrated.folders
                 self.normalizeBookmarkImageAssetsIfNeeded()
+                self.adoptOrphanedVaultFiles()
                 self.persist()
                 self.scheduleEnrichmentForIncompleteBookmarks()
                 self.runBookmarkFileMigrationIfNeeded()
@@ -75,6 +77,7 @@ final class BookmarksStorage: ObservableObject {
 
             self.bookmarks = []
             self.folders = []
+            self.adoptOrphanedVaultFiles()
         }
     }
 
@@ -227,6 +230,7 @@ final class BookmarksStorage: ObservableObject {
         cancelEnrichment(for: bookmark.id)
         SyncService.shared.trackDeletion(of: bookmark.id)
         let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
+        deleteWeblocFile(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()
         return trashItem
@@ -239,12 +243,26 @@ final class BookmarksStorage: ObservableObject {
             cancelEnrichment(for: bookmark.id)
             SyncService.shared.trackDeletion(of: bookmark.id)
             let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: directoryURL)
+            deleteWeblocFile(for: bookmark)
             trashItems.append(item)
         }
         let ids = Set(bookmarksToDelete.map(\.id))
         bookmarks.removeAll { ids.contains($0.id) }
         persist()
         return trashItems
+    }
+
+    /// Deletes the .webloc file from disk when a bookmark is trashed,
+    /// so the adoption scan doesn't re-create the bookmark.
+    private func deleteWeblocFile(for bookmark: Bookmark) {
+        guard let relativePath = bookmark.relativePath, !relativePath.isEmpty else { return }
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        let fileURL = vaultRoot.appendingPathComponent(relativePath)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            let filename = fileURL.lastPathComponent
+            let dirURL = fileURL.deletingLastPathComponent()
+            BookmarkFileService.shared.delete(filename: filename, from: dirURL)
+        }
     }
 
     func restoreFromTrash(_ bookmark: Bookmark) {
@@ -1123,6 +1141,91 @@ final class BookmarksStorage: ObservableObject {
         let inboxPath = "\(StoragePaths.inboxDir)/\(StorageType.bookmarks.inboxSubfolderName ?? "Bookmarks")"
         let dirURL = vaultRoot.appendingPathComponent(inboxPath)
         return (dirURL, inboxPath)
+    }
+
+    // MARK: - Vault File Adoption
+
+    /// Whether an adoption scan is currently in progress (prevents reentrancy).
+    private var isAdopting = false
+    /// Debounce: minimum interval between vault file scans.
+    private var lastAdoptionScan: Date = .distantPast
+    private let adoptionDebounceInterval: TimeInterval = 5
+
+    /// Scans all vault folders (including Inbox/Bookmarks) for `.webloc` files that are not
+    /// already tracked in the bookmarks array. Adopts them as new bookmarks with the correct
+    /// folderID so files moved on disk (by agents, Finder, etc.) appear in Cider immediately.
+    /// Also updates folderID for bookmarks whose files moved between folders.
+    func adoptOrphanedVaultFiles() {
+        guard !isAdopting else { return }
+        guard Date().timeIntervalSince(lastAdoptionScan) >= adoptionDebounceInterval else { return }
+        isAdopting = true
+        defer {
+            isAdopting = false
+            lastAdoptionScan = Date()
+        }
+
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        let fileService = BookmarkFileService.shared
+        let fm = FileManager.default
+
+        // Build lookup of existing bookmarks by URL → bookmark ID
+        var existingIDByURL: [String: UUID] = [:]
+        for bm in bookmarks {
+            let url = bm.urlString.lowercased()
+            if !url.isEmpty { existingIDByURL[url] = bm.id }
+        }
+
+        var adopted: [Bookmark] = []
+        var reassigned = 0
+
+        // Helper: process discovered files from a directory
+        func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
+            guard fm.fileExists(atPath: dirURL.path) else { return }
+            let found = fileService.readAll(from: dirURL, dirRelativePath: dirRelativePath)
+            for var bookmark in found {
+                let url = bookmark.urlString.lowercased()
+                guard !url.isEmpty else { continue }
+
+                if let existingID = existingIDByURL[url] {
+                    // Already tracked — check if folder assignment changed
+                    if let idx = bookmarks.firstIndex(where: { $0.id == existingID }),
+                       bookmarks[idx].folderID != folderID {
+                        bookmarks[idx].folderID = folderID
+                        bookmarks[idx].relativePath = bookmark.relativePath
+                        reassigned += 1
+                    }
+                } else {
+                    // New file — adopt it
+                    bookmark.folderID = folderID
+                    adopted.append(bookmark)
+                    existingIDByURL[url] = bookmark.id
+                }
+            }
+        }
+
+        // Scan Inbox/Bookmarks (unfiled)
+        let inboxDir = vaultRoot.appendingPathComponent("Inbox/Bookmarks")
+        processDirectory(dirURL: inboxDir, dirRelativePath: "Inbox/Bookmarks", folderID: nil)
+
+        // Scan vault root folders
+        for folder in VaultFolderService.shared.folders {
+            let dirURL = vaultRoot.appendingPathComponent(folder.relativePath)
+            processDirectory(dirURL: dirURL, dirRelativePath: folder.relativePath, folderID: folder.id)
+        }
+
+        if !adopted.isEmpty || reassigned > 0 {
+            if !adopted.isEmpty {
+                logger.info("Adopted \(adopted.count) orphaned .webloc files from vault folders")
+                bookmarks.append(contentsOf: adopted)
+            }
+            if reassigned > 0 {
+                logger.info("Reassigned \(reassigned) bookmarks to match filesystem folders")
+            }
+            persist()
+            if !adopted.isEmpty {
+                scheduleEnrichmentForIncompleteBookmarks()
+            }
+        }
     }
 
     // MARK: - One-time migration
