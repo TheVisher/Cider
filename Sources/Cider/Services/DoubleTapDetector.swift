@@ -3,6 +3,7 @@ import Combine
 import os
 
 /// Detects double-tap or single-tap of a modifier key (e.g., Option)
+/// @unchecked Sendable: all mutable state accessed only from main thread event monitors.
 final class DoubleTapDetector: @unchecked Sendable {
     private var lastTapTime: Date?
     private var globalFlagsMonitor: Any?

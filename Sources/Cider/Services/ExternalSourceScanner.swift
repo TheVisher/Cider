@@ -88,12 +88,6 @@ final class ExternalSourceScanner: ObservableObject {
         directorySource = source
     }
 
-    private func stopWatcher() {
-        directorySource?.cancel()
-        directorySource = nil
-        directoryFileDescriptor = -1
-    }
-
     deinit {
         directorySource?.cancel()
         if directoryFileDescriptor >= 0 {

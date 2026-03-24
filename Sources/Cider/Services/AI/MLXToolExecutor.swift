@@ -94,12 +94,6 @@ enum MLXToolExecutor {
         return fallback
     }
 
-    private static func bool(_ key: String, from args: [String: Any]) -> Bool {
-        if let b = args[key] as? Bool { return b }
-        if let s = args[key] as? String { return s.lowercased() == "true" }
-        return false
-    }
-
     // MARK: - Tool implementations
 
     private static func countItems(_ args: [String: Any]) -> String {

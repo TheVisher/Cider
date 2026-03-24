@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import WebKit
 
 struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel

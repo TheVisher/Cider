@@ -1,5 +1,4 @@
 import Foundation
-import UniformTypeIdentifiers
 
 /// A file in the vault that isn't a Cider-native type (note, bookmark, etc.).
 /// Represents images, PDFs, videos, documents, and any other file dropped into the vault.

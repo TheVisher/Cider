@@ -1564,16 +1564,6 @@ final class BookmarksStorage: ObservableObject {
         try? FileManager.default.removeItem(at: fileURL)
     }
 
-    private func removeBookmarkImageAssetsIfPresent(for bookmark: Bookmark) {
-        removeImageIfPresent(relativePath: bookmark.thumbnailRelativePath)
-        removeImageIfPresent(relativePath: bookmark.originalImageRelativePath)
-        if let carouselPaths = bookmark.carouselImagePaths {
-            for path in carouselPaths {
-                removeImageIfPresent(relativePath: path)
-            }
-        }
-    }
-
     private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
 

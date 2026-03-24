@@ -106,7 +106,8 @@ extension AppDelegate {
 
         panel.setFrame(frame, display: true)
         // Order main panel first, then shadow behind it — avoids flash of shadow-only
-        panel.makeKeyAndOrderFront(nil)
+        panel.orderFront(nil)
+        panel.makeKey()
         clipboardShadowPanel?.updateFrame(for: panel.frame)
         clipboardShadowPanel?.order(.below, relativeTo: panel.windowNumber)
     }

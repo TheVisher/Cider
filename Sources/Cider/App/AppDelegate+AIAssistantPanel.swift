@@ -90,7 +90,8 @@ extension AppDelegate {
         }
 
         panel.setFrame(frame, display: true)
-        panel.makeKeyAndOrderFront(nil)
+        panel.orderFront(nil)
+        panel.makeKey()
         aiAssistantShadowPanel?.updateFrame(for: panel.frame)
         aiAssistantShadowPanel?.order(.below, relativeTo: panel.windowNumber)
     }

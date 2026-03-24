@@ -617,29 +617,6 @@ final class NotesViewModel: ObservableObject {
         syncContentFromEditor(noteID: note.id)
     }
 
-    private func syncExternalContentFromEditor(fileURL: URL) {
-        guard editorIsReady, let webView = editorWebView else { return }
-        webView.evaluateJavaScript("window.editorAPI.getContent()") { [weak self] result, _ in
-            Task { @MainActor [weak self] in
-                guard let self,
-                      let markdown = result as? String,
-                      self.activeExternalFile?.path == fileURL else { return }
-                let content = NotesStorage.shared.markdownForPersistence(markdown)
-                editingContent = content
-                charCount = content.count
-                pendingExternalDiskContent = nil
-                ignoredExternalDiskContent = nil
-                externalChangeState = nil
-                guard content != self.lastSyncedDiskContent else {
-                    hasPendingSave = false
-                    return
-                }
-                lastSyncedDiskContent = content
-                try? content.write(to: fileURL, atomically: true, encoding: .utf8)
-                hasPendingSave = false
-            }
-        }
-    }
 
     private func syncContentFromEditor(noteID: UUID) {
         guard editorIsReady, let webView = editorWebView else { return }

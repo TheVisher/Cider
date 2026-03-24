@@ -4,6 +4,7 @@ import os
 
 /// Detects Option+V and posts `.toggleClipboardViewer`.
 /// Falls back to Carbon `RegisterEventHotKey` if CGEventTap creation fails.
+/// @unchecked Sendable: all mutable state accessed only from main thread event monitors.
 final class ClipboardHotkeyDetector: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.cider.app", category: "ClipboardHotkeyDetector")

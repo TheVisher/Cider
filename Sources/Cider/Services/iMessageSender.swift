@@ -16,7 +16,7 @@ enum iMessageSender {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = [
             "-e", """
-            tell application "Messages"
+            tell application id "com.apple.MobileSMS"
                 try
                     set targetService to 1st account whose service type = iMessage
                     set targetBuddy to participant "\(chatID)" of targetService

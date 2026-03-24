@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import ImageIO
-import os
 
 @MainActor
 final class ClipboardHistoryService: ObservableObject {
@@ -11,8 +10,6 @@ final class ClipboardHistoryService: ObservableObject {
     private var lastChangeCount: Int
     private var isEnabled = false
     private var suspendUntil: Date?
-
-    private let logger = Logger(subsystem: "com.cider.app", category: "ClipboardHistory")
 
     private static let imageTypes: [NSPasteboard.PasteboardType] = [
         .png, .tiff, NSPasteboard.PasteboardType("public.jpeg")

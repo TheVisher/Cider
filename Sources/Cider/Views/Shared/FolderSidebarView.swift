@@ -760,7 +760,7 @@ struct FolderSidebarView: View {
                       let bookmarkID = UUID(uuidString: rawID) else {
                     return
                 }
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     if let bookmark = bookmarks.first(where: { $0.id == bookmarkID }) {
                         _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
                     }
@@ -777,7 +777,7 @@ struct FolderSidebarView: View {
                       let noteID = UUID(uuidString: rawID) else {
                     return
                 }
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     if let note = notes.first(where: { $0.id == noteID }) {
                         _ = onAssignNoteToFolder?(note, targetFolderID)
                     }
@@ -806,13 +806,13 @@ struct FolderSidebarView: View {
                 }
 
                 if let bookmarkID = BookmarkDragPayload.bookmarkID(from: trimmed) {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         if let bookmark = bookmarks.first(where: { $0.id == bookmarkID }) {
                             _ = onAssignBookmarkToFolder?(bookmark, targetFolderID)
                         }
                     }
                 } else if let noteID = NoteDragPayload.noteID(from: trimmed) {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         if let note = notes.first(where: { $0.id == noteID }) {
                             _ = onAssignNoteToFolder?(note, targetFolderID)
                         }

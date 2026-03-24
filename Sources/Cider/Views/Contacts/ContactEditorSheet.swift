@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ContactEditorSheet: View {
     let existingContact: ContactCard?

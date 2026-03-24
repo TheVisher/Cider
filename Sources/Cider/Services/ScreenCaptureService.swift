@@ -148,7 +148,8 @@ private enum ScreenCaptureSelectionController {
 
             panel.contentView = view
             NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
+            panel.orderFront(nil)
+            panel.makeKey()
             panel.makeFirstResponder(view)
         }
     }

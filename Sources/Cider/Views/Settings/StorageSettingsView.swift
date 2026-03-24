@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 struct StorageSettingsView: View {
     @EnvironmentObject private var viewModel: SettingsViewModel

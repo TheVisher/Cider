@@ -4,6 +4,7 @@ import os
 
 /// Detects Option+B and Option+Shift+B to capture bookmarks.
 /// Posts `.captureBookmark` notification.
+/// @unchecked Sendable: all mutable state accessed only from main thread event monitors.
 final class BookmarksHotkeyDetector: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.cider.app", category: "BookmarksHotkeyDetector")

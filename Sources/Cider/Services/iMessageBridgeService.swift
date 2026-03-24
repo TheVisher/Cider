@@ -373,12 +373,6 @@ final class iMessageBridgeService: ObservableObject {
         return assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - Reply
-
-    private func sendReply(_ text: String, to chatID: String) {
-        iMessageSender.send(text, toChatID: chatID)
-    }
-
     // MARK: - Claude Path Resolution
 
     /// Resolve the full path to the `claude` binary by checking common locations
@@ -422,19 +416,4 @@ final class iMessageBridgeService: ObservableObject {
         return nil
     }
 
-    /// Build an environment dictionary that includes the user's login shell PATH.
-    private func buildShellEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        // Ensure PATH includes common locations
-        let extraPaths = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "\(NSHomeDirectory())/.npm/bin",
-            "\(NSHomeDirectory())/.local/bin",
-        ]
-        let existing = env["PATH"] ?? "/usr/bin:/bin"
-        let combined = (extraPaths + [existing]).joined(separator: ":")
-        env["PATH"] = combined
-        return env
-    }
 }

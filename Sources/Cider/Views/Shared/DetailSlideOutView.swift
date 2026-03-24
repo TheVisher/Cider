@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 
 enum BookmarkHeroMode: String { case thumbnail, web, reader }
 

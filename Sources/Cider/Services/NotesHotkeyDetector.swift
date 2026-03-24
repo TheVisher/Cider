@@ -4,6 +4,7 @@ import os
 
 /// Detects Option+N keyboard shortcut to toggle the inline note editor.
 /// Posts `.toggleNoteEditor` notification.
+/// @unchecked Sendable: all mutable state accessed only from main thread event monitors.
 final class NotesHotkeyDetector: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.cider.app", category: "NotesHotkeyDetector")

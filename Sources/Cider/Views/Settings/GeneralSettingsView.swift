@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 // MARK: - Reusable Settings Components
 
