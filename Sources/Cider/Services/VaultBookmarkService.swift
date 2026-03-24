@@ -688,6 +688,9 @@ final class VaultBookmarkService: ObservableObject {
 
         var adopted: [Bookmark] = []
         var reassigned = 0
+        // URLs already claimed by a folder — first folder wins, later copies are stale
+        var claimedURLs = Set<String>()
+        var staleDuplicateFiles: [URL] = []
 
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
             guard fm.fileExists(atPath: dirURL.path) else { return }
@@ -719,6 +722,16 @@ final class VaultBookmarkService: ObservableObject {
                     continue
                 }
 
+                // Duplicate cleanup: if this URL was already claimed by another folder
+                // (vault or Inbox), this copy is stale. Delete it.
+                if claimedURLs.contains(url) {
+                    if let rp = bookmark.relativePath {
+                        staleDuplicateFiles.append(vaultRoot.appendingPathComponent(rp))
+                    }
+                    continue
+                }
+                claimedURLs.insert(url)
+
                 if let existingID = existingIDByURL[url] {
                     if let idx = bookmarks.firstIndex(where: { $0.id == existingID }),
                        bookmarks[idx].folderID != folderID {
@@ -734,13 +747,19 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
 
-        // Scan Inbox/Bookmarks
-        processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
-
-        // Scan vault folders
+        // Scan vault folders FIRST — they are authoritative for folder assignment
         for folder in VaultFolderService.shared.folders {
             let dirURL = vaultRoot.appendingPathComponent(folder.relativePath)
             processDirectory(dirURL: dirURL, dirRelativePath: folder.relativePath, folderID: folder.id)
+        }
+
+        // Scan Inbox/Bookmarks — duplicates of vault-folder bookmarks are cleaned up
+        processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
+
+        // Delete stale duplicate .webloc files (same URL in multiple folders)
+        for fileURL in staleDuplicateFiles {
+            fileService.delete(filename: fileURL.lastPathComponent, from: fileURL.deletingLastPathComponent())
+            logger.info("Cleaned up stale duplicate: \(fileURL.lastPathComponent)")
         }
 
         if !adopted.isEmpty || reassigned > 0 {

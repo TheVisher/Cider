@@ -78,7 +78,20 @@ final class NotesViewModel: ObservableObject {
 
     @discardableResult
     func assignNote(_ note: Note, toFolder folderID: UUID?) -> Bool {
-        NotesStorage.shared.assignNote(note.id, toFolder: folderID)
+        let oldFolderID = note.folderID
+        let result = NotesStorage.shared.assignNote(note.id, toFolder: folderID)
+        if result {
+            let folderName = VaultFolderService.shared.folder(for: folderID ?? UUID())?.name ?? "Unfiled"
+            CiderUndoManager.shared.record(.movedToFolder(
+                itemType: .note,
+                itemID: note.id,
+                title: note.title,
+                fromFolderID: oldFolderID,
+                toFolderID: folderID,
+                folderName: folderName
+            ))
+        }
+        return result
     }
 
     @discardableResult

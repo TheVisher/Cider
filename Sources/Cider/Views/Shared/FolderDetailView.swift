@@ -1093,22 +1093,11 @@ struct FolderDetailView: View {
                     completion(payload, nil)
                     return nil
                 }
-                // NOTE: Do NOT register public.file-url here — it breaks SwiftUI's
-                // .onDrop, causing providers to arrive with empty registeredTypeIdentifiers.
-                // Instead, register the file content type (markdown) so Finder gets a .md copy.
-                if let mdType = UTType(filenameExtension: "md") {
-                    let fileURL = note.absoluteFileURL
-                    if FileManager.default.fileExists(atPath: fileURL.path) {
-                        provider.registerFileRepresentation(
-                            forTypeIdentifier: mdType.identifier,
-                            fileOptions: [],
-                            visibility: .all
-                        ) { completion in
-                            completion(fileURL, true, nil)
-                            return nil
-                        }
-                    }
-                }
+                // NOTE: Do NOT register additional types (registerFileRepresentation,
+                // registerDataRepresentation for markdown, or public.file-url) here —
+                // any extra type registration breaks SwiftUI's .onDrop, causing providers
+                // to arrive with empty registeredTypeIdentifiers (internal folder drops
+                // silently fail). Finder drag-out is sacrificed for internal drag-to-folder.
                 return provider
             }
         }
