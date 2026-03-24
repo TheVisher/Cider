@@ -30,7 +30,7 @@ struct RelatedItemsView: View {
             excluding: [bookmarkID],
             limit: 3
         )
-        let allBookmarks = BookmarksStorage.shared.bookmarks
+        let allBookmarks = VaultBookmarkService.shared.bookmarks
         relatedBookmarks = ids.compactMap { id in allBookmarks.first { $0.id == id } }
     }
 }

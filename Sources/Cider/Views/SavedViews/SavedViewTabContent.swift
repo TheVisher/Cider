@@ -1109,7 +1109,7 @@ struct SavedViewTabContent: View {
     private func titleForLinkedRef(_ ref: LibraryEntityRef) -> String? {
         switch ref.type {
         case .bookmark:
-            return BookmarksStorage.shared.bookmarks.first(where: { $0.id == ref.entityID })?.title
+            return VaultBookmarkService.shared.bookmarks.first(where: { $0.id == ref.entityID })?.title
         case .note:
             return NotesStorage.shared.notes.first(where: { $0.id == ref.entityID })?.title
         case .dateCard:
@@ -1126,7 +1126,7 @@ struct SavedViewTabContent: View {
     private func openLinkedRef(_ ref: LibraryEntityRef) {
         switch ref.type {
         case .bookmark:
-            if let bookmark = BookmarksStorage.shared.bookmarks.first(where: { $0.id == ref.entityID }) {
+            if let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == ref.entityID }) {
                 onOpenBookmark?(bookmark)
             }
         case .note:

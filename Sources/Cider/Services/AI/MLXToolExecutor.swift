@@ -107,7 +107,7 @@ enum MLXToolExecutor {
 
         switch type {
         case "bookmarks", "bookmark":
-            return "The user has \(BookmarksStorage.shared.bookmarks.count) bookmarks."
+            return "The user has \(VaultBookmarkService.shared.bookmarks.count) bookmarks."
         case "notes", "note":
             return "The user has \(NotesStorage.shared.notes.count) notes."
         case "events", "event", "datecards", "datecard", "date cards":
@@ -129,7 +129,7 @@ enum MLXToolExecutor {
         case "sessions", "session", "browser sessions":
             return "The user has \(BrowserSessionStorage.shared.sessions.count) saved browser sessions."
         case "all", "everything", "summary":
-            let b = BookmarksStorage.shared.bookmarks.count
+            let b = VaultBookmarkService.shared.bookmarks.count
             let n = NotesStorage.shared.notes.count
             let e = DateCardStorage.shared.dateCards.count
             let t = TodoCardStorage.shared.todoCards.count
@@ -150,7 +150,7 @@ enum MLXToolExecutor {
         var results: [String] = []
 
         if searchAll || typeFilter == "bookmarks" || typeFilter == "bookmark" {
-            let matches = BookmarksStorage.shared.bookmarks.filter {
+            let matches = VaultBookmarkService.shared.bookmarks.filter {
                 $0.title.localizedStandardContains(query) ||
                 $0.urlString.localizedStandardContains(query) ||
                 $0.notes.localizedStandardContains(query) ||
@@ -229,7 +229,7 @@ enum MLXToolExecutor {
         let folders = VaultFolderService.shared.folders
         if folders.isEmpty { return "No folders exist yet." }
 
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
         let notes = NotesStorage.shared.notes
         let events = DateCardStorage.shared.dateCards
         let todos = TodoCardStorage.shared.todoCards
@@ -268,7 +268,7 @@ enum MLXToolExecutor {
         fmt.dateStyle = .medium
         var results: [String] = []
 
-        let recentBookmarks = BookmarksStorage.shared.bookmarks
+        let recentBookmarks = VaultBookmarkService.shared.bookmarks
             .filter { $0.createdAt >= threshold }
             .sorted { $0.createdAt > $1.createdAt }
         for b in recentBookmarks.prefix(10) {
@@ -322,7 +322,7 @@ enum MLXToolExecutor {
         let lid = label.id
         var results: [String] = []
 
-        let bookmarks = BookmarksStorage.shared.bookmarks.filter { $0.labelIDs.contains(lid) }
+        let bookmarks = VaultBookmarkService.shared.bookmarks.filter { $0.labelIDs.contains(lid) }
         for b in bookmarks.prefix(10) { results.append("Bookmark: \"\(b.title)\"") }
         if bookmarks.count > 10 { results.append("...and \(bookmarks.count - 10) more bookmarks") }
 
@@ -420,7 +420,7 @@ enum MLXToolExecutor {
         let fid = folder.id
         var results: [String] = []
 
-        let bookmarks = BookmarksStorage.shared.bookmarks.filter { $0.folderID == fid }
+        let bookmarks = VaultBookmarkService.shared.bookmarks.filter { $0.folderID == fid }
         for b in bookmarks.prefix(15) { results.append("Bookmark: \"\(b.title)\"") }
         if bookmarks.count > 15 { results.append("...and \(bookmarks.count - 15) more bookmarks") }
 
@@ -464,7 +464,7 @@ enum MLXToolExecutor {
         let context = AIAssistantViewModel.shared.context
 
         if let bookmark = context.currentBookmark {
-            if let full = BookmarksStorage.shared.bookmarks.first(where: { $0.urlString == bookmark.url }) {
+            if let full = VaultBookmarkService.shared.bookmarks.first(where: { $0.urlString == bookmark.url }) {
                 var details = "Currently viewing bookmark:"
                 details += "\n  Title: \"\(full.title)\""
                 details += "\n  URL: \(full.urlString)"
@@ -507,7 +507,7 @@ enum MLXToolExecutor {
 
     private static func findSimilar(_ args: [String: Any]) -> String {
         let query = string("bookmarkTitle", from: args)
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
 
         guard let bookmark = bookmarks.first(where: { $0.title.localizedStandardContains(query) }) else {
             return "No bookmark found matching \"\(query)\"."
@@ -564,10 +564,10 @@ enum MLXToolExecutor {
 
         var moved: [String] = []
 
-        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+        for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query)
         }) {
-            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folder.id)
+            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
             moved.append("Bookmark: \"\(bookmark.title)\"")
         }
         for note in NotesStorage.shared.notes.filter({ $0.title.localizedStandardContains(query) }) {
@@ -587,11 +587,11 @@ enum MLXToolExecutor {
         let label = CardLabelStorage.shared.findOrCreate(name: tagName)
         var tagged: [String] = []
 
-        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+        for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query)
         }) {
             if !bookmark.labelIDs.contains(label.id) {
-                _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+                _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
                 tagged.append("Bookmark: \"\(bookmark.title)\"")
             }
         }
@@ -619,11 +619,11 @@ enum MLXToolExecutor {
         let lid = label.id
         var untagged: [String] = []
 
-        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+        for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             ($0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query))
             && $0.labelIDs.contains(lid)
         }) {
-            _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: lid)
+            _ = VaultBookmarkService.shared.removeLabel(bookmark.id, labelID: lid)
             untagged.append("Bookmark: \"\(bookmark.title)\"")
         }
         for note in NotesStorage.shared.notes.filter({
@@ -642,7 +642,7 @@ enum MLXToolExecutor {
         let newTitle = string("newTitle", from: args)
         guard !newTitle.isEmpty else { return "New title cannot be empty." }
 
-        let matches = BookmarksStorage.shared.bookmarks.filter { $0.title.localizedStandardContains(query) }
+        let matches = VaultBookmarkService.shared.bookmarks.filter { $0.title.localizedStandardContains(query) }
         guard let bookmark = matches.first else { return "No bookmark found matching \"\(query)\"." }
         if matches.count > 1 {
             let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
@@ -650,7 +650,7 @@ enum MLXToolExecutor {
         }
 
         let oldTitle = bookmark.title
-        _ = BookmarksStorage.shared.updateDetails(
+        _ = VaultBookmarkService.shared.updateDetails(
             for: bookmark.id, title: newTitle, notes: bookmark.notes,
             tags: bookmark.tags, labelIDs: bookmark.labelIDs
         )
@@ -682,7 +682,7 @@ enum MLXToolExecutor {
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
         let title = optString("title", from: args)
-        guard let bookmark = BookmarksStorage.shared.add(urlString: urlString, title: title) else {
+        guard let bookmark = VaultBookmarkService.shared.add(urlString: urlString, title: title) else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
 
@@ -692,12 +692,12 @@ enum MLXToolExecutor {
            let folder = VaultFolderService.shared.folders.first(where: {
                $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
            }) {
-            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folder.id)
+            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
             actions.append("moved to folder \"\(folder.name)\"")
         }
         if let tagName = optString("tagName", from: args) {
             let label = CardLabelStorage.shared.findOrCreate(name: tagName)
-            _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+            _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
             actions.append("tagged \"\(label.name)\"")
         }
 
@@ -709,13 +709,13 @@ enum MLXToolExecutor {
         let type = string("itemType", from: args).lowercased()
 
         if type == "bookmark" || type == "bookmarks" {
-            let matches = BookmarksStorage.shared.bookmarks.filter { $0.title.localizedStandardContains(query) }
+            let matches = VaultBookmarkService.shared.bookmarks.filter { $0.title.localizedStandardContains(query) }
             guard let bookmark = matches.first else { return "No bookmark found matching \"\(query)\"." }
             if matches.count > 1 {
                 let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
                 return "Multiple bookmarks match \"\(query)\": \(titles). Please be more specific."
             }
-            let trashItem = BookmarksStorage.shared.remove(bookmark)
+            let trashItem = VaultBookmarkService.shared.remove(bookmark)
             CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: trashItem))
             return "Moved bookmark \"\(bookmark.title)\" to trash."
         }
@@ -755,10 +755,10 @@ enum MLXToolExecutor {
         let query = string("searchQuery", from: args)
         var unfiled: [String] = []
 
-        for bookmark in BookmarksStorage.shared.bookmarks.filter({
+        for bookmark in VaultBookmarkService.shared.bookmarks.filter({
             $0.title.localizedStandardContains(query) && $0.folderID != nil
         }) {
-            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
+            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
             unfiled.append("Bookmark: \"\(bookmark.title)\"")
         }
         for note in NotesStorage.shared.notes.filter({

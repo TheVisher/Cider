@@ -331,7 +331,7 @@ final class SyncService: ObservableObject {
             return
         }
 
-        let storage = BookmarksStorage.shared
+        let storage = VaultBookmarkService.shared
         let notesStorage = NotesStorage.shared
         let config = CiderConfig.load()
         let lastPushDate = Date(timeIntervalSince1970: config.lastSuccessfulPushAt)
@@ -506,7 +506,7 @@ final class SyncService: ObservableObject {
     // MARK: - Apply pull results to local storage
 
     private func applyPullResult(_ result: SyncPullResponse) {
-        let storage = BookmarksStorage.shared
+        let storage = VaultBookmarkService.shared
 
         // --- Folders first (bookmarks/notes may reference them) ---
         let folderService = VaultFolderService.shared
@@ -699,7 +699,7 @@ final class SyncService: ObservableObject {
                 let result: SyncPullResponse = try await client.action("sync:pull", with: args)
 
                 // Build local inventories
-                let localBookmarks = BookmarksStorage.shared.bookmarks
+                let localBookmarks = VaultBookmarkService.shared.bookmarks
                 let localFolders = VaultFolderService.shared.legacyFolders
                 let localNotes = NotesStorage.shared.notes
 

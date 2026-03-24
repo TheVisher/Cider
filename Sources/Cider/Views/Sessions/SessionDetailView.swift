@@ -169,7 +169,7 @@ struct SessionDetailView: View {
 
             Button {
                 if isSaved { return }
-                _ = BookmarksStorage.shared.add(urlString: tab.urlString, title: tab.title)
+                _ = VaultBookmarkService.shared.add(urlString: tab.urlString, title: tab.title)
                 savedTabIDs.insert(tab.id)
             } label: {
                 Image(systemName: isSaved ? "bookmark.fill" : "bookmark")

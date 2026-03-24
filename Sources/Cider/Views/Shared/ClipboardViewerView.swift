@@ -84,7 +84,7 @@ enum ClipboardDateGroup: Hashable, Comparable {
 
 struct ClipboardViewerView: View {
     @ObservedObject private var clipboardStorage = ClipboardStorage.shared
-    @ObservedObject private var bookmarksStorage = BookmarksStorage.shared
+    @ObservedObject private var bookmarksStorage = VaultBookmarkService.shared
     @ObservedObject private var notesStorage = NotesStorage.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("cider.clipboardWideMode") private var isWideMode = false
@@ -434,7 +434,7 @@ struct ClipboardViewerView: View {
         switch item.type {
         case .url:
             if let urlString = item.textContent {
-                if let bookmark = BookmarksStorage.shared.add(urlString: urlString, title: nil) {
+                if let bookmark = VaultBookmarkService.shared.add(urlString: urlString, title: nil) {
                     resultID = bookmark.id
                     NotificationCenter.default.post(
                         name: .showBookmarkCaptureToast,
@@ -452,8 +452,8 @@ struct ClipboardViewerView: View {
                     try? Data(contentsOf: url)
                 }.value
                 guard let data else { return }
-                let bookmark = BookmarksStorage.shared.addImageBookmark(title: "Clipboard Image")
-                _ = BookmarksStorage.shared.assignThumbnail(
+                let bookmark = VaultBookmarkService.shared.addImageBookmark(title: "Clipboard Image")
+                _ = VaultBookmarkService.shared.assignThumbnail(
                     for: bookmark.id,
                     imageData: data,
                     preferredFileExtension: ext

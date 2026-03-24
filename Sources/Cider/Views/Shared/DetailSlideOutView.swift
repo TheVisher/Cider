@@ -168,7 +168,7 @@ struct DetailSlideOutView: View {
         .onChange(of: heroMode) { _, newMode in
             // Persist per-bookmark hero mode preference
             if let id = bookmark?.id {
-                BookmarksStorage.shared.setPreferredHeroMode(newMode.rawValue, for: id)
+                VaultBookmarkService.shared.setPreferredHeroMode(newMode.rawValue, for: id)
             }
         }
         .onChange(of: webViewStore.readerFailed) { _, failed in
@@ -180,7 +180,7 @@ struct DetailSlideOutView: View {
             webViewIsLoading = false
             webViewStore.reset()
             // Restore per-bookmark hero mode and reader availability
-            if let bm = newID.flatMap({ id in BookmarksStorage.shared.bookmarks.first { $0.id == id } }) {
+            if let bm = newID.flatMap({ id in VaultBookmarkService.shared.bookmarks.first { $0.id == id } }) {
                 let isReaderUnavailable = bm.readerUnavailable == true
                 let restored = bm.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
                 heroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored

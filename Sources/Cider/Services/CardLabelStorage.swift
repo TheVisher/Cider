@@ -69,7 +69,7 @@ final class CardLabelStorage: ObservableObject {
         guard labels.count != oldCount else { return false }
         persist()
         // Cascade: remove this label from all items
-        BookmarksStorage.shared.removeLabelsFromAll(labelID: id)
+        VaultBookmarkService.shared.removeLabelsFromAll(labelID: id)
         NotesStorage.shared.removeLabelsFromAll(labelID: id)
         DateCardStorage.shared.removeLabelsFromAll(labelID: id)
         ContactStorage.shared.removeLabelsFromAll(labelID: id)
@@ -106,9 +106,9 @@ final class CardLabelStorage: ObservableObject {
 
     private func reassignLabelOnAllItems(from sourceID: UUID, to targetID: UUID) {
         // Bookmarks
-        for bookmark in BookmarksStorage.shared.bookmarks where bookmark.labelIDs.contains(sourceID) {
-            BookmarksStorage.shared.removeLabel(bookmark.id, labelID: sourceID)
-            BookmarksStorage.shared.assignLabel(bookmark.id, labelID: targetID)
+        for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.labelIDs.contains(sourceID) {
+            VaultBookmarkService.shared.removeLabel(bookmark.id, labelID: sourceID)
+            VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: targetID)
         }
         // Notes
         for note in NotesStorage.shared.notes where note.labelIDs.contains(sourceID) {
@@ -144,7 +144,7 @@ final class CardLabelStorage: ObservableObject {
 
     /// Total item count across all entity storages for a given label.
     func itemCount(for labelID: UUID) -> Int {
-        BookmarksStorage.shared.bookmarks.filter { $0.labelIDs.contains(labelID) }.count
+        VaultBookmarkService.shared.bookmarks.filter { $0.labelIDs.contains(labelID) }.count
         + NotesStorage.shared.notes.filter { $0.labelIDs.contains(labelID) }.count
         + DateCardStorage.shared.dateCards.filter { $0.labelIDs.contains(labelID) }.count
         + ContactStorage.shared.contacts.filter { $0.labelIDs.contains(labelID) }.count

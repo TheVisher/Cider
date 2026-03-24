@@ -41,7 +41,7 @@ final class SpotlightIndexer {
     // MARK: - Storage Bindings
 
     private func bindStorages() {
-        BookmarksStorage.shared.$bookmarks
+        VaultBookmarkService.shared.$bookmarks
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.scheduleReindex() }
             .store(in: &cancellables)
@@ -78,7 +78,7 @@ final class SpotlightIndexer {
 
         // Snapshot data on main actor, then load heavy data (thumbnails, note content)
         // off-main to avoid blocking the UI. Index items are built on main after.
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
         let notes = NotesStorage.shared.notes
         let dateCards = DateCardStorage.shared.dateCards
         let contacts = ContactStorage.shared.contacts
@@ -273,7 +273,7 @@ final class SpotlightIndexer {
         // Navigate to the item based on type
         switch itemType {
         case "bookmark":
-            if let bookmark = BookmarksStorage.shared.bookmarks.first(where: { $0.id == itemID }) {
+            if let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == itemID }) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     NotificationCenter.default.post(
                         name: .openBookmarkDetails,

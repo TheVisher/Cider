@@ -22,7 +22,7 @@ final class BookmarksViewModel: ObservableObject {
         self.cardSize = config.bookmarksCardSize
         self.cardSizeScale = config.bookmarksCardSizeScale ?? config.bookmarksCardSize.sliderValue
 
-        BookmarksStorage.shared.$bookmarks
+        VaultBookmarkService.shared.$bookmarks
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -59,7 +59,7 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     var bookmarks: [Bookmark] {
-        BookmarksStorage.shared.bookmarks
+        VaultBookmarkService.shared.bookmarks
     }
 
     var folders: [Folder] {
@@ -79,12 +79,12 @@ final class BookmarksViewModel: ObservableObject {
 
     @discardableResult
     func addBookmark(urlString: String, title: String?) -> Bool {
-        BookmarksStorage.shared.add(urlString: urlString, title: title) != nil
+        VaultBookmarkService.shared.add(urlString: urlString, title: title) != nil
     }
 
     @discardableResult
     func addBookmarkFromPasteboard() -> Bool {
-        BookmarksStorage.shared.addFromPasteboard() != nil
+        VaultBookmarkService.shared.addFromPasteboard() != nil
     }
 
     @discardableResult
@@ -107,14 +107,14 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     func delete(_ bookmark: Bookmark) {
-        let trashItem = BookmarksStorage.shared.remove(bookmark)
+        let trashItem = VaultBookmarkService.shared.remove(bookmark)
         CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: trashItem))
     }
 
     @discardableResult
     func assign(_ bookmark: Bookmark, toFolder folderID: UUID?) -> Bool {
         let oldFolderID = bookmark.folderID
-        let result = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folderID)
+        let result = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID)
         if result {
             let folderName = folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
             CiderUndoManager.shared.record(.movedToFolder(
@@ -163,7 +163,7 @@ final class BookmarksViewModel: ObservableObject {
                 NotesStorage.shared.assignNote(note.id, toFolder: nil)
             }
             for bookmark in bookmarks where bookmark.folderID == id {
-                BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
+                VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
             }
             for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
                 TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
@@ -231,7 +231,7 @@ final class BookmarksViewModel: ObservableObject {
 
     @discardableResult
     func updateDetails(for bookmark: Bookmark, title: String, notes: String, tags: [String], labelIDs: [UUID]? = nil, urlString: String? = nil) -> Bool {
-        BookmarksStorage.shared.updateDetails(
+        VaultBookmarkService.shared.updateDetails(
             for: bookmark.id,
             title: title,
             notes: notes,
@@ -248,7 +248,7 @@ final class BookmarksViewModel: ObservableObject {
 
         let bookmarkID = bookmark.id
         Task { @MainActor [weak self] in
-            let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: trimmed)
+            let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: trimmed)
             self?.postCaptureToast(
                 message: saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL",
                 isSuccess: saved
@@ -261,7 +261,7 @@ final class BookmarksViewModel: ObservableObject {
     func assignThumbnail(for bookmark: Bookmark, fileURL: URL) -> Bool {
         let bookmarkID = bookmark.id
         Task { @MainActor [weak self] in
-            let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: fileURL)
+            let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: fileURL)
             self?.postCaptureToast(
                 message: saved ? "Updated bookmark thumbnail" : "Could not use dropped image file",
                 isSuccess: saved
@@ -276,7 +276,7 @@ final class BookmarksViewModel: ObservableObject {
 
         let bookmarkID = bookmark.id
         Task { @MainActor [weak self] in
-            let saved = BookmarksStorage.shared.assignThumbnail(
+            let saved = VaultBookmarkService.shared.assignThumbnail(
                 for: bookmarkID,
                 imageData: imageData,
                 preferredFileExtension: preferredFileExtension
@@ -290,7 +290,7 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     func deleteBookmarks(_ bookmarks: [Bookmark]) {
-        let trashItems = BookmarksStorage.shared.removeAll(bookmarks)
+        let trashItems = VaultBookmarkService.shared.removeAll(bookmarks)
         if !trashItems.isEmpty {
             CiderUndoManager.shared.record(.bulkDeletedToTrash(trashItems))
         }

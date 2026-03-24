@@ -113,14 +113,14 @@ struct BookmarkListRow: View {
             folders: folders,
             onOpen: onOpen,
             onShowDetails: onShowDetails,
-            onRefetchMetadata: { BookmarksStorage.shared.refetchMetadata(for: bookmark.id) },
+            onRefetchMetadata: { VaultBookmarkService.shared.refetchMetadata(for: bookmark.id) },
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
             onDelete: onDelete,
             onToggleLabel: { labelID in
                 if bookmark.labelIDs.contains(labelID) {
-                    _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: labelID)
+                    _ = VaultBookmarkService.shared.removeLabel(bookmark.id, labelID: labelID)
                 } else {
-                    _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: labelID)
+                    _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: labelID)
                 }
             },
             isSelected: isSelected,

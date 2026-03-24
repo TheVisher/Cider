@@ -38,7 +38,7 @@ final class BookmarkAIEnrichment {
     /// Re-run AI enrichment on all bookmarks with the latest algorithm.
     /// Throttled to avoid saturating the main thread.
     func retagAll() {
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
         Task { @MainActor in
             for bookmark in bookmarks {
                 guard !Task.isCancelled else { break }
@@ -138,7 +138,7 @@ final class BookmarkAIEnrichment {
                    || suggestedTitle != nil
 
         if changed {
-            BookmarksStorage.shared.applyAIResults(
+            VaultBookmarkService.shared.applyAIResults(
                 for: bookmark.id,
                 tags: newTags,
                 ocrText: ocrText,
@@ -152,11 +152,11 @@ final class BookmarkAIEnrichment {
         // Skip any label the user previously dismissed.
         if !suggestedTags.isEmpty {
             await MainActor.run {
-                let current = BookmarksStorage.shared.bookmarks.first(where: { $0.id == bookmark.id })
+                let current = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmark.id })
                 for tagName in suggestedTags {
                     let label = CardLabelStorage.shared.findOrCreate(name: tagName, colorHex: nil)
                     if let current, current.dismissedLabelIDs.contains(label.id) { continue }
-                    _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+                    _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
                 }
             }
         }

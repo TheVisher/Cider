@@ -322,7 +322,7 @@ struct BookmarkMetadataSidebar: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 60, maximum: 80), spacing: Spacing.xs)], spacing: Spacing.xs) {
                     ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
                         CarouselMetadataThumbnail(url: url) {
-                            BookmarksStorage.shared.removeCarouselImage(for: bookmark.id, at: index)
+                            VaultBookmarkService.shared.removeCarouselImage(for: bookmark.id, at: index)
                         }
                     }
                 }

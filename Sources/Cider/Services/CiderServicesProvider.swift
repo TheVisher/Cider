@@ -27,7 +27,7 @@ final class CiderServicesProvider: NSObject {
         if let url = URL(string: trimmed),
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
-            let saved = BookmarksStorage.shared.add(urlString: url.absoluteString, title: nil) != nil
+            let saved = VaultBookmarkService.shared.add(urlString: url.absoluteString, title: nil) != nil
             postToast(message: saved ? "Saved from Services" : "Could not save URL", isSuccess: saved)
             return
         }
@@ -57,8 +57,8 @@ final class CiderServicesProvider: NSObject {
 
     private func handleImage(_ data: Data?) {
         guard let data else { return }
-        let bookmark = BookmarksStorage.shared.addImageBookmark(title: "Image from Services")
-        BookmarksStorage.shared.assignThumbnail(for: bookmark.id, imageData: data)
+        let bookmark = VaultBookmarkService.shared.addImageBookmark(title: "Image from Services")
+        VaultBookmarkService.shared.assignThumbnail(for: bookmark.id, imageData: data)
         postToast(message: "Saved image from Services", isSuccess: true)
     }
 

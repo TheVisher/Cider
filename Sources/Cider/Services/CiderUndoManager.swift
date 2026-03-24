@@ -88,7 +88,7 @@ final class CiderUndoManager {
         case .movedToFolder(let itemType, let itemID, _, let fromFolderID, _, _):
             switch itemType {
             case .bookmark:
-                BookmarksStorage.shared.assignBookmark(itemID, toFolder: fromFolderID)
+                VaultBookmarkService.shared.assignBookmark(itemID, toFolder: fromFolderID)
             case .note:
                 NotesStorage.shared.assignNote(itemID, toFolder: fromFolderID)
             case .dateCard:
@@ -107,7 +107,7 @@ final class CiderUndoManager {
             for item in items {
                 switch item.itemType {
                 case .bookmark:
-                    BookmarksStorage.shared.assignBookmark(item.itemID, toFolder: item.fromFolderID)
+                    VaultBookmarkService.shared.assignBookmark(item.itemID, toFolder: item.fromFolderID)
                 case .note:
                     NotesStorage.shared.assignNote(item.itemID, toFolder: item.fromFolderID)
                 case .dateCard:
@@ -126,8 +126,8 @@ final class CiderUndoManager {
         case .renamed(let itemType, let itemID, let oldTitle, _):
             switch itemType {
             case .bookmark:
-                if let bm = BookmarksStorage.shared.bookmarks.first(where: { $0.id == itemID }) {
-                    BookmarksStorage.shared.updateDetails(
+                if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == itemID }) {
+                    VaultBookmarkService.shared.updateDetails(
                         for: itemID,
                         title: oldTitle,
                         notes: bm.notes,

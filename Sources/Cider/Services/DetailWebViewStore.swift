@@ -43,7 +43,7 @@ final class DetailWebViewStore: ObservableObject {
         currentBookmarkID = bookmarkID
 
         // Check persisted reader availability
-        if let bm = BookmarksStorage.shared.bookmarks.first(where: { $0.id == bookmarkID }),
+        if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmarkID }),
            bm.readerUnavailable == true {
             readerFailed = true
             // Skip reader extraction, still preload web view
@@ -116,11 +116,11 @@ final class DetailWebViewStore: ObservableObject {
             case .success(let article):
                 self.cachedArticle = article
                 self.readerReady = true
-                BookmarksStorage.shared.setReaderUnavailable(false, for: bookmarkID)
+                VaultBookmarkService.shared.setReaderUnavailable(false, for: bookmarkID)
                 Self.logger.debug("Reader content extracted for \(bookmarkID)")
             case .failure:
                 self.readerFailed = true
-                BookmarksStorage.shared.setReaderUnavailable(true, for: bookmarkID)
+                VaultBookmarkService.shared.setReaderUnavailable(true, for: bookmarkID)
                 Self.logger.debug("Reader extraction failed for \(bookmarkID)")
             }
             self.extractionWebView = nil

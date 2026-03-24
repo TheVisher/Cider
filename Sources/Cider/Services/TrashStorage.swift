@@ -107,7 +107,7 @@ final class TrashStorage {
             }
         }
 
-        BookmarksStorage.shared.restoreFromTrash(restoredBookmark)
+        VaultBookmarkService.shared.restoreFromTrash(restoredBookmark)
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 

@@ -847,7 +847,7 @@ struct FolderSidebarView: View {
                         title: bookmark.title,
                         fromFolderID: bookmark.folderID
                     ))
-                    BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: targetFolderID)
+                    VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: targetFolderID)
                 }
             case "note":
                 if let note = notes.first(where: { $0.id == item.id }) {

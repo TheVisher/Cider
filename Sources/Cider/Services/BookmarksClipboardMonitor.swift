@@ -101,7 +101,7 @@ final class BookmarksClipboardMonitor {
         // Check for URL string (if URL capture is enabled)
         if config.autoCaptureCopiedURLs, let value = pasteboard.string(forType: .string) {
             if config.confirmCopiedURLBeforeSave {
-                if BookmarksStorage.shared.previewNormalizedURLString(from: value) != nil {
+                if VaultBookmarkService.shared.previewNormalizedURLString(from: value) != nil {
                     NotificationCenter.default.post(
                         name: .showBookmarkClipboardReviewToast,
                         object: nil,
@@ -109,7 +109,7 @@ final class BookmarksClipboardMonitor {
                     )
                     return
                 }
-            } else if BookmarksStorage.shared.add(urlString: value, title: nil) != nil {
+            } else if VaultBookmarkService.shared.add(urlString: value, title: nil) != nil {
                 NotificationCenter.default.post(
                     name: .showBookmarkCaptureToast,
                     object: nil,

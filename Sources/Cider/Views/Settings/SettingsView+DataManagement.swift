@@ -200,7 +200,7 @@ extension SettingsView {
 
             NSApp.activate(ignoringOtherApps: true)
             if panel.runModal() == .OK, let url = panel.url {
-                let count = BookmarksStorage.shared.importNetscapeHTML(from: url)
+                let count = VaultBookmarkService.shared.importNetscapeHTML(from: url)
                 importResult = "Imported \(count) bookmarks"
             }
         }
@@ -217,7 +217,7 @@ extension SettingsView {
             NSApp.activate(ignoringOtherApps: true)
             if panel.runModal() == .OK, let url = panel.url {
                 do {
-                    try BookmarksStorage.shared.exportNetscapeHTML(to: url)
+                    try VaultBookmarkService.shared.exportNetscapeHTML(to: url)
                     exportResult = "Exported successfully"
                 } catch {
                     exportResult = "Export failed"

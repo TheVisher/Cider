@@ -23,7 +23,7 @@ struct CountItemsTool: Tool {
 
         switch type {
         case "bookmarks", "bookmark":
-            let count = BookmarksStorage.shared.bookmarks.count
+            let count = VaultBookmarkService.shared.bookmarks.count
             return ("The user has \(count) bookmarks.")
 
         case "notes", "note":
@@ -61,7 +61,7 @@ struct CountItemsTool: Tool {
             return ("The user has \(count) saved browser sessions.")
 
         case "all", "everything", "summary":
-            let bookmarks = BookmarksStorage.shared.bookmarks.count
+            let bookmarks = VaultBookmarkService.shared.bookmarks.count
             let notes = NotesStorage.shared.notes.count
             let events = DateCardStorage.shared.dateCards.count
             let todos = TodoCardStorage.shared.todoCards.count
@@ -110,7 +110,7 @@ struct SearchItemsTool: Tool {
 
         // Search bookmarks
         if searchAll || typeFilter == "bookmarks" || typeFilter == "bookmark" {
-            let matches = BookmarksStorage.shared.bookmarks.filter { bookmark in
+            let matches = VaultBookmarkService.shared.bookmarks.filter { bookmark in
                 bookmark.title.localizedStandardContains(query) ||
                 bookmark.urlString.localizedStandardContains(query) ||
                 bookmark.notes.localizedStandardContains(query) ||
@@ -209,7 +209,7 @@ struct ListFoldersTool: Tool {
             return ("No folders exist yet.")
         }
 
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
         let notes = NotesStorage.shared.notes
         let events = DateCardStorage.shared.dateCards
         let todos = TodoCardStorage.shared.todoCards
@@ -281,7 +281,7 @@ struct GetRecentItemsTool: Tool {
 
         var results: [String] = []
 
-        let recentBookmarks = BookmarksStorage.shared.bookmarks
+        let recentBookmarks = VaultBookmarkService.shared.bookmarks
             .filter { $0.createdAt >= threshold }
             .sorted { $0.createdAt > $1.createdAt }
         for b in recentBookmarks.prefix(10) {
@@ -351,7 +351,7 @@ struct GetItemsByTagTool: Tool {
         var results: [String] = []
         let lid = label.id
 
-        let bookmarks = BookmarksStorage.shared.bookmarks.filter { $0.labelIDs.contains(lid) }
+        let bookmarks = VaultBookmarkService.shared.bookmarks.filter { $0.labelIDs.contains(lid) }
         for b in bookmarks.prefix(10) {
             results.append("Bookmark: \"\(b.title)\"")
         }
@@ -503,7 +503,7 @@ struct GetFolderContentsTool: Tool {
         let fid = folder.id
         var results: [String] = []
 
-        let bookmarks = BookmarksStorage.shared.bookmarks.filter { $0.folderID == fid }
+        let bookmarks = VaultBookmarkService.shared.bookmarks.filter { $0.folderID == fid }
         for b in bookmarks.prefix(15) {
             results.append("Bookmark: \"\(b.title)\"")
         }
@@ -647,12 +647,12 @@ struct MoveToFolderTool: Tool {
 
         var moved: [String] = []
 
-        let matchingBookmarks = BookmarksStorage.shared.bookmarks.filter {
+        let matchingBookmarks = VaultBookmarkService.shared.bookmarks.filter {
             $0.title.localizedStandardContains(query) ||
             $0.urlString.localizedStandardContains(query)
         }
         for bookmark in matchingBookmarks {
-            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folder.id)
+            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
             moved.append("Bookmark: \"\(bookmark.title)\"")
         }
 
@@ -698,13 +698,13 @@ struct ApplyTagTool: Tool {
         let label = CardLabelStorage.shared.findOrCreate(name: tagName)
         var tagged: [String] = []
 
-        let matchingBookmarks = BookmarksStorage.shared.bookmarks.filter {
+        let matchingBookmarks = VaultBookmarkService.shared.bookmarks.filter {
             $0.title.localizedStandardContains(query) ||
             $0.urlString.localizedStandardContains(query)
         }
         for bookmark in matchingBookmarks {
             if !bookmark.labelIDs.contains(label.id) {
-                _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+                _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
                 tagged.append("Bookmark: \"\(bookmark.title)\"")
             }
         }
@@ -755,12 +755,12 @@ struct RemoveTagTool: Tool {
         var untagged: [String] = []
         let lid = label.id
 
-        let matchingBookmarks = BookmarksStorage.shared.bookmarks.filter {
+        let matchingBookmarks = VaultBookmarkService.shared.bookmarks.filter {
             ($0.title.localizedStandardContains(query) || $0.urlString.localizedStandardContains(query))
             && $0.labelIDs.contains(lid)
         }
         for bookmark in matchingBookmarks {
-            _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: lid)
+            _ = VaultBookmarkService.shared.removeLabel(bookmark.id, labelID: lid)
             untagged.append("Bookmark: \"\(bookmark.title)\"")
         }
 
@@ -800,7 +800,7 @@ struct RenameBookmarkTool: Tool {
         let newTitle = arguments.newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newTitle.isEmpty else { return "New title cannot be empty." }
 
-        let matches = BookmarksStorage.shared.bookmarks.filter {
+        let matches = VaultBookmarkService.shared.bookmarks.filter {
             $0.title.localizedStandardContains(query)
         }
 
@@ -814,7 +814,7 @@ struct RenameBookmarkTool: Tool {
         }
 
         let oldTitle = bookmark.title
-        _ = BookmarksStorage.shared.updateDetails(
+        _ = VaultBookmarkService.shared.updateDetails(
             for: bookmark.id,
             title: newTitle,
             notes: bookmark.notes,
@@ -843,7 +843,7 @@ struct FindSimilarTool: Tool {
 
     nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
         let query = arguments.bookmarkTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
 
         guard let bookmark = bookmarks.first(where: {
             $0.title.localizedStandardContains(query)
@@ -1005,7 +1005,7 @@ struct AddBookmarkTool: Tool {
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
         let title = arguments.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let bookmark = BookmarksStorage.shared.add(urlString: urlString, title: title) else {
+        guard let bookmark = VaultBookmarkService.shared.add(urlString: urlString, title: title) else {
             return "Failed to create bookmark for \"\(urlString)\"."
         }
 
@@ -1017,7 +1017,7 @@ struct AddBookmarkTool: Tool {
            let folder = VaultFolderService.shared.folders.first(where: {
                $0.name.localizedCaseInsensitiveCompare(folderName) == .orderedSame
            }) {
-            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: folder.id)
+            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folder.id)
             actions.append("moved to folder \"\(folder.name)\"")
         }
 
@@ -1025,7 +1025,7 @@ struct AddBookmarkTool: Tool {
         if let tagName = arguments.tagName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !tagName.isEmpty {
             let label = CardLabelStorage.shared.findOrCreate(name: tagName)
-            _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: label.id)
+            _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: label.id)
             actions.append("tagged \"\(label.name)\"")
         }
 
@@ -1052,7 +1052,7 @@ struct GetCurrentItemTool: Tool {
 
         if let bookmark = context.currentBookmark {
             // Find full bookmark data
-            if let full = BookmarksStorage.shared.bookmarks.first(where: {
+            if let full = VaultBookmarkService.shared.bookmarks.first(where: {
                 $0.urlString == bookmark.url
             }) {
                 var details = "Currently viewing bookmark:"
@@ -1126,7 +1126,7 @@ struct DeleteItemTool: Tool {
         let type = arguments.itemType.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         if type == "bookmark" || type == "bookmarks" {
-            let matches = BookmarksStorage.shared.bookmarks.filter {
+            let matches = VaultBookmarkService.shared.bookmarks.filter {
                 $0.title.localizedStandardContains(query)
             }
             guard let bookmark = matches.first else {
@@ -1136,7 +1136,7 @@ struct DeleteItemTool: Tool {
                 let titles = matches.prefix(5).map { "\"\($0.title)\"" }.joined(separator: ", ")
                 return "Multiple bookmarks match \"\(query)\": \(titles). Please be more specific."
             }
-            let trashItem = BookmarksStorage.shared.remove(bookmark)
+            let trashItem = VaultBookmarkService.shared.remove(bookmark)
             CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: trashItem))
             return "Moved bookmark \"\(bookmark.title)\" to trash. It can be recovered from the trash."
         }
@@ -1217,11 +1217,11 @@ struct UnfileItemsTool: Tool {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         var unfiled: [String] = []
 
-        let matchingBookmarks = BookmarksStorage.shared.bookmarks.filter {
+        let matchingBookmarks = VaultBookmarkService.shared.bookmarks.filter {
             $0.title.localizedStandardContains(query) && $0.folderID != nil
         }
         for bookmark in matchingBookmarks {
-            _ = BookmarksStorage.shared.assignBookmark(bookmark.id, toFolder: nil)
+            _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
             unfiled.append("Bookmark: \"\(bookmark.title)\"")
         }
 

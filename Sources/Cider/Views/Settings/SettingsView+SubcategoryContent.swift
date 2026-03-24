@@ -468,7 +468,7 @@ extension SettingsView {
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                         } else {
-                            Text("\(BookmarksStorage.shared.bookmarks.count) bookmarks")
+                            Text("\(VaultBookmarkService.shared.bookmarks.count) bookmarks")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
                         }

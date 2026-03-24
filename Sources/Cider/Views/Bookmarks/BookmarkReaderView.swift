@@ -65,12 +65,12 @@ struct BookmarkReaderView: NSViewRepresentable {
         // Trigger summary generation if needed
         if let bid = bookmarkID,
            CiderConfig.load().enablePageSummaries,
-           BookmarksStorage.shared.bookmarks.first(where: { $0.id == bid })?.aiSummary == nil {
+           VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bid })?.aiSummary == nil {
             let plainText = "\(article.title). \(article.content)"
                 .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
             Task { @MainActor in
                 if let summary = await SummaryService.shared.summarize(articleText: plainText) {
-                    BookmarksStorage.shared.applyAISummary(summary, for: bid)
+                    VaultBookmarkService.shared.applyAISummary(summary, for: bid)
                 }
             }
         }

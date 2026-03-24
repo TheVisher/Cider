@@ -174,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // then backfill any bookmarks that have no vector yet.
             EmbeddingStore.shared.load()
             if config.enableEmbeddings {
-                EmbeddingStore.shared.backfillMissing(bookmarks: BookmarksStorage.shared.bookmarks)
+                EmbeddingStore.shared.backfillMissing(bookmarks: VaultBookmarkService.shared.bookmarks)
             }
 
             // Date card notifications — always subscribe, service gates on config internally
@@ -356,7 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotesStorage.shared.updateDirectory(to: notesDir)
 
         let bookmarksDir = StoragePaths.directoryURL(for: .bookmarks).path
-        BookmarksStorage.shared.updateDirectory(to: bookmarksDir)
+        VaultBookmarkService.shared.updateDirectory(to: bookmarksDir)
 
         // Reload shared-data storages (they use computed fileURL, just need a fresh load)
         ContactStorage.shared.reload()

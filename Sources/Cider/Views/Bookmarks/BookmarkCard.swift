@@ -173,14 +173,14 @@ struct BookmarkCard: View {
             folders: folders,
             onOpen: onOpen,
             onShowDetails: onShowDetails,
-            onRefetchMetadata: { BookmarksStorage.shared.refetchMetadata(for: bookmark.id) },
+            onRefetchMetadata: { VaultBookmarkService.shared.refetchMetadata(for: bookmark.id) },
             onMoveToFolder: { folderID in onMoveToFolder?(folderID) },
             onDelete: onDelete,
             onToggleLabel: { labelID in
                 if bookmark.labelIDs.contains(labelID) {
-                    _ = BookmarksStorage.shared.removeLabel(bookmark.id, labelID: labelID)
+                    _ = VaultBookmarkService.shared.removeLabel(bookmark.id, labelID: labelID)
                 } else {
-                    _ = BookmarksStorage.shared.assignLabel(bookmark.id, labelID: labelID)
+                    _ = VaultBookmarkService.shared.assignLabel(bookmark.id, labelID: labelID)
                 }
             },
             isSelected: isSelected,
@@ -248,10 +248,10 @@ struct BookmarkCard: View {
                 guard let data else { return }
                 Task { @MainActor in
                     if addToCarousel {
-                        let saved = BookmarksStorage.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
+                        let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
                         Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
                     } else {
-                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
+                        let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                     }
                 }
@@ -271,10 +271,10 @@ struct BookmarkCard: View {
                 let ext = Self.preferredImageFileExtension(for: identifier)
                 Task { @MainActor in
                     if addToCarousel {
-                        let saved = BookmarksStorage.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+                        let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: ext)
                         Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
                     } else {
-                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
+                        let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                     }
                 }
@@ -292,10 +292,10 @@ struct BookmarkCard: View {
                       let data = image.pngRepresentation else { return }
                 Task { @MainActor in
                     if addToCarousel {
-                        let saved = BookmarksStorage.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "png")
+                        let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "png")
                         Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
                     } else {
-                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
+                        let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: "png")
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                     }
                 }
@@ -308,14 +308,14 @@ struct BookmarkCard: View {
                 guard let data else { return }
                 if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
                     Task { @MainActor in
-                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
+                        let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                     }
                     return
                 }
                 if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
                     Task { @MainActor in
-                        let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
+                        let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                 }
@@ -328,10 +328,10 @@ struct BookmarkCard: View {
                 guard let droppedURL = item as? URL else { return }
                 Task { @MainActor in
                     if droppedURL.isFileURL {
-                        let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
+                        let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                     } else {
-                        let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedURL.absoluteString)
+                        let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedURL.absoluteString)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                 }
@@ -343,7 +343,7 @@ struct BookmarkCard: View {
             provider.loadObject(ofClass: NSString.self) { item, _ in
                 guard let droppedString = item as? String else { return }
                 Task { @MainActor in
-                    let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
+                    let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
                     Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                 }
             }
@@ -361,7 +361,7 @@ struct BookmarkCard: View {
                 guard let data else { return }
                 if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
                     Task { @MainActor in
-                        let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
+                        let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                     return
@@ -369,10 +369,10 @@ struct BookmarkCard: View {
                 if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
                     Task { @MainActor in
                         if droppedURL.isFileURL {
-                            let saved = BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
+                            let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
                             Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                         } else {
-                            let saved = await BookmarksStorage.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedURL.absoluteString)
+                            let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedURL.absoluteString)
                             Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                         }
                     }
@@ -398,7 +398,7 @@ struct BookmarkCard: View {
             // Download from the source URL — cacheImageAssets detects GIF/animation via magic bytes
             // and will try .gif variant if URL is .webp
             Task { @MainActor in
-                _ = await BookmarksStorage.shared.assignThumbnail(
+                _ = await VaultBookmarkService.shared.assignThumbnail(
                     for: bookmarkID,
                     fromDroppedString: droppedURL.absoluteString
                 )

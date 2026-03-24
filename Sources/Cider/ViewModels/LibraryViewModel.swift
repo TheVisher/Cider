@@ -27,7 +27,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func rebuildItems() {
-        let bookmarkItems = BookmarksStorage.shared.bookmarks.map { LibraryItemV2.bookmark($0) }
+        let bookmarkItems = VaultBookmarkService.shared.bookmarks.map { LibraryItemV2.bookmark($0) }
         let noteItems = NotesStorage.shared.notes.map { LibraryItemV2.note($0) }
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
@@ -161,7 +161,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     private func bindStorages() {
-        BookmarksStorage.shared.$bookmarks
+        VaultBookmarkService.shared.$bookmarks
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildItems() }
             .store(in: &cancellables)

@@ -232,7 +232,7 @@ struct CiderPanelView: View {
             // Update AI context with folder info
             if let fid = newFolderID,
                let folder = VaultFolderService.shared.folder(for: fid) {
-                let itemCount = BookmarksStorage.shared.bookmarks.filter { $0.folderID == fid }.count
+                let itemCount = VaultBookmarkService.shared.bookmarks.filter { $0.folderID == fid }.count
                     + NotesStorage.shared.notes.filter { $0.folderID == fid }.count
                 AIAssistantViewModel.shared.updateContext(
                     folder: (name: folder.name, itemCount: itemCount)

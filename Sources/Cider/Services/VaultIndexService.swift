@@ -71,7 +71,7 @@ final class VaultIndexService {
             .sink { _ in rebuild() }
             .store(in: &cancellables)
 
-        BookmarksStorage.shared.objectWillChange
+        VaultBookmarkService.shared.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { _ in rebuild() }
             .store(in: &cancellables)
@@ -212,7 +212,7 @@ final class VaultIndexService {
         }
 
         // Bookmarks — use the bookmark's actual relativePath when available
-        for bookmark in BookmarksStorage.shared.bookmarks {
+        for bookmark in VaultBookmarkService.shared.bookmarks {
             let path: String
             if let rp = bookmark.relativePath, !rp.isEmpty {
                 // Drop the .webloc filename to get the directory, then add the JSON sidecar path

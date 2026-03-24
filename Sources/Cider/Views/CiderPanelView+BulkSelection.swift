@@ -69,7 +69,7 @@ extension CiderPanelView {
         var allTrashItems: [TrashItem] = []
 
         if !bookmarksToDelete.isEmpty {
-            let trashItems = BookmarksStorage.shared.removeAll(bookmarksToDelete)
+            let trashItems = VaultBookmarkService.shared.removeAll(bookmarksToDelete)
             allTrashItems.append(contentsOf: trashItems)
         }
         if !notesToDelete.isEmpty {
@@ -149,9 +149,9 @@ extension CiderPanelView {
                 let uuidString = String(id.dropFirst("bookmark-".count))
                 if let uuid = UUID(uuidString: uuidString) {
                     if allHave {
-                        BookmarksStorage.shared.removeLabel(uuid, labelID: labelID)
+                        VaultBookmarkService.shared.removeLabel(uuid, labelID: labelID)
                     } else {
-                        BookmarksStorage.shared.assignLabel(uuid, labelID: labelID)
+                        VaultBookmarkService.shared.assignLabel(uuid, labelID: labelID)
                     }
                 }
             } else if id.hasPrefix("note-") {

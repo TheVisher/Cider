@@ -208,11 +208,11 @@ extension AppDelegate {
                 // Try to get context from the frontmost browser (page title + URL)
                 let browserCapture = ActiveBrowserCaptureService.captureFromFrontmostBrowser()
                 let title = browserCapture?.title ?? "Saved Image"
-                let bookmark = BookmarksStorage.shared.addImageBookmark(title: title)
+                let bookmark = VaultBookmarkService.shared.addImageBookmark(title: title)
                 if let urlString = browserCapture?.urlString {
-                    BookmarksStorage.shared.updateURL(for: bookmark.id, urlString: urlString)
+                    VaultBookmarkService.shared.updateURL(for: bookmark.id, urlString: urlString)
                 }
-                BookmarksStorage.shared.assignThumbnail(for: bookmark.id, imageData: imageData)
+                VaultBookmarkService.shared.assignThumbnail(for: bookmark.id, imageData: imageData)
                 self.showBookmarkCaptureToast(message: "Saved copied image", isSuccess: true)
             },
             onDiscard: { [weak self] in
@@ -235,7 +235,7 @@ extension AppDelegate {
         bookmarkCaptureToastHideWorkItem?.cancel()
         bookmarkCaptureToastHideWorkItem = nil
 
-        guard let normalized = BookmarksStorage.shared.previewNormalizedURLString(from: urlString),
+        guard let normalized = VaultBookmarkService.shared.previewNormalizedURLString(from: urlString),
               let url = URL(string: normalized) else {
             return
         }
@@ -250,7 +250,7 @@ extension AppDelegate {
             },
             onSave: { [weak self] in
                 guard let self else { return }
-                let saved = BookmarksStorage.shared.add(urlString: normalized, title: nil) != nil
+                let saved = VaultBookmarkService.shared.add(urlString: normalized, title: nil) != nil
                 self.showBookmarkCaptureToast(
                     message: saved ? "Saved copied URL" : "Could not save copied URL",
                     isSuccess: saved
