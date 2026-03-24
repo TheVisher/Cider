@@ -263,7 +263,7 @@ final class BookmarkFileService {
         writeSidecar(sidecar, at: dirURL)
     }
 
-    private func removeSidecarEntry(at dirURL: URL, filename: String) {
+    func removeSidecarEntry(at dirURL: URL, filename: String) {
         var sidecar = loadSidecar(at: dirURL)
         sidecar.items.removeValue(forKey: filename)
         writeSidecar(sidecar, at: dirURL)

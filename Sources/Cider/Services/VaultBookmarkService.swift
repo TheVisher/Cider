@@ -335,11 +335,14 @@ final class VaultBookmarkService: ObservableObject {
         return trashItems
     }
 
-    /// Deletes only the `.webloc` file and its sidecar entry (not assets — TrashStorage handles those).
+    /// Deletes the `.webloc` file and its sidecar entry (not assets — TrashStorage handles those).
     private func deleteWeblocFileOnly(for bookmark: Bookmark) {
         guard let relativePath = bookmark.relativePath, !relativePath.isEmpty else { return }
         let fileURL = vaultRoot.appendingPathComponent(relativePath)
+        let filename = fileURL.lastPathComponent
+        let dirURL = fileURL.deletingLastPathComponent()
         try? FileManager.default.removeItem(at: fileURL)
+        BookmarkFileService.shared.removeSidecarEntry(at: dirURL, filename: filename)
     }
 
     /// Deletes the .webloc file, assets, and sidecar entry from disk (full cleanup).
