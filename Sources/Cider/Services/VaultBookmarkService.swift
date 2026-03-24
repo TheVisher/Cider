@@ -784,6 +784,10 @@ final class VaultBookmarkService: ObservableObject {
             if !adopted.isEmpty {
                 logger.info("Adopted \(adopted.count) orphaned .webloc files from vault folders")
                 bookmarks.append(contentsOf: adopted)
+                // Write sidecar entries for adopted files so metadata survives on disk
+                for bookmark in adopted {
+                    persistSidecar(for: bookmark)
+                }
             }
             if reassigned > 0 {
                 logger.info("Reassigned \(reassigned) bookmarks to match filesystem folders")
