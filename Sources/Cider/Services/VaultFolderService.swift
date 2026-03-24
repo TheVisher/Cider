@@ -711,7 +711,12 @@ final class VaultFolderService {
 
     /// Directories that are Cider internals or reserved, not user-created folders.
     /// All StorageType dirs now live inside `.cider/` (hidden, auto-skipped by .skipsHiddenFiles).
-    private static let reservedDirectoryNames: Set<String> = ["Inbox", "Unsorted"]
+    private static let reservedDirectoryNames: Set<String> = [
+        "Inbox", "Unsorted",
+        // Storage type directories that may exist at vault root from legacy migrations
+        "Bookmarks", "Contacts", "DateCards", "Labels", "Notes",
+        "SavedViews", "Sources", "Stacks", "Tags",
+    ]
 
     /// Returns true if the path is a reserved directory that should not appear as a vault folder.
     private func isStorageTypeDirectory(_ relativePath: String) -> Bool {
