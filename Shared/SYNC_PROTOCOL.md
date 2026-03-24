@@ -38,17 +38,19 @@ See **AUTH.md** for the full auth specification: login/signup flow, token manage
 | POST | `/api/sync/note-attachments-check` | Batch check which note attachments already exist on server |
 | POST | `/api/capture` | Quick-capture a URL (creates bookmark with `enrichmentStatus: "pending"`) |
 
-### Planned Endpoints (not yet in `http.ts` — iOS client code calls these as of 2026-03-18)
+### Planned Endpoints (not yet in `http.ts` — iOS client fully wired as of 2026-03-23)
 
 | Method | Path | Purpose | iOS client code |
 |--------|------|---------|-----------------|
-| POST | `/api/sync/purge` | Permanently delete one item: `{ type: "bookmark"\|"note", ciderSyncId }` | `SyncClient.purgeBookmark/purgeNote` |
-| POST | `/api/sync/empty-trash` | Purge all soft-deleted items for the user | `SyncClient.emptyTrash` |
-| POST | `/api/tags/rename` | Rename a tag: `{ oldName, newName }` → `{ count }` | `SyncClient.renameTag` |
-| POST | `/api/tags/delete` | Delete a tag: `{ name }` → `{ count }` | `SyncClient.deleteTag` |
-| POST | `/api/tags/merge` | Merge tags: `{ sourceName, targetName }` → `{ count }` | `SyncClient.mergeTag` |
+| POST | `/api/sync/purge` | Permanently delete one item: `{ type: "bookmark"\|"note", ciderSyncId }` | `SyncClient.purgeBookmark/purgeNote` — called from `DataStore.permanentlyDeleteBookmark/Note` |
+| POST | `/api/sync/empty-trash` | Purge all soft-deleted items for the user → `{ purgedBookmarks, purgedNotes, serverTime }` | `SyncClient.emptyTrash` — called from `DataStore.emptyTrash` |
+| POST | `/api/tags/rename` | Rename a tag: `{ oldName, newName }` → `{ count }` | `SyncClient.renameTag` — called from `TagManagementView` |
+| POST | `/api/tags/delete` | Delete a tag: `{ name }` → `{ count }` | `SyncClient.deleteTag` — called from `TagManagementView` |
+| POST | `/api/tags/merge` | Merge tags: `{ sourceName, targetName }` → `{ count }` | `SyncClient.mergeTag` — called from `TagManagementView` |
 
 Backend mutations for purge already exist (`bookmarks.ts`, `notes.ts`), but the HTTP routes in `http.ts` need to be added. Tag management mutations need to be created. All routes should use the existing `authenticateSync` Bearer token pattern.
+
+iOS also handles purge on pull: `DataStore.applyPullResponse` now checks `isPurged` on incoming bookmarks and notes and removes local copies of purged items from SwiftData.
 
 All requests: `POST`, `Content-Type: application/json`, `Authorization: Bearer <sync_token>`.
 

@@ -231,6 +231,7 @@ All app-internal data lives inside `~/CiderVault/.cider/`, a hidden directory th
 ├── sessions/            # Browsing session snapshots
 ├── boards/              # Kanban board YAML files
 ├── folder-kanban/       # Per-folder kanban board data
+├── claude-sessions/     # Claude Code agent session data
 ├── folders/             # Folder metadata: index.json, covers/, .trash/
 ├── ai-chat/             # AI Chat conversation history per model
 ├── ai/                  # NL embedding vectors (embeddings.json)
@@ -272,6 +273,14 @@ Currently, if a user (or an external tool like Apple Contacts or a text editor) 
 - Debounce rapid changes (file saves trigger multiple events)
 - Compare file modification dates against index `updatedAt` to detect actual changes
 - Orphan adoption already handles "new file appeared" — file watching just triggers it live
+
+### Vault File Adoption (Live)
+
+`BookmarksStorage.adoptOrphanedVaultFiles()` runs on every load (debounced to at most once per 5 seconds). It scans all vault folders (including `Inbox/Bookmarks/`) for `.webloc` files not already tracked in the bookmarks array. Orphaned files are adopted as new bookmarks with the correct `folderID` based on their directory location. Files that have moved between folders also get their `folderID` updated. This means files created by agents, Finder drag-and-drop, or any external tool are picked up automatically.
+
+### Webloc Cleanup on Trash
+
+When a bookmark is trashed, `BookmarksStorage.deleteWeblocFile(for:)` deletes the corresponding `.webloc` file from the vault directory. This prevents the adoption scan from re-creating the bookmark on next load. The bookmark's metadata is still moved to `.cider/bookmarks/.trash/` as usual for potential restore.
 
 ---
 

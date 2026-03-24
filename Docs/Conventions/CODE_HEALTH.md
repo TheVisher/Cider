@@ -597,3 +597,188 @@ These items remain unresolved from prior code reviews:
 
 1. **No open High-severity items.** CH-C22 was resolved via the `cider-vault://` scheme handler.
 2. **Large file growth on Desktop** — 13 files newly crossed the 500-line threshold. `BookmarksStorage.swift` at 2,418 lines remains the most critical decomposition target. Consider a focused refactoring sprint to extract codecs, parsers, and per-entity builders before these files grow further.
+
+---
+
+## Weekly Code Health Scan — 2026-03-22
+
+### Summary
+
+| Metric | Desktop | iOS | Web | Total |
+|---|---|---|---|---|
+| Source files | 239 (.swift) | 51 (.swift) | 86 (.ts/.tsx/.js) | 376 |
+| Lines of code | 68,507 | 11,620 | 16,058 | 96,185 |
+| TODO comments | 0 | 0 | 0 | 0 |
+| FIXME comments | 0 | 0 | 0 | 0 |
+| HACK comments | 0 | 0 | 0 | 0 |
+| Files >500 lines | 38 | 5 | 7 | 50 |
+| TypeScript errors | — | — | 0 | 0 |
+| Swift build | N/A (no toolchain) | N/A | — | — |
+
+### Trend vs. Prior Scan (2026-03-15)
+
+| Metric | Prior | Current | Delta |
+|---|---|---|---|
+| Desktop files | 228 | 239 | +11 |
+| Desktop LOC | 61,710 | 68,507 | +6,797 |
+| Desktop >500L files | 32 | 38 | **+6** |
+| iOS files | 48 | 51 | +3 |
+| iOS LOC | 10,546 | 11,620 | +1,074 |
+| iOS >500L files | 5 | 5 | — |
+| Web files | 103 | 86 | -17 |
+| Web LOC | 15,830 | 16,058 | +228 |
+| Web >500L files | 7 | 7 | — |
+| Total LOC | 88,086 | 96,185 | **+8,099** |
+| Total >500L files | 44 | 50 | **+6** |
+
+The codebase grew ~9.2% in one week — almost entirely on Desktop (+6,797 LOC). Desktop's large-file count jumped from 32 to 38, continuing the trend noted last scan.
+
+### TODO/FIXME/HACK Comments
+
+All three repos remain clean — zero actionable TODO, FIXME, or HACK comments in project-owned source code.
+
+### TypeScript Health (Cider-Web)
+
+`tsc --noEmit` passes with zero errors. The web codebase remains type-clean.
+
+### Convention Violations
+
+#### Desktop — Force Unwraps (4 instances)
+
+| File | Line | Code | Risk |
+|---|---|---|---|
+| `Views/Shared/MasonryLayout.swift` | 106 | `columnHeights.enumerated().min(...)!.offset` | Low — array guaranteed non-empty |
+| `Services/SyncService.swift` | 953 | `URL(string: "\(siteURL)/api/sync/note-attachments-check")!` | Medium — interpolated URL could fail |
+| `Services/SyncService.swift` | 994 | `URL(string: "\(siteURL)/api/sync/upload-note-attachment")!` | Medium — same pattern |
+| `Services/VaultFolderService.swift` | 524 | `index[folderID]!` | Low — safe after index write on line 518 |
+
+#### iOS — Force Unwraps (9 instances)
+
+| File | Line | Code | Risk |
+|---|---|---|---|
+| `Views/BookmarkReaderView.swift` | 26, 28 | `URL(string: bookmark.urlString)!` | **High** — user-supplied URL string |
+| `CiderApp.swift` | 109 | `UserDefaults(suiteName: "group.com.cider.app")!` | Medium — suite init can fail |
+| `Shared/CiderTab.swift` | 69 | `UserDefaults(suiteName: "group.com.cider.app")!` | Medium — same pattern |
+| `Views/SidebarView.swift` | 380 | `icon.unicodeScalars.first!.isASCII` | Low — guarded by prior check |
+| `Views/TabChipBar.swift` | 90 | `icon.unicodeScalars.first!.isASCII` | Low — same pattern |
+| `Views/FolderSheetView.swift` | 251 | `icon.unicodeScalars.first!.isASCII` | Low — same pattern |
+| `Views/FolderBrowserView.swift` | 209 | `icon.unicodeScalars.first!.isASCII` | Low — same pattern |
+| `Shared/MasonryLayout.swift` | 70 | `columnHeights.enumerated().min(...)!.offset` | Low — array guaranteed non-empty |
+
+#### iOS — print() Statements (4 instances)
+
+All in `Shared/SyncClient.swift` — should use `os.Logger`:
+
+| Line | Statement |
+|---|---|
+| 49 | `print("[Cider Raw Pull] \(rawWithNotes.count)/\(bookmarks.count) bookmarks have notes in raw JSON")` |
+| 51 | `print("  - \"\(b["title"] ?? "?")\": notes=\"\(b["notes"] ?? "?")\"" )` |
+| 61 | `print("[Cider Pull] \(withNotes.count) bookmarks have notes:")` |
+| 63 | `print("  - \"\(b.title)\": notes=\"\(b.notes ?? "")\""` |
+
+#### Web — Console Statements (5 instances)
+
+| File | Line | Type | Verdict |
+|---|---|---|---|
+| `components/error-boundary.tsx` | 25 | `console.error` | Acceptable — error boundary |
+| `components/providers/convex-provider.tsx` | 32 | `console.warn` | Acceptable — connection warning |
+| `components/notes/note-editor.tsx` | 533 | `console.log` | **Remove** — debug log left in |
+| `components/bookmarks/bookmark-capture.tsx` | 61 | `console.warn` | Acceptable — error handling |
+| `convex/enrichment.ts` | 73 | `console.error` | Acceptable — server-side error |
+
+#### Web — Type Safety Bypasses (30 `as any` / `as unknown`)
+
+14 in frontend components, 10 in convex backend, 6 in generated route tree. Most common patterns:
+- Tiptap editor storage casting (`editor.storage as any`)
+- Auth user object assertions in `convex/nativeAuth.ts`
+- Polymorphic list rendering in `bookmark-feed.tsx`
+
+### Large Files Needing Attention
+
+**Desktop — 38 files >500 lines** (up from 32 — 6 newly crossed the threshold):
+
+| File | Lines | Delta vs. Prior | Status |
+|---|---|---|---|
+| `Services/BookmarksStorage.swift` | 2,601 | +183 | **Critical.** Continued growth — decomposition overdue. |
+| `Views/Notes/InlineNoteEditorView.swift` | 1,390 | — | Unchanged |
+| `Views/SavedViews/SavedViewTabContent.swift` | 1,344 | +12 | |
+| `Views/Shared/FolderSidebarView.swift` | 1,319 | — | |
+| `Services/NotesStorage.swift` | 1,305 | +18 | |
+| `ViewModels/NotesViewModel.swift` | 1,258 | +16 | |
+| `Views/Shared/FolderDetailView.swift` | 1,249 | +22 | |
+| `Services/AI/AIAssistantTools.swift` | 1,241 | — | *New.* AI tool definitions — extract per-tool handlers. |
+| `Views/Shared/NewItemPopover.swift` | 1,136 | — | |
+| `Views/Bookmarks/BookmarkDetailsDraft.swift` | 1,073 | +26 | |
+| `Services/SyncService.swift` | 1,055 | +105 | **Crossed 1,000 lines.** Extract push/pull/auth sub-services. |
+| `Views/Search/SearchPaletteView.swift` | 1,002 | +62 | **Crossed 1,000 lines.** Extract result renderers per entity type. |
+| `Utilities/Constants.swift` | 911 | +407 | **Major growth.** Extract domain-specific constant groups. |
+| `Views/Home/HomeDashboardView.swift` | 898 | +24 | |
+| `Views/Shared/ClipboardViewerView.swift` | 829 | — | |
+| `Services/VaultFolderService.swift` | 815 | — | |
+| `Services/AI/MLXToolExecutor.swift` | 774 | — | *New.* AI model execution — extract per-model adapters. |
+| `Views/Shared/TagDetailView.swift` | 747 | — | |
+| `Services/TrashStorage.swift` | 731 | +59 | |
+| `Views/Settings/SettingsComponents.swift` | 719 | — | |
+| `Models/CiderConfig.swift` | 700 | +9 | |
+| `Services/ActiveBrowserCaptureService.swift` | 649 | -11 | Slight reduction |
+| `Views/Bookmarks/BookmarkThumbnailView.swift` | 616 | +14 | |
+| `Services/SearchService.swift` | 615 | +30 | |
+| `Services/BookmarkMetadataParser.swift` | 605 | — | |
+| `App/AppDelegate.swift` | 599 | ~0 | Already split into extensions (CH-D15). |
+| `Views/Stacks/StackManagerSheet.swift` | 583 | — | |
+| `Views/Settings/SettingsView+SubcategoryContent.swift` | 564 | +10 | |
+| `Services/VaultStructureMigration.swift` | 561 | — | |
+| `Services/ContactStorage.swift` | 537 | — | |
+| `Services/TodoCardStorage.swift` | 531 | — | |
+| `Views/Shared/DetailSlideOutView.swift` | 530 | +8 | |
+| `Views/Notes/TipTapEditorView.swift` | 525 | +15 | |
+| `Views/Kanban/KanbanBoardView.swift` | 520 | — | *New.* Kanban board — extract card renderers and drag logic. |
+| `Views/Shared/ViewOptionsDropdown.swift` | 519 | — | *New.* View options — extract per-option sections. |
+| `Views/CiderPanelView+DetailViews.swift` | 517 | +3 | |
+| `Views/AIAssistant/AIAssistantPanelView.swift` | 508 | — | *New.* AI assistant UI — extract message renderers. |
+
+**New files crossing 500 lines since last scan:** `AIAssistantTools.swift` (1,241), `MLXToolExecutor.swift` (774), `KanbanBoardView.swift` (520), `ViewOptionsDropdown.swift` (519), `AIAssistantPanelView.swift` (508). The AI feature area accounts for 3 of the 6 new large files.
+
+**iOS — 5 files >500 lines (unchanged):**
+
+| File | Lines | Suggested Action |
+|---|---|---|
+| `Views/BookmarkListView.swift` | 939 | Extract row builders and filter logic. |
+| `Views/BookmarkDetailView.swift` | 725 | Extract metadata sections. |
+| `Views/SidebarView.swift` | 614 | Extract navigation items and folder tree. |
+| `Views/FolderBrowserView.swift` | 605 | Extract folder card components. |
+| `Views/NoteEditorToolbar.swift` | 546 | Extract formatting button groups. |
+
+**Web — 7 files >500 lines (unchanged count, minor line changes):**
+
+| File | Lines | Delta | Suggested Action |
+|---|---|---|---|
+| `components/bookmarks/bookmark-detail.tsx` | 1,080 | — | Extract metadata panel, action bar, and reader sub-components. |
+| `components/landing/landing-page.tsx` | 844 | — | Extract individual landing sections. |
+| `components/layout/sidebar.tsx` | 814 | +2 | Extract nav groups and folder tree. |
+| `components/notes/note-editor.tsx` | 772 | +2 | Extract toolbar and formatting helpers. |
+| `convex/syncInternal.ts` | 655 | +151 | **Notable growth.** Extract push/pull handlers into separate modules. |
+| `components/notes/note-detail.tsx` | 599 | +7 | Extract metadata sidebar. |
+| `components/bookmarks/library-table-view.tsx` | 592 | — | Extract column renderers and sort logic. |
+
+### Open Issues from Previous Reviews
+
+These items remain unresolved from prior code reviews:
+
+| ID | Severity | Summary |
+|---|---|---|
+| CH-C18 | Medium | Folder parent resolution during pull is order-dependent (deferred — sync protocol) |
+| CH-C21 | Medium | Web/iOS-created items without `ciderSyncId` skipped on desktop pull (deferred — sync protocol) |
+| CH-C23 | Medium | Sync-driven note deletes bypass orphan attachment cleanup |
+| CH-D16 | Medium | List view and display modes inconsistent across card types |
+| CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
+
+### Priority Recommendations
+
+1. **No open High-severity items.** The 5 deferred/open medium issues are unchanged.
+2. **Desktop large-file growth is accelerating.** 6 new files crossed 500 lines in one week. `BookmarksStorage.swift` at 2,601 lines (+183) is increasingly urgent. `SyncService.swift` and `SearchPaletteView.swift` both crossed 1,000 lines. `Constants.swift` nearly doubled (+407 lines) — likely from AI feature constants.
+3. **AI feature area is the primary growth driver.** 3 of 6 new large files are AI-related (`AIAssistantTools`, `MLXToolExecutor`, `AIAssistantPanelView`), and ~6,800 of the 6,797 new Desktop LOC appears to correlate with AI assistant and kanban features. Establishing decomposition patterns early will prevent these from becoming the next `BookmarksStorage`.
+4. **iOS `print()` statements** in `SyncClient.swift` should be converted to `os.Logger` to match Desktop conventions.
+5. **iOS force unwraps** on `URL(string: bookmark.urlString)!` in `BookmarkReaderView.swift` are the highest-risk items — user-supplied URL strings can fail to parse.
+6. **Web `console.log`** at `note-editor.tsx:533` is a debug leftover and should be removed.
+7. **Web `syncInternal.ts`** grew +151 lines (+30%) in one week — approaching the complexity where push/pull extraction becomes worthwhile.

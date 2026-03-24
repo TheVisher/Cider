@@ -142,9 +142,11 @@ Context clears when details close. The "Context" badge appears in the AI panel t
 
 ---
 
-## Tool Calling (Apple Intelligence Only)
+## Tool Calling
 
-23 tools defined in `Services/AI/AIAssistantTools.swift`, registered in `FoundationModelsProvider`. The model decides which tool to call based on the user's message. All tools use `nonisolated func call` with `await MainActor.run` for thread-safe storage access.
+Both backends support the same 23 tools. Apple Intelligence uses the Foundation Models Tool API (automatic loop). The MLX provider uses prompt-based tool calling (`<tool_call>` blocks parsed and executed in a manual loop — see "MLX Tool-Calling Loop" below).
+
+23 tools defined in `Services/AI/AIAssistantTools.swift`, registered in `FoundationModelsProvider` for Apple Intelligence and mirrored via `MLXToolDefinitions.swift` / `MLXToolExecutor.swift` for the local model. The model decides which tool to call based on the user's message. All tools use `nonisolated func call` with `await MainActor.run` for thread-safe storage access.
 
 ### Read Tools (12)
 
@@ -237,9 +239,22 @@ Auto-detected by system RAM. Stored in Hugging Face cache (first download only).
 - `ModelContainer.perform {}` for thread-safe inference
 
 **Architecture:**
-- `MLXModelManager` — singleton, handles download/load/unload lifecycle
-- `MLXProvider` — conforms to `AIAssistantProvider`, manages conversation history
+- `MLXModelManager` — singleton, handles download/load/unload lifecycle. Exposes two generate methods: `generate(prompt:systemPrompt:)` (convenience) and `generate(messages:)` (full messages array, used by the tool-calling loop)
+- `MLXProvider` — conforms to `AIAssistantProvider`, runs the tool-calling loop via `generateWithTools()`
 - Multi-turn via conversation history in prompt (last 10 exchanges)
+
+### MLX Tool-Calling Loop
+
+`MLXProvider.generateWithTools()` implements a prompt-based tool-calling loop:
+
+1. Build chat messages array (system prompt + last 10 history messages + current user message)
+2. Generate a response via `MLXModelManager.generate(messages:)`
+3. Parse any `<tool_call>` blocks from the response
+4. If no tool calls → return the cleaned response
+5. Execute each tool call via `MLXToolExecutor`, inject `<tool_response>` results back as user messages
+6. Re-prompt the model with the updated messages (up to 3 rounds)
+
+**Context budget:** Qwen 2.5 has 32K context; the loop reserves a 28K token budget (`maxContextTokens`). Older history is trimmed if it exceeds the budget. Individual tool results are truncated at 2,000 characters (`maxToolResultChars`). If adding a tool result would blow the budget, remaining tool calls in that round are skipped.
 
 ### Model Picker UI
 
@@ -281,6 +296,65 @@ Apple's on-device model has a **4,096 token** context window. With 23 tools (~1,
 **Error recovery:** If `exceededContextWindowSize` fires, auto-summarizes and retries.
 
 This limitation is why the Local Model (32K context) is a major upgrade for conversation.
+
+---
+
+## Claude Code Sessions (Shipped)
+
+Cider embeds a Claude Code agent runner as a first-class tab type. Users can create, manage, and chat with Claude Code sessions directly inside Cider.
+
+### Architecture
+
+Each user message spawns a new `claude -p "..." --output-format stream-json` process. Multi-turn conversation is maintained via `--resume SESSION_ID` (Claude's own session ID, returned in the `system` stream event). The process runs until the response is complete, then exits. At most one process runs per session at a time.
+
+### Data Model
+
+| Type | Fields |
+|------|--------|
+| `ClaudeSession` | `id` (UUID), `name`, `projectPath`, `status` (idle/working/waitingForApproval/error/stopped), `messages` ([ClaudeSessionMessage]), `claudeSessionID` (Claude's own session ID for `--resume`), `createdAt`, `updatedAt` |
+| `ClaudeSessionMessage` | `id` (UUID), `role` (user/assistant/toolUse/toolResult/system), `content`, `timestamp`, `toolName?` |
+
+### Stream Parsing
+
+`ClaudeStreamEvent` parses Claude Code's `--output-format stream-json` stdout. Each line is a JSON object with a `type` field:
+
+| Event Type | Parsed As |
+|-----------|-----------|
+| `system` | Captures `session_id` and `cwd` |
+| `assistant` / `content_block_delta` | Assistant text (streamed progressively) |
+| `tool_use` | Tool invocation with name + input |
+| `tool_result` | Tool output with name + content |
+| `result` | Final response text + optional `cost_usd` |
+
+### Key Files
+
+| File | Role |
+|------|------|
+| `Models/ClaudeSession.swift` | Session + message models, status enum |
+| `Models/ClaudeStreamEvent.swift` | Stream JSON parser |
+| `Services/ClaudeSessionManager.swift` | Singleton manager — CRUD, process spawning, stream handling, persistence |
+| `Views/Sessions/ClaudeSessionsTabView.swift` | Tab view showing all sessions as cards |
+| `Views/Sessions/ClaudeSessionCard.swift` | Compact/expanded card for each session |
+| `Views/Sessions/ClaudeSessionChatView.swift` | Chat UI inside expanded card |
+| `Views/Sessions/ClaudeMessageBubble.swift` | Per-message bubble (user, assistant, tool use/result, system) |
+| `Views/Sessions/ClaudeSessionCreationSheet.swift` | Sheet for creating new sessions (name + project path) |
+| `Views/Sessions/SessionStatusBadge.swift` | Status indicator badge |
+
+### Storage
+
+Sessions are persisted as JSON at `~/CiderVault/.cider/claude-sessions/_cider_claude_sessions.json` (via `StoragePaths.directoryURL(for: .claudeSessions)`). On app restart, active statuses (working/waitingForApproval) are reset to idle since processes don't survive restarts.
+
+### Tab Integration
+
+`SavedViewKind` has a `.sessions` case. The tab uses the `terminal` SF Symbol. Users can add a Sessions tab like any other saved view.
+
+### CLI Resolution
+
+`ClaudeSessionManager` resolves the `claude` binary by checking common paths (`/usr/local/bin/claude`, `/opt/homebrew/bin/claude`, `~/.npm/bin/claude`, `~/.local/bin/claude`) and falls back to a login shell `which claude` lookup, since macOS GUI apps don't inherit shell PATH. The resolved path is cached.
+
+### Design Tokens
+
+`SessionsDesign` in Constants.swift defines: `cardMinWidth` (280pt), `statusDotSize` (8pt), `chatMaxHeight` (400pt), `inputFieldMinHeight` (36pt), `compactRowHeight` (120pt).
 
 ---
 
