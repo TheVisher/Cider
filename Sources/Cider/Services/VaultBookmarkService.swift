@@ -28,6 +28,8 @@ final class VaultBookmarkService: ObservableObject {
     private let originalImagesDirectoryName = ".originals"
     private let thumbnailMaxPixelDimension: CGFloat = 720
     private var enrichmentTasks: [UUID: Task<Void, Never>] = [:]
+    /// URLs recently deleted — adoption skips these to prevent zombie re-adoption from duplicate files.
+    private var recentlyDeletedURLs: Set<String> = []
 
     // MARK: - Computed Paths
 
@@ -297,6 +299,10 @@ final class VaultBookmarkService: ObservableObject {
     func remove(_ bookmark: Bookmark) -> TrashItem {
         cancelEnrichment(for: bookmark.id)
         SyncService.shared.trackDeletion(of: bookmark.id)
+        // Track deleted URL so adoption doesn't re-adopt duplicate files
+        if !bookmark.urlString.isEmpty {
+            recentlyDeletedURLs.insert(bookmark.urlString.lowercased())
+        }
         let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
         let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
         deleteWeblocFile(for: bookmark)
@@ -311,6 +317,9 @@ final class VaultBookmarkService: ObservableObject {
         for bookmark in bookmarksToDelete {
             cancelEnrichment(for: bookmark.id)
             SyncService.shared.trackDeletion(of: bookmark.id)
+            if !bookmark.urlString.isEmpty {
+                recentlyDeletedURLs.insert(bookmark.urlString.lowercased())
+            }
             let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
             let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
             deleteWeblocFile(for: bookmark)
@@ -702,6 +711,11 @@ final class VaultBookmarkService: ObservableObject {
                         adopted.append(bookmark)
                         existingIDs.insert(bookmark.id)
                     }
+                    continue
+                }
+
+                // Skip URLs that were recently deleted (prevents zombie re-adoption from duplicate files)
+                if recentlyDeletedURLs.contains(url) {
                     continue
                 }
 
