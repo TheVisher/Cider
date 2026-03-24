@@ -1,4 +1,53 @@
-# Cider Code Audit — Fix & Verify Loop
+# Audit Reports
+
+Consolidated results from all automated audits run against the Cider codebase.
+
+## Table of Contents
+
+- [Audit History](#audit-history)
+- [Design Token Audit (Code Audit)](#design-token-audit-code-audit)
+- [Convention Enforcement Audit](#convention-enforcement-audit)
+- [Dead Code Detection Audit](#dead-code-detection-audit)
+- [Storage Integrity Audit](#storage-integrity-audit)
+- [Threading Safety Audit](#threading-safety-audit)
+
+---
+
+## Audit History
+
+
+Record of all automated audits run against the Cider codebase.
+
+## Completed Audits
+
+| Audit | Date | Violations Fixed | Branch | Notes |
+|-------|------|-----------------|--------|-------|
+| Design Token | 2026-03-18 | ~190+ | audit-fixes | Hardcoded colors → CiderColors, fonts → CiderFont, magic numbers → Spacing/Radius/Design constants. Created dozens of new design tokens. |
+| Convention Enforcement | 2026-03-18 | 17 | convention-fixes | 15 NSLog → os.Logger, 1 AppleScript app name removed, 1 missing [weak self]. |
+| Threading Safety | 2026-03-19 | 34 | threading-fixes | 16 Combine publishers missing .receive(on:), sync file I/O moved off main thread, force unwraps in async contexts, @MainActor on state mutations after await, NSLock → OSAllocatedUnfairLock. |
+| Dead Code | 2026-03-20 | 3 | main | Removed unused `isHovered` state in AIAssistantBubbleView, unused `conversationHistory` in MLXProvider. 2 areas scanned so far. |
+
+**Total fixes across all audits: ~243+**
+
+## Available Loops (not yet run)
+
+| Loop | Doc | Purpose |
+|------|-----|---------|
+| Docs Health | `Docs/QA/DOCS_LOOP.md` | Check docs against actual code for stale/outdated content |
+
+## Detailed Results
+
+Each audit has its own detailed results doc with per-area progress tracker and fix log:
+
+- `Docs/QA/CODE_AUDIT.md` — Design token audit results
+- `Docs/QA/CONVENTION_AUDIT.md` — Convention enforcement results
+- `Docs/QA/THREADING_AUDIT.md` — Threading safety results
+- `Docs/QA/DEAD_CODE_AUDIT.md` — Dead code detection results
+
+---
+
+## Design Token Audit (Code Audit)
+
 
 Automated scan-fix-rescan loop across the entire codebase.
 Each area requires **3 independent clean scans** before marking PASS.
@@ -1307,3 +1356,450 @@ All checks passed:
 **Views/Settings/ promoted to PASS (3/3 clean passes). No changes made. No build run needed.**
 
 **This completes the entire codebase audit. All 11 areas are now at PASS 3/3.**
+
+---
+
+## Convention Enforcement Audit
+
+
+Automated scan-fix-rescan loop across the entire codebase.
+Each area requires **3 independent clean scans** before marking PASS.
+Build verified with `swift build` after each fix batch.
+
+**Rules checked:**
+1. No `print()` — use `os.Logger` instead
+2. No direct file deletion — use `TrashStorage` + `CiderUndoManager`
+3. Notification names use `cider.` prefix, centralized in Constants.swift
+4. No `as?` for CF types — use `unsafeDowncast` after `CFGetTypeID` check
+5. No raw app names in AppleScript — use `application id` (bundle ID)
+6. Shell.run() safety — Process with argument arrays
+7. No `.glassEffect()` — use `NSVisualEffectView` with `.underWindowBackground`
+8. No `makeKeyAndOrderFront` — use `orderFront`
+9. CiderConfig pattern — `decodeIfPresent` + fallback
+10. No local `@State` copies of ViewModel data
+
+---
+
+## Progress Tracker
+
+| Area | Status | Violations | Clean Passes | Last Scanned |
+|------|--------|------------|-------------|--------------|
+| App/ | PASS | 2 fixed | 3/3 | 2026-03-23 |
+| Models/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Utilities/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Services/ | PASS | 2 fixed | 3/3 | 2026-03-23 |
+| Services/AI/ | PASS | 0 | 3/3 | 2026-03-23 |
+| ViewModels/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Bookmarks/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Notes/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Home/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Shared/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Search/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Settings/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/AIAssistant/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Calendar/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Contacts/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/DateCards/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Kanban/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Onboarding/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/SavedViews/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/ScreenCapture/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Sessions/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Sources/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Stacks/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Todos/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Whiteboard/ | PASS | 0 | 3/3 | 2026-03-23 |
+
+---
+
+## Fix Log
+
+### App/ — 2026-03-23
+
+Scanned 14 files. Found and fixed 2 violations:
+
+1. **AppDelegate+ClipboardPanel.swift** — Rule 8: `makeKeyAndOrderFront(nil)` replaced with `orderFront(nil)` + `makeKey()` to avoid focus stealing.
+2. **AppDelegate+AIAssistantPanel.swift** — Rule 8: `makeKeyAndOrderFront(nil)` replaced with `orderFront(nil)` + `makeKey()` to avoid focus stealing.
+
+Build verified: `swift build` passed with zero errors.
+
+### Services/ — 2026-03-23
+
+Scanned 40+ files. Found and fixed 2 violations:
+
+1. **iMessageSender.swift** — Rule 5: `tell application "Messages"` replaced with `tell application id "com.apple.MobileSMS"` to use bundle ID instead of raw app name.
+2. **ScreenCaptureService.swift** — Rule 8: `makeKeyAndOrderFront(nil)` replaced with `orderFront(nil)` + `makeKey()`. The screen capture overlay needs key status for mouse event handling, achieved via separate `makeKey()` call.
+
+Build verified: `swift build` passed with zero errors.
+
+### Noted (acceptable patterns, not violations)
+
+- **Rule 2 — `FileManager.default.trashItem` in Views/Home, Views/SavedViews, Views/Sources**: These call `trashItem(at:resultingItemURL:)` on `ExternalFile` objects (files from linked external sources outside the vault). Since these are not Cider-managed data items, using macOS system Trash is appropriate — CiderUndoManager/TrashStorage only applies to vault items.
+- **Rule 2 — `removeItem` in Services/**: Storage services (TrashStorage, BookmarksStorage, NotesStorage, VaultBookmarkService, VaultFolderService, ClipboardStorage, KanbanStorage, etc.) use `removeItem` internally as part of their own file management. These are not user-facing deletions bypassing the trash system.
+- **Rule 2 — `removeItem` in iMessageSender.swift**: Cleans up temporary files created for AppleScript message passing. Not user data.
+- **Rule 2 — `removeItem` in Services/AI/AIConversationStorage.swift**: Manages its own conversation JSON files internally.
+- **Rule 4 — `as? [CFString: Any]` in ClipboardHistoryService and BookmarksStorage**: These cast `CGImageSourceCopyPropertiesAtIndex` return value (`CFDictionary?`) to a Swift dictionary via toll-free bridging. This is standard Apple API usage, not an unsafe CF type downcast.
+- **Rule 9 — CiderConfig**: All 60+ properties use `decodeIfPresent` + fallback pattern correctly.
+- **Rule 6 — Shell/Process usage**: All Process usage in iMessageBridgeService, ClaudeSessionManager, iMessageSender, and BrowserTabCaptureService uses argument arrays correctly.
+
+---
+
+## Dead Code Detection Audit
+
+
+Automated scan-fix-rescan loop for unused code across the codebase.
+Each area requires **3 independent clean scans** before marking PASS.
+Build verified with `swift build` after each removal.
+
+**Checks:**
+1. Unused private functions/variables
+2. Unused imports
+3. Commented-out code blocks
+4. Empty extension blocks
+5. Unused type definitions
+6. Unused parameters
+
+---
+
+## Progress Tracker
+
+| Area | Status | Removals | Clean Passes | Last Scanned |
+|------|--------|----------|-------------|--------------|
+| App/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Models/ | PASS | 1 removed | 3/3 | 2026-03-23 |
+| Utilities/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Services/ | PASS | 5 removed | 3/3 | 2026-03-23 |
+| Services/AI/ | PASS | 1 removed | 3/3 | 2026-03-23 |
+| ViewModels/ | PASS | 1 removed | 3/3 | 2026-03-23 |
+| Views/Bookmarks/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Notes/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Home/ | PASS | 2 removed | 3/3 | 2026-03-23 |
+| Views/Shared/ | PASS | 2 removed | 3/3 | 2026-03-23 |
+| Views/Search/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/Settings/ | PASS | 3 removed | 3/3 | 2026-03-23 |
+| Views/AIAssistant/ | PASS | 0 | 3/3 | 2026-03-23 |
+| Views/SavedViews/ | PASS | 4 removed | 3/3 | 2026-03-23 |
+
+---
+
+## Fix Log
+
+### 2026-03-23 — Full Codebase Scan (Claude Opus 4.6)
+
+**Pass 1 — 19 dead code items found and removed:**
+
+#### Unused Imports (10)
+
+1. `Models/VaultFile.swift` — removed `import UniformTypeIdentifiers` (UTType never used; file type inference is string-based)
+2. `Models/ClipboardItem.swift` — removed `import AppKit` (only uses CGSize, provided by Foundation/CoreGraphics)
+3. `Views/CiderPanelView.swift` — removed `import WebKit` (no WK types used)
+4. `Views/Shared/DetailSlideOutView.swift` — removed `import WebKit` (no WK types used)
+5. `Views/Settings/SettingsView.swift` — removed `import UniformTypeIdentifiers`
+6. `Views/Settings/StorageSettingsView.swift` — removed `import AppKit` (no NS/CG types used)
+7. `Views/Settings/GeneralSettingsView.swift` — removed `import AppKit` (no NS/CG types used)
+8. `Views/Home/HomeDashboardView.swift` — removed `import UniformTypeIdentifiers`
+9. `Views/Contacts/ContactEditorSheet.swift` — removed `import UniformTypeIdentifiers`
+10. `Views/Shared/FolderDetailView.swift` — removed `import UniformTypeIdentifiers`
+
+#### Unused Private Functions (7)
+
+11. `ViewModels/NotesViewModel.swift` — removed `syncExternalContentFromEditor(fileURL:)` (23 lines) — identical to `syncContentFromEditor(noteID:)` but for external files; never called
+12. `Views/Home/HomeDashboardView.swift` — removed `libraryListRow(_:)` (175 lines) — large dead switch statement for list row rendering; list mode uses `LibraryTableRows` instead
+13. `Views/Shared/FolderDetailView.swift` — removed `libraryListRow(_:)` (160 lines) — same pattern as HomeDashboardView; list mode uses `LibraryTableRows`
+14. `Views/SavedViews/SavedViewTabContent.swift` — removed `itemRow(_:)` (131 lines) — dead list row builder, plus cascading dead helpers `genericRow(_:)` (32 lines), `icon(for:)` (19 lines), `subtitle(for:)` (21 lines)
+15. `Services/BookmarksStorage.swift` — removed `removeBookmarkImageAssetsIfPresent(for:)` (9 lines) — helper that was never called
+16. `Services/ExternalSourceScanner.swift` — removed `stopWatcher()` (5 lines) — deinit handles cleanup directly
+17. `Services/iMessageBridgeService.swift` — removed `sendReply(_:to:)` (3 lines) and `buildShellEnvironment()` (14 lines) — unused helper wrappers
+
+#### Unused Private Variables (1)
+
+18. `Services/ClipboardHistoryService.swift` — removed unused `logger` (Logger instance) + cascading unused `import os`
+
+#### Unused Helper Functions (cascading from itemRow removal)
+
+19. `Views/SavedViews/SavedViewTabContent.swift` — removed `genericRow(_:)`, `icon(for:)`, `subtitle(for:)` (only called from removed `itemRow`)
+
+**Pass 2 — Clean.** No new dead code found.
+**Pass 3 — Clean.** Confirmed.
+
+**Build verified:** `swift build -Xswiftc -warnings-as-errors` passes clean.
+
+**Total lines removed:** ~600+ lines of dead code.
+
+### 2026-03-20 — Views/AIAssistant/ + Services/AI/ (Claude Opus 4.6)
+
+**Pass 1 — 3 dead code items found and removed:**
+
+1. `AIAssistantBubbleView.swift` — `@State private var isHovered` + `.onHover` handler: variable was written to by hover tracking but never read in any conditional. Removed both.
+
+2. `MLXProvider.swift` — `private var conversationHistory`: maintained (appended, trimmed) but never read for prompt building. `buildConversationPrompt()` uses the `messages` parameter from the ViewModel instead. Likely a leftover from an earlier iteration. Removed property, removed append/trim logic in `streamResponse`, updated `resetSession()`.
+
+3. `ColorExtractionService.swift` — Tested removing `import AppKit` (only CG types used visibly), but `CGImageSourceCreateWithURL` resolves through AppKit on macOS. Import is required — reverted.
+
+**Pass 2 — Clean.** No new dead code found.
+**Pass 3 — Clean.** Confirmed.
+
+**No old CLI wrapper remnants found** — searched for CLIProvider, TerminalProvider, ShellProvider, OllamaProvider, LlamaProvider, Process(), and general CLI/terminal/shell references. All clean.
+
+---
+
+## Storage Integrity Audit
+
+
+Automated scan-fix-rescan loop across the vault storage layer.
+Each rule area requires **3 independent clean scans** before marking PASS.
+Build verified with `swift build -Xswiftc -warnings-as-errors` after each cycle.
+
+**Rules checked:** Per `Docs/QA/STORAGE_LOOP.md` — 8 static analysis rules + 2 live vault verification checks.
+
+---
+
+## Progress Tracker
+
+| Rule Area | Status | Violations | Clean Passes | Last Scanned |
+|-----------|--------|------------|-------------|--------------|
+| 1. File/Memory consistency | PASS | 0 | 3/3 | 2026-03-23 |
+| 2. Webloc file integrity | PASS | 0 | 3/3 | 2026-03-23 |
+| 3. Sidecar consistency | PASS | 0 | 3/3 | 2026-03-23 |
+| 4. Trash round-trip integrity | PASS | 0 | 3/3 | 2026-03-23 |
+| 5. Index/cache vs disk agreement | PASS | 0 | 3/3 | 2026-03-23 |
+| 6. Folder assignment integrity | PASS | 0 | 3/3 | 2026-03-23 |
+| 7. Migration safety | PASS | 0 | 3/3 | 2026-03-23 |
+| 8. No stale references | PASS | 0 | 3/3 | 2026-03-23 |
+| 9. Vault filesystem health | PASS | 0 warnings | N/A (live) | 2026-03-23 |
+| 10. Cross-item consistency | PASS | 0 | N/A (live) | 2026-03-23 |
+
+**Build status:** PASS (zero errors, zero warnings)
+
+---
+
+## Static Analysis — Scan Log
+
+### Rule 1: File/Memory consistency
+
+Scanned: VaultBookmarkService, BookmarkFileService, NotesStorage, ContactStorage, DateCardStorage, TodoCardStorage
+
+- `updateURL()` (VBS line 283): rewrites `.webloc` plist on disk after in-memory change. PASS.
+- `updateDetails()` (VBS line 382): calls `persistSidecar()` + `persist()` after property changes. PASS.
+- `assignBookmark()` (VBS line 435): physically moves `.webloc` file via BookmarkFileService.move(), then updates folderID + relativePath in memory + index. PASS.
+- `NotesStorage.save()`: writes content to disk, updates in-memory modifiedAt. PASS.
+- `NotesStorage.rename()`: moves file on disk, updates index filename + relativePath in memory. PASS.
+- `ContactStorage.updateContact()`: rewrites .vcf file on disk, updates index entry. PASS.
+- `DateCardStorage.updateDateCard()`: rewrites .ics file on disk, updates index entry. PASS.
+- `TodoCardStorage.updateTodoCard()`: rewrites .ics file on disk, updates index entry. PASS.
+
+No violations found across 3 scans.
+
+### Rule 2: Webloc file integrity
+
+- `BookmarkFileService.write()`: writes URL to plist, adds sidecar entry. PASS.
+- `BookmarkFileService.move()`: uses `fm.moveItem()` (deletes source), updates sidecars in both source and destination. PASS.
+- `BookmarkFileService.delete()`: removes `.webloc` + assets + sidecar entry. PASS.
+- `VBS.remove()`: tracks URL in `recentlyDeletedURLs` to prevent zombie re-adoption. PASS.
+- `VBS.adoptOrphanedVaultFiles()`: checks `recentlyDeletedURLs` before adopting. PASS.
+
+No violations found across 3 scans.
+
+### Rule 3: Sidecar consistency
+
+- `VBS.persistSidecar()` routes through `BookmarkFileService.updateSidecar()` — no manual encode/write. PASS.
+- `BookmarkFileService.writeSidecar()`: deletes sidecar file when `items` is empty (line 248-249). PASS.
+- `BookmarkFileService.move()`: removes entry from source sidecar, adds to destination sidecar. PASS.
+- No direct sidecar JSON writes found outside BookmarkFileService. PASS.
+
+No violations found across 3 scans.
+
+### Rule 4: Trash round-trip integrity
+
+- `TrashStorage.trashBookmark()`: moves assets to UUID-safe `.trash/thumbnails/` and `.trash/originals/` subdirectories. PASS.
+- `TrashStorage.restoreBookmark()`: restores assets to target directory, calls `VBS.restoreFromTrash()` which writes a fresh `.webloc`. PASS.
+- `VBS.remove()`: calls `TrashStorage.shared.trashBookmark()` then `deleteWeblocFileOnly()` — does NOT double-delete assets (only removes .webloc + sidecar entry). PASS.
+- `recentlyDeletedURLs` has TTL of 30 seconds, purged at start of each adoption scan (line 691). PASS.
+- Trash paths use `thumbnails/` and `originals/` subdirectories (not name-based). PASS.
+
+No violations found across 3 scans.
+
+### Rule 5: Index/cache vs disk agreement
+
+- `VBS.loadBookmarks()`: loads from index cache, filters out entries whose `.webloc` no longer exists on disk (line 88-92). PASS.
+- `VBS.scanAllVaultFolders()`: reads directly from `BookmarkFileService.readAll()`. PASS.
+- `NotesStorage.scanNotes()`: rebuilds index from scanned `.md` files, removes stale entries (line 253-286). PASS.
+- `NotesStorage.loadAndScan()`: background-safe version of the same rebuild logic. PASS.
+- Orphaned files trigger adoption (`adoptOrphanedVaultFiles`). PASS.
+
+No violations found across 3 scans.
+
+### Rule 6: Folder assignment integrity
+
+- `VBS.assignBookmark()`: physically moves `.webloc` via `BookmarkFileService.move()`, updates `folderID` + `relativePath`. PASS.
+- `VBS.scanAllVaultFolders()`: scans vault folders FIRST (authoritative), then Inbox (line 166-173). PASS.
+- `VBS.adoptOrphanedVaultFiles()`: same scan order (vault folders first, then Inbox). Duplicate URLs in Inbox are cleaned up (line 774-778). PASS.
+- `NotesStorage.assignNote()`: physically moves `.md` file, updates `folderID` + `relativePath` + index. PASS.
+- `ContactStorage.assignContact()`: physically moves `.vcf` file, updates `folderID` + index. PASS.
+- `DateCardStorage.assignDateCard()`: physically moves `.ics` file, updates `folderID` + index. PASS.
+
+No violations found across 3 scans.
+
+### Rule 7: Migration safety
+
+- `VaultMigrationService.migrateBookmarks()`: uses `BookmarkFileService.shared.uniqueFilename()` for collision-safe filenames (line 116). PASS.
+- Migration is idempotent: checks `fm.fileExists(atPath: fileURL.path)` before writing (line 119). PASS.
+- `BookmarksStorage.shared` references in `VaultMigrationService` are intentional (legacy source for one-time migration) — listed as known non-violation. PASS.
+- `VaultStructureMigration`: idempotent via config flags (`didMigrateVaultToCiderDir`, `didMigrateContentToInbox`, etc.). PASS.
+
+No violations found across 3 scans.
+
+### Rule 8: No stale references
+
+- Searched all consumer files for `BookmarksStorage.shared`: zero hits outside VaultMigrationService. PASS.
+- Searched all consumer files for hardcoded `.cider/bookmarks/` paths: zero hits (comments only in storage layer). PASS.
+- `BookmarksViewModel` reads from `VaultBookmarkService.shared.bookmarks`. PASS.
+- `NotesViewModel` reads from `NotesStorage.shared.notes`. PASS.
+- `FolderSidebarView`, `FolderDetailView`, `HomeDashboardView`, `CiderPanelView+Sidebar`: no BookmarksStorage references, no direct file deletion, no hardcoded paths. PASS.
+- No `print()` statements in any scanned file — all use `os.Logger`. PASS.
+
+No violations found across 3 scans.
+
+---
+
+## Live Vault Verification — 2026-03-23
+
+Vault location: `~/CiderVault/`
+
+### Rule 9: Vault filesystem health checks
+
+**Orphan detection — Bookmarks:**
+```
+CHECK: .webloc files on disk vs bookmark index
+STATUS: PASS
+DETAILS: 58 .webloc files on disk, 58 index entries, all matched
+```
+
+**Orphan detection — Notes:**
+```
+CHECK: .md files on disk vs notes index
+STATUS: PASS
+DETAILS: 4 .md files on disk, 4 index entries, all matched
+```
+
+**Duplicate detection:**
+```
+CHECK: Duplicate URLs across vault folders
+STATUS: PASS
+DETAILS: No duplicate URLs found across any folders
+```
+
+**Sidecar health:**
+```
+CHECK: Sidecar files match .webloc files in each folder
+STATUS: PASS
+DETAILS: All folders with .webloc files have matching sidecar entries, no stale entries, no empty sidecars
+```
+
+**Trash health:**
+```
+CHECK: Trash directories and manifests
+STATUS: PASS
+DETAILS: All manifests empty (0 trashed items). Empty thumbnails/originals subdirs exist in both legacy and Inbox trash — structural only, not orphaned data.
+```
+
+**Folder structure:**
+```
+CHECK: Folder index vs directories on disk
+STATUS: PASS
+DETAILS: 9 folder index entries, all have corresponding directories on disk. No untracked directories found.
+```
+
+### Rule 10: Cross-item consistency
+
+**Bookmarks in folders:**
+```
+CHECK: folderID matches physical file location for each bookmark
+STATUS: PASS
+DETAILS: All 58 bookmarks have folderID/path agreement
+```
+
+**Item counts:**
+```
+CHECK: Index count vs disk count
+STATUS: PASS
+DETAILS: Bookmarks: 58 index = 58 disk. Notes: 4 index = 4 disk.
+```
+
+---
+
+## Integration Tests
+
+Skipped — integration tests (rules 11+) require running the app and are not part of the static/live audit. They are documented in STORAGE_LOOP.md for manual or automated test harness runs.
+
+---
+
+## Summary
+
+All 8 static analysis rule areas passed with 3 consecutive clean scans each. Zero violations found, zero fixes needed. Live vault verification (rules 9-10) confirmed full consistency between the index cache, sidecar files, folder structure, and physical files on disk. Build passed with zero errors and zero warnings.
+
+The storage layer is in good health. All mutations (create, update, move, delete, restore) properly synchronize in-memory state with disk. The adoption system correctly handles orphaned files, duplicates, and recently-deleted URL guards.
+
+---
+
+## Threading Safety Audit
+
+
+**Date:** 2026-03-23
+**Branch:** feature/sessions-tab
+**Build:** PASS (clean build, pre-existing MLX deprecation warning with `-warnings-as-errors`)
+
+## Rules Checked
+
+1. @MainActor on UI-touching code
+2. No bare DispatchQueue.main.async without guard
+3. No force unwraps in async callbacks
+4. OSAllocatedUnfairLock for shared mutable state
+5. No synchronous file I/O on main thread
+6. Task cancellation handling
+7. No data races in KVO/NotificationCenter callbacks
+8. Sendable compliance
+
+## Progress
+
+| Area | Status | Scans | Notes |
+|------|--------|-------|-------|
+| App/ | PASS | 3/3 | AppDelegate is @MainActor. KVO callbacks use [weak self] + DispatchQueue.main.async (AppKit convention). |
+| Services/ | PASS | 3/3 | All ObservableObject services are @MainActor. Added @unchecked Sendable justification comments to 6 hotkey detectors. |
+| Services/AI/ | PASS | 3/3 | EmbeddingStore uses Task.detached for computation, MainActor.run for state updates. BookmarkAIEnrichment checks Task.isCancelled. |
+| ViewModels/ | PASS | 3/3 | All ViewModels are @MainActor. Task {} in @MainActor class inherits isolation. |
+| Views/Shared/ | PASS | 3/3 | Fixed 4x bare DispatchQueue.main.async in FolderSidebarView drag callbacks -> Task { @MainActor in }. |
+| Views/Bookmarks/ | PASS | 3/3 | All Task {} calls are @MainActor annotated. No violations. |
+| Views/Notes/ | PASS | 3/3 | DispatchQueue.main.asyncAfter for focus management is AppKit convention. HideScrollIndicatorsHelper is NSViewRepresentable convention. |
+| Views/Home/ | PASS | 3/3 | Clean. |
+| Views/Search/ | PASS | 3/3 | SearchPaletteView Task {} inherits @MainActor from View context. |
+| Views/Settings/ | PASS | 3/3 | DispatchQueue.main.async for NSOpenPanel is AppKit convention. |
+| Views/AIAssistant/ | PASS | 3/3 | Clean. |
+
+## Fixes Applied
+
+### 1. @unchecked Sendable justification comments (Rule 8)
+
+Added documentation comments to 6 hotkey detector classes explaining why `@unchecked Sendable` is safe:
+
+- `DoubleTapDetector.swift`
+- `BookmarksHotkeyDetector.swift`
+- `NotesHotkeyDetector.swift`
+- `ScreenCaptureHotkeyDetector.swift`
+- `ClipboardHotkeyDetector.swift`
+- `AIAssistantHotkeyDetector.swift`
+
+All use NSEvent monitors that deliver callbacks on the main thread; no cross-thread mutable state access.
+
+### 2. DispatchQueue.main.async in drag callbacks (Rule 2)
+
+**File:** `Views/Shared/FolderSidebarView.swift`
+
+Replaced 4 instances of bare `DispatchQueue.main.async` inside `loadDataRepresentation` callbacks with `Task { @MainActor in }` for consistent concurrency model. These callbacks fire on background threads after drag data is loaded.
+
+## Observations (no fix needed)
+
+- **ClaudeSessionManager.resolveClaudePath()** runs `Process.waitUntilExit()` synchronously on @MainActor. Mitigated by caching after first call. A future improvement could make this async, but the shell commands complete in <100ms and results are cached.
+- **DetailWebViewStore** uses `DispatchQueue.main.async` inside URLSession.dataTask callback to call WKWebView APIs. Uses [weak wv, weak delegate] captures. Standard WebKit pattern.
+- **SpotlightIndexer** uses `DispatchQueue.main.asyncAfter` for navigation delay after showing panel. Acceptable UI convention.
+- **NotesStorage / VaultIndexService** use `DispatchQueue.main.asyncAfter` with `DispatchWorkItem` for debouncing. Both are @MainActor classes. Acceptable pattern.

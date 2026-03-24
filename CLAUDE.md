@@ -29,16 +29,29 @@ When you start work on a feature, move its card to `in_progress`. When done, mov
 swift build -Xswiftc -warnings-as-errors
 ```
 
+## Skills
+
+Use `/code`, `/design`, `/review`, `/docs` for deep reference on conventions, UI tokens, code review checklists, and doc formatting. Invoke before writing code or docs in unfamiliar areas.
+
 ## Docs
 
-Read the relevant doc BEFORE writing code in that area:
+**How to read docs:** Read ONLY the Table of Contents first, then jump to the relevant section by line number. Do not read entire docs unless explicitly asked.
 
-| Folder | Contents |
-|--------|----------|
-| `Docs/Architecture/` | Panel architecture, floating panel, storage, tech stack, SwiftUI gotchas |
-| `Docs/Design/` | Design system (incl. component catalog, cross-tab patterns), acrylic implementation |
-| `Docs/Conventions/` | Code conventions, code health, troubleshooting + performance best practices |
-| `Docs/Features/` | TipTap editor, AI/chat, detail panel spec, integration design, user preferences |
-| `Docs/Product/` | 1.0 roadmap, tab vision docs, future tabs, vault vision, user feedback |
-| `Docs/QA/` | QA testing, audit loops, release checklist, build status |
-| `Shared/` | Cross-platform: ecosystem, sync protocol, data model, design language, feature parity |
+**How to write docs:** Use `/docs` skill — it has the exact format rules. No guessing.
+
+**Before debugging:** Read `Docs/LESSONS_LEARNED.md` TOC for the relevant feature area. Past bugs with root causes and fixes are documented there.
+
+| Doc | Contents |
+|-----|----------|
+| `Docs/LESSONS_LEARNED.md` | Past bugs: symptom → root cause → fix, organized by feature |
+| `Docs/Architecture/ARCHITECTURE.md` | Panel, floating panel, tech stack, SwiftUI + AppKit patterns |
+| `Docs/Architecture/STORAGE.md` | Vault file storage, webloc lifecycle, sidecar system |
+| `Docs/Design/DESIGN_SYSTEM.md` | Component catalog, spacing, color tokens, cross-tab patterns |
+| `Docs/Conventions/CONVENTIONS.md` | Code conventions, naming, patterns |
+| `Docs/Conventions/CODE_HEALTH.md` | Weekly health scans, large file tracking |
+| `Docs/Conventions/TROUBLESHOOTING.md` | Performance patterns, known issues |
+| `Docs/Features/AI.md` | AI architecture, tool calling, MLX, Apple Intelligence |
+| `Docs/Features/TIPTAP_EDITOR.md` | TipTap/ProseMirror editor in WKWebView |
+| `Docs/Product/PRODUCT_VISION.md` | Roadmap, per-tab visions, strategy |
+| `Docs/QA/AUDIT_LOOPS.md` | All reusable audit procedures (design tokens, conventions, threading, storage, dead code) |
+| `Shared/` | Cross-platform: sync protocol, data model, feature parity |

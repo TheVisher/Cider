@@ -12,6 +12,7 @@ Hard-won debugging knowledge from past issues. **Read the relevant section befor
 - [NSPanel / Window Management](#nspanel--window-management)
 - [Keyboard Events](#keyboard-events)
 - [Sync](#sync)
+- [Performance & Caching](#performance--caching)
 - [TipTap Editor](#tiptap-editor)
 - [AI / LLM](#ai--llm)
 
@@ -101,6 +102,31 @@ Hard-won debugging knowledge from past issues. **Read the relevant section befor
 **Root cause:** Resizing after positioning shifts the window because macOS anchors from different corners.
 **Fix:** Always resize first, then set position.
 
+### VisualEffectView blending mode matters
+**Symptom:** Overlay views show desktop wallpaper bleeding through instead of blending with panel content.
+**Root cause:** `.behindWindow` blending samples through the clear window background to the desktop wallpaper. It's meant for the window chrome itself, not for views layered on top of other panel content.
+**Fix:** Use `.withinWindow` for views overlaying panel content. Reserve `.behindWindow` for the base window background layer only.
+
+### GeometryReader in compact mode — measure the right thing
+**Symptom:** Panel width oscillates infinitely between collapsed and expanded states.
+**Root cause:** GeometryReader was measuring the content area width (which changes when the sidebar toggles), feeding back into layout, which triggers another toggle — infinite loop.
+**Fix:** Measure the full panel width (the outer HStack), not the content area. The panel width is stable regardless of sidebar state.
+
+### Sticky section headers need opaque backgrounds
+**Symptom:** Scrolling content bleeds through sticky section headers in lists.
+**Root cause:** `LazyVStack` with `pinnedViews: [.sectionHeaders]` pins headers but they have transparent backgrounds by default.
+**Fix:** Add an explicit opaque background (e.g., `CiderColors.panelBackground`) to section header views.
+
+### DatePicker crashes in non-activating panel popovers
+**Symptom:** App crashes when opening a DatePicker inside a popover in a non-activating `NSPanel`.
+**Root cause:** `DatePicker` with `.field` or `.compact` style tries to present its own popover, which conflicts with the non-activating panel's window level and event handling.
+**Fix:** Don't use `DatePicker` in non-activating panel popovers. Use a plain `TextField` with manual date string parsing instead.
+
+### Remote view service crashes from focus/animation in popovers
+**Symptom:** Intermittent crashes in remote XPC view service when interacting with popovers.
+**Root cause:** Two patterns crash the remote view service: (1) `@FocusState` combined with `async .task { focused = true }`, and (2) `withAnimation` on content that changes height. Both trigger XPC issues in the remote rendering process.
+**Fix:** Remove `@FocusState` auto-focus hacks and avoid animating height-changing content inside popovers. Let the user tap to focus manually.
+
 ---
 
 ## Keyboard Events
@@ -118,6 +144,40 @@ Hard-won debugging knowledge from past issues. **Read the relevant section befor
 **Symptom:** New folders invisible on other platforms.
 **Root cause:** SyncService was reading from legacy `BookmarksStorage.folders` instead of `VaultFolderService.shared.folders`.
 **Fix:** Updated all SyncService folder reads/writes to use VaultFolderService. (Fixed 2026-03-23)
+
+### Case-insensitive SyncId matching
+**Symptom:** Duplicate records appear on the backend for the same bookmark/note.
+**Root cause:** UUID strings can differ in casing (e.g., `A1B2...` vs `a1b2...`). Backend lookups were case-sensitive, treating them as different records.
+**Fix:** All `ciderSyncId` lookups in the backend use `.toLowerCase()`. Prevents duplicate records from UUID casing differences.
+
+### Preserve FolderId on sync lookup failure
+**Symptom:** Bookmarks silently lose their folder assignment after a sync cycle.
+**Root cause:** When `folderSyncId` lookup fails (because the folder hasn't synced yet), the code was clearing the bookmark's `folderId` instead of leaving it alone.
+**Fix:** When folder lookup fails, preserve the existing `folderId` value instead of setting it to nil. The folder will sync eventually and the association will resolve.
+
+---
+
+## Performance & Caching
+
+### NotesStorage filesystem watcher CPU loop
+**Symptom:** App pegs 100% CPU doing nothing visible.
+**Root cause:** The filesystem watcher monitors the notes directory. `scanNotes()` rebuilds and writes the index file, which lives in the same directory. The write triggers the watcher, which calls `scanNotes()` again — infinite loop.
+**Fix:** Compare the rebuilt index to the previous one before writing. Only write if content actually changed. This pattern applies to ANY filesystem watcher that writes into its own watched directory.
+
+### Card size slider minimum width pressure
+**Symptom:** Panel can't shrink below a certain width even though the user is dragging it smaller.
+**Root cause:** `MasonryLayout.resolvedLayoutWidth` floors the width at `minimumColumnWidth`, which creates back-pressure preventing the panel from shrinking.
+**Fix:** Return `rawWidth` directly from `resolvedLayoutWidth` instead of flooring. Let the masonry layout adapt to whatever width it's given.
+
+### CiderFont scale caching
+**Symptom:** Changing font scale in config has no effect until app restart.
+**Root cause:** `_cachedScale` is computed once at startup and never invalidated. New config-driven font properties read from the stale cache.
+**Fix:** Call `invalidateScale()` in `handleConfigChanged()` so the cached scale is recomputed when config changes.
+
+### StoragePaths vault URL caching
+**Symptom:** Sluggish scrolling or hitches in card grid views.
+**Root cause:** `StoragePaths` URLs were being resolved fresh on every access, including calling `CiderConfig.load()` from disk in view body render paths.
+**Fix:** URLs are cached in `_cachedTypeURLs`. Use `cachedDirectoryURL(for:)` in render paths. Never call `CiderConfig.load()` in SwiftUI view bodies — it reads from disk.
 
 ---
 
