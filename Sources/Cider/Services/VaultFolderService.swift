@@ -616,7 +616,7 @@ final class VaultFolderService {
         adoptionDebounceTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            BookmarksStorage.shared.adoptOrphanedVaultFiles()
+            VaultBookmarkService.shared.adoptOrphanedVaultFiles()
         }
     }
 
