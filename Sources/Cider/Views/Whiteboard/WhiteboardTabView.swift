@@ -36,7 +36,7 @@ struct WhiteboardTabView: View {
     private var emptyState: some View {
         VStack(spacing: Spacing.md) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
+                .font(CiderFont.fileIconLarge)
                 .foregroundColor(CiderColors.tertiary)
             Text("Whiteboard not found")
                 .font(CiderFont.subheading)

@@ -178,7 +178,7 @@ final class VaultFolderService {
         guard let folder = index[folderID] else { return nil }
 
         let sourceURL = vaultRoot.appendingPathComponent(folder.relativePath)
-        let trashDestURL = trashDir.appendingPathComponent(folder.name)
+        let trashDestURL = trashDir.appendingPathComponent(folder.id.uuidString)
         let fm = FileManager.default
 
         isMutating = true
@@ -241,7 +241,7 @@ final class VaultFolderService {
         guard let payload = trashItem.vaultFolderPayload else { return }
 
         let folder = payload.folder
-        let trashSourceURL = trashDir.appendingPathComponent(folder.name)
+        let trashSourceURL = trashDir.appendingPathComponent(folder.id.uuidString)
         let restoreURL = vaultRoot.appendingPathComponent(folder.relativePath)
         let fm = FileManager.default
 
@@ -785,7 +785,7 @@ final class VaultFolderService {
         let fm = FileManager.default
         for item in items {
             if let payload = item.vaultFolderPayload {
-                let trashFolderURL = trashDir.appendingPathComponent(payload.folder.name)
+                let trashFolderURL = trashDir.appendingPathComponent(payload.folder.id.uuidString)
                 try? fm.removeItem(at: trashFolderURL)
             }
         }

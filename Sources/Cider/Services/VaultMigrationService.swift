@@ -112,7 +112,8 @@ final class VaultMigrationService {
 
             // Create .webloc file if bookmark has a URL
             if bookmark.hasURL, let url = bookmark.url {
-                let filename = sanitizeFilename(bookmark.title.isEmpty ? "Untitled" : bookmark.title) + ".webloc"
+                let baseName = sanitizeFilename(bookmark.title.isEmpty ? "Untitled" : bookmark.title)
+                let filename = BookmarkFileService.shared.uniqueFilename(for: baseName, extension: "webloc", in: dirURL)
                 let fileURL = dirURL.appendingPathComponent(filename)
 
                 if !fm.fileExists(atPath: fileURL.path) {

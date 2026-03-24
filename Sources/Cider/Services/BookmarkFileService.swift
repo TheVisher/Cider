@@ -257,7 +257,7 @@ final class BookmarkFileService {
         try? data.write(to: fileURL, options: .atomic)
     }
 
-    private func updateSidecar(at dirURL: URL, setting filename: String, to entry: BookmarkSidecarEntry) {
+    func updateSidecar(at dirURL: URL, setting filename: String, to entry: BookmarkSidecarEntry) {
         var sidecar = loadSidecar(at: dirURL)
         sidecar.items[filename] = entry
         writeSidecar(sidecar, at: dirURL)

@@ -124,6 +124,20 @@ enum CiderFont {
     static var settingsEmptyIcon: Font { Font.system(size: scaled(28)) }
     /// 11pt medium monospaced — keyboard shortcut key labels in Settings
     static var monospacedBody: Font { Font.system(size: scaled(11), weight: .medium, design: .monospaced) }
+    /// 40pt regular — onboarding/empty-state large icon
+    static var emptyStateIconLarge: Font { Font.system(size: scaled(40)) }
+    /// 22pt regular — onboarding card section icon
+    static var titleLarge: Font { Font.system(size: scaled(22)) }
+    /// 9pt semibold — sidebar chevrons, small decorative labels
+    static var microSemibold: Font { Font.system(size: scaled(9), weight: .semibold) }
+    /// 10pt regular monospaced — keyboard shortcut hints
+    static var captionMonospaced: Font { Font.system(size: scaled(10), design: .monospaced) }
+    /// 9pt medium monospaced — context usage percentage labels
+    static var microMonospaced: Font { Font.system(size: scaled(9), weight: .medium, design: .monospaced) }
+    /// 10pt medium monospaced — code block language labels
+    static var captionMonospacedMedium: Font { Font.system(size: scaled(10), weight: .medium, design: .monospaced) }
+    /// 12pt regular monospaced — code block content
+    static var labelMonospaced: Font { Font.system(size: scaled(12), design: .monospaced) }
     /// 64pt regular — about screen app icon
     static let appIcon = Font.system(size: 64)
 

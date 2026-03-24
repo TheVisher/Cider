@@ -6,6 +6,7 @@ struct ClaudeSessionChatView: View {
     let onSend: (String) -> Void
 
     @State private var inputText = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isWorking: Bool {
         if case .working = session.status { return true }
@@ -46,7 +47,7 @@ struct ClaudeSessionChatView: View {
                     proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
                 .onChange(of: session.messages.count) { _, _ in
-                    withAnimation(.snappy) {
+                    withAnimation(reduceMotion ? .none : .snappy) {
                         proxy.scrollTo("chat-bottom", anchor: .bottom)
                     }
                 }

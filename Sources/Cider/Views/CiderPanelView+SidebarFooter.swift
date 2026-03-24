@@ -159,7 +159,7 @@ extension CiderPanelView {
                         .foregroundColor(CiderColors.secondary)
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(CiderFont.microSemibold)
                         .foregroundColor(CiderColors.quaternary)
                         .rotationEffect(.degrees(aiSectionExpanded ? 90 : 0))
                 }
@@ -217,7 +217,7 @@ extension CiderPanelView {
                                 .foregroundColor(CiderColors.primary)
                             Spacer()
                             Text("⌥A")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(CiderFont.captionMonospaced)
                                 .foregroundColor(CiderColors.quaternary)
                         }
                         .padding(.horizontal, Spacing.sm)

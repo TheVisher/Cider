@@ -69,7 +69,7 @@ struct ContactEditorSheet: View {
                     if hasAvatar {
                         Button(action: removeAvatar) {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18))
+                                .font(CiderFont.title)
                                 .foregroundColor(CiderColors.secondary)
                                 .background(
                                     Circle()
@@ -82,7 +82,7 @@ struct ContactEditorSheet: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Button(action: pickAvatar) {
                         Text(hasAvatar ? "Change Photo" : "Add Photo")
                             .font(CiderFont.bodyMedium)
@@ -225,7 +225,7 @@ struct ContactEditorSheet: View {
                 .fill(CiderColors.surfaceSubtle)
                 .frame(width: size, height: size)
                 .overlay(
-                    VStack(spacing: 2) {
+                    VStack(spacing: Spacing.xxs) {
                         Image(systemName: "camera")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.tertiary)

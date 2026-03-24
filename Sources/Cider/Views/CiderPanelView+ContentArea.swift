@@ -254,7 +254,7 @@ extension CiderPanelView {
             Spacer()
 
             Image(systemName: "square.grid.2x2.fill")
-                .font(.system(size: 36))
+                .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.tertiary)
 
             VStack(spacing: Spacing.sm) {
@@ -383,7 +383,7 @@ extension CiderPanelView {
     var noTabsEmptyState: some View {
         VStack(spacing: Spacing.lg) {
             Image(systemName: "rectangle.stack.badge.plus")
-                .font(.system(size: 40))
+                .font(CiderFont.emptyStateIconLarge)
                 .foregroundColor(CiderColors.tertiary)
             Text("No tabs open")
                 .font(CiderFont.headingSemibold)

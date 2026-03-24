@@ -241,7 +241,7 @@ struct ContactListRow: View {
 
                 avatarCircle(size: 28)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(contact.displayName)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)

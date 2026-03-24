@@ -130,14 +130,14 @@ struct MarkdownContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             if !language.isEmpty {
                 Text(language)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(CiderFont.captionMonospacedMedium)
                     .foregroundColor(CiderColors.tertiary)
                     .padding(.horizontal, Spacing.sm)
                     .padding(.top, Spacing.xs)
             }
 
             Text(code)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .font(CiderFont.labelMonospaced)
                 .foregroundColor(CiderColors.primary)
                 .textSelection(.enabled)
                 .padding(.horizontal, Spacing.sm)

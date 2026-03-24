@@ -288,7 +288,7 @@ struct DateCardListRow: View {
                 }
                 .frame(width: 42, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(dateCard.title)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)

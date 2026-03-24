@@ -72,9 +72,29 @@ final class TrashStorage {
     func restoreBookmark(_ trashItem: TrashItem) {
         guard let payload = trashItem.bookmarkPayload else { return }
 
-        let bookmarksDir = StoragePaths.directoryURL(for: .bookmarks)
-        let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
+
+        // Determine the correct target directory based on the bookmark's folderID
+        let targetDir: URL
+        if let folderID = payload.bookmark.folderID,
+           let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            targetDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(vaultFolder.relativePath)
+            try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        } else {
+            targetDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
+        }
+
+        // Resolve trash dir: check Inbox first, then legacy .cider/bookmarks/
+        let inboxTrashDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
+        let legacyTrashDir = StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
+
+        let trashDir: URL
+        if fm.fileExists(atPath: inboxTrashDir.appendingPathComponent(manifestFileName).path) {
+            let manifest = loadManifest(trashDir: inboxTrashDir)
+            trashDir = manifest.contains(where: { $0.id == trashItem.id }) ? inboxTrashDir : legacyTrashDir
+        } else {
+            trashDir = legacyTrashDir
+        }
 
         var restoredBookmark = payload.bookmark
         restoredBookmark.isEnriching = false
@@ -83,7 +103,7 @@ final class TrashStorage {
         if let trashRelPath = payload.trashThumbnailRelativePath,
            let originalRelPath = restoredBookmark.thumbnailRelativePath {
             let srcURL = trashDir.appendingPathComponent(trashRelPath)
-            let destURL = bookmarksDir.appendingPathComponent(originalRelPath)
+            let destURL = targetDir.appendingPathComponent(originalRelPath)
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.createDirectory(
                     at: destURL.deletingLastPathComponent(),
@@ -97,7 +117,7 @@ final class TrashStorage {
         if let trashRelPath = payload.trashOriginalRelativePath,
            let originalRelPath = restoredBookmark.originalImageRelativePath {
             let srcURL = trashDir.appendingPathComponent(trashRelPath)
-            let destURL = bookmarksDir.appendingPathComponent(originalRelPath)
+            let destURL = targetDir.appendingPathComponent(originalRelPath)
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.createDirectory(
                     at: destURL.deletingLastPathComponent(),
@@ -606,8 +626,8 @@ final class TrashStorage {
             // Vault folder trash is managed by VaultFolderService
             if let payload = trashItem.vaultFolderPayload {
                 let vaultRoot = StoragePaths.cachedVaultDirectoryURL
-                let trashDir = vaultRoot.appendingPathComponent(".cider-folders/.trash")
-                let trashFolderURL = trashDir.appendingPathComponent(payload.folder.name)
+                let trashDir = vaultRoot.appendingPathComponent(".cider/folders/.trash")
+                let trashFolderURL = trashDir.appendingPathComponent(payload.folder.id.uuidString)
                 try? FileManager.default.removeItem(at: trashFolderURL)
                 removeFromManifest(trashItem.id, trashDir: trashDir)
             }

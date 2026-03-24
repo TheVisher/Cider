@@ -74,7 +74,7 @@ struct OnboardingTabView: View {
 
                     VStack(spacing: Spacing.md) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 40))
+                            .font(CiderFont.emptyStateIconLarge)
                             .foregroundColor(CiderColors.controlAccent)
 
                         Text("Welcome to Cider")
@@ -168,7 +168,7 @@ struct OnboardingTabView: View {
     private func onboardingCard(_ section: SectionData) -> some View {
         VStack(spacing: Spacing.sm) {
             Image(systemName: section.icon)
-                .font(.system(size: 22))
+                .font(CiderFont.titleLarge)
                 .foregroundColor(CiderColors.controlAccent)
 
             Text(section.title)
@@ -196,7 +196,7 @@ struct OnboardingTabView: View {
     private var shortcutsCard: some View {
         VStack(spacing: Spacing.sm) {
             Image(systemName: "keyboard")
-                .font(.system(size: 22))
+                .font(CiderFont.titleLarge)
                 .foregroundColor(CiderColors.controlAccent)
 
             Text("Keyboard Shortcuts")

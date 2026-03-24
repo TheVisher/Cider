@@ -29,7 +29,9 @@ final class VaultBookmarkService: ObservableObject {
     private let thumbnailMaxPixelDimension: CGFloat = 720
     private var enrichmentTasks: [UUID: Task<Void, Never>] = [:]
     /// URLs recently deleted — adoption skips these to prevent zombie re-adoption from duplicate files.
-    private var recentlyDeletedURLs: Set<String> = []
+    /// Entries expire after 30 seconds so the dictionary doesn't grow forever.
+    private var recentlyDeletedURLs: [String: Date] = [:]
+    private let recentlyDeletedTTL: TimeInterval = 30
 
     // MARK: - Computed Paths
 
@@ -161,14 +163,14 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
 
-        // Scan Inbox/Bookmarks (unfiled)
-        processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
-
-        // Scan all vault folders
+        // Scan vault folders FIRST — they are authoritative for folder assignment
         for folder in VaultFolderService.shared.folders {
             let dirURL = vaultRoot.appendingPathComponent(folder.relativePath)
             processDirectory(dirURL: dirURL, dirRelativePath: folder.relativePath, folderID: folder.id)
         }
+
+        // Scan Inbox/Bookmarks (unfiled)
+        processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
 
         // Sort by creation date descending (newest first)
         result.sort { $0.createdAt > $1.createdAt }
@@ -190,17 +192,7 @@ final class VaultBookmarkService: ObservableObject {
         let filename = (relativePath as NSString).lastPathComponent
         let fileService = BookmarkFileService.shared
         let entry = fileService.sidecarEntry(from: bookmark)
-
-        var sidecar = fileService.loadSidecar(at: dirURL)
-        sidecar.items[filename] = entry
-        // Write sidecar using the same encoder pattern as BookmarkFileService
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(sidecar) {
-            let sidecarURL = dirURL.appendingPathComponent(BookmarkFileService.sidecarFileName)
-            try? data.write(to: sidecarURL, options: .atomic)
-        }
+        fileService.updateSidecar(at: dirURL, setting: filename, to: entry)
     }
 
     // MARK: - Directory Resolution
@@ -291,6 +283,18 @@ final class VaultBookmarkService: ObservableObject {
     func updateURL(for bookmarkID: UUID, urlString: String) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         bookmarks[index].urlString = urlString
+
+        // Rewrite the .webloc plist on disk with the updated URL
+        if let relativePath = bookmarks[index].relativePath {
+            let fileURL = vaultRoot.appendingPathComponent(relativePath)
+            if let url = URL(string: urlString) {
+                let plist: [String: String] = ["URL": url.absoluteString]
+                if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
+                    try? data.write(to: fileURL, options: .atomic)
+                }
+            }
+        }
+
         persistSidecar(for: bookmarks[index])
         persist()
     }
@@ -301,11 +305,11 @@ final class VaultBookmarkService: ObservableObject {
         SyncService.shared.trackDeletion(of: bookmark.id)
         // Track deleted URL so adoption doesn't re-adopt duplicate files
         if !bookmark.urlString.isEmpty {
-            recentlyDeletedURLs.insert(bookmark.urlString.lowercased())
+            recentlyDeletedURLs[bookmark.urlString.lowercased()] = Date()
         }
         let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
         let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
-        deleteWeblocFile(for: bookmark)
+        deleteWeblocFileOnly(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()
         return trashItem
@@ -318,11 +322,11 @@ final class VaultBookmarkService: ObservableObject {
             cancelEnrichment(for: bookmark.id)
             SyncService.shared.trackDeletion(of: bookmark.id)
             if !bookmark.urlString.isEmpty {
-                recentlyDeletedURLs.insert(bookmark.urlString.lowercased())
+                recentlyDeletedURLs[bookmark.urlString.lowercased()] = Date()
             }
             let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
             let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
-            deleteWeblocFile(for: bookmark)
+            deleteWeblocFileOnly(for: bookmark)
             trashItems.append(item)
         }
         let ids = Set(bookmarksToDelete.map(\.id))
@@ -331,7 +335,14 @@ final class VaultBookmarkService: ObservableObject {
         return trashItems
     }
 
-    /// Deletes the .webloc file from disk when a bookmark is trashed.
+    /// Deletes only the `.webloc` file and its sidecar entry (not assets — TrashStorage handles those).
+    private func deleteWeblocFileOnly(for bookmark: Bookmark) {
+        guard let relativePath = bookmark.relativePath, !relativePath.isEmpty else { return }
+        let fileURL = vaultRoot.appendingPathComponent(relativePath)
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    /// Deletes the .webloc file, assets, and sidecar entry from disk (full cleanup).
     private func deleteWeblocFile(for bookmark: Bookmark) {
         guard let relativePath = bookmark.relativePath, !relativePath.isEmpty else { return }
         let fileURL = vaultRoot.appendingPathComponent(relativePath)
@@ -675,6 +686,10 @@ final class VaultBookmarkService: ObservableObject {
             lastAdoptionScan = Date()
         }
 
+        // Purge expired entries from recentlyDeletedURLs
+        let now = Date()
+        recentlyDeletedURLs = recentlyDeletedURLs.filter { now.timeIntervalSince($0.value) < recentlyDeletedTTL }
+
         let fileService = BookmarkFileService.shared
         let fm = FileManager.default
 
@@ -718,7 +733,7 @@ final class VaultBookmarkService: ObservableObject {
                 }
 
                 // Skip URLs that were recently deleted (prevents zombie re-adoption from duplicate files)
-                if recentlyDeletedURLs.contains(url) {
+                if recentlyDeletedURLs[url] != nil {
                     continue
                 }
 
@@ -1878,54 +1893,4 @@ final class VaultBookmarkService: ObservableObject {
         try? fm.createDirectory(at: inboxBookmarksDir, withIntermediateDirectories: true)
     }
 
-    // MARK: - Verification (temporary — compare with BookmarksStorage)
-
-    /// Logs discrepancies between VaultBookmarkService and BookmarksStorage.
-    /// Call after both services have loaded to verify the new service matches.
-    func verifyAgainstLegacy() {
-        let legacy = BookmarksStorage.shared.bookmarks
-        let vault = bookmarks
-
-        let legacyIDs = Set(legacy.map(\.id))
-        let vaultIDs = Set(vault.map(\.id))
-
-        let missingInVault = legacyIDs.subtracting(vaultIDs)
-        let extraInVault = vaultIDs.subtracting(legacyIDs)
-
-        if !missingInVault.isEmpty {
-            logger.warning("Verification: \(missingInVault.count) bookmarks in legacy but not in vault service")
-            for id in missingInVault.prefix(10) {
-                if let bm = legacy.first(where: { $0.id == id }) {
-                    logger.warning("  Missing: \(bm.title, privacy: .public) (\(bm.urlString, privacy: .public))")
-                }
-            }
-        }
-
-        if !extraInVault.isEmpty {
-            logger.warning("Verification: \(extraInVault.count) bookmarks in vault service but not in legacy")
-            for id in extraInVault.prefix(10) {
-                if let bm = vault.first(where: { $0.id == id }) {
-                    logger.warning("  Extra: \(bm.title, privacy: .public) (\(bm.urlString, privacy: .public))")
-                }
-            }
-        }
-
-        // Check folder ID mismatches
-        var folderMismatches = 0
-        for legacyBM in legacy {
-            if let vaultBM = vault.first(where: { $0.id == legacyBM.id }),
-               vaultBM.folderID != legacyBM.folderID {
-                folderMismatches += 1
-                if folderMismatches <= 5 {
-                    logger.warning("  FolderID mismatch for '\(legacyBM.title, privacy: .public)': legacy=\(legacyBM.folderID?.uuidString ?? "nil") vault=\(vaultBM.folderID?.uuidString ?? "nil")")
-                }
-            }
-        }
-
-        if missingInVault.isEmpty && extraInVault.isEmpty && folderMismatches == 0 {
-            logger.info("Verification: VaultBookmarkService matches BookmarksStorage (\(vault.count) bookmarks)")
-        } else {
-            logger.warning("Verification: \(missingInVault.count) missing, \(extraInVault.count) extra, \(folderMismatches) folder mismatches")
-        }
-    }
 }

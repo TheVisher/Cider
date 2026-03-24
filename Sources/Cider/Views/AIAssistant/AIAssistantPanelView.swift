@@ -164,7 +164,7 @@ struct AIAssistantPanelView: View {
             .frame(width: 32, height: 3)
 
             Text("\(Int(usage * 100))%")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(CiderFont.microMonospaced)
                 .foregroundColor(color)
         }
         .help("Context window usage — \(Int(usage * 100))% of \(4096) tokens. Clears automatically when full.")
