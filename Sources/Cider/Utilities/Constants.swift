@@ -158,17 +158,6 @@ enum KanbanDesign {
     static let accentBarHeight: CGFloat = 3
 }
 
-// MARK: - Sessions Design Tokens
-
-enum SessionsDesign {
-    static let cardMinWidth: CGFloat = 280
-    static let statusDotSize: CGFloat = Spacing.sm
-    static let chatMaxHeight: CGFloat = 400
-    static let inputFieldMinHeight: CGFloat = 36
-    /// Height of the compact cards row at the bottom when one card is expanded
-    static let compactRowHeight: CGFloat = 120
-}
-
 // MARK: - Animation Presets
 
 enum CiderAnimation {

@@ -34,7 +34,7 @@ extension CiderPanelView {
                 selectedFolderID = nil
                 selectedTab = .savedView(id: savedView.id, name: savedView.name)
             },
-            onOpenSessionsTab: { openOrCreateSessionsTab() }
+            onOpenSessionsTab: nil
         )
         .frame(maxWidth: .infinity)
 
