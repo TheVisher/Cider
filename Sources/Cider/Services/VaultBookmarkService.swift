@@ -959,6 +959,27 @@ final class VaultBookmarkService: ObservableObject {
         persist()
     }
 
+    func applyOEmbedResults(
+        for bookmarkID: UUID,
+        title: String?,
+        notes: String?
+    ) {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        var bookmark = bookmarks[index]
+        var changed = false
+        if let title, !title.isEmpty, bookmark.title != title {
+            bookmark.title = title; changed = true
+        }
+        // Only set notes if the bookmark doesn't already have user-written notes
+        if let notes, !notes.isEmpty, bookmark.notes.isEmpty {
+            bookmark.notes = notes; changed = true
+        }
+        guard changed else { return }
+        bookmarks[index] = bookmark
+        persistSidecar(for: bookmark)
+        persist()
+    }
+
     func applyAISummary(_ summary: String, for bookmarkID: UUID) {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard bookmarks[index].aiSummary != summary else { return }

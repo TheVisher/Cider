@@ -54,6 +54,29 @@ final class BookmarkAIEnrichment {
     private func run(for bookmark: Bookmark, config: CiderConfig) async {
         guard !Task.isCancelled else { return }
 
+        // ── 0. oEmbed enrichment (TikTok, YouTube, Instagram, X) ────────────
+        if OEmbedService.supports(bookmark.urlString),
+           bookmark.notes.isEmpty
+        {
+            if let result = await OEmbedService.fetch(for: bookmark.urlString) {
+                let suggestedTitle = OEmbedService.suggestTitle(
+                    from: result,
+                    currentTitle: bookmark.title,
+                    urlString: bookmark.urlString
+                )
+                let notes = OEmbedService.buildNotes(from: result)
+                await MainActor.run {
+                    VaultBookmarkService.shared.applyOEmbedResults(
+                        for: bookmark.id,
+                        title: suggestedTitle,
+                        notes: notes
+                    )
+                }
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+
         // ── 1. Auto-tagging (NaturalLanguage, any Mac) ──────────────────────
         var suggestedTags: [String] = []
         if config.enableAutoTagging {
