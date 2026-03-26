@@ -503,8 +503,10 @@ enum ClipboardPanelDesign {
 }
 
 enum VaultFileDesign {
-    /// Height of the thumbnail/placeholder area in grid cards
+    /// Height of the thumbnail/placeholder area in grid cards (non-image files)
     static let cardThumbnailHeight: CGFloat = 120
+    /// Fallback height for image cards before thumbnail loads
+    static let imageFallbackHeight: CGFloat = 160
     /// Height of the placeholder area in the detail panel
     static let detailPlaceholderHeight: CGFloat = 180
     /// Min/max preview heights for PDF and video in detail view

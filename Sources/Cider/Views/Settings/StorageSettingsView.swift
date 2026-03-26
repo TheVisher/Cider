@@ -141,6 +141,7 @@ private struct TrashItemRow: View {
         case .vaultFolder: return "folder"
         case .session: return "globe"
         case .kanbanBoard: return "square.split.2x1"
+        case .vaultFile: return "doc"
         }
     }
 

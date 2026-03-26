@@ -487,6 +487,69 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
+    // MARK: - Vault File Trash
+
+    private var vaultFilesTrashDir: URL {
+        StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent(".cider/vault-files")
+            .appendingPathComponent(trashDirName)
+    }
+
+    func trashVaultFile(_ file: VaultFile) -> TrashItem {
+        let trashDir = vaultFilesTrashDir
+        let fm = FileManager.default
+        try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
+
+        var trashFilename: String?
+        if fm.fileExists(atPath: file.absoluteURL.path) {
+            let destURL = trashDir.appendingPathComponent(file.filename)
+            try? fm.moveItem(at: file.absoluteURL, to: destURL)
+            trashFilename = file.filename
+        }
+
+        let payload = VaultFileTrashPayload(vaultFile: file, trashFilename: trashFilename)
+        let trashItem = TrashItem(
+            itemID: file.id,
+            itemType: .vaultFile,
+            title: file.displayTitle,
+            originalFolderID: file.folderID,
+            vaultFilePayload: payload
+        )
+
+        addToManifest(trashItem, trashDir: trashDir)
+        VaultFileStorage.shared.removeMetadata(for: file.id)
+        VaultFileService.shared.scan()
+        return trashItem
+    }
+
+    func restoreVaultFile(_ trashItem: TrashItem) {
+        guard let payload = trashItem.vaultFilePayload else { return }
+        let trashDir = vaultFilesTrashDir
+        let fm = FileManager.default
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+
+        // Determine target directory
+        let targetDir: URL
+        if let folderID = payload.vaultFile.folderID,
+           let folder = VaultFolderService.shared.folder(for: folderID) {
+            targetDir = vaultRoot.appendingPathComponent(folder.relativePath)
+        } else {
+            targetDir = vaultRoot.appendingPathComponent("Inbox")
+        }
+        try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+
+        if let trashFilename = payload.trashFilename {
+            let srcURL = trashDir.appendingPathComponent(trashFilename)
+            let destURL = targetDir.appendingPathComponent(payload.vaultFile.filename)
+            if fm.fileExists(atPath: srcURL.path) {
+                try? fm.moveItem(at: srcURL, to: destURL)
+            }
+        }
+
+        removeFromManifest(trashItem.id, trashDir: trashDir)
+        VaultFileService.shared.scan()
+    }
+
     // MARK: - Generic Restore
 
     func restore(_ trashItem: TrashItem) {
@@ -513,6 +576,8 @@ final class TrashStorage {
             restoreSession(trashItem)
         case .kanbanBoard:
             restoreKanbanBoard(trashItem)
+        case .vaultFile:
+            restoreVaultFile(trashItem)
         }
     }
 
@@ -541,6 +606,7 @@ final class TrashStorage {
         let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
         items += loadManifest(trashDir: inboxBookmarksDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: inboxNotesDir.appendingPathComponent(trashDirName))
+        items += loadManifest(trashDir: vaultFilesTrashDir)
         items += VaultFolderService.shared.trashedFolders()
         return items.sorted { $0.deletedAt > $1.deletedAt }
     }
@@ -637,6 +703,11 @@ final class TrashStorage {
         case .kanbanBoard:
             let trashDir = StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+        case .vaultFile:
+            if let payload = trashItem.vaultFilePayload, let trashFilename = payload.trashFilename {
+                try? FileManager.default.removeItem(at: vaultFilesTrashDir.appendingPathComponent(trashFilename))
+            }
+            removeFromManifest(trashItem.id, trashDir: vaultFilesTrashDir)
         }
     }
 
@@ -720,6 +791,10 @@ final class TrashStorage {
             break // Sessions are metadata-only, no separate files to delete
         case .kanbanBoard:
             break // YAML content stored in payload, no separate files
+        case .vaultFile:
+            if let payload = trashItem.vaultFilePayload, let trashFilename = payload.trashFilename {
+                try? fm.removeItem(at: trashDir.appendingPathComponent(trashFilename))
+            }
         }
     }
 

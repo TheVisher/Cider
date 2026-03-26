@@ -15,6 +15,7 @@ struct VaultFileCardView: View {
 
     @State private var isHovered = false
     @State private var thumbnail: NSImage?
+    @State private var thumbnailAspectRatio: CGFloat?
 
     private func handleClick(normalAction: () -> Void) {
         let flags = NSEvent.modifierFlags
@@ -31,38 +32,11 @@ struct VaultFileCardView: View {
         Button {
             handleClick { onOpen?() }
         } label: {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                // Thumbnail or icon
-                thumbnailArea
-
-                // Filename
-                Text(file.filename)
-                    .font(CiderFont.subheadingMedium)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(2)
-
-                // File info row
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: file.fileType.systemImageName)
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.tertiary)
-                        .imageScale(.small)
-
-                    Text(file.fileType.displayName)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-
-                    Text("\u{00B7}")
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.quaternary)
-
-                    Text(formattedSize)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                }
+            if file.fileType == .image {
+                imageCardContent
+            } else {
+                genericCardContent
             }
-            .padding(Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused)
@@ -84,10 +58,102 @@ struct VaultFileCardView: View {
         }
     }
 
-    // MARK: - Thumbnail
+    // MARK: - Image Card (full-bleed thumbnail with natural aspect ratio)
+
+    private var imageCardContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Full-bleed thumbnail
+            if let thumbnail {
+                let ratio = thumbnailAspectRatio ?? 1.0
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: nil)
+                    .aspectRatio(1 / ratio, contentMode: .fit)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: VaultFileDesign.imageFallbackHeight)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(CiderFont.vaultCardIcon)
+                            .foregroundColor(CiderColors.tertiary)
+                            .imageScale(.large)
+                    )
+            }
+
+            // Title + metadata footer
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(file.displayTitle)
+                    .font(CiderFont.subheadingMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+
+                HStack(spacing: Spacing.xs) {
+                    Text(file.fileType.displayName)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    Text("\u{00B7}")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
+
+                    Text(formattedSize)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.sm)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Generic Card (non-image files)
+
+    private var genericCardContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            // Thumbnail or icon
+            genericThumbnailArea
+
+            // Title
+            Text(file.displayTitle)
+                .font(CiderFont.subheadingMedium)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(2)
+
+            // File info row
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: file.fileType.systemImageName)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .imageScale(.small)
+
+                Text(file.fileType.displayName)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text("\u{00B7}")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.quaternary)
+
+                Text(formattedSize)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+        }
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Generic Thumbnail
 
     @ViewBuilder
-    private var thumbnailArea: some View {
+    private var genericThumbnailArea: some View {
         if let thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
@@ -131,17 +197,23 @@ struct VaultFileCardView: View {
         let url = file.absoluteURL
         switch file.fileType {
         case .image:
-            let loaded: NSImage? = await Task.detached(priority: .userInitiated) {
+            let result: (NSImage, CGFloat)? = await Task.detached(priority: .userInitiated) {
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
                 let options: [CFString: Any] = [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 400,
+                    kCGImageSourceThumbnailMaxPixelSize: 600,
                     kCGImageSourceShouldCacheImmediately: true,
                 ]
                 guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                let w = CGFloat(cgImage.width)
+                let h = CGFloat(cgImage.height)
+                let aspectRatio = h / w
+                return (NSImage(cgImage: cgImage, size: NSSize(width: w, height: h)), aspectRatio)
             }.value
-            thumbnail = loaded
+            if let (image, ratio) = result {
+                thumbnail = image
+                thumbnailAspectRatio = ratio
+            }
 
         case .pdf:
             let loaded: NSImage? = await Task.detached(priority: .userInitiated) {
@@ -212,7 +284,7 @@ struct VaultFileListRow: View {
                     .frame(width: FolderSidebarItemDesign.folderIconSize)
 
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
-                    Text(file.filename)
+                    Text(file.displayTitle)
                         .font(CiderFont.subheadingMedium)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(1)

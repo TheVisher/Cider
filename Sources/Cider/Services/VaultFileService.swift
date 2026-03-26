@@ -23,15 +23,32 @@ final class VaultFileService: ObservableObject {
     private static let excludedExtensions: Set<String> = ["md", "json", "webloc", "ics", "vcf"]
 
     /// Directories that contain Cider internal data, not user files.
-    /// All StorageType dirs now live inside `.cider/` (hidden, auto-skipped by .skipsHiddenFiles).
+    /// `.cider/` is hidden and auto-skipped by .skipsHiddenFiles.
+    /// `Unsorted` is a legacy directory prefix.
     private static let excludedDirectoryPrefixes: Set<String> = [
-        "Unsorted", "Inbox"
+        "Unsorted"
     ]
+
+    /// Inbox subdirectory names that hold Cider-native files (skip scanning those).
+    private static let inboxNativeSubdirs: Set<String> = [
+        "Bookmarks", "Notes", "Contacts", "Todos", "Date Cards"
+    ]
+
+    // MARK: - File Watching
+
+    private var watcher: FSEventsWatcher?
+    private var isScanning = false
 
     private init() {}
 
-    /// Scans all vault folders for non-Cider files.
+    // MARK: - Public API
+
+    /// Scans all vault folders (including Inbox) for non-Cider files.
     func scan() {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
+
         let fm = FileManager.default
         let root = vaultRoot
 
@@ -51,10 +68,21 @@ final class VaultFileService: ObservableObject {
 
         while let url = enumerator.nextObject() as? URL {
             let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+            let components = relativePath.split(separator: "/").map(String.init)
 
-            // Skip excluded directories
-            let topComponent = relativePath.split(separator: "/").first.map(String.init) ?? relativePath
-            if Self.excludedDirectoryPrefixes.contains(topComponent) {
+            // Skip excluded top-level directories
+            if let topComponent = components.first,
+               Self.excludedDirectoryPrefixes.contains(topComponent) {
+                if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+
+            // Skip Inbox subdirectories that hold native Cider files
+            // (e.g., Inbox/Bookmarks/, Inbox/Notes/) but allow non-native files in Inbox root
+            if components.count >= 2, components[0] == "Inbox",
+               Self.inboxNativeSubdirs.contains(components[1]) {
                 if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                     enumerator.skipDescendants()
                 }
@@ -87,7 +115,7 @@ final class VaultFileService: ObservableObject {
             // Determine folder ID from the directory
             let dirPath = (relativePath as NSString).deletingLastPathComponent
             let folderID: UUID?
-            if dirPath.isEmpty || dirPath == "." {
+            if dirPath.isEmpty || dirPath == "." || dirPath == "Inbox" {
                 folderID = nil
             } else {
                 folderID = VaultFolderService.shared.folders.first(where: { $0.relativePath == dirPath })?.id
@@ -105,9 +133,34 @@ final class VaultFileService: ObservableObject {
             ))
         }
 
+        // Apply persisted metadata (title, notes, labels, OCR, colors)
+        VaultFileStorage.shared.applyMetadata(to: &scanned)
+
         files = scanned.sorted { $0.modifiedAt > $1.modifiedAt }
         logger.info("Scanned vault files: \(scanned.count) items")
+
+        // Schedule enrichment for new un-enriched image files
+        VaultFileEnrichment.shared.scheduleAll()
     }
+
+    /// Starts watching the vault root for file changes and auto-rescanning.
+    func startWatching() {
+        stopWatching()
+        watcher = FSEventsWatcher(path: vaultRoot.path, latency: 1.0) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isScanning else { return }
+                self.scan()
+            }
+        }
+        watcher?.start()
+    }
+
+    func stopWatching() {
+        watcher?.stop()
+        watcher = nil
+    }
+
+    // MARK: - Queries
 
     /// Returns all files in a given folder.
     func files(inFolder folderID: UUID?) -> [VaultFile] {
@@ -118,6 +171,52 @@ final class VaultFileService: ObservableObject {
     func files(ofType type: VaultFileType) -> [VaultFile] {
         files.filter { $0.fileType == type }
     }
+
+    /// Returns a file by ID.
+    func file(for id: UUID) -> VaultFile? {
+        files.first { $0.id == id }
+    }
+
+    // MARK: - Mutation
+
+    /// Moves a vault file to a different folder by physically moving the file.
+    func assignFile(_ fileID: UUID, toFolder folderID: UUID?) {
+        guard let index = files.firstIndex(where: { $0.id == fileID }) else { return }
+        let file = files[index]
+        let fm = FileManager.default
+
+        // Determine target directory
+        let targetDir: URL
+        if let folderID, let folder = VaultFolderService.shared.folder(for: folderID) {
+            targetDir = vaultRoot.appendingPathComponent(folder.relativePath)
+        } else {
+            // Unfiled — move to Inbox root
+            targetDir = vaultRoot.appendingPathComponent("Inbox")
+        }
+        try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+
+        let destURL = targetDir.appendingPathComponent(file.filename)
+        guard destURL != file.absoluteURL else { return }
+
+        do {
+            try fm.moveItem(at: file.absoluteURL, to: destURL)
+            // Rescan to pick up new path and folder assignment
+            scan()
+        } catch {
+            logger.error("Failed to move vault file: \(error.localizedDescription)")
+        }
+    }
+
+    /// Deletes a vault file from disk and rescans.
+    func deleteFile(_ fileID: UUID) -> VaultFile? {
+        guard let file = files.first(where: { $0.id == fileID }) else { return nil }
+        try? FileManager.default.removeItem(at: file.absoluteURL)
+        VaultFileStorage.shared.removeMetadata(for: fileID)
+        scan()
+        return file
+    }
+
+    // MARK: - Private
 
     /// Derives a stable UUID from a vault-relative path using SHA-256.
     private func stableID(for path: String) -> UUID {

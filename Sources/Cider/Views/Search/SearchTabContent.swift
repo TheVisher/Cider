@@ -125,6 +125,10 @@ struct SearchTabContent: View {
                 }
             case .session:
                 break
+            case .vaultFile:
+                if let vaultFile = result.vaultFile {
+                    NSWorkspace.shared.open(vaultFile.absoluteURL)
+                }
             }
         } label: {
             HStack(spacing: Spacing.sm) {
@@ -176,6 +180,7 @@ struct SearchTabContent: View {
         case .contact:   return "person"
         case .todo:      return "checklist"
         case .session:   return "rectangle.stack"
+        case .vaultFile: return "doc"
         }
     }
 

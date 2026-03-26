@@ -132,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Load sidecar metadata and scan vault files
         SidecarService.shared.loadAll()
         VaultFileService.shared.scan()
+        VaultFileService.shared.startWatching()
 
         // Sync Kanban board YAML files with tab entries and start file watching
         KanbanStorage.shared.syncTabsWithBoards()

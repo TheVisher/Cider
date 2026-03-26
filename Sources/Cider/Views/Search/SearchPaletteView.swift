@@ -136,6 +136,10 @@ struct SearchPaletteView: View {
         results.filter { $0.type == .session }
     }
 
+    private var vaultFileResults: [SearchResult] {
+        results.filter { $0.type == .vaultFile }
+    }
+
     private var filteredTags: [CardLabel] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -319,6 +323,10 @@ struct SearchPaletteView: View {
                 }
             case .session:
                 break
+            case .vaultFile:
+                if let vaultFile = result.vaultFile {
+                    NSWorkspace.shared.open(vaultFile.absoluteURL)
+                }
             }
             onDismiss()
         }
@@ -927,6 +935,7 @@ struct SearchPaletteView: View {
         case .contact:   return "person"
         case .todo:      return "checklist"
         case .session:   return "rectangle.stack"
+        case .vaultFile: return "doc"
         }
     }
 

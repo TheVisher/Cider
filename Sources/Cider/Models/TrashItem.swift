@@ -11,6 +11,7 @@ enum TrashItemType: String, Codable {
     case vaultFolder
     case session
     case kanbanBoard
+    case vaultFile
 }
 
 /// Payload stored alongside a trashed bookmark, containing the full bookmark data
@@ -111,6 +112,13 @@ struct ContactTrashPayload: Codable {
     }
 }
 
+/// Payload stored alongside a trashed vault file.
+struct VaultFileTrashPayload: Codable {
+    let vaultFile: VaultFile
+    /// The filename moved to `.trash/`, if any.
+    let trashFilename: String?
+}
+
 /// Represents a single item that has been moved to the trash.
 struct TrashItem: Codable, Identifiable {
     var id: UUID
@@ -150,6 +158,9 @@ struct TrashItem: Codable, Identifiable {
     // Kanban board-specific
     var kanbanBoardPayload: KanbanBoardTrashPayload?
 
+    // Vault file-specific
+    var vaultFilePayload: VaultFileTrashPayload?
+
     init(
         id: UUID = UUID(),
         itemID: UUID,
@@ -166,7 +177,8 @@ struct TrashItem: Codable, Identifiable {
         whiteboardPayload: WhiteboardTrashPayload? = nil,
         vaultFolderPayload: VaultFolderTrashPayload? = nil,
         sessionPayload: BrowserSessionTrashPayload? = nil,
-        kanbanBoardPayload: KanbanBoardTrashPayload? = nil
+        kanbanBoardPayload: KanbanBoardTrashPayload? = nil,
+        vaultFilePayload: VaultFileTrashPayload? = nil
     ) {
         self.id = id
         self.itemID = itemID
@@ -184,5 +196,6 @@ struct TrashItem: Codable, Identifiable {
         self.vaultFolderPayload = vaultFolderPayload
         self.sessionPayload = sessionPayload
         self.kanbanBoardPayload = kanbanBoardPayload
+        self.vaultFilePayload = vaultFilePayload
     }
 }

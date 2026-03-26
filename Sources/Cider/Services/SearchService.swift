@@ -7,6 +7,7 @@ enum SearchResultType {
     case contact
     case todo
     case session
+    case vaultFile
 }
 
 struct SearchSnippet {
@@ -29,6 +30,7 @@ struct SearchResult: Identifiable {
     var contact: ContactCard?
     var todoCard: TodoCard?
     var session: BrowserSession?
+    var vaultFile: VaultFile?
 }
 
 // MARK: - Search Scope
@@ -54,6 +56,7 @@ struct SearchScope: Equatable {
                 case .contact:   return "Contacts"
                 case .todo:      return "Todos"
                 case .session:   return "Sessions"
+                case .vaultFile: return "Files"
                 }
             }.sorted()
             descs.append(contentsOf: names)
@@ -110,6 +113,7 @@ enum SearchService {
             (["contacts", "contact"], .contact),
             (["todos", "todo", "tasks", "task"], .todo),
             (["sessions", "session"], .session),
+            (["files", "file", "images", "image", "vaultfiles", "vaultfile"], .vaultFile),
         ]
 
         var i = 0
@@ -333,6 +337,22 @@ enum SearchService {
             }
         }
 
+        if shouldSearchType(.vaultFile) {
+            let vaultFiles = VaultFileService.shared.files
+            let filtered = applyFolderFilter(vaultFiles, scope: scope) { $0.folderID }
+            if tokens.isEmpty {
+                results += filtered.map { file in
+                    SearchResult(
+                        id: file.id, type: .vaultFile, title: file.displayTitle,
+                        subtitle: file.fileType.displayName,
+                        snippet: nil, date: file.modifiedAt, vaultFile: file
+                    )
+                }
+            } else {
+                results += searchVaultFiles(tokens, in: filtered)
+            }
+        }
+
         return results
     }
 
@@ -497,6 +517,19 @@ enum SearchService {
                 id: session.id, type: .session, title: session.name,
                 subtitle: "\(session.tabCount) tab\(session.tabCount == 1 ? "" : "s")",
                 snippet: nil, date: session.updatedAt, session: session
+            )
+        }
+    }
+
+    static func searchVaultFiles(_ tokens: [String], in files: [VaultFile]) -> [SearchResult] {
+        files.compactMap { file in
+            let fields = [file.filename, file.displayTitle, file.notes, file.ocrText ?? ""]
+                .filter { !$0.isEmpty }
+            guard matchesAllTokens(tokens, in: fields) else { return nil }
+            return SearchResult(
+                id: file.id, type: .vaultFile, title: file.displayTitle,
+                subtitle: file.fileType.displayName,
+                snippet: nil, date: file.modifiedAt, vaultFile: file
             )
         }
     }
