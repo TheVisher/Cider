@@ -80,6 +80,7 @@ struct StorageSettingsView: View {
                     (.vaultFolder, "Folders"),
                     (.session, "Sessions"),
                     (.kanbanBoard, "Boards"),
+                    (.vaultFile, "Files"),
                 ]
 
                 ForEach(groupOrder, id: \.0) { itemType, label in

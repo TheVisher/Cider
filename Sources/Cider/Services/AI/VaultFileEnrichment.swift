@@ -19,8 +19,8 @@ final class VaultFileEnrichment {
     /// Schedule enrichment for a vault file. Only images are enriched.
     func schedule(for file: VaultFile) {
         guard file.fileType == .image else { return }
-        // Skip if already enriched (has OCR text)
-        guard file.ocrText == nil else { return }
+        // Skip if already enriched (has OCR text or dominant colors)
+        guard file.ocrText == nil && file.dominantColors == nil else { return }
 
         activeTasks[file.id]?.cancel()
         activeTasks[file.id] = Task { [weak self] in
@@ -87,8 +87,6 @@ final class VaultFileEnrichment {
                 dominantColors: dominantColors,
                 title: suggestedTitle
             )
-            // Rescan to pick up updated metadata
-            VaultFileService.shared.scan()
         }
 
         logger.info("Enriched vault file \(file.filename): OCR=\(ocrText != nil), colors=\(dominantColors != nil), title=\(suggestedTitle ?? "nil")")

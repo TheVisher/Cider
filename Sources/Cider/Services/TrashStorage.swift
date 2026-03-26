@@ -726,6 +726,11 @@ final class TrashStorage {
             for item in items { deleteFilesForItem(item, trashDir: trashDir) }
             saveManifest([], trashDir: trashDir)
         }
+        // Empty vault file trash
+        let vfTrashDir = vaultFilesTrashDir
+        let vfItems = loadManifest(trashDir: vfTrashDir)
+        for item in vfItems { deleteFilesForItem(item, trashDir: vfTrashDir) }
+        saveManifest([], trashDir: vfTrashDir)
         // Empty vault folder trash
         VaultFolderService.shared.emptyFolderTrash()
     }
