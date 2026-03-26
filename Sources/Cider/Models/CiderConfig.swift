@@ -499,10 +499,13 @@ struct CiderConfig: Codable {
             LibrarySortMode.self,
             forKey: .homeSort
         ) ?? .createdDescending
-        homeEntityFilter = try container.decodeIfPresent(
+        var decodedFilter = try container.decodeIfPresent(
             Set<LibraryEntityType>.self,
             forKey: .homeEntityFilter
         ) ?? Set(LibraryEntityType.allCases)
+        // Ensure new entity types are included in existing configs
+        decodedFilter.insert(.vaultFile)
+        homeEntityFilter = decodedFilter
         enableSpotlightIndexing = try container.decodeIfPresent(
             Bool.self,
             forKey: .enableSpotlightIndexing

@@ -67,7 +67,8 @@ final class LibraryViewModel: ObservableObject {
                 case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
                 case .contact:      entityMatch = scopeTypes.contains(.contact)
                 case .todo:         entityMatch = scopeTypes.contains(.todo)
-                case .externalFile, .vaultFile: entityMatch = false
+                case .externalFile:  entityMatch = false
+                case .vaultFile:    entityMatch = scopeTypes.contains(.vaultFile)
                 case .session:      entityMatch = scopeTypes.contains(.session)
                 }
                 guard entityMatch else { return false }

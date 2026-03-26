@@ -39,7 +39,10 @@ struct SavedViewFilterSpec: Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        entityTypes = try container.decodeIfPresent(Set<LibraryEntityType>.self, forKey: .entityTypes) ?? Set(LibraryEntityType.allCases)
+        var decodedTypes = try container.decodeIfPresent(Set<LibraryEntityType>.self, forKey: .entityTypes) ?? Set(LibraryEntityType.allCases)
+        // Ensure new entity types are included in existing saved views
+        decodedTypes.insert(.vaultFile)
+        entityTypes = decodedTypes
         labelIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .labelIDs) ?? []
         folderID = try container.decodeIfPresent(UUID.self, forKey: .folderID)
         includeCompleted = try container.decodeIfPresent(Bool.self, forKey: .includeCompleted) ?? true

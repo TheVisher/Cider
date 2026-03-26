@@ -13,6 +13,8 @@ struct VaultFileCardView: View {
     var onSelect: (() -> Void)? = nil
     var onShiftSelect: (() -> Void)? = nil
 
+    @Environment(\.hideCardFooters) private var hideCardFooters
+    @Environment(\.showCardDetailsOnHover) private var showCardDetailsOnHover
     @State private var isHovered = false
     @State private var thumbnail: NSImage?
     @State private var thumbnailAspectRatio: CGFloat?
@@ -86,29 +88,31 @@ struct VaultFileCardView: View {
                     )
             }
 
-            // Title + metadata footer
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(file.displayTitle)
-                    .font(CiderFont.subheadingMedium)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(2)
+            // Title + metadata footer (respects hide details setting)
+            if !hideCardFooters || (showCardDetailsOnHover && isHovered) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(file.displayTitle)
+                        .font(CiderFont.subheadingMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(2)
 
-                HStack(spacing: Spacing.xs) {
-                    Text(file.fileType.displayName)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
+                    HStack(spacing: Spacing.xs) {
+                        Text(file.fileType.displayName)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
 
-                    Text("\u{00B7}")
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.quaternary)
+                        Text("\u{00B7}")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
 
-                    Text(formattedSize)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
+                        Text(formattedSize)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
                 }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.sm)
             }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.sm)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
