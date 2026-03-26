@@ -137,7 +137,7 @@ struct BookmarkThumbnailView: View {
                 Spacer(minLength: 0)
 
                 Text(String(bookmark.hostDisplay.prefix(1)).uppercased())
-                    .font(.system(size: (mode == .list ? BookmarksDesign.listFallbackLetterSize : BookmarksDesign.cardFallbackLetterSize) * textScale, weight: .black))
+                    .font(CiderFont.fallbackLetter(size: mode == .list ? BookmarksDesign.listFallbackLetterSize : BookmarksDesign.cardFallbackLetterSize))
                     .foregroundColor(CiderColors.textOnColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

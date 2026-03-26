@@ -60,7 +60,7 @@ private struct CiderShadowView: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(Color.black.opacity(0.6))
+            .fill(CiderColors.gradientOverlay)
             .padding(padding)
             .blur(radius: blurRadius)
     }

@@ -242,12 +242,12 @@ struct NotesTextStylePopover: View {
     // MARK: - Highlight color menu
 
     private static let highlightColors: [(name: String, css: String, swatch: Color)] = [
-        ("Yellow", "rgba(234, 179, 8, 0.35)", Color.yellow),
-        ("Green", "rgba(34, 197, 94, 0.3)", Color.green),
-        ("Blue", "rgba(59, 130, 246, 0.35)", Color.blue),
-        ("Pink", "rgba(236, 72, 153, 0.3)", Color.pink),
-        ("Orange", "rgba(249, 115, 22, 0.3)", Color.orange),
-        ("Purple", "rgba(168, 85, 247, 0.3)", Color.purple),
+        ("Yellow", "rgba(234, 179, 8, 0.35)", CiderColors.highlightYellow),
+        ("Green", "rgba(34, 197, 94, 0.3)", CiderColors.highlightGreen),
+        ("Blue", "rgba(59, 130, 246, 0.35)", CiderColors.highlightBlue),
+        ("Pink", "rgba(236, 72, 153, 0.3)", CiderColors.highlightPink),
+        ("Orange", "rgba(249, 115, 22, 0.3)", CiderColors.highlightOrange),
+        ("Purple", "rgba(168, 85, 247, 0.3)", CiderColors.highlightPurple),
     ]
 
     private var lastHighlightSwatch: Color {

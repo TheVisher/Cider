@@ -1,9 +1,6 @@
 import Foundation
 
 enum CardLabelKind: String, Codable, CaseIterable, Hashable {
-    case person
-    case category
-    case priority
     case custom
 }
 

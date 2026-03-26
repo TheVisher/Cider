@@ -854,7 +854,7 @@ struct BookmarkDetailsHeroPreview: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Spacer(minLength: 0)
                 Text(String(draft.hostDisplay.prefix(1)).uppercased())
-                    .font(.system(size: BookmarksDesign.detailsHeroFallbackLetterSize * textScale, weight: .black))
+                    .font(CiderFont.fallbackLetter(size: BookmarksDesign.detailsHeroFallbackLetterSize))
                     .foregroundColor(CiderColors.textOnColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

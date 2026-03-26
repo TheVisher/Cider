@@ -877,6 +877,16 @@ enum CiderColors {
 
     // MARK: - Shadow Shape Opacity (custom blurred shadow technique)
 
+    // MARK: - Editor Highlight Colors
+
+    /// Note editor text highlight swatches
+    static let highlightYellow = Color.yellow
+    static let highlightGreen = Color.green
+    static let highlightBlue = Color.blue
+    static let highlightPink = Color.pink
+    static let highlightOrange = Color.orange
+    static let highlightPurple = Color.purple
+
     // MARK: - View State Opacity
 
     /// Disabled element opacity

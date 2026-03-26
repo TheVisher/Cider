@@ -106,6 +106,10 @@ enum CiderFont {
 
     /// 28pt bold — bookmark hero fallback letter
     static var heroFallback: Font { Font.system(size: scaled(28), weight: .bold) }
+    /// Fallback letter for bookmark cards — size varies by mode, extra-bold weight
+    static func fallbackLetter(size: CGFloat) -> Font { Font.system(size: scaled(size), weight: .black) }
+    /// Settings preview text at a specific size (pre-scaled, medium weight)
+    static func settingsPreview(size: CGFloat) -> Font { Font.system(size: size, weight: .medium) }
     /// 32pt medium — drag preview icon overlay
     static var dragPreviewIcon: Font { Font.system(size: scaled(32), weight: .medium) }
     /// 32pt light — vault file card placeholder icon

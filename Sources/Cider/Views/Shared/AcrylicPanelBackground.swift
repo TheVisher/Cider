@@ -29,7 +29,7 @@ struct AcrylicPanelBackground: View {
 
     @ViewBuilder
     private var opaqueBackground: some View {
-        Color(nsColor: NSColor.windowBackgroundColor)
+        CiderColors.opaqueBackground
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)

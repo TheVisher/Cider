@@ -32,7 +32,7 @@ struct SettingsBackgroundView: View {
 
     @ViewBuilder
     private var opaqueBackground: some View {
-        Color(nsColor: NSColor.windowBackgroundColor)
+        CiderColors.opaqueBackground
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius - CiderBorder.innerStrokeInset, style: .continuous)
@@ -352,36 +352,6 @@ struct SettingsAccountOverviewView: View {
                 }
             }
 
-            iMessageBridgeView
-        }
-    }
-
-    // MARK: - iMessage Bridge
-
-    private var iMessageBridgeView: some View {
-        SettingsSection(title: "iMessage Assistant") {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                Toggle("Enable iMessage Bridge", isOn: Binding(
-                    get: { iMessageBridgeService.shared.isEnabled },
-                    set: { iMessageBridgeService.shared.isEnabled = $0 }
-                ))
-                .font(CiderFont.body)
-
-                Text("When enabled, Cider watches for incoming iMessages and responds using Claude. Requires Full Disk Access permission.")
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.quaternary)
-
-                if iMessageBridgeService.shared.isRunning {
-                    HStack(spacing: Spacing.sm) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(CiderColors.success)
-                            .font(CiderFont.label)
-                        Text("Bridge active — \(iMessageBridgeService.shared.messageCount) messages processed")
-                            .font(CiderFont.body)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                }
-            }
         }
     }
 
@@ -522,7 +492,7 @@ struct SettingsSizeOptionButton: View {
             VStack(spacing: Spacing.xs) {
                 if let preview, let previewSize {
                     Text(preview)
-                        .font(.system(size: previewSize, weight: .medium))
+                        .font(CiderFont.settingsPreview(size: previewSize))
                         .frame(width: SettingsDesign.sizeOptionPreviewWidth, height: SettingsDesign.sizeOptionPreviewHeight)
                 } else if let icon {
                     Image(systemName: icon)

@@ -434,6 +434,11 @@ struct CiderPanelView: View {
                 .hidden()
 
             Button("") {
+                // If a sheet (e.g. Kanban card edit) is presented, let it handle Escape.
+                if let keyWindow = NSApp.keyWindow, keyWindow.isSheet {
+                    keyWindow.close()
+                    return
+                }
                 if isEditingNoteTitle {
                     isEditingNoteTitle = false
                 } else if isSearchPaletteVisible {
