@@ -739,6 +739,21 @@ struct FolderDetailView: View {
             VaultFileCardView(
                 file: file,
                 onOpen: { onOpenVaultFile?(file) },
+                folders: bookmarksViewModel.folders,
+                onMoveToFolder: { folderID in
+                    let oldFolderID = file.folderID
+                    VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+                    CiderUndoManager.shared.record(.movedToFolder(
+                        itemType: .vaultFile, itemID: file.id, title: file.displayTitle,
+                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
+                    ))
+                },
+                onDelete: {
+                    let trashItem = TrashStorage.shared.trashVaultFile(file)
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+                },
+                onToggleLabelBulk: onToggleLabelBulk,
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },

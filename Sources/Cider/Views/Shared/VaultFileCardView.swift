@@ -8,6 +8,10 @@ import SwiftUI
 struct VaultFileCardView: View {
     let file: VaultFile
     var onOpen: (() -> Void)? = nil
+    var folders: [Folder] = []
+    var onMoveToFolder: ((UUID?) -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    var onToggleLabelBulk: ((UUID) -> Void)? = nil
     var isSelected: Bool = false
     var isFocused: Bool = false
     var onSelect: (() -> Void)? = nil
@@ -52,8 +56,49 @@ struct VaultFileCardView: View {
         .contextMenu {
             Button("Open in Finder") { openInFinder() }
             Button("Open with Default App") { openWithDefaultApp() }
-            Divider()
             Button("Quick Look") { quickLook() }
+
+            Divider()
+
+            if !folders.isEmpty {
+                Menu("Move to Folder") {
+                    Button("Unfiled") { onMoveToFolder?(nil) }
+                    Divider()
+                    ForEach(folders) { folder in
+                        Button(folder.name) { onMoveToFolder?(folder.id) }
+                    }
+                }
+            }
+
+            if !CardLabelStorage.shared.labels.isEmpty {
+                Menu("Tags") {
+                    ForEach(CardLabelStorage.shared.labels) { label in
+                        let hasTag = file.labelIDs.contains(label.id)
+                        Button {
+                            if isSelected {
+                                onToggleLabelBulk?(label.id)
+                            } else if hasTag {
+                                VaultFileStorage.shared.removeLabel(file.id, labelID: label.id)
+                                VaultFileService.shared.scan()
+                            } else {
+                                VaultFileStorage.shared.assignLabel(file.id, labelID: label.id)
+                                VaultFileService.shared.scan()
+                            }
+                        } label: {
+                            HStack {
+                                Text(label.name)
+                                if hasTag {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button("Delete", role: .destructive) { onDelete?() }
         }
         .task {
             await loadThumbnail()

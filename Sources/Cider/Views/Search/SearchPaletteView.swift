@@ -580,6 +580,9 @@ struct SearchPaletteView: View {
                         if !sessionResults.isEmpty {
                             resultsSection(title: "Sessions", icon: "rectangle.stack", results: sessionResults)
                         }
+                        if !vaultFileResults.isEmpty {
+                            resultsSection(title: "Files", icon: "doc", results: vaultFileResults)
+                        }
                     }
 
                     if showNoResults && !activeScope.hasFolderScope {
