@@ -19,20 +19,19 @@ final class VaultFileService: ObservableObject {
     private var vaultRoot: URL { StoragePaths.cachedVaultDirectoryURL }
 
     /// File extensions that are Cider-native and handled by other services.
-    /// These are excluded from vault file scanning.
     private static let excludedExtensions: Set<String> = ["md", "json", "webloc", "ics", "vcf"]
 
-    /// Directories that contain Cider internal data, not user files.
+    /// Directories excluded from the main vault scan.
     /// `.cider/` is hidden and auto-skipped by .skipsHiddenFiles.
-    /// `Unsorted` is a legacy directory prefix.
+    /// Inbox is excluded from main scan — its vault-file subfolders are scanned separately.
     private static let excludedDirectoryPrefixes: Set<String> = [
-        "Unsorted"
+        "Unsorted", "Inbox"
     ]
 
-    /// Inbox subdirectory names that hold Cider-native files (skip scanning those).
-    private static let inboxNativeSubdirs: Set<String> = [
-        "Bookmarks", "Notes", "Contacts", "Todos", "Date Cards"
-    ]
+    /// Inbox subdirectory names for vault file types.
+    static let inboxImagesDirName = "Images"
+    static let inboxVideosDirName = "Videos"
+    static let inboxFilesDirName = "Files"
 
     // MARK: - File Watching
 
@@ -43,7 +42,17 @@ final class VaultFileService: ObservableObject {
 
     // MARK: - Public API
 
-    /// Scans all vault folders (including Inbox) for non-Cider files.
+    /// Ensures Inbox vault-file subdirectories exist.
+    func ensureInboxDirectories() {
+        let fm = FileManager.default
+        let inboxRoot = vaultRoot.appendingPathComponent("Inbox")
+        for dirName in [Self.inboxImagesDirName, Self.inboxVideosDirName, Self.inboxFilesDirName] {
+            let dirURL = inboxRoot.appendingPathComponent(dirName)
+            try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        }
+    }
+
+    /// Scans all vault folders + Inbox vault-file subdirectories for non-Cider files.
     func scan() {
         guard !isScanning else { return }
         isScanning = true
@@ -51,86 +60,57 @@ final class VaultFileService: ObservableObject {
 
         let fm = FileManager.default
         let root = vaultRoot
+        var scanned: [VaultFile] = []
 
-        guard let enumerator = fm.enumerator(
+        // ── 1. Scan user folders (everything except Inbox/ and Unsorted/) ──
+        if let enumerator = fm.enumerator(
             at: root,
             includingPropertiesForKeys: [
                 .isDirectoryKey, .fileSizeKey,
                 .creationDateKey, .contentModificationDateKey
             ],
             options: [.skipsHiddenFiles]
-        ) else {
-            files = []
-            return
+        ) {
+            while let url = enumerator.nextObject() as? URL {
+                let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                let components = relativePath.split(separator: "/").map(String.init)
+
+                // Skip excluded top-level directories
+                if let topComponent = components.first,
+                   Self.excludedDirectoryPrefixes.contains(topComponent) {
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                        enumerator.skipDescendants()
+                    }
+                    continue
+                }
+
+                if let file = processFile(url: url, relativePath: relativePath) {
+                    scanned.append(file)
+                }
+            }
         }
 
-        var scanned: [VaultFile] = []
+        // ── 2. Scan Inbox vault-file subdirectories (Images/, Videos/, Files/) ──
+        let inboxRoot = root.appendingPathComponent("Inbox")
+        for dirName in [Self.inboxImagesDirName, Self.inboxVideosDirName, Self.inboxFilesDirName] {
+            let dirURL = inboxRoot.appendingPathComponent(dirName)
+            guard fm.fileExists(atPath: dirURL.path) else { continue }
 
-        while let url = enumerator.nextObject() as? URL {
-            let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
-            let components = relativePath.split(separator: "/").map(String.init)
-
-            // Skip excluded top-level directories
-            if let topComponent = components.first,
-               Self.excludedDirectoryPrefixes.contains(topComponent) {
-                if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                    enumerator.skipDescendants()
+            if let enumerator = fm.enumerator(
+                at: dirURL,
+                includingPropertiesForKeys: [
+                    .isDirectoryKey, .fileSizeKey,
+                    .creationDateKey, .contentModificationDateKey
+                ],
+                options: [.skipsHiddenFiles]
+            ) {
+                while let url = enumerator.nextObject() as? URL {
+                    let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                    if let file = processFile(url: url, relativePath: relativePath) {
+                        scanned.append(file)
+                    }
                 }
-                continue
             }
-
-            // Skip Inbox subdirectories that hold native Cider files
-            // (e.g., Inbox/Bookmarks/, Inbox/Notes/) but allow non-native files in Inbox root
-            if components.count >= 2, components[0] == "Inbox",
-               Self.inboxNativeSubdirs.contains(components[1]) {
-                if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                    enumerator.skipDescendants()
-                }
-                continue
-            }
-
-            // Skip directories
-            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                continue
-            }
-
-            // Skip Cider-native file types
-            let ext = url.pathExtension.lowercased()
-            if Self.excludedExtensions.contains(ext) || ext.isEmpty {
-                continue
-            }
-
-            let fileType = VaultFileType.from(extension: ext)
-            let values = try? url.resourceValues(forKeys: [
-                .fileSizeKey, .creationDateKey, .contentModificationDateKey
-            ])
-
-            let fileSize = Int64(values?.fileSize ?? 0)
-            let createdAt = values?.creationDate ?? Date()
-            let modifiedAt = values?.contentModificationDate ?? Date()
-
-            // Derive a stable UUID from the path
-            let id = stableID(for: relativePath)
-
-            // Determine folder ID from the directory
-            let dirPath = (relativePath as NSString).deletingLastPathComponent
-            let folderID: UUID?
-            if dirPath.isEmpty || dirPath == "." || dirPath == "Inbox" {
-                folderID = nil
-            } else {
-                folderID = VaultFolderService.shared.folders.first(where: { $0.relativePath == dirPath })?.id
-            }
-
-            scanned.append(VaultFile(
-                id: id,
-                filename: url.lastPathComponent,
-                relativePath: relativePath,
-                fileType: fileType,
-                fileSize: fileSize,
-                createdAt: createdAt,
-                modifiedAt: modifiedAt,
-                folderID: folderID
-            ))
         }
 
         // Apply persisted metadata (title, notes, labels, OCR, colors)
@@ -162,17 +142,14 @@ final class VaultFileService: ObservableObject {
 
     // MARK: - Queries
 
-    /// Returns all files in a given folder.
     func files(inFolder folderID: UUID?) -> [VaultFile] {
         files.filter { $0.folderID == folderID }
     }
 
-    /// Returns all files of a given type.
     func files(ofType type: VaultFileType) -> [VaultFile] {
         files.filter { $0.fileType == type }
     }
 
-    /// Returns a file by ID.
     func file(for id: UUID) -> VaultFile? {
         files.first { $0.id == id }
     }
@@ -185,13 +162,12 @@ final class VaultFileService: ObservableObject {
         let file = files[index]
         let fm = FileManager.default
 
-        // Determine target directory
         let targetDir: URL
         if let folderID, let folder = VaultFolderService.shared.folder(for: folderID) {
             targetDir = vaultRoot.appendingPathComponent(folder.relativePath)
         } else {
-            // Unfiled — move to Inbox root
-            targetDir = vaultRoot.appendingPathComponent("Inbox")
+            // Unfiled — move to appropriate Inbox subfolder
+            targetDir = inboxDirectory(for: file.fileType)
         }
         try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
@@ -200,7 +176,6 @@ final class VaultFileService: ObservableObject {
 
         do {
             try fm.moveItem(at: file.absoluteURL, to: destURL)
-            // Rescan to pick up new path and folder assignment
             scan()
         } catch {
             logger.error("Failed to move vault file: \(error.localizedDescription)")
@@ -216,7 +191,70 @@ final class VaultFileService: ObservableObject {
         return file
     }
 
-    // MARK: - Private
+    // MARK: - Private Helpers
+
+    /// Returns the appropriate Inbox subdirectory for a file type.
+    private func inboxDirectory(for fileType: VaultFileType) -> URL {
+        let inboxRoot = vaultRoot.appendingPathComponent("Inbox")
+        switch fileType {
+        case .image:
+            return inboxRoot.appendingPathComponent(Self.inboxImagesDirName)
+        case .video:
+            return inboxRoot.appendingPathComponent(Self.inboxVideosDirName)
+        default:
+            return inboxRoot.appendingPathComponent(Self.inboxFilesDirName)
+        }
+    }
+
+    /// Processes a single URL from the enumerator into a VaultFile, or nil if it should be skipped.
+    private func processFile(url: URL, relativePath: String) -> VaultFile? {
+        // Skip directories
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            return nil
+        }
+
+        // Skip Cider-native file types
+        let ext = url.pathExtension.lowercased()
+        if Self.excludedExtensions.contains(ext) || ext.isEmpty {
+            return nil
+        }
+
+        let fileType = VaultFileType.from(extension: ext)
+        let values = try? url.resourceValues(forKeys: [
+            .fileSizeKey, .creationDateKey, .contentModificationDateKey
+        ])
+
+        let fileSize = Int64(values?.fileSize ?? 0)
+        let createdAt = values?.creationDate ?? Date()
+        let modifiedAt = values?.contentModificationDate ?? Date()
+        let id = stableID(for: relativePath)
+
+        // Determine folder ID from the directory
+        let dirPath = (relativePath as NSString).deletingLastPathComponent
+        let folderID: UUID?
+        let inboxPrefixes = [
+            "Inbox/\(Self.inboxImagesDirName)",
+            "Inbox/\(Self.inboxVideosDirName)",
+            "Inbox/\(Self.inboxFilesDirName)",
+            "Inbox"
+        ]
+        if dirPath.isEmpty || dirPath == "." || inboxPrefixes.contains(dirPath) {
+            folderID = nil
+        } else {
+            folderID = VaultFolderService.shared.folders.first(where: { $0.relativePath == dirPath })?.id
+        }
+
+        return VaultFile(
+            id: id,
+            filename: url.lastPathComponent,
+            relativePath: relativePath,
+            fileType: fileType,
+            fileSize: fileSize,
+            createdAt: createdAt,
+            modifiedAt: modifiedAt,
+            folderID: folderID
+        )
+    }
 
     /// Derives a stable UUID from a vault-relative path using SHA-256.
     private func stableID(for path: String) -> UUID {

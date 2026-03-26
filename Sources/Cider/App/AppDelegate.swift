@@ -131,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Load sidecar metadata and scan vault files
         SidecarService.shared.loadAll()
+        VaultFileService.shared.ensureInboxDirectories()
         VaultFileService.shared.scan()
         VaultFileService.shared.startWatching()
 
