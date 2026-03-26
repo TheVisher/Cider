@@ -63,58 +63,104 @@ struct VaultFileCardView: View {
     // MARK: - Image Card (full-bleed thumbnail with natural aspect ratio)
 
     private var imageCardContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Full-bleed thumbnail
-            if let thumbnail {
-                let ratio = thumbnailAspectRatio ?? 1.0
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity)
-                    .frame(height: nil)
-                    .aspectRatio(1 / ratio, contentMode: .fit)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                    .fill(CiderColors.surfaceInput)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: VaultFileDesign.imageFallbackHeight)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(CiderFont.vaultCardIcon)
-                            .foregroundColor(CiderColors.tertiary)
-                            .imageScale(.large)
-                    )
-            }
-
-            // Title + metadata footer (respects hide details setting)
-            if !hideCardFooters || (showCardDetailsOnHover && isHovered) {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text(file.displayTitle)
-                        .font(CiderFont.subheadingMedium)
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(2)
-
-                    HStack(spacing: Spacing.xs) {
-                        Text(file.fileType.displayName)
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-
-                        Text("\u{00B7}")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.quaternary)
-
-                        Text(formattedSize)
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            // Full-bleed thumbnail with hover overlay
+            imageThumbnailArea
+                .overlay(alignment: .bottom) {
+                    if hideCardFooters && showCardDetailsOnHover && isHovered {
+                        imageHoverOverlay
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.sm)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+
+            // Static footer (only when details are visible)
+            if !hideCardFooters {
+                imageFooter
             }
         }
+        .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var imageThumbnailArea: some View {
+        if let thumbnail {
+            let ratio = thumbnailAspectRatio ?? 1.0
+            Image(nsImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1 / ratio, contentMode: .fit)
+                .clipped()
+        } else {
+            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                .fill(CiderColors.surfaceInput)
+                .frame(maxWidth: .infinity)
+                .frame(height: VaultFileDesign.imageFallbackHeight)
+                .overlay(
+                    Image(systemName: "photo")
+                        .font(CiderFont.vaultCardIcon)
+                        .foregroundColor(CiderColors.tertiary)
+                        .imageScale(.large)
+                )
+        }
+    }
+
+    /// Gradient overlay that slides up from the bottom on hover (matches BookmarkCard pattern).
+    private var imageHoverOverlay: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text(file.displayTitle)
+                .font(CiderFont.labelSemibold)
+                .foregroundColor(CiderColors.textOnColor)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: Spacing.xs) {
+                Text(file.fileType.displayName)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.textOnColorDim)
+                Text("\u{00B7}")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.textOnColorDim)
+                Text(formattedSize)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.textOnColorDim)
+            }
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.bottom, Spacing.sm)
+        .padding(.top, Spacing.xxl)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [.clear, CiderColors.gradientOverlay],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    /// Static footer shown below the thumbnail when details are visible.
+    private var imageFooter: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text(file.displayTitle)
+                .font(CiderFont.subheadingMedium)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(2)
+
+            HStack(spacing: Spacing.xs) {
+                Text(file.fileType.displayName)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                Text("\u{00B7}")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.quaternary)
+                Text(formattedSize)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+        }
     }
 
     // MARK: - Generic Card (non-image files)
