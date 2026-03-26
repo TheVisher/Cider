@@ -56,7 +56,7 @@ final class BookmarkAIEnrichment {
 
         // ── 0. oEmbed enrichment (TikTok, YouTube, Instagram, X) ────────────
         if OEmbedService.supports(bookmark.urlString),
-           bookmark.notes.isEmpty
+           !bookmark.notesManuallySet, bookmark.notes.isEmpty
         {
             if let result = await OEmbedService.fetch(for: bookmark.urlString) {
                 let suggestedTitle = OEmbedService.suggestTitle(
@@ -137,8 +137,9 @@ final class BookmarkAIEnrichment {
         // (See SummaryService + BookmarkReaderView integration)
 
         // ── 5a. Smart title from OCR (image bookmarks with generic titles) ──────
+        // Skip if the user or an external agent explicitly set the title.
         var suggestedTitle: String?
-        if let text = ocrText, !text.isEmpty, isGenericImageTitle(bookmark.title) {
+        if let text = ocrText, !text.isEmpty, !bookmark.titleManuallySet, isGenericImageTitle(bookmark.title) {
             // Prefer Apple Intelligence if available, fall back to first OCR line
             if let aiTitle = await SummaryService.shared.suggestTitle(
                 currentTitle: bookmark.title,

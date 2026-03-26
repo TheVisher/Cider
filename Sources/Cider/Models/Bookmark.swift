@@ -226,6 +226,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var readerUnavailable: Bool?      // true when Readability.js fails to extract content
     var preferredHeroMode: String?    // "thumbnail", "reader", or "web" — last used hero mode
     var relativePath: String?         // vault-relative path, e.g. "Entertainment/YouTube - Some Video.webloc"
+    var titleManuallySet: Bool = false // true when title was explicitly changed by user or external agent — enrichment won't overwrite
+    var notesManuallySet: Bool = false // true when notes were explicitly changed — oEmbed/enrichment won't overwrite
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -250,6 +252,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case readerUnavailable
         case preferredHeroMode
         case relativePath
+        case titleManuallySet
+        case notesManuallySet
     }
 
     init(
@@ -275,7 +279,9 @@ struct Bookmark: Identifiable, Hashable, Codable {
         carouselImagePaths: [String]? = nil,
         readerUnavailable: Bool? = nil,
         preferredHeroMode: String? = nil,
-        relativePath: String? = nil
+        relativePath: String? = nil,
+        titleManuallySet: Bool = false,
+        notesManuallySet: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -300,6 +306,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.readerUnavailable = readerUnavailable
         self.preferredHeroMode = preferredHeroMode
         self.relativePath = relativePath
+        self.titleManuallySet = titleManuallySet
+        self.notesManuallySet = notesManuallySet
     }
 
     init(from decoder: Decoder) throws {
@@ -326,6 +334,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         readerUnavailable = try container.decodeIfPresent(Bool.self, forKey: .readerUnavailable)
         preferredHeroMode = try container.decodeIfPresent(String.self, forKey: .preferredHeroMode)
         relativePath = try container.decodeIfPresent(String.self, forKey: .relativePath)
+        titleManuallySet = try container.decodeIfPresent(Bool.self, forKey: .titleManuallySet) ?? false
+        notesManuallySet = try container.decodeIfPresent(Bool.self, forKey: .notesManuallySet) ?? false
     }
 
     var url: URL? {

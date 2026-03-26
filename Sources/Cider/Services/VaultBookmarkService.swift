@@ -161,9 +161,25 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     /// Reloads the bookmarks array from the index file after an external edit.
+    /// Detects title/notes changes and marks them as manually set so enrichment won't overwrite.
     private func reloadFromExternalEdit() {
-        guard let updated = loadFromIndexCache() else { return }
+        guard var updated = loadFromIndexCache() else { return }
         let oldCount = bookmarks.count
+
+        // Build lookup of current bookmarks by ID
+        let oldByID = Dictionary(uniqueKeysWithValues: bookmarks.map { ($0.id, $0) })
+
+        // Detect externally changed titles/notes and mark as manually set
+        for i in updated.indices {
+            guard let old = oldByID[updated[i].id] else { continue }
+            if updated[i].title != old.title && !updated[i].titleManuallySet {
+                updated[i].titleManuallySet = true
+            }
+            if updated[i].notes != old.notes && !updated[i].notesManuallySet {
+                updated[i].notesManuallySet = true
+            }
+        }
+
         bookmarks = updated
         logger.info("Reloaded \(updated.count) bookmarks from external index edit (was \(oldCount))")
     }
@@ -445,8 +461,16 @@ final class VaultBookmarkService: ObservableObject {
         let normalizedTags = deduplicatedTags(from: tags)
 
         var changed = false
-        if bookmark.title != resolvedTitleValue { bookmark.title = resolvedTitleValue; changed = true }
-        if bookmark.notes != normalizedNotes { bookmark.notes = normalizedNotes; changed = true }
+        if bookmark.title != resolvedTitleValue {
+            bookmark.title = resolvedTitleValue
+            bookmark.titleManuallySet = true
+            changed = true
+        }
+        if bookmark.notes != normalizedNotes {
+            bookmark.notes = normalizedNotes
+            bookmark.notesManuallySet = true
+            changed = true
+        }
         if bookmark.tags != normalizedTags { bookmark.tags = normalizedTags; changed = true }
         if let labelIDs, bookmark.labelIDs != labelIDs { bookmark.labelIDs = labelIDs; changed = true }
         if let urlString {
@@ -952,7 +976,7 @@ final class VaultBookmarkService: ObservableObject {
         if bookmark.tags != tags { bookmark.tags = tags; changed = true }
         if bookmark.ocrText != ocrText { bookmark.ocrText = ocrText; changed = true }
         if bookmark.dominantColors != dominantColors { bookmark.dominantColors = dominantColors; changed = true }
-        if let title, !title.isEmpty, bookmark.title != title { bookmark.title = title; changed = true }
+        if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet { bookmark.title = title; changed = true }
         guard changed else { return }
         bookmarks[index] = bookmark
         persistSidecar(for: bookmark)
@@ -967,11 +991,11 @@ final class VaultBookmarkService: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         var bookmark = bookmarks[index]
         var changed = false
-        if let title, !title.isEmpty, bookmark.title != title {
+        if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet {
             bookmark.title = title; changed = true
         }
         // Only set notes if the bookmark doesn't already have user-written notes
-        if let notes, !notes.isEmpty, bookmark.notes.isEmpty {
+        if let notes, !notes.isEmpty, bookmark.notes.isEmpty, !bookmark.notesManuallySet {
             bookmark.notes = notes; changed = true
         }
         guard changed else { return }
