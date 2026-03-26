@@ -33,6 +33,13 @@ final class VaultBookmarkService: ObservableObject {
     private var recentlyDeletedURLs: [String: Date] = [:]
     private let recentlyDeletedTTL: TimeInterval = 30
 
+    // MARK: - External Edit Watching
+
+    /// Watches `.cider/bookmarks/` for external edits to the index file (e.g. from Claude via iMessage).
+    private var indexWatcher: FSEventsWatcher?
+    /// True while this service is writing the index — suppresses reload from our own writes.
+    private var isWritingIndex = false
+
     // MARK: - Computed Paths
 
     private var vaultRoot: URL {
@@ -76,6 +83,7 @@ final class VaultBookmarkService: ObservableObject {
     private init() {
         ensureDirectories()
         loadBookmarks()
+        startIndexWatcher()
     }
 
     // MARK: - Load
@@ -122,6 +130,7 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Writes the current bookmarks array as the index cache.
     private func writeIndexCache() {
+        isWritingIndex = true
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
@@ -130,6 +139,33 @@ final class VaultBookmarkService: ObservableObject {
         } catch {
             logger.error("Failed to write index cache: \(error.localizedDescription)")
         }
+        // Reset after a short delay so the FSEvents callback doesn't trigger a reload
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.isWritingIndex = false
+        }
+    }
+
+    // MARK: - Index File Watching
+
+    /// Watches the bookmarks metadata directory for external edits to the index file.
+    private func startIndexWatcher() {
+        indexWatcher = FSEventsWatcher(path: bookmarksMetaDir.path, latency: 0.5) { [weak self] paths in
+            MainActor.assumeIsolated {
+                guard let self, !self.isWritingIndex else { return }
+                let indexPath = self.indexFileURL.path
+                guard paths.contains(where: { $0 == indexPath }) else { return }
+                self.reloadFromExternalEdit()
+            }
+        }
+        indexWatcher?.start()
+    }
+
+    /// Reloads the bookmarks array from the index file after an external edit.
+    private func reloadFromExternalEdit() {
+        guard let updated = loadFromIndexCache() else { return }
+        let oldCount = bookmarks.count
+        bookmarks = updated
+        logger.info("Reloaded \(updated.count) bookmarks from external index edit (was \(oldCount))")
     }
 
     /// Full scan of all vault folders + Inbox/Bookmarks for .webloc files.
