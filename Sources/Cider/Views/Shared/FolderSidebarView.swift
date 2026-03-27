@@ -646,6 +646,7 @@ struct FolderSidebarView: View {
     private func selectFolder(_ folderID: UUID?) {
         guard selectedFolderID != folderID else { return }
         selectedFolderID = folderID
+        selectedSourceID.wrappedValue = nil
         if let folderID {
             expandPath(to: folderID)
         }
