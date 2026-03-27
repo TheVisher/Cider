@@ -1367,6 +1367,18 @@ final class VaultBookmarkService: ObservableObject {
             objectWillChange.send()
         }
 
+        // Download additional carousel images (e.g. Reddit gallery)
+        if let carouselURLs = payload?.carouselImageURLs, !carouselURLs.isEmpty {
+            for carouselURL in carouselURLs {
+                do {
+                    let (imageData, _) = try await URLSession.shared.data(from: carouselURL)
+                    _ = addCarouselImage(for: bookmarkID, imageData: imageData)
+                } catch {
+                    // Skip failed downloads silently
+                }
+            }
+        }
+
         BookmarkAIEnrichment.shared.schedule(for: bookmarks[index])
     }
 
@@ -1764,21 +1776,32 @@ final class VaultBookmarkService: ObservableObject {
             thumbnailURL = URL(string: urlString.replacingOccurrences(of: "&amp;", with: "&"))
         }
 
-        if thumbnailURL == nil,
-           postData["is_gallery"] as? Bool == true,
+        // Reddit gallery — extract ALL image URLs for carousel
+        var carouselURLs: [URL] = []
+        if postData["is_gallery"] as? Bool == true,
            let mediaMetadata = postData["media_metadata"] as? [String: [String: Any]] {
-            var firstMediaID: String?
+            // Use gallery_data items order if available (preserves author's ordering)
+            var orderedMediaIDs: [String] = []
             if let galleryData = postData["gallery_data"] as? [String: Any],
-               let items = galleryData["items"] as? [[String: Any]],
-               let first = items.first {
-                firstMediaID = first["media_id"] as? String
+               let items = galleryData["items"] as? [[String: Any]] {
+                orderedMediaIDs = items.compactMap { $0["media_id"] as? String }
             }
-            let mediaID = firstMediaID ?? mediaMetadata.keys.first
-            if let mediaID,
-               let meta = mediaMetadata[mediaID],
-               let source = meta["s"] as? [String: Any],
-               let urlString = source["u"] as? String {
-                thumbnailURL = URL(string: urlString.replacingOccurrences(of: "&amp;", with: "&"))
+            if orderedMediaIDs.isEmpty {
+                orderedMediaIDs = Array(mediaMetadata.keys)
+            }
+
+            for mediaID in orderedMediaIDs {
+                if let meta = mediaMetadata[mediaID],
+                   let source = meta["s"] as? [String: Any],
+                   let urlString = source["u"] as? String,
+                   let url = URL(string: urlString.replacingOccurrences(of: "&amp;", with: "&")) {
+                    carouselURLs.append(url)
+                }
+            }
+
+            // First gallery image becomes the thumbnail
+            if thumbnailURL == nil, let first = carouselURLs.first {
+                thumbnailURL = first
             }
         }
 
@@ -1796,7 +1819,14 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         guard title != nil || thumbnailURL != nil else { return nil }
-        return BookmarkEnrichmentPayload(title: title, thumbnailURL: thumbnailURL, screenshotData: nil)
+        // Include carousel URLs (skip the first since it's already the thumbnail)
+        let extraCarouselURLs = carouselURLs.count > 1 ? Array(carouselURLs.dropFirst()) : nil
+        return BookmarkEnrichmentPayload(
+            title: title,
+            thumbnailURL: thumbnailURL,
+            screenshotData: nil,
+            carouselImageURLs: extraCarouselURLs
+        )
     }
 
     private static func extractYouTubeVideoID(from url: URL) -> String? {

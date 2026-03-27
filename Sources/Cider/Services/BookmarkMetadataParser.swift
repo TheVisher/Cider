@@ -4,6 +4,7 @@ struct BookmarkEnrichmentPayload {
     let title: String?
     let thumbnailURL: URL?
     let screenshotData: Data?
+    var carouselImageURLs: [URL]?  // Additional images (e.g. Reddit gallery)
 }
 
 enum EnrichmentRetryThresholds {
