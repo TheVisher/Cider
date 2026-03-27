@@ -70,7 +70,7 @@ struct SessionCardCardView: View {
                 // Tab preview — first few tab titles
                 if !session.tabs.isEmpty {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        ForEach(Array(session.tabs.prefix(3))) { tab in
+                        ForEach(Array(session.tabs.prefix(6))) { tab in
                             HStack(spacing: Spacing.xs) {
                                 Circle()
                                     .fill(CiderColors.quaternary)
@@ -81,8 +81,8 @@ struct SessionCardCardView: View {
                                     .lineLimit(1)
                             }
                         }
-                        if session.tabs.count > 3 {
-                            Text("+\(session.tabs.count - 3) more")
+                        if session.tabs.count > 6 {
+                            Text("+\(session.tabs.count - 6) more")
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.quaternary)
                         }

@@ -72,6 +72,7 @@ struct TagPillRow: View {
                     TagPillView(label: label, onTap: onTapTag != nil ? { onTapTag?(label.id) } : nil)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: CGFloat(maxLines) * Spacing.xxl, alignment: .topLeading)
             .clipped()
         }

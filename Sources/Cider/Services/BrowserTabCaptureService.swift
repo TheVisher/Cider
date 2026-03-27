@@ -95,6 +95,25 @@ enum BrowserTabCaptureService {
         return browsers
     }
 
+    /// Returns all installed browsers (running or not) by checking known bundle IDs.
+    static func installedBrowsers() -> [(bundleID: String, appName: String)] {
+        let knownBrowsers: [(bundleID: String, appName: String)] = [
+            ("com.apple.Safari", "Safari"),
+            ("com.google.Chrome", "Google Chrome"),
+            ("org.mozilla.firefox", "Firefox"),
+            ("com.microsoft.edgemac", "Microsoft Edge"),
+            ("com.brave.Browser", "Brave Browser"),
+            ("com.operasoftware.Opera", "Opera"),
+            ("com.vivaldi.Vivaldi", "Vivaldi"),
+            ("company.thebrowser.Browser", "Arc"),
+            ("app.zen-browser.zen", "Zen Browser"),
+            ("org.chromium.Chromium", "Chromium"),
+        ]
+        return knownBrowsers.filter { browser in
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: browser.bundleID) != nil
+        }
+    }
+
     // MARK: - Safari Capture
 
     private static func captureFromSafari(bundleID: String, appName: String) -> BrowserCaptureResult? {

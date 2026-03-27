@@ -256,7 +256,7 @@ struct SessionDetailView: View {
     // MARK: - Browser Picker
 
     private var browserPicker: some View {
-        let browsers = BrowserTabCaptureService.runningBrowsers()
+        let browsers = BrowserTabCaptureService.installedBrowsers()
         return Menu {
             Button {
                 restoreBrowserBundleID = nil
