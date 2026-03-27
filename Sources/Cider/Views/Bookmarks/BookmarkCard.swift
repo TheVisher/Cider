@@ -234,9 +234,19 @@ struct BookmarkCard: View {
         bookmark.thumbnailRelativePath != nil
     }
 
+    /// Loads image data from a drop provider and assigns it as the bookmark's thumbnail.
+    /// All VaultBookmarkService calls are dispatched via DispatchQueue.main.async to
+    /// guarantee main-thread execution from NSItemProvider background callbacks.
     private func loadThumbnailDrop(from provider: NSItemProvider) -> Bool {
         let bookmarkID = bookmark.id
         let addToCarousel = shouldAddToCarousel
+
+        // Helper: dispatch work to main thread safely from background callbacks
+        func onMain(_ work: @escaping @MainActor () async -> Void) {
+            DispatchQueue.main.async {
+                Task { @MainActor in await work() }
+            }
+        }
 
         // Check for GIF-specific type identifier first (preserves animation)
         let gifIdentifier = provider.registeredTypeIdentifiers.first { identifier in
@@ -246,7 +256,7 @@ struct BookmarkCard: View {
         if let gifIdentifier {
             provider.loadDataRepresentation(forTypeIdentifier: gifIdentifier) { data, _ in
                 guard let data else { return }
-                Task { @MainActor in
+                onMain {
                     if addToCarousel {
                         let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
                         Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
@@ -269,7 +279,7 @@ struct BookmarkCard: View {
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
                 guard let data else { return }
                 let ext = Self.preferredImageFileExtension(for: identifier)
-                Task { @MainActor in
+                onMain {
                     if addToCarousel {
                         let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: ext)
                         Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
@@ -290,7 +300,7 @@ struct BookmarkCard: View {
             provider.loadObject(ofClass: NSImage.self) { item, _ in
                 guard let image = item as? NSImage,
                       let data = image.pngRepresentation else { return }
-                Task { @MainActor in
+                onMain {
                     if addToCarousel {
                         let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "png")
                         Self.postThumbnailToast(saved ? "Added image to carousel" : "Dropped content is not a valid image", isSuccess: saved)
@@ -307,14 +317,14 @@ struct BookmarkCard: View {
             provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
                 guard let data else { return }
                 if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
-                    Task { @MainActor in
+                    onMain {
                         let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
                     }
                     return
                 }
                 if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
-                    Task { @MainActor in
+                    onMain {
                         let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
@@ -326,7 +336,7 @@ struct BookmarkCard: View {
         if provider.canLoadObject(ofClass: NSURL.self) {
             provider.loadObject(ofClass: NSURL.self) { item, _ in
                 guard let droppedURL = item as? URL else { return }
-                Task { @MainActor in
+                onMain {
                     if droppedURL.isFileURL {
                         let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
@@ -342,7 +352,7 @@ struct BookmarkCard: View {
         if provider.canLoadObject(ofClass: NSString.self) {
             provider.loadObject(ofClass: NSString.self) { item, _ in
                 guard let droppedString = item as? String else { return }
-                Task { @MainActor in
+                onMain {
                     let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
                     Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                 }
@@ -360,14 +370,14 @@ struct BookmarkCard: View {
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
                 guard let data else { return }
                 if let droppedString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
-                    Task { @MainActor in
+                    onMain {
                         let saved = await VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromDroppedString: droppedString)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped thumbnail URL", isSuccess: saved)
                     }
                     return
                 }
                 if let droppedURL = URL(dataRepresentation: data, relativeTo: nil) {
-                    Task { @MainActor in
+                    onMain {
                         if droppedURL.isFileURL {
                             let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, fromLocalFileURL: droppedURL)
                             Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Could not use dropped image file", isSuccess: saved)
@@ -384,10 +394,6 @@ struct BookmarkCard: View {
         return false
     }
 
-    /// After saving a static image from a drop, check if the provider also has a URL
-    /// pointing to an animated format (.gif). If so, download the actual animated data
-    /// and replace the static thumbnail. Browsers provide TIFF (single frame) for dragged
-    /// images, so this is the only way to preserve animation from drag-drop.
     /// After saving static image data from a browser drag, try to download the actual
     /// animated source from the image's URL. Browsers give TIFF (single frame) for dragged
     /// images, so this is the only way to preserve GIF animation from drag-drop.
@@ -395,13 +401,13 @@ struct BookmarkCard: View {
         guard provider.canLoadObject(ofClass: NSURL.self) else { return }
         provider.loadObject(ofClass: NSURL.self) { item, _ in
             guard let droppedURL = item as? URL, !droppedURL.isFileURL else { return }
-            // Download from the source URL — cacheImageAssets detects GIF/animation via magic bytes
-            // and will try .gif variant if URL is .webp
-            Task { @MainActor in
-                _ = await VaultBookmarkService.shared.assignThumbnail(
-                    for: bookmarkID,
-                    fromDroppedString: droppedURL.absoluteString
-                )
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    _ = await VaultBookmarkService.shared.assignThumbnail(
+                        for: bookmarkID,
+                        fromDroppedString: droppedURL.absoluteString
+                    )
+                }
             }
         }
     }

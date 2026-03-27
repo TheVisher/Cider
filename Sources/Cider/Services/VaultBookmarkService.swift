@@ -1336,6 +1336,22 @@ final class VaultBookmarkService: ObservableObject {
                 bookmark.thumbnailRemoteURLString = remoteURL
                 changed = true
             }
+        } else {
+            // New URL has no thumbnail — clear stale references and files
+            if let path = bookmark.thumbnailRelativePath, !path.isEmpty {
+                removeImageIfPresent(relativePath: path)
+                bookmark.thumbnailRelativePath = nil
+                changed = true
+            }
+            if let path = bookmark.originalImageRelativePath, !path.isEmpty {
+                removeImageIfPresent(relativePath: path)
+                bookmark.originalImageRelativePath = nil
+                changed = true
+            }
+            if bookmark.thumbnailRemoteURLString != nil {
+                bookmark.thumbnailRemoteURLString = nil
+                changed = true
+            }
         }
 
         bookmark.isEnriching = false
@@ -1914,6 +1930,7 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func shouldApplyEnrichedTitle(_ title: String, to bookmark: Bookmark, sourceURL: URL) -> Bool {
+        if bookmark.titleManuallySet { return false }
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
         if bookmark.title.caseInsensitiveCompare(normalized) == .orderedSame { return false }

@@ -607,6 +607,12 @@ final class TrashStorage {
         items += loadManifest(trashDir: inboxBookmarksDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: inboxNotesDir.appendingPathComponent(trashDirName))
         items += loadManifest(trashDir: vaultFilesTrashDir)
+        // Scan trash inside every vault folder (bookmarks in user folders trash to {folder}/.trash/)
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        for folder in VaultFolderService.shared.folders {
+            let folderTrashDir = vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
+            items += loadManifest(trashDir: folderTrashDir)
+        }
         items += VaultFolderService.shared.trashedFolders()
         return items.sorted { $0.deletedAt > $1.deletedAt }
     }
@@ -731,6 +737,14 @@ final class TrashStorage {
         let vfItems = loadManifest(trashDir: vfTrashDir)
         for item in vfItems { deleteFilesForItem(item, trashDir: vfTrashDir) }
         saveManifest([], trashDir: vfTrashDir)
+        // Empty trash inside vault folders
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        for folder in VaultFolderService.shared.folders {
+            let folderTrashDir = vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
+            let folderItems = loadManifest(trashDir: folderTrashDir)
+            for item in folderItems { deleteFilesForItem(item, trashDir: folderTrashDir) }
+            saveManifest([], trashDir: folderTrashDir)
+        }
         // Empty vault folder trash
         VaultFolderService.shared.emptyFolderTrash()
     }
