@@ -39,6 +39,9 @@ final class VaultBookmarkService: ObservableObject {
     private var indexWatcher: FSEventsWatcher?
     /// True while this service is writing the index — suppresses reload from our own writes.
     private var isWritingIndex = false
+    /// Timestamp of last external index edit — adoption is suppressed for a few seconds after.
+    private var lastExternalEditAt: Date = .distantPast
+    private let externalEditCooldown: TimeInterval = 10
 
     // MARK: - Computed Paths
 
@@ -181,6 +184,9 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         bookmarks = updated
+        // Suppress adoption for a few seconds — the external agent (Claude) moved files
+        // and updated the index simultaneously. Adoption would fight with the new state.
+        lastExternalEditAt = Date()
         logger.info("Reloaded \(updated.count) bookmarks from external index edit (was \(oldCount))")
     }
 
@@ -743,6 +749,9 @@ final class VaultBookmarkService: ObservableObject {
     func adoptOrphanedVaultFiles() {
         guard !isAdopting else { return }
         guard Date().timeIntervalSince(lastAdoptionScan) >= adoptionDebounceInterval else { return }
+        // Skip adoption if index was recently edited externally (e.g. Claude moved files + updated index).
+        // The external edit is authoritative; adoption would fight it.
+        guard Date().timeIntervalSince(lastExternalEditAt) >= externalEditCooldown else { return }
         isAdopting = true
         defer {
             isAdopting = false
