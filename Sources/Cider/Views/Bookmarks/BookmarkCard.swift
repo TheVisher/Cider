@@ -241,8 +241,8 @@ struct BookmarkCard: View {
         let bookmarkID = bookmark.id
         let addToCarousel = shouldAddToCarousel
 
-        // Helper: dispatch work to main thread safely from background callbacks
-        func onMain(_ work: @escaping @MainActor () async -> Void) {
+        // Inline dispatch to main thread from background NSItemProvider callbacks
+        let onMain: @Sendable (@escaping @MainActor @Sendable () async -> Void) -> Void = { work in
             DispatchQueue.main.async {
                 Task { @MainActor in await work() }
             }
