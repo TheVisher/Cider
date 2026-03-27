@@ -1629,6 +1629,14 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
 
+        // Amazon — extract ASIN and product title from URL (page scraping is blocked)
+        if host.contains("amazon.com") || host.contains("amazon.co") {
+            if let amazonResult = Self.extractAmazonPayload(from: pageURL) {
+                enrichLog.info("Amazon URL extraction succeeded for \(pageURL.host ?? "?", privacy: .public)")
+                return amazonResult
+            }
+        }
+
         // YouTube
         if host.contains("youtube.com") || host.contains("youtu.be") {
             if let videoID = extractYouTubeVideoID(from: pageURL) {
@@ -1675,6 +1683,39 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         return htmlResult
+    }
+
+    /// Extracts product info directly from an Amazon URL without scraping.
+    /// Amazon URLs contain the ASIN and often the product title in the path slug.
+    /// Product images are available at a predictable URL based on ASIN.
+    private static func extractAmazonPayload(from pageURL: URL) -> BookmarkEnrichmentPayload? {
+        let path = pageURL.path
+
+        // Extract ASIN — 10-character alphanumeric code after /dp/ or /gp/product/
+        let asinPattern = #"/(?:dp|gp/product)/([A-Z0-9]{10})"#
+        guard let asinMatch = path.range(of: asinPattern, options: .regularExpression),
+              let asinCapture = path[asinMatch].split(separator: "/").last else { return nil }
+        let asin = String(asinCapture)
+
+        // Extract product title from URL slug (the human-readable part before /dp/)
+        var title: String?
+        if let dpRange = path.range(of: "/dp/") {
+            let beforeDP = path[path.startIndex..<dpRange.lowerBound]
+            let slug = beforeDP.split(separator: "/").last.map(String.init) ?? ""
+            if !slug.isEmpty {
+                // Convert URL slug to title: "Samsung-Galaxy-Buds-Pro" → "Samsung Galaxy Buds Pro"
+                title = slug.replacingOccurrences(of: "-", with: " ")
+            }
+        }
+
+        // Amazon product images are available via their CDN
+        let thumbnailURL = URL(string: "https://images-na.ssl-images-amazon.com/images/P/\(asin).jpg")
+
+        return BookmarkEnrichmentPayload(
+            title: title,
+            thumbnailURL: thumbnailURL,
+            screenshotData: nil
+        )
     }
 
     private static func fetchRedditJSONPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
