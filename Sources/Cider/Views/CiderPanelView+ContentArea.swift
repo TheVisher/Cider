@@ -174,24 +174,38 @@ extension CiderPanelView {
                         title: "Saved view not found"
                     )
                 }
-            case .search(_, let query):
-                SearchTabContent(
-                    query: query,
-                    bookmarks: bookmarksViewModel.bookmarks,
-                    notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmark in
-                        if NSEvent.modifierFlags.contains(.command) {
-                            bookmarksViewModel.open(bookmark)
-                        } else {
-                            openBookmarkDetails(bookmark)
-                        }
+            case .search(let searchID, let query):
+                HomeDashboardView(
+                    bookmarksViewModel: bookmarksViewModel,
+                    notesViewModel: notesViewModel,
+                    libraryViewModel: libraryViewModel,
+                    selectedFolderID: nil,
+                    displayMode: $homeDisplayMode,
+                    cardSizeScale: $homeCardSizeScale,
+                    continueSectionCollapsed: .constant(true),
+                    selectedItemIDs: $selectedItemIDs,
+                    sortMode: sortModeBinding(for: searchID),
+                    entityFilter: entityFilterBinding(for: searchID),
+                    searchText: query,
+                    onOpenNote: { note in openNoteDetail(note) },
+                    onShowBookmarkDetails: { openBookmarkDetails($0) },
+                    onEditDateCard: { dateCard in
+                        newEventEditorContext = DateCardEditorContext(
+                            existingCard: dateCard,
+                            defaultDate: dateCard.startAt
+                        )
                     },
-                    onOpenNote: { note in
-                        openNoteDetail(note)
+                    onEditContact: { contact in
+                        newContactEditorContext = ContactEditorContext(existingContact: contact)
                     },
                     onOpenDateCard: { openDateCardDetail($0) },
                     onOpenContact: { openContactDetail($0) },
-                    onOpenTodo: { openTodoDetail($0) }
+                    onOpenTodo: { openTodoDetail($0) },
+                    onOpenVaultFile: { openVaultFileDetail($0) },
+                    onOpenSession: { openSessionDetail($0) },
+                    onToggleLabelBulk: { toggleTagOnSelected($0) },
+                    scrollToItemID: $scrollToItemID,
+                    focusedItemID: focusedItemID
                 )
             case .externalSource(let id, _):
                 if let source = externalSourceStorage.source(for: id) {
