@@ -673,7 +673,7 @@ private struct TagColorPickerPopover: View {
 
 // MARK: - Inline Tag Creation Form (Popover)
 
-private struct InlineTagCreationForm: View {
+struct InlineTagCreationForm: View {
     let onCreate: (String, String) -> Void
 
     @State private var name = ""

@@ -704,6 +704,11 @@ final class NotesStorage: ObservableObject {
             entry.isPinned = notes[idx].isPinned ? true : nil
             index[noteID] = entry
         }
+        // Re-sort so pinned notes appear at the top immediately
+        notes.sort { a, b in
+            if a.isPinned != b.isPinned { return a.isPinned }
+            return a.createdAt > b.createdAt
+        }
         saveIndex()
         SyncService.shared.pushAfterLocalChange()
         return true

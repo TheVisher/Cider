@@ -165,7 +165,7 @@ struct TodoCardCardView: View {
                 }
             }
             .padding(Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: TodoDesign.cardGridMinHeight, alignment: .leading)
         }
         .buttonStyle(.plain)
         .cardContainer(isHovered: isHovered, isSelected: isSelected, isFocused: isFocused)

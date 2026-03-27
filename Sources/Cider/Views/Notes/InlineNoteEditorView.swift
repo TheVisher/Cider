@@ -857,6 +857,7 @@ struct NoteMetadataSidebar: View {
     @State private var showAllSnapshots = false
     @State private var isAIExpanded = true
     @State private var isInfoExpanded = true
+    @State private var showNewTagForm = false
     @State private var editingTitle: String = ""
 
     var body: some View {
@@ -1046,11 +1047,7 @@ struct NoteMetadataSidebar: View {
                     Menu {
                         if unassignedLabels.isEmpty && labelStorage.labels.isEmpty {
                             Button("New Tag...") {
-                                let newLabel = CardLabelStorage.shared.createLabel(
-                                    name: "New Tag",
-                                    colorHex: CardLabelStorage.randomPresetColor()
-                                )
-                                viewModel.toggleNoteLabel(newLabel.id)
+                                showNewTagForm = true
                             }
                         } else {
                             ForEach(unassignedLabels) { label in
@@ -1069,11 +1066,7 @@ struct NoteMetadataSidebar: View {
                             Divider()
 
                             Button("New Tag...") {
-                                let newLabel = CardLabelStorage.shared.createLabel(
-                                    name: "New Tag",
-                                    colorHex: CardLabelStorage.randomPresetColor()
-                                )
-                                viewModel.toggleNoteLabel(newLabel.id)
+                                showNewTagForm = true
                             }
                         }
                     } label: {
@@ -1092,6 +1085,13 @@ struct NoteMetadataSidebar: View {
                         )
                     }
                     .menuStyle(.borderlessButton)
+                    .popover(isPresented: $showNewTagForm, arrowEdge: .bottom) {
+                        InlineTagCreationForm { name, colorHex in
+                            let newLabel = CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)
+                            viewModel.toggleNoteLabel(newLabel.id)
+                            showNewTagForm = false
+                        }
+                    }
                 }
             }
         }

@@ -502,6 +502,11 @@ enum ClipboardPanelDesign {
     static let wideLayoutThreshold: CGFloat = 500
 }
 
+enum TodoDesign {
+    /// Minimum card height in grid mode — prevents tiny cards for short todos
+    static let cardGridMinHeight: CGFloat = 130
+}
+
 enum VaultFileDesign {
     /// Height of the thumbnail/placeholder area in grid cards (non-image files)
     static let cardThumbnailHeight: CGFloat = 120
