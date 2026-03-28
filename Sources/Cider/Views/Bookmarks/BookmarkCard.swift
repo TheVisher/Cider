@@ -255,8 +255,12 @@ struct BookmarkCard: View {
         }
         if let gifIdentifier {
             provider.loadDataRepresentation(forTypeIdentifier: gifIdentifier) { data, _ in
-                guard let data, data.count <= 30_000_000 else {
-                    if data != nil { onMain { Self.postThumbnailToast("Image too large (max 30 MB)", isSuccess: false) } }
+                guard let data else {
+                    onMain { Self.postThumbnailToast("Could not load dropped image", isSuccess: false) }
+                    return
+                }
+                guard data.count <= 30_000_000 else {
+                    onMain { Self.postThumbnailToast("Image too large (max 30 MB)", isSuccess: false) }
                     return
                 }
                 onMain {
@@ -280,10 +284,12 @@ struct BookmarkCard: View {
 
         if let identifier = imageIdentifiers.first {
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
-                guard let data, data.count <= 30_000_000 else {
-                    if data != nil {
-                        onMain { Self.postThumbnailToast("Image too large (max 30 MB)", isSuccess: false) }
-                    }
+                guard let data else {
+                    onMain { Self.postThumbnailToast("Could not load dropped image", isSuccess: false) }
+                    return
+                }
+                guard data.count <= 30_000_000 else {
+                    onMain { Self.postThumbnailToast("Image too large (max 30 MB)", isSuccess: false) }
                     return
                 }
                 let ext = Self.preferredImageFileExtension(for: identifier)
@@ -407,7 +413,8 @@ struct BookmarkCard: View {
     private static func tryUpgradeToAnimatedSource(provider: NSItemProvider, bookmarkID: UUID) {
         guard provider.canLoadObject(ofClass: NSURL.self) else { return }
         provider.loadObject(ofClass: NSURL.self) { item, _ in
-            guard let droppedURL = item as? URL, !droppedURL.isFileURL else { return }
+            guard let droppedURL = item as? URL, !droppedURL.isFileURL,
+                  ["gif", "webp", "apng"].contains(droppedURL.pathExtension.lowercased()) else { return }
             DispatchQueue.main.async {
                 Task { @MainActor in
                     _ = await VaultBookmarkService.shared.assignThumbnail(
