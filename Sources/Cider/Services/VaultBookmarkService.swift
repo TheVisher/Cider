@@ -1392,11 +1392,15 @@ final class VaultBookmarkService: ObservableObject {
         if let carouselURLs = payload?.carouselImageURLs, !carouselURLs.isEmpty {
             for carouselURL in carouselURLs {
                 guard !Task.isCancelled else { break }
+                // Only fetch HTTPS URLs from known Reddit CDN hosts (SSRF prevention)
+                guard let scheme = carouselURL.scheme?.lowercased(), scheme == "https",
+                      let host = carouselURL.host?.lowercased(),
+                      host.hasSuffix("redd.it") || host.hasSuffix("reddit.com") || host.hasSuffix("redditmedia.com") else { continue }
                 do {
                     var request = URLRequest(url: carouselURL)
                     request.timeoutInterval = 8
                     let (imageData, _) = try await URLSession.shared.data(for: request)
-                    guard imageData.count <= 20_000_000 else { continue } // Skip images > 20 MB
+                    guard imageData.count <= 12_000_000 else { continue } // Align with addCarouselImage's internal limit
                     _ = addCarouselImage(for: bookmarkID, imageData: imageData)
                 } catch {
                     // Skip failed downloads silently

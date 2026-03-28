@@ -76,10 +76,10 @@ enum OEmbedService {
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             guard let json else { return nil }
 
-            let title = json["title"] as? String
-            let authorName = json["author_name"] as? String
+            let title = (json["title"] as? String).map(sanitize)
+            let authorName = (json["author_name"] as? String).map(sanitize)
             let authorURL = json["author_url"] as? String
-            let providerName = json["provider_name"] as? String
+            let providerName = (json["provider_name"] as? String).map(sanitize)
             let thumbnailURL = json["thumbnail_url"] as? String
 
             logger.info("oEmbed fetched for \(host): title=\(title ?? "nil"), author=\(authorName ?? "nil")")
@@ -136,6 +136,15 @@ enum OEmbedService {
 
     // MARK: - Private Helpers
 
+    /// Strips Unicode control characters, RLO overrides, and null bytes from oEmbed strings.
+    private static func sanitize(_ s: String) -> String {
+        String(s.unicodeScalars.filter { scalar in
+            // Keep printable characters, whitespace, and common punctuation
+            !scalar.properties.isDefaultIgnorableCodePoint && scalar.value != 0
+                && (scalar.value > 0x1F || scalar == "\t" || scalar == "\n")
+        })
+    }
+
     private static func isGenericTitle(_ title: String, urlString: String) -> Bool {
         let t = title.trimmingCharacters(in: .whitespaces).lowercased()
         if t.isEmpty { return true }
@@ -144,9 +153,11 @@ enum OEmbedService {
         let genericNames = ["tiktok", "tiktok - make your day", "youtube", "instagram", "x", "twitter"]
         if genericNames.contains(t) { return true }
 
-        // Title is just a URL path fragment
+        // Title is just a URL
         if t.hasPrefix("http") { return true }
-        if urlString.lowercased().contains(t) { return true }
+        // Title is essentially the URL path or domain (not just a short substring match)
+        let urlLower = urlString.lowercased()
+        if t.count > 8 && urlLower.contains(t) { return true }
 
         // Very short with a hash/code pattern (e.g. "ZP8bV7Vjr")
         if t.count < 15 && t.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == " " }) {

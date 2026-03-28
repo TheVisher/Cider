@@ -158,26 +158,29 @@ enum BookmarkMetadataParser {
 
     private static func jsonLDObjects(fromHTML html: String) -> [Any] {
         guard let scriptRegex else { return [] }
-        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
-        let matches = scriptRegex.matches(in: html, options: [], range: nsRange)
+        // Cap input to first 100KB to prevent ReDoS on pages with large inline JS bundles.
+        // JSON-LD <script> tags are always in the <head>, well within this limit.
+        let cappedHTML = html.count > 100_000 ? String(html.prefix(100_000)) : html
+        let nsRange = NSRange(cappedHTML.startIndex..<cappedHTML.endIndex, in: cappedHTML)
+        let matches = scriptRegex.matches(in: cappedHTML, options: [], range: nsRange)
         guard !matches.isEmpty else { return [] }
 
         var results: [Any] = []
         results.reserveCapacity(matches.count)
 
         for match in matches {
-            guard let attrsRange = Range(match.range(at: 1), in: html),
-                  let bodyRange = Range(match.range(at: 2), in: html) else {
+            guard let attrsRange = Range(match.range(at: 1), in: cappedHTML),
+                  let bodyRange = Range(match.range(at: 2), in: cappedHTML) else {
                 continue
             }
 
-            let attributes = parseAttributes(String(html[attrsRange]))
+            let attributes = parseAttributes(String(cappedHTML[attrsRange]))
             guard let scriptType = attributes["type"]?.lowercased(),
                   scriptType.contains("application/ld+json") else {
                 continue
             }
 
-            let scriptBody = String(html[bodyRange])
+            let scriptBody = String(cappedHTML[bodyRange])
             guard let object = parseJSONLDObject(from: scriptBody) else { continue }
             results.append(object)
         }
