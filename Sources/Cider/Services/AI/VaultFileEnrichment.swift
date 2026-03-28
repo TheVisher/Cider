@@ -23,11 +23,10 @@ final class VaultFileEnrichment {
         guard file.ocrText == nil && file.dominantColors == nil else { return }
 
         activeTasks[file.id]?.cancel()
-        activeTasks[file.id] = Task { [weak self] in
-            await self?.enrich(file)
-            await MainActor.run { [weak self] in
-                _ = self?.activeTasks.removeValue(forKey: file.id)
-            }
+        activeTasks[file.id] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.enrich(file)
+            self.activeTasks.removeValue(forKey: file.id)
         }
     }
 

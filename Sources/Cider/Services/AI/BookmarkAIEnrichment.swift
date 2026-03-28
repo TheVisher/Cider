@@ -152,14 +152,17 @@ final class BookmarkAIEnrichment {
         }
 
         // ── Apply results back to storage ───────────────────────────────────
+        // Re-read the live bookmark — it may have been modified during async AI work
+        // (user edited tags, Claude renamed title, etc.). Use live state for diff comparison.
+        let live = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmark.id }) ?? bookmark
         let newTags = mergedTags(
-            existing: bookmark.tags,
+            existing: live.tags,
             suggested: suggestedTags
         )
-        let changed = newTags != bookmark.tags
-                   || ocrText != bookmark.ocrText
-                   || dominantColors != bookmark.dominantColors
-                   || suggestedTitle != nil
+        let changed = newTags != live.tags
+                   || ocrText != live.ocrText
+                   || dominantColors != live.dominantColors
+                   || (suggestedTitle != nil && !live.titleManuallySet)
 
         if changed {
             VaultBookmarkService.shared.applyAIResults(

@@ -1379,7 +1379,10 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
 
-        BookmarkAIEnrichment.shared.schedule(for: bookmarks[index])
+        // Re-fetch bookmark safely — index may have shifted during carousel await loop
+        if let current = bookmarks.first(where: { $0.id == bookmarkID }) {
+            BookmarkAIEnrichment.shared.schedule(for: current)
+        }
     }
 
     private func shouldEnrich(_ bookmark: Bookmark, for url: URL) -> Bool {
