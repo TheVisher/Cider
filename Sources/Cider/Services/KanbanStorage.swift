@@ -128,9 +128,17 @@ final class KanbanStorage: ObservableObject {
 
     @discardableResult
     func addColumn(boardID: String, name: String, isDoneColumn: Bool = false) -> KanbanColumn? {
-        guard boards.contains(where: { $0.id == boardID }) else { return nil }
+        guard let board = boards.first(where: { $0.id == boardID }) else { return nil }
+        var columnID = KanbanID.slug(from: name)
+        // Ensure unique column ID within this board
+        let existingIDs = Set(board.columns.map(\.id))
+        if existingIDs.contains(columnID) {
+            var counter = 2
+            while existingIDs.contains("\(columnID)_\(counter)") { counter += 1 }
+            columnID = "\(columnID)_\(counter)"
+        }
         let column = KanbanColumn(
-            id: KanbanID.slug(from: name),
+            id: columnID,
             name: name,
             isDoneColumn: isDoneColumn
         )
@@ -198,6 +206,9 @@ final class KanbanStorage: ObservableObject {
 
     func moveCard(boardID: String, cardID: String, toColumnID: String, toIndex: Int) {
         mutate(boardID: boardID) { board in
+            // Validate destination column exists before removing from source
+            guard board.columns.contains(where: { $0.id == toColumnID }) else { return }
+
             // Find and remove card from current column
             var card: KanbanCard?
             for colIdx in board.columns.indices {
