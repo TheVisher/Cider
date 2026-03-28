@@ -1391,8 +1391,12 @@ final class VaultBookmarkService: ObservableObject {
         // Download additional carousel images (e.g. Reddit gallery)
         if let carouselURLs = payload?.carouselImageURLs, !carouselURLs.isEmpty {
             for carouselURL in carouselURLs {
+                guard !Task.isCancelled else { break }
                 do {
-                    let (imageData, _) = try await URLSession.shared.data(from: carouselURL)
+                    var request = URLRequest(url: carouselURL)
+                    request.timeoutInterval = 8
+                    let (imageData, _) = try await URLSession.shared.data(for: request)
+                    guard imageData.count <= 20_000_000 else { continue } // Skip images > 20 MB
                     _ = addCarouselImage(for: bookmarkID, imageData: imageData)
                 } catch {
                     // Skip failed downloads silently
@@ -1728,10 +1732,10 @@ final class VaultBookmarkService: ObservableObject {
         let path = pageURL.path
 
         // Extract ASIN — 10-character alphanumeric code after /dp/ or /gp/product/
-        let asinPattern = #"/(?:dp|gp/product)/([A-Z0-9]{10})"#
+        let asinPattern = #"/(?:dp|gp/product)/([A-Za-z0-9]{10})"#
         guard let asinMatch = path.range(of: asinPattern, options: .regularExpression),
               let asinCapture = path[asinMatch].split(separator: "/").last else { return nil }
-        let asin = String(asinCapture)
+        let asin = String(asinCapture).uppercased()
 
         // Extract product title from URL slug (the human-readable part before /dp/)
         var title: String?

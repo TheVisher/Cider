@@ -64,7 +64,9 @@ enum OEmbedService {
               let oembedURL = provider.endpoint(urlString) else { return nil }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: oembedURL)
+            var request = URLRequest(url: oembedURL)
+            request.timeoutInterval = 8
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
                 logger.info("oEmbed fetch returned non-200 for \(host)")

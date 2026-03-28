@@ -231,20 +231,21 @@ enum BookmarkMetadataParser {
         return nil
     }
 
-    private static func collectJSONValues(forKey key: String, from object: Any, into values: inout [Any]) {
+    private static func collectJSONValues(forKey key: String, from object: Any, depth: Int = 0, into values: inout [Any]) {
+        guard depth < 20 else { return } // Prevent stack overflow on crafted JSON-LD
         if let dictionary = object as? [String: Any] {
             for (candidateKey, value) in dictionary {
                 if candidateKey.lowercased() == key.lowercased() {
                     values.append(value)
                 }
-                collectJSONValues(forKey: key, from: value, into: &values)
+                collectJSONValues(forKey: key, from: value, depth: depth + 1, into: &values)
             }
             return
         }
 
         if let array = object as? [Any] {
             for item in array {
-                collectJSONValues(forKey: key, from: item, into: &values)
+                collectJSONValues(forKey: key, from: item, depth: depth + 1, into: &values)
             }
         }
     }
