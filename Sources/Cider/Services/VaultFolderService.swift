@@ -96,6 +96,15 @@ final class VaultFolderService {
         isMutating = true
         defer { isMutating = false }
 
+        // Check if directory already exists on disk (e.g. created by external process)
+        // and is already in the index — return existing folder to avoid duplicate UUIDs
+        if FileManager.default.fileExists(atPath: directoryURL.path) {
+            if let existing = index.values.first(where: { $0.relativePath == relativePath }) {
+                logger.info("createFolder: directory already exists and indexed — returning existing")
+                return existing
+            }
+        }
+
         do {
             try FileManager.default.createDirectory(
                 at: directoryURL,

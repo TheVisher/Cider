@@ -647,6 +647,7 @@ struct FolderSidebarView: View {
         guard selectedFolderID != folderID else { return }
         selectedFolderID = folderID
         selectedSourceID.wrappedValue = nil
+        selectedTagIDs.wrappedValue.removeAll()
         if let folderID {
             expandPath(to: folderID)
         }
