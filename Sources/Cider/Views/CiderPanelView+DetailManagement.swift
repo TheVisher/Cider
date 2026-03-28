@@ -99,6 +99,7 @@ extension CiderPanelView {
 
     func closeBookmarkDetails() {
         guard isDetailOpen else { return }
+        saveBookmarkDetails() // Flush any pending edits before closing
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
@@ -110,6 +111,7 @@ extension CiderPanelView {
     func openDateCardDetail(_ dateCard: DateCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isNoteDetailOpen { closeNoteDetail() }
+        if isDetailOpen { saveBookmarkDetails() } // Flush pending bookmark edits
         let wasExpanded = isAnyDetailOpen
         // Clear all detail state silently (no restore notification — we're about to show a new detail)
         detailBookmarkID = nil
@@ -138,6 +140,7 @@ extension CiderPanelView {
     func openContactDetail(_ contact: ContactCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isNoteDetailOpen { closeNoteDetail() }
+        if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
         detailBookmarkID = nil
         detailsDraft = nil
@@ -163,6 +166,7 @@ extension CiderPanelView {
     func openTodoDetail(_ todoCard: TodoCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isNoteDetailOpen { closeNoteDetail() }
+        if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
         detailBookmarkID = nil
         detailsDraft = nil
@@ -189,6 +193,7 @@ extension CiderPanelView {
     func openVaultFileDetail(_ file: VaultFile) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isNoteDetailOpen { closeNoteDetail() }
+        if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
         detailBookmarkID = nil
         detailsDraft = nil
@@ -210,6 +215,7 @@ extension CiderPanelView {
     func openSessionDetail(_ session: BrowserSession) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
         if isNoteDetailOpen { closeNoteDetail() }
+        if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
         detailBookmarkID = nil
         detailsDraft = nil
