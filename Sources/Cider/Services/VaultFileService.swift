@@ -135,7 +135,11 @@ final class VaultFileService: ObservableObject {
     /// Starts watching the vault root for file changes and auto-rescanning.
     func startWatching() {
         stopWatching()
-        watcher = FSEventsWatcher(path: vaultRoot.path, latency: 1.0) { [weak self] _ in
+        let rootPath = vaultRoot.path
+        watcher = FSEventsWatcher(path: rootPath, latency: 1.0) { [weak self] paths in
+            // Skip events from .cider/ metadata writes to avoid scan-on-own-write loops
+            let hasUserFileChange = paths.contains { !$0.contains("/.cider/") }
+            guard hasUserFileChange else { return }
             MainActor.assumeIsolated {
                 guard let self, !self.isScanning else { return }
                 self.scan()

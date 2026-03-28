@@ -42,6 +42,7 @@ final class TodoCardStorage: ObservableObject {
     private var index: [UUID: IndexEntry] = [:]
     private var inboxWatcher: FSEventsWatcher?
     private var isScanning = false
+    private var pendingRescan = false
 
     private var metadataDirectoryURL: URL {
         StoragePaths.cachedDirectoryURL(for: .todos)
@@ -80,9 +81,15 @@ final class TodoCardStorage: ObservableObject {
 
     /// Rescans for new or changed .ics files without full reinitialization.
     func rescan() {
-        guard !isScanning else { return }
+        guard !isScanning else { pendingRescan = true; return }
         isScanning = true
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            if pendingRescan {
+                pendingRescan = false
+                rescan()
+            }
+        }
         scanAndLoad()
     }
 

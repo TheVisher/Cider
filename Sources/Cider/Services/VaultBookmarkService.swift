@@ -37,7 +37,8 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Watches `.cider/bookmarks/` for external edits to the index file (e.g. from Claude via iMessage).
     private var indexWatcher: FSEventsWatcher?
-    /// True while this service is writing the index — suppresses reload from our own writes.
+    /// Monotonic generation counter — incremented on every write, used to suppress reload from own writes.
+    private var writeGeneration: UInt64 = 0
     private var isWritingIndex = false
     /// Timestamp of last external index edit — adoption is suppressed for a few seconds after.
     private var lastExternalEditAt: Date = .distantPast
@@ -133,6 +134,8 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Writes the current bookmarks array as the index cache.
     private func writeIndexCache() {
+        writeGeneration += 1
+        let gen = writeGeneration
         isWritingIndex = true
         do {
             let encoder = JSONEncoder()
@@ -142,9 +145,10 @@ final class VaultBookmarkService: ObservableObject {
         } catch {
             logger.error("Failed to write index cache: \(error.localizedDescription)")
         }
-        // Reset after a short delay so the FSEvents callback doesn't trigger a reload
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.isWritingIndex = false
+        // Reset after delay — only if no newer write has occurred (generation check prevents race)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.writeGeneration == gen else { return }
+            self.isWritingIndex = false
         }
     }
 
@@ -172,14 +176,27 @@ final class VaultBookmarkService: ObservableObject {
         // Build lookup of current bookmarks by ID
         let oldByID = Dictionary(uniqueKeysWithValues: bookmarks.map { ($0.id, $0) })
 
-        // Detect externally changed titles/notes and mark as manually set
+        // Detect externally changed titles/notes and mark as manually set.
+        // Also preserve in-memory manually-set edits that haven't been persisted yet.
         for i in updated.indices {
             guard let old = oldByID[updated[i].id] else { continue }
+            // Preserve in-memory manual flags — don't let external file clear them
+            if old.titleManuallySet { updated[i].titleManuallySet = true }
+            if old.notesManuallySet { updated[i].notesManuallySet = true }
+            // Detect new external changes
             if updated[i].title != old.title && !updated[i].titleManuallySet {
                 updated[i].titleManuallySet = true
             }
             if updated[i].notes != old.notes && !updated[i].notesManuallySet {
                 updated[i].notesManuallySet = true
+            }
+            // Preserve in-memory title/notes if they were manually set in memory
+            // (user edited but persist hasn't fired yet)
+            if old.titleManuallySet && old.title != updated[i].title {
+                updated[i].title = old.title
+            }
+            if old.notesManuallySet && old.notes != updated[i].notes {
+                updated[i].notes = old.notes
             }
         }
 

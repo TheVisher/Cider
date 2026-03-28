@@ -58,6 +58,7 @@ final class DateCardStorage: ObservableObject {
 
     private var inboxWatcher: FSEventsWatcher?
     private var isScanning = false
+    private var pendingRescan = false
 
     private init() {
         ensureDirectories()
@@ -78,9 +79,15 @@ final class DateCardStorage: ObservableObject {
     }
 
     func rescan() {
-        guard !isScanning else { return }
+        guard !isScanning else { pendingRescan = true; return }
         isScanning = true
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            if pendingRescan {
+                pendingRescan = false
+                rescan()
+            }
+        }
         scanAndLoad()
     }
 
