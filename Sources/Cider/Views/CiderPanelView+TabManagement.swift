@@ -40,8 +40,8 @@ extension CiderPanelView {
         }
 
         if wasSelected {
-            // Select adjacent tab or nil
-            selectedTab = allTabs.first
+            // Select adjacent tab, excluding the one just closed
+            selectedTab = allTabs.first { $0 != tab }
         }
     }
 
@@ -195,9 +195,18 @@ extension CiderPanelView {
     }
 
     func deleteFolder(_ folderID: UUID) {
-        if selectedFolderID == folderID {
+        // Collect all IDs that will be removed (root + descendants)
+        var deletedIDs: Set<UUID> = [folderID]
+        if let vf = VaultFolderService.shared.folder(for: folderID) {
+            let prefix = vf.relativePath + "/"
+            for f in VaultFolderService.shared.folders where f.relativePath.hasPrefix(prefix) {
+                deletedIDs.insert(f.id)
+            }
+        }
+        if let sel = selectedFolderID, deletedIDs.contains(sel) {
             selectedFolderID = nil
         }
+        expandedFolderIDs.subtract(deletedIDs)
         bookmarksViewModel.deleteFolder(folderID)
     }
 }

@@ -1154,7 +1154,7 @@ struct SubFolderRow: View {
 
             Spacer(minLength: Spacing.xs)
 
-            if !isRenaming {
+            if !isRenaming, itemCount > 0 {
                 Text("\(itemCount)")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
