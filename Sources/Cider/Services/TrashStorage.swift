@@ -258,6 +258,24 @@ final class TrashStorage {
 
         let dateCardsDir = StoragePaths.directoryURL(for: .dateCards)
         let trashDir = dateCardsDir.appendingPathComponent(trashDirName)
+        let fm = FileManager.default
+
+        // Move the .ics file back from trash
+        if let icsFilename = payload.trashICSFilename {
+            let srcURL = trashDir.appendingPathComponent(icsFilename)
+            let destDir: URL
+            if let folderID = payload.dateCard.folderID,
+               let folder = VaultFolderService.shared.folder(for: folderID) {
+                destDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(folder.relativePath)
+            } else {
+                destDir = StoragePaths.cachedInboxSubdirectoryURL(for: .dateCards)
+            }
+            try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            let destURL = destDir.appendingPathComponent(icsFilename)
+            if fm.fileExists(atPath: srcURL.path) {
+                try? fm.moveItem(at: srcURL, to: destURL)
+            }
+        }
 
         DateCardStorage.shared.restoreFromTrash(payload.dateCard)
         removeFromManifest(trashItem.id, trashDir: trashDir)
@@ -297,6 +315,24 @@ final class TrashStorage {
 
         let todoCardsDir = StoragePaths.directoryURL(for: .todos)
         let trashDir = todoCardsDir.appendingPathComponent(trashDirName)
+        let fm = FileManager.default
+
+        // Move the .ics file back from trash
+        if let icsFilename = payload.trashICSFilename {
+            let srcURL = trashDir.appendingPathComponent(icsFilename)
+            let destDir: URL
+            if let folderID = payload.todoCard.folderID,
+               let folder = VaultFolderService.shared.folder(for: folderID) {
+                destDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(folder.relativePath)
+            } else {
+                destDir = StoragePaths.cachedInboxSubdirectoryURL(for: .todos)
+            }
+            try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            let destURL = destDir.appendingPathComponent(icsFilename)
+            if fm.fileExists(atPath: srcURL.path) {
+                try? fm.moveItem(at: srcURL, to: destURL)
+            }
+        }
 
         TodoCardStorage.shared.restoreFromTrash(payload.todoCard)
         removeFromManifest(trashItem.id, trashDir: trashDir)
@@ -549,9 +585,21 @@ final class TrashStorage {
 
         if let trashFilename = payload.trashFilename {
             let srcURL = trashDir.appendingPathComponent(trashFilename)
-            let destURL = targetDir.appendingPathComponent(payload.vaultFile.filename)
+            var destURL = targetDir.appendingPathComponent(payload.vaultFile.filename)
+
+            // Avoid overwriting existing file with same name
+            if fm.fileExists(atPath: destURL.path) {
+                let base = (payload.vaultFile.filename as NSString).deletingPathExtension
+                let ext = (payload.vaultFile.filename as NSString).pathExtension
+                destURL = targetDir.appendingPathComponent("\(base) Restored.\(ext)")
+            }
+
             if fm.fileExists(atPath: srcURL.path) {
-                try? fm.moveItem(at: srcURL, to: destURL)
+                do {
+                    try fm.moveItem(at: srcURL, to: destURL)
+                } catch {
+                    return // bail — leave manifest intact so item remains visible in trash
+                }
             }
         }
 
@@ -767,6 +815,8 @@ final class TrashStorage {
         }
         // Empty vault folder trash
         VaultFolderService.shared.emptyFolderTrash()
+        // Clear any pending undo action that references trashed items — prevents ghost restores
+        CiderUndoManager.shared.discard()
     }
 
     // MARK: - Private Helpers
@@ -857,6 +907,8 @@ final class TrashStorage {
 
     private func addToManifest(_ item: TrashItem, trashDir: URL) {
         var manifest = loadManifest(trashDir: trashDir)
+        // Prevent duplicate entries for the same item
+        manifest.removeAll { $0.id == item.id }
         manifest.insert(item, at: 0)
         saveManifest(manifest, trashDir: trashDir)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
