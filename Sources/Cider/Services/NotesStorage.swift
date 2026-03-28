@@ -665,6 +665,7 @@ final class NotesStorage: ObservableObject {
 
         do {
             try FileManager.default.moveItem(at: oldFileURL, to: newFileURL)
+            contentCache.removeValue(forKey: note.id)
 
             // Move sidecar metadata from old filename to new filename
             let oldFilename = (note.relativePath as NSString).lastPathComponent
@@ -815,7 +816,7 @@ final class NotesStorage: ObservableObject {
     }
 
     @discardableResult
-    func delete(note: Note) -> TrashItem {
+    func delete(note: Note, trackSync: Bool = true) -> TrashItem {
         contentCache.removeValue(forKey: note.id)
 
         // For notes in vault/Inbox folders, move the file to Inbox/Notes/ first so trash works correctly
@@ -843,10 +844,12 @@ final class NotesStorage: ObservableObject {
         notes.removeAll { $0.id == note.id }
         scheduleAttachmentCleanup()
 
-        // Track deletion for sync
-        let config = CiderConfig.load()
-        if config.syncEnabled {
-            SyncService.shared.trackNoteDeletion(of: note.id)
+        // Track deletion for sync (skip if this deletion originated from sync)
+        if trackSync {
+            let config = CiderConfig.load()
+            if config.syncEnabled {
+                SyncService.shared.trackNoteDeletion(of: note.id)
+            }
         }
 
         return trashItem
@@ -979,9 +982,10 @@ final class NotesStorage: ObservableObject {
 
     /// Delete a note from a sync pull (remote deleted it).
     /// Routes through TrashStorage so the note can be recovered locally.
+    /// Does NOT re-report to SyncService to avoid deletion ping-pong.
     func deleteFromSync(_ note: Note) {
         contentCache.removeValue(forKey: note.id)
-        let _ = delete(note: note)
+        let _ = delete(note: note, trackSync: false)
     }
 
     func restoreFromTrash(noteID: UUID, filename: String, folderID: UUID?, createdAt: Date) {
