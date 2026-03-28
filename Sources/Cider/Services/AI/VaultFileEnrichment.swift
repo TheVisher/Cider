@@ -78,8 +78,6 @@ final class VaultFileEnrichment {
         }
 
         // ── 4. Apply results ────────────────────────────────────────────
-        // ocrText is "" when OCR ran but found nothing — still a valid result to store
-        let hasChanges = !ocrText.isEmpty || dominantColors != nil || suggestedTitle != nil
         // Always apply — even empty ocrText is stored as sentinel to prevent re-enrichment
 
         // Verify file still exists — it may have been deleted or moved during async work
