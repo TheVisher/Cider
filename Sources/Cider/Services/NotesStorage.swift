@@ -734,7 +734,18 @@ final class NotesStorage: ObservableObject {
             newRelativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
         }
 
-        let newFileURL = newDirURL.appendingPathComponent(filename)
+        var newFileURL = newDirURL.appendingPathComponent(filename)
+
+        // Handle filename collision at destination
+        if FileManager.default.fileExists(atPath: newFileURL.path), oldFileURL != newFileURL {
+            let base = (filename as NSString).deletingPathExtension
+            let ext = (filename as NSString).pathExtension
+            var counter = 2
+            while FileManager.default.fileExists(atPath: newFileURL.path) {
+                newFileURL = newDirURL.appendingPathComponent("\(base) (\(counter)).\(ext)")
+                counter += 1
+            }
+        }
 
         // Physically move the file if source and destination differ
         if oldFileURL != newFileURL {
@@ -967,14 +978,10 @@ final class NotesStorage: ObservableObject {
     }
 
     /// Delete a note from a sync pull (remote deleted it).
+    /// Routes through TrashStorage so the note can be recovered locally.
     func deleteFromSync(_ note: Note) {
         contentCache.removeValue(forKey: note.id)
-        let fileURL = noteFileURL(for: note)
-        try? FileManager.default.removeItem(at: fileURL)
-        try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
-        index.removeValue(forKey: note.id)
-        saveIndex()
-        notes.removeAll { $0.id == note.id }
+        let _ = delete(note: note)
     }
 
     func restoreFromTrash(noteID: UUID, filename: String, folderID: UUID?, createdAt: Date) {
