@@ -79,9 +79,9 @@ final class KanbanStorage: ObservableObject {
     private func mutate(boardID: String, _ body: (inout KanbanBoard) -> Void) {
         guard let index = boards.firstIndex(where: { $0.id == boardID }) else { return }
         isMutating = true
+        defer { isMutating = false }
         body(&boards[index])
         save(boards[index])
-        isMutating = false
         NotificationCenter.default.post(name: .kanbanBoardsChanged, object: nil)
     }
 
@@ -90,10 +90,10 @@ final class KanbanStorage: ObservableObject {
     @discardableResult
     func createBoard(name: String) -> KanbanBoard {
         isMutating = true
+        defer { isMutating = false }
         let board = KanbanBoard.new(name: name)
         boards.insert(board, at: 0)
         save(board)
-        isMutating = false
         logger.info("Created board: \(name, privacy: .public)")
         NotificationCenter.default.post(name: .kanbanBoardsChanged, object: nil)
         return board
@@ -112,9 +112,9 @@ final class KanbanStorage: ObservableObject {
         )
 
         isMutating = true
+        defer { isMutating = false }
         boards.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: url)
-        isMutating = false
         logger.info("Trashed board: \(id, privacy: .public)")
         NotificationCenter.default.post(name: .kanbanBoardsChanged, object: nil)
         return trashItem

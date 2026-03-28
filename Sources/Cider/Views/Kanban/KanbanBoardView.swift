@@ -277,7 +277,7 @@ struct KanbanBoardView: View {
                     }
             }
 
-            Text("\(column.cards.count)")
+            Text("\(filteredCards(column.cards).count)")
                 .font(CiderFont.captionSemibold)
                 .foregroundColor(CiderColors.tertiary)
                 .padding(.horizontal, Spacing.xs)
