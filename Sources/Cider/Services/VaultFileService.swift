@@ -217,6 +217,13 @@ final class VaultFileService: ObservableObject {
         }
     }
 
+    /// Refreshes metadata overlay on current files without a full disk rescan.
+    /// Use after metadata-only changes (labels, title, notes) instead of scan().
+    func refreshMetadata() {
+        VaultFileStorage.shared.applyMetadata(to: &files)
+        objectWillChange.send()
+    }
+
     // MARK: - Private Helpers
 
     /// Returns the appropriate Inbox subdirectory for a file type.

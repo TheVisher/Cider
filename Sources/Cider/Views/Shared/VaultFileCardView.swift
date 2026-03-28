@@ -3,6 +3,25 @@ import PDFKit
 import QuickLookThumbnailing
 import SwiftUI
 
+// MARK: - Shared Thumbnail Cache
+
+/// Shared cache for vault file thumbnails — prevents re-decoding from disk on every scan/rebuild.
+@MainActor
+final class VaultFileThumbnailCache {
+    static let shared = VaultFileThumbnailCache()
+    private let cache = NSCache<NSString, NSImage>()
+
+    init() { cache.countLimit = 200 }
+
+    func get(_ relativePath: String) -> NSImage? {
+        cache.object(forKey: relativePath as NSString)
+    }
+
+    func set(_ image: NSImage, for relativePath: String) {
+        cache.setObject(image, forKey: relativePath as NSString)
+    }
+}
+
 // MARK: - Card View (Grid / Masonry)
 
 struct VaultFileCardView: View {
@@ -78,10 +97,10 @@ struct VaultFileCardView: View {
                                 onToggleLabelBulk?(label.id)
                             } else if hasTag {
                                 VaultFileStorage.shared.removeLabel(file.id, labelID: label.id)
-                                VaultFileService.shared.scan()
+                                VaultFileService.shared.refreshMetadata()
                             } else {
                                 VaultFileStorage.shared.assignLabel(file.id, labelID: label.id)
-                                VaultFileService.shared.scan()
+                                VaultFileService.shared.refreshMetadata()
                             }
                         } label: {
                             HStack {
@@ -284,6 +303,12 @@ struct VaultFileCardView: View {
     }
 
     private func loadThumbnail() async {
+        // Check shared cache first — avoids re-decoding on scan/tag/rebuild
+        if let cached = VaultFileThumbnailCache.shared.get(file.relativePath) {
+            thumbnail = cached
+            return
+        }
+
         let url = file.absoluteURL
         switch file.fileType {
         case .image:
@@ -301,12 +326,13 @@ struct VaultFileCardView: View {
                 return (NSImage(cgImage: cgImage, size: NSSize(width: w, height: h)), aspectRatio)
             }.value
             if let (image, ratio) = result {
+                VaultFileThumbnailCache.shared.set(image, for: file.relativePath)
                 thumbnail = image
                 thumbnailAspectRatio = ratio
             }
 
         case .pdf:
-            let loaded: NSImage? = await Task.detached(priority: .userInitiated) {
+            let pdfLoaded: NSImage? = await Task.detached(priority: .userInitiated) {
                 guard let doc = PDFDocument(url: url),
                       let page = doc.page(at: 0) else { return nil }
                 let bounds = page.bounds(for: .mediaBox)
@@ -323,7 +349,8 @@ struct VaultFileCardView: View {
                 image.unlockFocus()
                 return image
             }.value
-            thumbnail = loaded
+            if let pdfLoaded { VaultFileThumbnailCache.shared.set(pdfLoaded, for: file.relativePath) }
+            thumbnail = pdfLoaded
 
         case .document, .archive, .unknown, .video, .audio:
             let request = QLThumbnailGenerator.Request(
@@ -332,8 +359,9 @@ struct VaultFileCardView: View {
                 scale: NSScreen.main?.backingScaleFactor ?? 2,
                 representationTypes: .thumbnail
             )
-            let loaded: NSImage? = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).nsImage
-            thumbnail = loaded
+            let qlLoaded: NSImage? = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).nsImage
+            if let qlLoaded { VaultFileThumbnailCache.shared.set(qlLoaded, for: file.relativePath) }
+            thumbnail = qlLoaded
         }
     }
 }

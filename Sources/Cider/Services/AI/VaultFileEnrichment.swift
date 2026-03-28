@@ -19,7 +19,7 @@ final class VaultFileEnrichment {
     /// Schedule enrichment for a vault file. Only images are enriched.
     func schedule(for file: VaultFile) {
         guard file.fileType == .image else { return }
-        // Skip if already enriched (has OCR text or dominant colors)
+        // Skip if already enriched — ocrText "" means "OCR ran, no text found"
         guard file.ocrText == nil && file.dominantColors == nil else { return }
 
         activeTasks[file.id]?.cancel()
@@ -52,7 +52,8 @@ final class VaultFileEnrichment {
         guard !Task.isCancelled else { return }
 
         // ── 1. OCR ──────────────────────────────────────────────────────
-        let ocrText = await OCRService.extractText(from: url)
+        // Use empty string as sentinel for "OCR ran, found nothing" — distinct from nil ("never ran")
+        let ocrText = await OCRService.extractText(from: url) ?? ""
 
         guard !Task.isCancelled else { return }
 
@@ -64,7 +65,8 @@ final class VaultFileEnrichment {
 
         // ── 3. Smart title from OCR ─────────────────────────────────────
         var suggestedTitle: String?
-        if let text = ocrText, !text.isEmpty, isGenericFilename(file.filename) {
+        if !ocrText.isEmpty, isGenericFilename(file.filename) {
+            let text = ocrText
             if let aiTitle = await SummaryService.shared.suggestTitle(
                 currentTitle: file.filename,
                 articleText: text
@@ -76,20 +78,21 @@ final class VaultFileEnrichment {
         }
 
         // ── 4. Apply results ────────────────────────────────────────────
-        let hasChanges = ocrText != nil || dominantColors != nil || suggestedTitle != nil
-        guard hasChanges else { return }
+        // ocrText is "" when OCR ran but found nothing — still a valid result to store
+        let hasChanges = !ocrText.isEmpty || dominantColors != nil || suggestedTitle != nil
+        // Always apply — even empty ocrText is stored as sentinel to prevent re-enrichment
 
         // Verify file still exists — it may have been deleted or moved during async work
         guard VaultFileService.shared.file(for: file.id) != nil else { return }
 
         VaultFileStorage.shared.applyEnrichment(
             fileID: file.id,
-            ocrText: ocrText,
+            ocrText: ocrText.isEmpty ? "" : ocrText,  // Store empty string as "OCR ran, no text"
             dominantColors: dominantColors,
             title: suggestedTitle
         )
 
-        logger.info("Enriched vault file \(file.filename): OCR=\(ocrText != nil), colors=\(dominantColors != nil), title=\(suggestedTitle ?? "nil")")
+        logger.info("Enriched vault file \(file.filename): OCR=\(!ocrText.isEmpty), colors=\(dominantColors != nil), title=\(suggestedTitle ?? "nil")")
     }
 
     // MARK: - Helpers
