@@ -296,9 +296,7 @@ struct BookmarkCard: View {
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
                         // After saving the static image, try to upgrade to animated source.
                         // Runs after the initial save completes so it doesn't race.
-                        if !addToCarousel {
-                            Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
-                        }
+                        Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
                     }
                 }
             }
