@@ -148,8 +148,10 @@ enum LibraryItemV2: Identifiable, Hashable {
             return Set(contact.labelIDs)
         case .todo(let todo):
             return Set(todo.labelIDs)
-        case .externalFile, .vaultFile:
+        case .externalFile:
             return []
+        case .vaultFile(let file):
+            return Set(file.labelIDs)
         case .session(let session):
             return Set(session.labelIDs)
         }

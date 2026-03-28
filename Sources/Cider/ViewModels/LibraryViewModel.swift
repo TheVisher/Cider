@@ -237,7 +237,9 @@ final class LibraryViewModel: ObservableObject {
             }
             fields = [file.title, content]
         case .vaultFile(let file):
-            fields = [file.filename]
+            var vFields = [file.filename, file.displayTitle, file.notes]
+            if let ocr = file.ocrText { vFields.append(ocr) }
+            fields = vFields
         case .session(let session):
             var sFields = [session.name]
             sFields.append(contentsOf: session.tabs.compactMap(\.title))

@@ -410,9 +410,12 @@ struct SearchPaletteView: View {
         if lower == "notes" { return "note.text" }
         if lower == "events" { return "calendar" }
         if lower == "contacts" { return "person" }
+        if lower == "todos" { return "checklist" }
+        if lower == "sessions" { return "rectangle.stack" }
+        if lower == "files" { return "doc" }
         if lower.hasPrefix("folder:") { return "folder" }
         if lower.hasPrefix("tag:") { return "tag" }
-        return "scope"
+        return "magnifyingglass"
     }
 
     // MARK: - Folder Grouped Results
