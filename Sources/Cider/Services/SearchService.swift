@@ -339,7 +339,10 @@ enum SearchService {
 
         if shouldSearchType(.vaultFile) {
             let vaultFiles = VaultFileService.shared.files
-            let filtered = applyFolderFilter(vaultFiles, scope: scope) { $0.folderID }
+            var filtered = applyFolderFilter(vaultFiles, scope: scope) { $0.folderID }
+            if let labelID = scope.labelID {
+                filtered = filtered.filter { $0.labelIDs.contains(labelID) }
+            }
             if tokens.isEmpty {
                 results += filtered.map { file in
                     SearchResult(

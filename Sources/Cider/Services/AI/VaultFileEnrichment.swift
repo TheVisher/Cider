@@ -33,7 +33,7 @@ final class VaultFileEnrichment {
     /// Schedule enrichment for all un-enriched image files.
     func scheduleAll() {
         let imageFiles = VaultFileService.shared.files.filter {
-            $0.fileType == .image && $0.ocrText == nil
+            $0.fileType == .image && $0.ocrText == nil && $0.dominantColors == nil
         }
         for file in imageFiles {
             schedule(for: file)
@@ -78,6 +78,9 @@ final class VaultFileEnrichment {
         // ── 4. Apply results ────────────────────────────────────────────
         let hasChanges = ocrText != nil || dominantColors != nil || suggestedTitle != nil
         guard hasChanges else { return }
+
+        // Verify file still exists — it may have been deleted or moved during async work
+        guard VaultFileService.shared.file(for: file.id) != nil else { return }
 
         await MainActor.run {
             VaultFileStorage.shared.applyEnrichment(

@@ -56,7 +56,6 @@ struct VaultFileCardView: View {
         .contextMenu {
             Button("Open in Finder") { openInFinder() }
             Button("Open with Default App") { openWithDefaultApp() }
-            Button("Quick Look") { quickLook() }
 
             Divider()
 
@@ -281,10 +280,6 @@ struct VaultFileCardView: View {
     }
 
     private func openWithDefaultApp() {
-        NSWorkspace.shared.open(file.absoluteURL)
-    }
-
-    private func quickLook() {
         NSWorkspace.shared.open(file.absoluteURL)
     }
 

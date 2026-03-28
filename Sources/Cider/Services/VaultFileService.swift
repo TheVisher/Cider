@@ -37,6 +37,7 @@ final class VaultFileService: ObservableObject {
 
     private var watcher: FSEventsWatcher?
     private var isScanning = false
+    private var pendingRescan = false
 
     private init() {}
 
@@ -54,9 +55,15 @@ final class VaultFileService: ObservableObject {
 
     /// Scans all vault folders + Inbox vault-file subdirectories for non-Cider files.
     func scan() {
-        guard !isScanning else { return }
+        guard !isScanning else { pendingRescan = true; return }
         isScanning = true
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            if pendingRescan {
+                pendingRescan = false
+                scan()
+            }
+        }
 
         let fm = FileManager.default
         let root = vaultRoot
@@ -72,7 +79,8 @@ final class VaultFileService: ObservableObject {
             options: [.skipsHiddenFiles]
         ) {
             while let url = enumerator.nextObject() as? URL {
-                let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+                let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
                 let components = relativePath.split(separator: "/").map(String.init)
 
                 // Skip excluded top-level directories
@@ -105,7 +113,8 @@ final class VaultFileService: ObservableObject {
                 options: [.skipsHiddenFiles]
             ) {
                 while let url = enumerator.nextObject() as? URL {
-                    let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                    let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+                let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
                     if let file = processFile(url: url, relativePath: relativePath) {
                         scanned.append(file)
                     }
@@ -157,6 +166,7 @@ final class VaultFileService: ObservableObject {
     // MARK: - Mutation
 
     /// Moves a vault file to a different folder by physically moving the file.
+    /// Migrates metadata to the new path-derived ID so it isn't orphaned.
     func assignFile(_ fileID: UUID, toFolder folderID: UUID?) {
         guard let index = files.firstIndex(where: { $0.id == fileID }) else { return }
         let file = files[index]
@@ -171,24 +181,40 @@ final class VaultFileService: ObservableObject {
         }
         try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
-        let destURL = targetDir.appendingPathComponent(file.filename)
+        var destURL = targetDir.appendingPathComponent(file.filename)
         guard destURL != file.absoluteURL else { return }
+
+        // Handle filename collision at destination
+        if fm.fileExists(atPath: destURL.path) {
+            let base = (file.filename as NSString).deletingPathExtension
+            let ext = (file.filename as NSString).pathExtension
+            var counter = 2
+            while fm.fileExists(atPath: destURL.path) {
+                destURL = targetDir.appendingPathComponent("\(base) (\(counter)).\(ext)")
+                counter += 1
+            }
+        }
+
+        // Capture old ID before move
+        let oldID = file.id
 
         do {
             try fm.moveItem(at: file.absoluteURL, to: destURL)
+
+            // Migrate metadata to new path-derived ID (path changed → ID changed)
+            let newRelativePath = destURL.path.replacingOccurrences(
+                of: vaultRoot.path.hasSuffix("/") ? vaultRoot.path : vaultRoot.path + "/",
+                with: ""
+            )
+            let newID = stableID(for: newRelativePath)
+            if newID != oldID {
+                VaultFileStorage.shared.migrateMetadata(from: oldID, to: newID)
+            }
+
             scan()
         } catch {
             logger.error("Failed to move vault file: \(error.localizedDescription)")
         }
-    }
-
-    /// Deletes a vault file from disk and rescans.
-    func deleteFile(_ fileID: UUID) -> VaultFile? {
-        guard let file = files.first(where: { $0.id == fileID }) else { return nil }
-        try? FileManager.default.removeItem(at: file.absoluteURL)
-        VaultFileStorage.shared.removeMetadata(for: fileID)
-        scan()
-        return file
     }
 
     // MARK: - Private Helpers

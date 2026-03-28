@@ -118,6 +118,13 @@ final class VaultFileStorage: ObservableObject {
         if changed { save() }
     }
 
+    /// Migrates metadata from one file ID to another (e.g., after a file move changes the path-derived ID).
+    func migrateMetadata(from oldID: UUID, to newID: UUID) {
+        guard let existing = metadata.removeValue(forKey: oldID) else { return }
+        metadata[newID] = existing
+        save()
+    }
+
     /// Removes metadata for a file (e.g., when permanently deleted).
     func removeMetadata(for fileID: UUID) {
         guard metadata.removeValue(forKey: fileID) != nil else { return }
