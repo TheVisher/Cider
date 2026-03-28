@@ -141,8 +141,12 @@ final class VaultFileService: ObservableObject {
             let hasUserFileChange = paths.contains { !$0.contains("/.cider/") }
             guard hasUserFileChange else { return }
             MainActor.assumeIsolated {
-                guard let self, !self.isScanning else { return }
-                self.scan()
+                guard let self else { return }
+                if self.isScanning {
+                    self.pendingRescan = true
+                } else {
+                    self.scan()
+                }
             }
         }
         watcher?.start()

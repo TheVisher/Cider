@@ -204,6 +204,10 @@ final class VaultBookmarkService: ObservableObject {
         // Suppress adoption for a few seconds — the external agent (Claude) moved files
         // and updated the index simultaneously. Adoption would fight with the new state.
         lastExternalEditAt = Date()
+        // Persist the merged state so manual title/notes overrides survive cold restarts
+        persist()
+        // Schedule enrichment for any new bookmarks added by the external editor
+        scheduleEnrichmentForIncompleteBookmarks()
         logger.info("Reloaded \(updated.count) bookmarks from external index edit (was \(oldCount))")
     }
 

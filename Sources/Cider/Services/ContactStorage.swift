@@ -74,8 +74,12 @@ final class ContactStorage: ObservableObject {
         inboxWatcher?.stop()
         inboxWatcher = FSEventsWatcher(path: inboxDirectoryURL.path, latency: 1.0) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.isScanning else { return }
-                self.rescan()
+                guard let self else { return }
+                if self.isScanning {
+                    self.pendingRescan = true
+                } else {
+                    self.rescan()
+                }
             }
         }
         inboxWatcher?.start()
