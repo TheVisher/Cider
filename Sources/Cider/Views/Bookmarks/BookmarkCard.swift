@@ -255,7 +255,10 @@ struct BookmarkCard: View {
         }
         if let gifIdentifier {
             provider.loadDataRepresentation(forTypeIdentifier: gifIdentifier) { data, _ in
-                guard let data else { return }
+                guard let data, data.count <= 30_000_000 else {
+                    if data != nil { onMain { Self.postThumbnailToast("Image too large (max 30 MB)", isSuccess: false) } }
+                    return
+                }
                 onMain {
                     if addToCarousel {
                         let saved = VaultBookmarkService.shared.addCarouselImage(for: bookmarkID, imageData: data, preferredFileExtension: "gif")
@@ -275,9 +278,14 @@ struct BookmarkCard: View {
             return type.conforms(to: .image)
         }
 
-        for identifier in imageIdentifiers {
+        if let identifier = imageIdentifiers.first {
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
-                guard let data else { return }
+                guard let data, data.count <= 30_000_000 else {
+                    if data != nil {
+                        onMain { Self.postThumbnailToast("Image too large (max 30 MB)", isSuccess: false) }
+                    }
+                    return
+                }
                 let ext = Self.preferredImageFileExtension(for: identifier)
                 onMain {
                     if addToCarousel {
@@ -286,12 +294,13 @@ struct BookmarkCard: View {
                     } else {
                         let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
+                        // After saving the static image, try to upgrade to animated source.
+                        // Runs after the initial save completes so it doesn't race.
+                        if !addToCarousel {
+                            Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
+                        }
                     }
                 }
-            }
-            // Also try to load the source URL — if it's a .gif, upgrade the static TIFF to animated GIF
-            if !addToCarousel {
-                Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
             }
             return true
         }

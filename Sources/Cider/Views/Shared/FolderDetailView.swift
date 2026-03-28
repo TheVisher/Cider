@@ -883,7 +883,11 @@ struct FolderDetailView: View {
             if isOptionHeld && hasImage {
                 let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL
                 if let fileURL, let provider = NSItemProvider(contentsOf: fileURL) {
-                    provider.suggestedName = bookmark.title + "." + fileURL.pathExtension
+                    let ext = fileURL.pathExtension
+                    let base = (bookmark.title as NSString).pathExtension.lowercased() == ext.lowercased()
+                        ? (bookmark.title as NSString).deletingPathExtension
+                        : bookmark.title
+                    provider.suggestedName = base + "." + ext
                     return provider
                 }
                 // Fallback: raw image data
