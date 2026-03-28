@@ -1531,6 +1531,7 @@ final class BookmarksStorage: ObservableObject {
     }
 
     private func shouldApplyEnrichedTitle(_ title: String, to bookmark: Bookmark, sourceURL: URL) -> Bool {
+        if bookmark.titleManuallySet { return false }
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
         if bookmark.title.caseInsensitiveCompare(normalized) == .orderedSame { return false }
