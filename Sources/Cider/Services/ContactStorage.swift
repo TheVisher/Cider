@@ -59,9 +59,31 @@ final class ContactStorage: ObservableObject {
         metadataDirectoryURL.appendingPathComponent(indexFileName)
     }
 
+    private var inboxWatcher: FSEventsWatcher?
+    private var isScanning = false
+
     private init() {
         ensureDirectories()
         loadIndex()
+        scanAndLoad()
+        startWatching()
+    }
+
+    func startWatching() {
+        inboxWatcher?.stop()
+        inboxWatcher = FSEventsWatcher(path: inboxDirectoryURL.path, latency: 1.0) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isScanning else { return }
+                self.rescan()
+            }
+        }
+        inboxWatcher?.start()
+    }
+
+    func rescan() {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
         scanAndLoad()
     }
 

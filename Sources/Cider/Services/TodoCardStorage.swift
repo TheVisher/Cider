@@ -40,6 +40,8 @@ final class TodoCardStorage: ObservableObject {
     }
 
     private var index: [UUID: IndexEntry] = [:]
+    private var inboxWatcher: FSEventsWatcher?
+    private var isScanning = false
 
     private var metadataDirectoryURL: URL {
         StoragePaths.cachedDirectoryURL(for: .todos)
@@ -60,6 +62,27 @@ final class TodoCardStorage: ObservableObject {
     private init() {
         ensureDirectories()
         loadIndex()
+        scanAndLoad()
+        startWatching()
+    }
+
+    /// Watches the Inbox/Todos directory for new .ics files dropped externally (e.g. via iMessage agent).
+    func startWatching() {
+        inboxWatcher?.stop()
+        inboxWatcher = FSEventsWatcher(path: inboxDirectoryURL.path, latency: 1.0) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isScanning else { return }
+                self.rescan()
+            }
+        }
+        inboxWatcher?.start()
+    }
+
+    /// Rescans for new or changed .ics files without full reinitialization.
+    func rescan() {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
         scanAndLoad()
     }
 
