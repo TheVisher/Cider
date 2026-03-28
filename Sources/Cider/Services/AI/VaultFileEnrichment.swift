@@ -82,14 +82,12 @@ final class VaultFileEnrichment {
         // Verify file still exists — it may have been deleted or moved during async work
         guard VaultFileService.shared.file(for: file.id) != nil else { return }
 
-        await MainActor.run {
-            VaultFileStorage.shared.applyEnrichment(
-                fileID: file.id,
-                ocrText: ocrText,
-                dominantColors: dominantColors,
-                title: suggestedTitle
-            )
-        }
+        VaultFileStorage.shared.applyEnrichment(
+            fileID: file.id,
+            ocrText: ocrText,
+            dominantColors: dominantColors,
+            title: suggestedTitle
+        )
 
         logger.info("Enriched vault file \(file.filename): OCR=\(ocrText != nil), colors=\(dominantColors != nil), title=\(suggestedTitle ?? "nil")")
     }
