@@ -246,6 +246,7 @@ extension CiderPanelView {
 
     func closeAllDetails() {
         let anyOpen = isAnyDetailOpen
+        if isDetailOpen { saveBookmarkDetails() }
         if isNoteDetailOpen { notesViewModel.flushSave() }
         detailBookmarkID = nil
         detailsDraft = nil
