@@ -454,9 +454,10 @@ final class TrashStorage {
         // Restore the contact
         ContactStorage.shared.restoreFromTrash(payload.contact)
 
-        // Restore cascaded birthday date cards (stored in date cards trash, not contacts trash)
-        let dateCardsTrashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
-        let manifest = loadManifest(trashDir: dateCardsTrashDir)
+        // Restore cascaded birthday date cards — search all trash locations since
+        // the date card could have been trashed from Inbox, vault folder, or legacy path
+        let allItems = allTrashItems()
+        let manifest = allItems
         for cascadedID in payload.cascadedDateCardTrashIDs {
             if let cascadedItem = manifest.first(where: { $0.id == cascadedID }) {
                 restoreDateCard(cascadedItem)
