@@ -117,6 +117,18 @@ struct VaultFileTrashPayload: Codable {
     let vaultFile: VaultFile
     /// The filename moved to `.trash/`, if any.
     let trashFilename: String?
+
+    /// Backward-compatible decoder: trashFilename may not exist in older payloads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        vaultFile = try c.decode(VaultFile.self, forKey: .vaultFile)
+        trashFilename = try c.decodeIfPresent(String.self, forKey: .trashFilename)
+    }
+
+    init(vaultFile: VaultFile, trashFilename: String?) {
+        self.vaultFile = vaultFile
+        self.trashFilename = trashFilename
+    }
 }
 
 /// Represents a single item that has been moved to the trash.
