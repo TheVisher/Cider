@@ -594,12 +594,13 @@ final class TrashStorage {
                 destURL = targetDir.appendingPathComponent("\(base) Restored.\(ext)")
             }
 
-            if fm.fileExists(atPath: srcURL.path) {
-                do {
-                    try fm.moveItem(at: srcURL, to: destURL)
-                } catch {
-                    return // bail — leave manifest intact so item remains visible in trash
-                }
+            guard fm.fileExists(atPath: srcURL.path) else {
+                return // source file missing — leave manifest intact
+            }
+            do {
+                try fm.moveItem(at: srcURL, to: destURL)
+            } catch {
+                return // move failed — leave manifest intact so item remains visible in trash
             }
         }
 
