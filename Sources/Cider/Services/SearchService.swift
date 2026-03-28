@@ -439,7 +439,6 @@ enum SearchService {
 
     // Note content is loaded off the main actor to avoid blocking the UI.
     static func searchNotes(_ tokens: [String], in notes: [Note]) async -> [SearchResult] {
-        let directoryURL = NotesStorage.shared.notesDirectoryURL
         // Collect sidecar tags on main actor before dispatching to background
         var sidecarTags: [UUID: [String]] = [:]
         for note in notes {
@@ -448,7 +447,7 @@ enum SearchService {
                 sidecarTags[note.id] = tags
             }
         }
-        return await fetchNoteResults(tokens: tokens, notes: notes, directoryURL: directoryURL, sidecarTags: sidecarTags)
+        return await fetchNoteResults(tokens: tokens, notes: notes, sidecarTags: sidecarTags)
     }
 
     static func searchDateCards(_ tokens: [String], in dateCards: [DateCard]) -> [SearchResult] {
@@ -580,7 +579,6 @@ enum SearchService {
     private nonisolated static func fetchNoteResults(
         tokens: [String],
         notes: [Note],
-        directoryURL: URL,
         sidecarTags: [UUID: [String]] = [:]
     ) async -> [SearchResult] {
         notes.compactMap { note in

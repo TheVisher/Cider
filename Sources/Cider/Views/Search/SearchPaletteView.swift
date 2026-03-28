@@ -132,6 +132,10 @@ struct SearchPaletteView: View {
         results.filter { $0.type == .contact }
     }
 
+    private var todoResults: [SearchResult] {
+        results.filter { $0.type == .todo }
+    }
+
     private var sessionResults: [SearchResult] {
         results.filter { $0.type == .session }
     }
@@ -512,6 +516,8 @@ struct SearchPaletteView: View {
         if let note = result.note { return note.folderID }
         if let dateCard = result.dateCard { return dateCard.folderID }
         if let contact = result.contact { return contact.folderID }
+        if let todoCard = result.todoCard { return todoCard.folderID }
+        if let vaultFile = result.vaultFile { return vaultFile.folderID }
         return nil
     }
 
@@ -576,6 +582,9 @@ struct SearchPaletteView: View {
                         }
                         if !contactResults.isEmpty {
                             resultsSection(title: "Contacts", icon: "person", results: contactResults)
+                        }
+                        if !todoResults.isEmpty {
+                            resultsSection(title: "Todos", icon: "checklist", results: todoResults)
                         }
                         if !sessionResults.isEmpty {
                             resultsSection(title: "Sessions", icon: "rectangle.stack", results: sessionResults)
