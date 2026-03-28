@@ -129,6 +129,18 @@ final class VaultFileStorage: ObservableObject {
         metadata[fileID]
     }
 
+    /// Restores metadata from a trashed VaultFile (re-registers after restore from trash).
+    func restoreMetadata(from file: VaultFile) {
+        var meta = VaultFileMetadata()
+        meta.title = file.title
+        meta.notes = file.notes
+        meta.labelIDs = file.labelIDs
+        meta.ocrText = file.ocrText
+        meta.dominantColors = file.dominantColors
+        metadata[file.id] = meta
+        save()
+    }
+
     // MARK: - Private
 
     private func ensureEntry(_ fileID: UUID) {

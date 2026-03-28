@@ -77,7 +77,7 @@ struct StorageSettingsView: View {
                     (.todo, "Todos"),
                     (.whiteboard, "Whiteboards"),
                     (.folder, "Folders"),
-                    (.vaultFolder, "Folders"),
+                    (.vaultFolder, "Vault Folders"),
                     (.session, "Sessions"),
                     (.kanbanBoard, "Boards"),
                     (.vaultFile, "Files"),

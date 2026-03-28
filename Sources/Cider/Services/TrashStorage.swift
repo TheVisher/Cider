@@ -214,7 +214,14 @@ final class TrashStorage {
             )
         }
 
-        removeFromManifest(trashItem.id, trashDir: trashDir)
+        // Remove from whichever manifest actually contains this item
+        let resolvedTrashDir: URL
+        if loadManifest(trashDir: trashDir).contains(where: { $0.id == trashItem.id }) {
+            resolvedTrashDir = trashDir
+        } else {
+            resolvedTrashDir = legacyTrashDir
+        }
+        removeFromManifest(trashItem.id, trashDir: resolvedTrashDir)
     }
 
     // MARK: - Date Card Trash
@@ -447,8 +454,9 @@ final class TrashStorage {
         // Restore the contact
         ContactStorage.shared.restoreFromTrash(payload.contact)
 
-        // Restore cascaded birthday date cards
-        let manifest = loadManifest(trashDir: trashDir)
+        // Restore cascaded birthday date cards (stored in date cards trash, not contacts trash)
+        let dateCardsTrashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
+        let manifest = loadManifest(trashDir: dateCardsTrashDir)
         for cascadedID in payload.cascadedDateCardTrashIDs {
             if let cascadedItem = manifest.first(where: { $0.id == cascadedID }) {
                 restoreDateCard(cascadedItem)
@@ -547,6 +555,7 @@ final class TrashStorage {
         }
 
         removeFromManifest(trashItem.id, trashDir: trashDir)
+        VaultFileStorage.shared.restoreMetadata(from: payload.vaultFile)
         VaultFileService.shared.scan()
     }
 
@@ -622,7 +631,7 @@ final class TrashStorage {
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .kanbanBoards]
+        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .kanbanBoards, .whiteboards]
         for type in trashTypes {
             purgeExpired(
                 olderThan: cutoff,
@@ -634,6 +643,16 @@ final class TrashStorage {
             purgeExpired(
                 olderThan: cutoff,
                 in: StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
+            )
+        }
+        // Purge vault file trash
+        purgeExpired(olderThan: cutoff, in: vaultFilesTrashDir)
+        // Purge trash inside vault folders
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        for folder in VaultFolderService.shared.folders {
+            purgeExpired(
+                olderThan: cutoff,
+                in: vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
             )
         }
     }
@@ -751,12 +770,19 @@ final class TrashStorage {
 
     // MARK: - Private Helpers
 
-    /// Finds the correct trash directory for an item — checks Inbox first, then .cider/.
+    /// Finds the correct trash directory for an item — checks Inbox, .cider/, and vault folders.
     private func resolveTrashDir(for type: StorageType, itemID: UUID) -> URL {
         let inboxTrashDir = StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
-        let manifest = loadManifest(trashDir: inboxTrashDir)
-        if manifest.contains(where: { $0.id == itemID }) {
+        if loadManifest(trashDir: inboxTrashDir).contains(where: { $0.id == itemID }) {
             return inboxTrashDir
+        }
+        // Check vault folder trash directories
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        for folder in VaultFolderService.shared.folders {
+            let folderTrashDir = vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
+            if loadManifest(trashDir: folderTrashDir).contains(where: { $0.id == itemID }) {
+                return folderTrashDir
+            }
         }
         return StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
     }
@@ -792,9 +818,8 @@ final class TrashStorage {
                 try? fm.removeItem(at: trashDir.appendingPathComponent(icsFilename))
             }
         case .whiteboard:
-            let trashDir = StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
             let trashSceneURL = trashDir.appendingPathComponent("\(trashItem.itemID.uuidString).excalidraw")
-            try? FileManager.default.removeItem(at: trashSceneURL)
+            try? fm.removeItem(at: trashSceneURL)
         case .contact:
             if let payload = trashItem.contactPayload {
                 if let vcfFilename = payload.trashVCFFilename {
