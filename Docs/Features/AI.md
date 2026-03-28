@@ -52,6 +52,12 @@ All AI runs locally. No cloud APIs, no accounts, no API keys. Cider ships as a o
 **Dominant Colors** — `ColorExtractionService.swift`
 - Extracted from bookmark thumbnails
 
+**oEmbed Enrichment** — `OEmbedService.swift`
+- Fetches structured metadata (title, author, description, thumbnail) from sites that block normal scraping
+- Supported providers: TikTok, YouTube, Instagram, X (Twitter)
+- Runs as first step in `BookmarkAIEnrichment` pipeline — populates notes field with author/description if empty
+- Uses standard oEmbed endpoints (no API keys required)
+
 ### Phase 2: Foundation Models Summarization (Shipped)
 
 **Page Summarization** — `SummaryService.swift`
@@ -185,7 +191,7 @@ Both backends support the same 23 tools. Apple Intelligence uses the Foundation 
 
 1. User asks "how many bookmarks do I have?"
 2. Model decides to call `countItems(itemType: "bookmarks")`
-3. Tool executes on MainActor, queries `BookmarksStorage.shared.bookmarks.count`
+3. Tool executes on MainActor, queries `VaultBookmarkService.shared.bookmarks.count`
 4. Tool returns `"The user has 50 bookmarks."`
 5. Model formats natural response: "You have 50 bookmarks."
 
@@ -195,7 +201,7 @@ The Foundation Models framework handles the tool call loop automatically — mod
 
 | Storage | What Tools Access |
 |---------|------------------|
-| `BookmarksStorage.shared` | URLs, titles, tags, AI summaries, folders, dates |
+| `VaultBookmarkService.shared` | URLs, titles, tags, AI summaries, folders, dates |
 | `NotesStorage.shared` | Titles, content preview, folders, labels |
 | `DateCardStorage.shared` | Events with dates, location, recurrence, completion |
 | `TodoCardStorage.shared` | Tasks with due dates, priority, checklists |

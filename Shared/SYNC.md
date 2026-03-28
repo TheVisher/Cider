@@ -267,6 +267,20 @@ All requests: `POST`, `Content-Type: application/json`, `Authorization: Bearer <
       "folderSyncId": "folder-uuid-lowercase"
     }
   ],
+  "notes": [
+    {
+      "ciderSyncId": "uuid-string-lowercase",
+      "title": "Note Title",
+      "content": "Note body text",
+      "tags": ["tag1"],
+      "isPinned": false,
+      "folderSyncId": "folder-uuid-lowercase",
+      "createdAt": 1709766000000,
+      "updatedAt": 1709766000000,
+      "deleted": false,
+      "deletedAt": null
+    }
+  ],
   "folders": [
     {
       "ciderSyncId": "folder-uuid-lowercase",
@@ -306,6 +320,21 @@ Convex uses `v.object()` strict validation. **Extra fields cause the ENTIRE push
 #### Rejected Bookmark Fields (will cause validation failure)
 
 Do NOT send: `_id`, `host`, `favicon`, `thumbnailUrl`, `thumbnailStorageId`, `userId`, `folderId`, `purged`, `purgedAt`, or any unlisted field.
+
+#### Accepted Note Fields (STRICT)
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `ciderSyncId` | string | yes | Lowercase UUID |
+| `title` | string | yes | |
+| `content` | string | yes | |
+| `tags` | string[] | no | |
+| `isPinned` | boolean | no | |
+| `folderSyncId` | string | no | References folder's `ciderSyncId` |
+| `createdAt` | number | yes | ms since epoch |
+| `updatedAt` | number | yes | ms since epoch |
+| `deleted` | boolean | no | |
+| `deletedAt` | number | no | ms since epoch |
 
 #### Accepted Folder Fields (STRICT)
 
@@ -390,15 +419,35 @@ Use `0` to pull everything.
       "updatedAt": 1709766000000,
       "deleted": false,
       "deletedAt": null,
+      "purged": false,
+      "purgedAt": null,
       "folderSyncId": "resolved-from-folderId"
     }
   ],
   "folders": [ ... ],
+  "notes": [
+    {
+      "_id": "convex_doc_id",
+      "ciderSyncId": "uuid-string",
+      "title": "Note Title",
+      "content": "Note body text",
+      "tags": ["tag1"],
+      "isPinned": false,
+      "folderSyncId": "resolved-from-folderId",
+      "createdAt": 1709766000000,
+      "updatedAt": 1709766000000,
+      "deleted": false,
+      "deletedAt": null,
+      "purged": false,
+      "purgedAt": null,
+      "attachments": [{ "filename": "image.png", "url": "https://convex-storage-url/..." }]
+    }
+  ],
   "serverTime": 1709766000000
 }
 ```
 
-Pull returns additional server-computed fields not accepted by push: `_id`, `host`, `favicon`, `thumbnailUrl` (resolved from `thumbnailStorageId`), `folderSyncId` (resolved from `folderId`).
+Pull returns additional server-computed fields not accepted by push: `_id`, `host`, `favicon`, `thumbnailUrl` (resolved from `thumbnailStorageId`), `folderSyncId` (resolved from `folderId`), `purged`, `purgedAt`. Notes pull also includes `attachments` (array of `{ filename, url }` with Convex storage URLs for note image attachments).
 
 ### Conflict Resolution
 

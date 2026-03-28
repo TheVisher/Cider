@@ -2,7 +2,7 @@
 
 > What each app has, doesn't have, and what's planned. This is the go-to reference for deciding what to build next on any platform.
 >
-> **Last updated**: 2026-03-23
+> **Last updated**: 2026-03-26
 
 Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicable to this platform
 
@@ -29,7 +29,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Nested folders (tree) | Yes | Yes | Yes |
 | Folder icons | Yes (SF Symbols) | Yes (Lucide) | Yes (SF Symbols + emoji) |
 | Move to folder | Yes | Yes (context menu + drag-and-drop) | Yes (context menu + detail) |
-| Tag management (rename/merge/delete) | Yes | Yes | Partial (full UI via TagManagementView + SyncClient, needs backend HTTP routes) |
+| Tag management (rename/merge/delete) | Yes | Yes | Yes (TagManagementView + SyncClient — rename, delete, merge all wired) |
 | Tag filtering | Yes | Yes (AND/OR toggle) | Yes (multi-tag filter panel) |
 | Saved views / smart filters | Yes | Yes (tabs) | Yes |
 
@@ -107,7 +107,7 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Pull to refresh | N/A | N/A | Yes |
 | Context menus | Yes | Yes (right-click) | Yes (long-press) |
 | Multi-select / bulk ops | Yes | Yes (Cmd+Click, Shift+Click, bulk delete/move) | Yes (filter panel multi-select) |
-| Export (Netscape HTML) | Yes | Yes | Yes (JSON + HTML) |
+| Export (Netscape HTML) | Yes | Yes | Yes (JSON w/ bookmarks+notes+folders, Netscape HTML) |
 | Import (Netscape HTML) | Yes | Planned | No |
 | Reader mode | Yes (Readability.js) | Yes (Readability.js) | Yes (Readability.js) |
 | Accessibility (VoiceOver) | Partial | No | Yes |
