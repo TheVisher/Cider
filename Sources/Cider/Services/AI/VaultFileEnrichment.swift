@@ -85,7 +85,7 @@ final class VaultFileEnrichment {
 
         VaultFileStorage.shared.applyEnrichment(
             fileID: file.id,
-            ocrText: ocrText.isEmpty ? "" : ocrText,  // Store empty string as "OCR ran, no text"
+            ocrText: ocrText,
             dominantColors: dominantColors,
             title: suggestedTitle
         )

@@ -241,10 +241,10 @@ final class VaultFileService: ObservableObject {
 
     /// Processes a single URL from the enumerator into a VaultFile, or nil if it should be skipped.
     private func processFile(url: URL, relativePath: String) -> VaultFile? {
-        // Skip directories
-        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            return nil
-        }
+        // Skip directories and symlinks
+        let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        if resourceValues?.isDirectory == true { return nil }
+        if resourceValues?.isSymbolicLink == true { return nil }
 
         // Skip Cider-native file types
         let ext = url.pathExtension.lowercased()
@@ -258,6 +258,7 @@ final class VaultFileService: ObservableObject {
         ])
 
         let fileSize = Int64(values?.fileSize ?? 0)
+        guard fileSize > 0 else { return nil } // Skip zero-byte files (in-progress writes, corrupted)
         let createdAt = values?.creationDate ?? Date()
         let modifiedAt = values?.contentModificationDate ?? Date()
         let id = stableID(for: relativePath)

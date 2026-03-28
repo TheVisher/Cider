@@ -103,10 +103,10 @@ final class VaultFileStorage: ObservableObject {
         save()
     }
 
-    func applyEnrichment(fileID: UUID, ocrText: String?, dominantColors: [String]?, title: String?) {
+    func applyEnrichment(fileID: UUID, ocrText: String, dominantColors: [String]?, title: String?) {
         ensureEntry(fileID)
         var changed = false
-        if let ocrText, metadata[fileID]?.ocrText != ocrText {
+        if metadata[fileID]?.ocrText != ocrText {
             metadata[fileID]?.ocrText = ocrText; changed = true
         }
         if let dominantColors, metadata[fileID]?.dominantColors != dominantColors {
@@ -165,4 +165,16 @@ struct VaultFileMetadata: Codable {
     var labelIDs: [UUID] = []
     var ocrText: String?
     var dominantColors: [String]?
+
+    /// Backward-compatible decoder — new fields won't break existing JSON.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        labelIDs = try c.decodeIfPresent([UUID].self, forKey: .labelIDs) ?? []
+        ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)
+        dominantColors = try c.decodeIfPresent([String].self, forKey: .dominantColors)
+    }
+
+    init() {}
 }

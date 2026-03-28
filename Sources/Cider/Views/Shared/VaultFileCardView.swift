@@ -13,12 +13,14 @@ final class VaultFileThumbnailCache {
 
     init() { cache.countLimit = 200 }
 
-    func get(_ relativePath: String) -> NSImage? {
-        cache.object(forKey: relativePath as NSString)
+    func get(_ relativePath: String, modifiedAt: Date) -> NSImage? {
+        let key = "\(relativePath):\(modifiedAt.timeIntervalSince1970)" as NSString
+        return cache.object(forKey: key)
     }
 
-    func set(_ image: NSImage, for relativePath: String) {
-        cache.setObject(image, forKey: relativePath as NSString)
+    func set(_ image: NSImage, for relativePath: String, modifiedAt: Date) {
+        let key = "\(relativePath):\(modifiedAt.timeIntervalSince1970)" as NSString
+        cache.setObject(image, forKey: key)
     }
 }
 
@@ -304,7 +306,7 @@ struct VaultFileCardView: View {
 
     private func loadThumbnail() async {
         // Check shared cache first — avoids re-decoding on scan/tag/rebuild
-        if let cached = VaultFileThumbnailCache.shared.get(file.relativePath) {
+        if let cached = VaultFileThumbnailCache.shared.get(file.relativePath, modifiedAt: file.modifiedAt) {
             thumbnail = cached
             return
         }
@@ -326,7 +328,7 @@ struct VaultFileCardView: View {
                 return (NSImage(cgImage: cgImage, size: NSSize(width: w, height: h)), aspectRatio)
             }.value
             if let (image, ratio) = result {
-                VaultFileThumbnailCache.shared.set(image, for: file.relativePath)
+                VaultFileThumbnailCache.shared.set(image, for: file.relativePath, modifiedAt: file.modifiedAt)
                 thumbnail = image
                 thumbnailAspectRatio = ratio
             }
@@ -349,7 +351,7 @@ struct VaultFileCardView: View {
                 image.unlockFocus()
                 return image
             }.value
-            if let pdfLoaded { VaultFileThumbnailCache.shared.set(pdfLoaded, for: file.relativePath) }
+            if let pdfLoaded { VaultFileThumbnailCache.shared.set(pdfLoaded, for: file.relativePath, modifiedAt: file.modifiedAt) }
             thumbnail = pdfLoaded
 
         case .document, .archive, .unknown, .video, .audio:
@@ -360,7 +362,7 @@ struct VaultFileCardView: View {
                 representationTypes: .thumbnail
             )
             let qlLoaded: NSImage? = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).nsImage
-            if let qlLoaded { VaultFileThumbnailCache.shared.set(qlLoaded, for: file.relativePath) }
+            if let qlLoaded { VaultFileThumbnailCache.shared.set(qlLoaded, for: file.relativePath, modifiedAt: file.modifiedAt) }
             thumbnail = qlLoaded
         }
     }
