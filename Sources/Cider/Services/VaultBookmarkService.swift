@@ -1202,7 +1202,7 @@ final class VaultBookmarkService: ObservableObject {
                   let remoteURL = URL(string: remoteURLString) else { continue }
 
             let bookmarkID = bookmark.id
-            let task = Task { [weak self] in
+            let task = Task { @MainActor [weak self] in
                 guard let self else { return }
                 let imageAssets = await self.cacheImageAssets(from: remoteURL, for: bookmarkID)
                 await self.applyRecoveredThumbnail(bookmarkID: bookmarkID, imageAssets: imageAssets)
@@ -1245,7 +1245,7 @@ final class VaultBookmarkService: ObservableObject {
         bookmarks[index].isEnriching = true
         objectWillChange.send()
 
-        let task = Task { [weak self] in
+        let task = Task { @MainActor [weak self] in
             guard let self else { return }
 
             // Direct image URL
