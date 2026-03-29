@@ -5,7 +5,8 @@ let package = Package(
     name: "Cider",
     platforms: [.macOS(.v26)],
     products: [
-        .library(name: "Cider", targets: ["Cider"])
+        .library(name: "Cider", targets: ["Cider"]),
+        .executable(name: "cider-cli", targets: ["CiderCLI"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
@@ -35,6 +36,12 @@ let package = Package(
                 "Resources/menubar-icon.png",
                 "Resources/cider-icon.png",
             ]
+        ),
+        .executableTarget(
+            name: "CiderCLI",
+            dependencies: ["Cider"],
+            path: "Sources/CiderCLI",
+            swiftSettings: [.unsafeFlags(["-enable-testing"])]
         ),
         .testTarget(
             name: "CiderTests",
