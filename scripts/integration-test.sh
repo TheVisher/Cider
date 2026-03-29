@@ -8,6 +8,13 @@
 set -euo pipefail
 
 CLI="/Users/minivish/Cider/.build/arm64-apple-macosx/debug/cider-cli"
+
+# Auto-build if binary doesn't exist
+if [ ! -f "$CLI" ]; then
+    echo "Building cider-cli..."
+    cd /Users/minivish/Cider && swift build --product cider-cli 2>&1 | tail -1
+fi
+
 PASS=0
 FAIL=0
 TOTAL=0
