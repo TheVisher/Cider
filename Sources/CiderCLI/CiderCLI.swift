@@ -39,6 +39,10 @@ struct CiderCLI {
         vaultFileService.ensureInboxDirectories()
         vaultFileService.scan()
 
+        // Wait for async storage initialization to complete
+        // (NotesStorage, TodoCardStorage, etc. use Task { @MainActor } in init)
+        try? await Task.sleep(for: .milliseconds(500))
+
         let subcommand = args.count > 1 ? args[1] : nil
         let remaining = Array(args.dropFirst(2))
 
