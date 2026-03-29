@@ -14,6 +14,7 @@ Native macOS floating panel app for bookmarks, notes, and projects. Double-tap O
 - **Use `os.Logger`** — not `print()` (invisible from Dock launch)
 - **Delete via TrashStorage** — never direct file deletion, always TrashStorage + CiderUndoManager
 - **Update Kanban boards** — when starting, completing, or adding work, update the YAML boards in `~/CiderVault/.cider/boards/`. Move cards between columns (backlog → in_progress → testing → done). The app watches these files and updates live.
+- **YAML board rules** — every card MUST have a `created` field (e.g. `created: '2026-03-29'`). Always quote dates with single quotes. Never duplicate keys on the same card. Always use the Write tool to rewrite the entire file (Edit tool corrupts YAML indentation).
 
 ## Kanban Boards
 
