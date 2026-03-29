@@ -231,6 +231,7 @@ All app-internal data lives inside `~/CiderVault/.cider/`, a hidden directory th
 ├── sessions/            # Browsing session snapshots
 ├── boards/              # Kanban board YAML files
 ├── folder-kanban/       # Per-folder kanban board data
+├── vault-files/         # Vault file metadata (images, PDFs, videos, docs)
 ├── folders/             # Folder metadata: index.json, covers/, .trash/
 ├── ai-chat/             # AI Chat conversation history per model
 ├── ai/                  # NL embedding vectors (embeddings.json)
@@ -255,23 +256,25 @@ If a user has set a `directoryOverrides` entry in CiderConfig for a StorageType,
 
 On first launch after the update, `VaultStructureMigration.migrateIfNeeded()` moves old top-level internal directories into `.cider/`. The migration is idempotent — skips sources that don't exist or destinations that already exist. Gated by `didMigrateVaultToCiderDir` flag in CiderConfig.
 
-## Future: File Watching (External Edit Detection)
+## File Watching (External Edit Detection)
 
-Currently, if a user (or an external tool like Apple Contacts or a text editor) modifies a `.vcf`, `.ics`, or `.md` file on disk, Cider won't notice until the next app restart. The in-memory state and the file can drift apart.
+All storage services watch their Inbox directories for external changes using `FSEventsWatcher` (wrapper over the FSEvents C API). When files are created, modified, or deleted externally — by Claude via iMessage, Finder, Apple Contacts, or any other tool — Cider detects the change and reloads live.
 
-**Goal:** Use macOS `FSEvents` or `DispatchSource` to watch content directories (`Inbox/{Type}/` and user folders) for changes. When a file is created, modified, or deleted externally, the relevant storage service should detect it and reload.
+**Services with file watchers:**
+- `VaultBookmarkService` — watches `.cider/bookmarks/` for index file changes (external edits from Claude)
+- `VaultFileService` — watches vault root for new images/PDFs/videos (filters out `.cider/` metadata writes)
+- `TodoCardStorage` — watches `Inbox/Todos/` for new `.ics` VTODO files
+- `DateCardStorage` — watches `Inbox/Date Cards/` for new `.ics` VEVENT files
+- `ContactStorage` — watches `Inbox/Contacts/` for new `.vcf` files
+- `NotesStorage` — uses `DispatchSource.fileSystemObject` on the notes directory
+- `KanbanStorage` — watches `.cider/boards/` for YAML changes
+- `VaultFolderService` — watches vault root for directory creates/renames/deletes
 
-**What this enables:**
-- Edit a `.vcf` in Apple Contacts → Cider updates instantly
-- AI tool creates a new `.ics` in the vault → appears in Cider without restart
-- User deletes a file in Finder → card disappears from Cider
-- True "filesystem is the source of truth" behavior
-
-**Implementation notes:**
-- The vault vision doc (`Docs/VAULT_VISION.md`) already describes FSEvents integration
-- Debounce rapid changes (file saves trigger multiple events)
-- Compare file modification dates against index `updatedAt` to detect actual changes
-- Orphan adoption already handles "new file appeared" — file watching just triggers it live
+**Key patterns:**
+- All watchers use `MainActor.assumeIsolated` in callbacks (FSEventsWatcher dispatches to main queue)
+- `pendingRescan` flag prevents dropped events during active scans
+- `isWritingIndex` / write generation counter prevents reload-from-own-write loops
+- 10-second `externalEditCooldown` suppresses adoption after Claude edits the bookmark index
 
 ### Vault File Adoption (Live)
 

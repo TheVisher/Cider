@@ -50,8 +50,11 @@ Use `/code`, `/design`, `/review`, `/docs` for deep reference on conventions, UI
 | `Docs/Conventions/CONVENTIONS.md` | Code conventions, naming, patterns |
 | `Docs/Conventions/CODE_HEALTH.md` | Weekly health scans, large file tracking |
 | `Docs/Conventions/TROUBLESHOOTING.md` | Performance patterns, known issues |
-| `Docs/Features/AI.md` | AI architecture, tool calling, MLX, Apple Intelligence |
+| `Docs/Features/AI.md` | AI architecture, tool calling, MLX, Apple Intelligence, oEmbed |
 | `Docs/Features/TIPTAP_EDITOR.md` | TipTap/ProseMirror editor in WKWebView |
+| `Docs/Features/SYSTEM_DESIGN.md` | Detail panel spec, integration design patterns |
 | `Docs/Product/PRODUCT_VISION.md` | Roadmap, per-tab visions, strategy |
 | `Docs/QA/AUDIT_LOOPS.md` | All reusable audit procedures (design tokens, conventions, threading, storage, dead code) |
+| `Docs/QA/AUDIT_REPORTS.md` | Historical audit findings and fixes |
+| `Docs/BUILD_STATUS.md` | Current build health and warnings |
 | `Shared/` | Cross-platform: sync protocol, data model, feature parity |
