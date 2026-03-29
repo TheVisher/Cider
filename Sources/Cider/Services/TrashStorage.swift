@@ -256,7 +256,7 @@ final class TrashStorage {
     func restoreDateCard(_ trashItem: TrashItem) {
         guard let payload = trashItem.dateCardPayload else { return }
 
-        let dateCardsDir = StoragePaths.directoryURL(for: .dateCards)
+        let dateCardsDir = StoragePaths.cachedDirectoryURL(for: .dateCards)
         let trashDir = dateCardsDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
@@ -313,7 +313,7 @@ final class TrashStorage {
     func restoreTodoCard(_ trashItem: TrashItem) {
         guard let payload = trashItem.todoCardPayload else { return }
 
-        let todoCardsDir = StoragePaths.directoryURL(for: .todos)
+        let todoCardsDir = StoragePaths.cachedDirectoryURL(for: .todos)
         let trashDir = todoCardsDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
@@ -470,7 +470,7 @@ final class TrashStorage {
     func restoreContact(_ trashItem: TrashItem) {
         guard let payload = trashItem.contactPayload else { return }
 
-        let contactsDir = StoragePaths.directoryURL(for: .contacts)
+        let contactsDir = StoragePaths.cachedDirectoryURL(for: .contacts)
         let trashDir = contactsDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 

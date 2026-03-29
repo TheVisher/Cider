@@ -761,13 +761,23 @@ final class NotesStorage: ObservableObject {
             }
         }
 
+        // Recalculate relative path using the final filename (may differ after collision-rename)
+        let finalFilename = newFileURL.lastPathComponent
+        let finalRelativePath: String
+        if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            finalRelativePath = "\(vaultFolder.relativePath)/\(finalFilename)"
+        } else {
+            finalRelativePath = "\(StoragePaths.inboxDir)/Notes/\(finalFilename)"
+        }
+
         notes[idx].folderID = folderID
-        notes[idx].relativePath = newRelativePath
+        notes[idx].relativePath = finalRelativePath
         notes[idx].modifiedAt = Date()
         contentCache.removeValue(forKey: noteID)
 
         if var entry = index[noteID] {
             entry.folderID = folderID
+            entry.filename = finalFilename
             index[noteID] = entry
         }
         saveIndex()
