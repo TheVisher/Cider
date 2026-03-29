@@ -59,7 +59,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         priority = try c.decodeIfPresent(KanbanPriority.self, forKey: .priority)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         tags = (try c.decodeIfPresent([String].self, forKey: .tags)) ?? []
-        created = try c.decode(KanbanDate.self, forKey: .created).date
+        created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
     }
 
