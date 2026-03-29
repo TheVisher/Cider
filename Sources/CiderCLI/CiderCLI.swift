@@ -81,11 +81,15 @@ struct CiderCLI {
                 bookmarks = service.bookmarks
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? bookmarks.count
-            print("Bookmarks (\(bookmarks.count)):")
-            for bm in bookmarks.prefix(limit) {
-                let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                let manual = bm.titleManuallySet ? " 🔒" : ""
-                print("  [\(bm.id.uuidString.prefix(8))] \(bm.title)\(manual) — \(bm.hostDisplay) (\(folder))")
+            if jsonOutput {
+                outputJSON(Array(bookmarks.prefix(limit)).map(bookmarkToDict))
+            } else {
+                print("Bookmarks (\(bookmarks.count)):")
+                for bm in bookmarks.prefix(limit) {
+                    let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    let manual = bm.titleManuallySet ? " 🔒" : ""
+                    print("  [\(bm.id.uuidString.prefix(8))] \(bm.title)\(manual) — \(bm.hostDisplay) (\(folder))")
+                }
             }
 
         case "add", "create":
@@ -111,20 +115,24 @@ struct CiderCLI {
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
-                let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                print("Bookmark: \(bm.title)")
-                print("  ID:       \(bm.id.uuidString)")
-                print("  URL:      \(bm.urlString)")
-                print("  Folder:   \(folder)")
-                print("  Tags:     \(bm.tags.joined(separator: ", "))")
-                print("  Labels:   \(bm.labelIDs.count)")
-                print("  Notes:    \(bm.notes.isEmpty ? "(none)" : bm.notes)")
-                print("  Created:  \(bm.createdAt.formatted())")
-                print("  Updated:  \(bm.updatedAt.formatted())")
-                print("  Manual:   title=\(bm.titleManuallySet) notes=\(bm.notesManuallySet)")
-                if let ocr = bm.ocrText { print("  OCR:      \(ocr.prefix(100))") }
-                if let colors = bm.dominantColors { print("  Colors:   \(colors.joined(separator: ", "))") }
-                if let summary = bm.aiSummary { print("  Summary:  \(summary.prefix(100))") }
+                if jsonOutput {
+                    outputJSON(bookmarkToDict(bm))
+                } else {
+                    let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    print("Bookmark: \(bm.title)")
+                    print("  ID:       \(bm.id.uuidString)")
+                    print("  URL:      \(bm.urlString)")
+                    print("  Folder:   \(folder)")
+                    print("  Tags:     \(bm.tags.joined(separator: ", "))")
+                    print("  Labels:   \(bm.labelIDs.count)")
+                    print("  Notes:    \(bm.notes.isEmpty ? "(none)" : bm.notes)")
+                    print("  Created:  \(bm.createdAt.formatted())")
+                    print("  Updated:  \(bm.updatedAt.formatted())")
+                    print("  Manual:   title=\(bm.titleManuallySet) notes=\(bm.notesManuallySet)")
+                    if let ocr = bm.ocrText { print("  OCR:      \(ocr.prefix(100))") }
+                    if let colors = bm.dominantColors { print("  Colors:   \(colors.joined(separator: ", "))") }
+                    if let summary = bm.aiSummary { print("  Summary:  \(summary.prefix(100))") }
+                }
             }
 
         case "search":
@@ -232,11 +240,15 @@ struct CiderCLI {
             } else {
                 notes = storage.notes
             }
-            print("Notes (\(notes.count)):")
-            for note in notes {
-                let folder = note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                let pinned = note.isPinned ? " 📌" : ""
-                print("  [\(note.id.uuidString.prefix(8))] \(note.title)\(pinned) (\(folder))")
+            if jsonOutput {
+                outputJSON(notes.map(noteToDict))
+            } else {
+                print("Notes (\(notes.count)):")
+                for note in notes {
+                    let folder = note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    let pinned = note.isPinned ? " 📌" : ""
+                    print("  [\(note.id.uuidString.prefix(8))] \(note.title)\(pinned) (\(folder))")
+                }
             }
 
         case "create":
@@ -316,12 +328,16 @@ struct CiderCLI {
         case "list", "ls":
             let showCompleted = args.contains("--completed")
             let todos = showCompleted ? storage.todoCards : storage.todoCards.filter { !$0.isCompleted }
-            print("Todos (\(todos.count)):")
-            for todo in todos {
-                let status = todo.isCompleted ? "✅" : "⬜"
-                let due = todo.dueDate.map { " due: \(dateFormatter.string(from: $0))" } ?? ""
-                let priority = todo.priority.map { " [\($0.rawValue)]" } ?? ""
-                print("  \(status) [\(todo.id.uuidString.prefix(8))] \(todo.title)\(priority)\(due)")
+            if jsonOutput {
+                outputJSON(todos.map(todoToDict))
+            } else {
+                print("Todos (\(todos.count)):")
+                for todo in todos {
+                    let status = todo.isCompleted ? "✅" : "⬜"
+                    let due = todo.dueDate.map { " due: \(dateFormatter.string(from: $0))" } ?? ""
+                    let priority = todo.priority.map { " [\($0.rawValue)]" } ?? ""
+                    print("  \(status) [\(todo.id.uuidString.prefix(8))] \(todo.title)\(priority)\(due)")
+                }
             }
 
         case "create":
@@ -584,16 +600,20 @@ struct CiderCLI {
                 return
             }
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame || $0.id == name }) {
-                print("Board: \(board.name) (\(board.id))")
-                for col in board.columns {
-                    let done = col.isDoneColumn ? " ✅" : ""
-                    print("\n  ── \(col.name)\(done) (\(col.cards.count)) ──")
-                    for card in col.cards {
-                        let priority = card.priority.map { " [\($0.rawValue)]" } ?? ""
-                        let completed = card.completed.map { " done:\(dateFormatter.string(from: $0))" } ?? ""
-                        print("    [\(card.id)] \(card.title)\(priority)\(completed)")
-                        if let notes = card.notes, !notes.isEmpty {
-                            print("      \(notes.prefix(80))")
+                if jsonOutput {
+                    outputJSON(boardToDict(board))
+                } else {
+                    print("Board: \(board.name) (\(board.id))")
+                    for col in board.columns {
+                        let done = col.isDoneColumn ? " ✅" : ""
+                        print("\n  ── \(col.name)\(done) (\(col.cards.count)) ──")
+                        for card in col.cards {
+                            let priority = card.priority.map { " [\($0.rawValue)]" } ?? ""
+                            let completed = card.completed.map { " done:\(dateFormatter.string(from: $0))" } ?? ""
+                            print("    [\(card.id)] \(card.title)\(priority)\(completed)")
+                            if let notes = card.notes, !notes.isEmpty {
+                                print("      \(notes.prefix(80))")
+                            }
                         }
                     }
                 }
@@ -745,20 +765,24 @@ struct CiderCLI {
             notes: NotesStorage.shared.notes
         )
 
-        print("Search '\(query)' (\(results.count) results):")
-        for result in results {
-            let icon: String
-            switch result.type {
-            case .bookmark: icon = "🔖"
-            case .note: icon = "📝"
-            case .dateCard: icon = "📅"
-            case .contact: icon = "👤"
-            case .todo: icon = "☑️"
-            case .session: icon = "🌐"
-            case .vaultFile: icon = "📎"
+        if jsonOutput {
+            outputJSON(results.map(searchResultToDict))
+        } else {
+            print("Search '\(query)' (\(results.count) results):")
+            for result in results {
+                let icon: String
+                switch result.type {
+                case .bookmark: icon = "🔖"
+                case .note: icon = "📝"
+                case .dateCard: icon = "📅"
+                case .contact: icon = "👤"
+                case .todo: icon = "☑️"
+                case .session: icon = "🌐"
+                case .vaultFile: icon = "📎"
+                }
+                let subtitle = result.subtitle.map { " — \($0)" } ?? ""
+                print("  \(icon) [\(result.id.uuidString.prefix(8))] \(result.title)\(subtitle)")
             }
-            let subtitle = result.subtitle.map { " — \($0)" } ?? ""
-            print("  \(icon) [\(result.id.uuidString.prefix(8))] \(result.title)\(subtitle)")
         }
     }
 
@@ -822,20 +846,24 @@ struct CiderCLI {
         let boards = KanbanStorage.shared.boards
         let trash = TrashStorage.shared.allTrashItems()
 
-        print("Cider Vault Status")
-        print("──────────────────")
-        print("  Bookmarks:    \(bookmarks.count)")
-        print("  Notes:        \(notes.count)")
-        print("  Todos:        \(todos.count) (\(todos.filter { !$0.isCompleted }.count) active)")
-        print("  Events:       \(events.count)")
-        print("  Contacts:     \(contacts.count)")
-        print("  Vault Files:  \(files.count) (\(files.filter { $0.fileType == .image }.count) images)")
-        print("  Sessions:     \(sessions.count)")
-        print("  Folders:      \(folders.count)")
-        print("  Labels:       \(labels.count)")
-        print("  Boards:       \(boards.count) (\(boards.flatMap(\.columns).flatMap(\.cards).count) cards)")
-        print("  Trash:        \(trash.count) items")
-        print("  Vault Root:   \(StoragePaths.cachedVaultDirectoryURL.path)")
+        if jsonOutput {
+            outputJSON(statusToDict())
+        } else {
+            print("Cider Vault Status")
+            print("──────────────────")
+            print("  Bookmarks:    \(bookmarks.count)")
+            print("  Notes:        \(notes.count)")
+            print("  Todos:        \(todos.count) (\(todos.filter { !$0.isCompleted }.count) active)")
+            print("  Events:       \(events.count)")
+            print("  Contacts:     \(contacts.count)")
+            print("  Vault Files:  \(files.count) (\(files.filter { $0.fileType == .image }.count) images)")
+            print("  Sessions:     \(sessions.count)")
+            print("  Folders:      \(folders.count)")
+            print("  Labels:       \(labels.count)")
+            print("  Boards:       \(boards.count) (\(boards.flatMap(\.columns).flatMap(\.cards).count) cards)")
+            print("  Trash:        \(trash.count) items")
+            print("  Vault Root:   \(StoragePaths.cachedVaultDirectoryURL.path)")
+        }
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
