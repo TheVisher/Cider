@@ -58,7 +58,7 @@ final class KanbanStorage: ObservableObject {
             let decoder = YAMLDecoder()
             return try decoder.decode(KanbanBoard.self, from: content)
         } catch {
-            logger.error("Failed to decode \(url.lastPathComponent): \(error.localizedDescription, privacy: .public)")
+            logger.error("Failed to decode \(url.lastPathComponent): \(String(describing: error), privacy: .public)")
             return nil
         }
     }
