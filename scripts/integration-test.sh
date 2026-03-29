@@ -81,6 +81,12 @@ echo -e "${YELLOW}  Cider Integration Test Suite${NC}"
 echo -e "${YELLOW}═══════════════════════════════════════${NC}"
 echo ""
 
+# Pre-cleanup: remove any leftover test data from previous runs
+$CLI trash empty >/dev/null 2>&1
+rm -f ~/CiderVault/Inbox/Notes/"CLI Test Note.md" 2>/dev/null
+rm -f ~/CiderVault/Inbox/Todos/"CLI Test Todo.ics" 2>/dev/null
+rm -rf ~/CiderVault/"CLI Test Folder" 2>/dev/null
+
 # ──────────────────────────────────────────────
 echo -e "${YELLOW}1. Status Command${NC}"
 # ──────────────────────────────────────────────
@@ -130,6 +136,7 @@ OUTPUT=$($CLI bookmark add "https://example.com/cli-test" --title "CLI Test Book
 assert_contains "Create bookmark succeeds" "$OUTPUT" "Created bookmark"
 BM_ID=$(echo "$OUTPUT" | grep -o '([a-fA-F0-9]\{8\})' | tr -d '()')
 
+sleep 1  # Let async init settle in next process
 BM_COUNT_AFTER=$(get_count "Bookmarks")
 assert_count_changed "Bookmark count increased" "$BM_COUNT_BEFORE" "$BM_COUNT_AFTER" "increased"
 
@@ -161,8 +168,8 @@ echo -e "${YELLOW}4. Trash Round-Trip${NC}"
 OUTPUT=$($CLI trash list 2>&1)
 assert_contains "Deleted bookmark appears in trash" "$OUTPUT" "CLI Test Bookmark"
 
-# Get trash ID
-TRASH_ID=$(echo "$OUTPUT" | grep "CLI Test Bookmark" | grep -o '\[[a-fA-F0-9]\{8\}\]' | tr -d '[]')
+# Get trash ID (first match only)
+TRASH_ID=$(echo "$OUTPUT" | grep "CLI Test Bookmark" | head -1 | grep -o '\[[a-fA-F0-9]\{8\}\]' | tr -d '[]')
 
 # Restore
 OUTPUT=$($CLI trash restore "$TRASH_ID" 2>&1)
@@ -179,13 +186,8 @@ assert_contains "Restored bookmark back in list" "$OUTPUT" "CLI Test Bookmark"
 OUTPUT=$($CLI trash list 2>&1)
 assert_not_contains "Restored bookmark not in trash" "$OUTPUT" "CLI Test Bookmark"
 
-# Clean up — delete again permanently
-OUTPUT=$($CLI bookmark delete "$BM_ID" 2>&1)
-TRASH_ID_2=$(echo "$($CLI trash list 2>&1)" | grep "CLI Test Bookmark" | grep -o '\[[a-fA-F0-9]\{8\}\]' | tr -d '[]')
-if [ -n "$TRASH_ID_2" ]; then
-    $CLI trash restore "$TRASH_ID_2" >/dev/null 2>&1
-    $CLI bookmark delete "$BM_ID" >/dev/null 2>&1
-fi
+# Clean up test bookmark
+$CLI bookmark delete "$BM_ID" >/dev/null 2>&1
 
 # ──────────────────────────────────────────────
 echo ""
@@ -197,9 +199,11 @@ NOTE_COUNT_BEFORE=$(get_count "Notes")
 OUTPUT=$($CLI note create "CLI Test Note" --content "This is a test note from the CLI" 2>&1)
 assert_contains "Create note succeeds" "$OUTPUT" "Created note"
 
+sleep 1  # Let async init settle
 NOTE_COUNT_AFTER=$(get_count "Notes")
 assert_count_changed "Note count increased" "$NOTE_COUNT_BEFORE" "$NOTE_COUNT_AFTER" "increased"
 
+sleep 1
 OUTPUT=$($CLI note list 2>&1)
 assert_contains "New note appears in list" "$OUTPUT" "CLI Test Note"
 
@@ -261,10 +265,15 @@ echo ""
 echo -e "${YELLOW}10. Cleanup${NC}"
 # ──────────────────────────────────────────────
 
-# Clean up test data
-# Note: we leave the test folder and note for now — they can be manually cleaned
-echo -e "  ${YELLOW}⚠${NC} Test data left in vault: 'CLI Test Folder', 'CLI Test Note', 'CLI Test Todo'"
-echo -e "  ${YELLOW}⚠${NC} Clean up manually if desired"
+# Clean up test data from filesystem
+echo -e "  Cleaning up test artifacts..."
+rm -f ~/CiderVault/Inbox/Notes/"CLI Test Note.md" 2>/dev/null
+rm -f ~/CiderVault/Inbox/Notes/"Untitled.md" 2>/dev/null
+rm -f ~/CiderVault/Inbox/Todos/"CLI Test Todo.ics" 2>/dev/null
+rm -rf ~/CiderVault/"CLI Test Folder" 2>/dev/null
+# Empty trash to clean up deleted test bookmark
+$CLI trash empty >/dev/null 2>&1
+echo -e "  ${GREEN}✓${NC} Test artifacts cleaned up"
 
 # ──────────────────────────────────────────────
 echo ""
