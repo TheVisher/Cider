@@ -184,15 +184,24 @@ private struct KanbanDate: Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        let string = try container.decode(String.self)
-        if let parsed = Self.formatter.date(from: string) {
-            date = parsed
-        } else if let parsed = ISO8601DateFormatter().date(from: string) {
-            date = parsed
+        // Yams parses unquoted dates (2026-03-20) as Date, quoted ones ('2026-03-20') as String
+        if let directDate = try? container.decode(Date.self) {
+            date = directDate
+        } else if let string = try? container.decode(String.self) {
+            if let parsed = Self.formatter.date(from: string) {
+                date = parsed
+            } else if let parsed = ISO8601DateFormatter().date(from: string) {
+                date = parsed
+            } else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Invalid date format: \(string). Expected yyyy-MM-dd or ISO-8601."
+                )
+            }
         } else {
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: "Invalid date format: \(string). Expected yyyy-MM-dd or ISO-8601."
+                debugDescription: "Could not decode date as Date or String."
             )
         }
     }
