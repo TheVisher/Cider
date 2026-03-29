@@ -15,6 +15,8 @@ if [ ! -f "$CLI" ]; then
     cd /Users/minivish/Cider && swift build --product cider-cli 2>&1 | tail -1
 fi
 
+# Unique suffix to avoid collisions with previous runs
+TEST_ID=$(date +%s | tail -c 5)
 PASS=0
 FAIL=0
 TOTAL=0
@@ -90,9 +92,9 @@ echo ""
 
 # Pre-cleanup: remove any leftover test data from previous runs
 $CLI trash empty >/dev/null 2>&1
-rm -f ~/CiderVault/Inbox/Notes/"CLI Test Note.md" 2>/dev/null
-rm -f ~/CiderVault/Inbox/Todos/"CLI Test Todo.ics" 2>/dev/null
-rm -rf ~/CiderVault/"CLI Test Folder" 2>/dev/null
+rm -f ~/CiderVault/Inbox/Notes/"CiderTest${TEST_ID}Note.md" 2>/dev/null
+rm -f ~/CiderVault/Inbox/Todos/CiderTest*.ics 2>/dev/null
+rm -rf ~/CiderVault/CiderTest* 2>/dev/null
 
 # ──────────────────────────────────────────────
 echo -e "${YELLOW}1. Status Command${NC}"
@@ -115,21 +117,21 @@ echo -e "${YELLOW}2. Folder Operations${NC}"
 
 FOLDER_COUNT_BEFORE=$(get_count "Folders")
 
-OUTPUT=$($CLI folder create "CLI Test Folder" 2>&1)
+OUTPUT=$($CLI folder create "CiderTest${TEST_ID}Folder" 2>&1)
 assert_contains "Create folder succeeds" "$OUTPUT" "Created folder"
 
 OUTPUT=$($CLI folder list 2>&1)
-assert_contains "New folder appears in list" "$OUTPUT" "CLI Test Folder"
+assert_contains "New folder appears in list" "$OUTPUT" "CiderTest${TEST_ID}Folder"
 
 FOLDER_COUNT_AFTER=$(get_count "Folders")
 assert_count_changed "Folder count increased" "$FOLDER_COUNT_BEFORE" "$FOLDER_COUNT_AFTER" "increased"
 
 # Subfolder
-OUTPUT=$($CLI folder create "CLI Subfolder" --parent "CLI Test Folder" 2>&1)
+OUTPUT=$($CLI folder create "CiderTest${TEST_ID}Sub" --parent "CiderTest${TEST_ID}Folder" 2>&1)
 assert_contains "Create subfolder succeeds" "$OUTPUT" "Created folder"
 
 OUTPUT=$($CLI folder list 2>&1)
-assert_contains "Subfolder appears in list" "$OUTPUT" "CLI Subfolder"
+assert_contains "Subfolder appears in list" "$OUTPUT" "CiderTest${TEST_ID}Sub"
 
 # ──────────────────────────────────────────────
 echo ""
@@ -139,7 +141,7 @@ echo -e "${YELLOW}3. Bookmark CRUD${NC}"
 BM_COUNT_BEFORE=$(get_count "Bookmarks")
 
 # Create
-OUTPUT=$($CLI bookmark add "https://example.com/cli-test" --title "CLI Test Bookmark" 2>&1)
+OUTPUT=$($CLI bookmark add "https://example.com/cider-test-${TEST_ID}" --title "CiderTest${TEST_ID}Bookmark" 2>&1)
 assert_contains "Create bookmark succeeds" "$OUTPUT" "Created bookmark"
 BM_ID=$(echo "$OUTPUT" | grep -o '([a-fA-F0-9]\{8\})' | tr -d '()')
 
@@ -149,14 +151,14 @@ assert_count_changed "Bookmark count increased" "$BM_COUNT_BEFORE" "$BM_COUNT_AF
 
 # List
 OUTPUT=$($CLI bookmark list 2>&1)
-assert_contains "New bookmark appears in list" "$OUTPUT" "CLI Test Bookmark"
+assert_contains "New bookmark appears in list" "$OUTPUT" "CiderTest${TEST_ID}Bookmark"
 
 # Search
-OUTPUT=$($CLI bookmark search "cli-test" 2>&1)
-assert_contains "Bookmark found by URL search" "$OUTPUT" "CLI Test Bookmark"
+OUTPUT=$($CLI bookmark search "cider-test-${TEST_ID}" 2>&1)
+assert_contains "Bookmark found by URL search" "$OUTPUT" "CiderTest${TEST_ID}Bookmark"
 
-OUTPUT=$($CLI bookmark search "CLI Test" 2>&1)
-assert_contains "Bookmark found by title search" "$OUTPUT" "CLI Test Bookmark"
+OUTPUT=$($CLI bookmark search "CiderTest${TEST_ID}" 2>&1)
+assert_contains "Bookmark found by title search" "$OUTPUT" "CiderTest${TEST_ID}Bookmark"
 
 # Delete
 OUTPUT=$($CLI bookmark delete "$BM_ID" 2>&1)
@@ -173,10 +175,10 @@ echo -e "${YELLOW}4. Trash Round-Trip${NC}"
 
 # Verify in trash
 OUTPUT=$($CLI trash list 2>&1)
-assert_contains "Deleted bookmark appears in trash" "$OUTPUT" "CLI Test Bookmark"
+assert_contains "Deleted bookmark appears in trash" "$OUTPUT" "CiderTest${TEST_ID}Bookmark"
 
 # Get trash ID (first match only)
-TRASH_ID=$(echo "$OUTPUT" | grep "CLI Test Bookmark" | head -1 | grep -o '\[[a-fA-F0-9]\{8\}\]' | tr -d '[]')
+TRASH_ID=$(echo "$OUTPUT" | grep "CiderTest${TEST_ID}Bookmark" | head -1 | grep -o '\[[a-fA-F0-9]\{8\}\]' | tr -d '[]')
 
 # Restore
 OUTPUT=$($CLI trash restore "$TRASH_ID" 2>&1)
@@ -187,11 +189,11 @@ BM_COUNT_RESTORED=$(get_count "Bookmarks")
 assert_count_changed "Bookmark count restored" "$BM_COUNT_DELETED" "$BM_COUNT_RESTORED" "increased"
 
 OUTPUT=$($CLI bookmark list 2>&1)
-assert_contains "Restored bookmark back in list" "$OUTPUT" "CLI Test Bookmark"
+assert_contains "Restored bookmark back in list" "$OUTPUT" "CiderTest${TEST_ID}Bookmark"
 
 # Verify no longer in trash
 OUTPUT=$($CLI trash list 2>&1)
-assert_not_contains "Restored bookmark not in trash" "$OUTPUT" "CLI Test Bookmark"
+assert_not_contains "Restored bookmark not in trash" "$OUTPUT" "CiderTest${TEST_ID}Bookmark"
 
 # Clean up test bookmark
 $CLI bookmark delete "$BM_ID" >/dev/null 2>&1
@@ -203,7 +205,7 @@ echo -e "${YELLOW}5. Note Operations${NC}"
 
 NOTE_COUNT_BEFORE=$(get_count "Notes")
 
-OUTPUT=$($CLI note create "CLI Test Note" --content "This is a test note from the CLI" 2>&1)
+OUTPUT=$($CLI note create "CiderTest${TEST_ID}Note" --content "This is a test note from the CLI" 2>&1)
 assert_contains "Create note succeeds" "$OUTPUT" "Created note"
 
 sleep 1  # Let async init settle
@@ -212,7 +214,7 @@ assert_count_changed "Note count increased" "$NOTE_COUNT_BEFORE" "$NOTE_COUNT_AF
 
 sleep 1
 OUTPUT=$($CLI note list 2>&1)
-assert_contains "New note appears in list" "$OUTPUT" "CLI Test Note"
+assert_contains "New note appears in list" "$OUTPUT" "CiderTest${TEST_ID}Note"
 
 # ──────────────────────────────────────────────
 echo ""
@@ -221,14 +223,14 @@ echo -e "${YELLOW}6. Todo Operations${NC}"
 
 TODO_COUNT_BEFORE=$(get_count "Todos")
 
-OUTPUT=$($CLI todo create "CLI Test Todo" --due 2026-04-15 --priority medium 2>&1)
+OUTPUT=$($CLI todo create "CiderTest${TEST_ID}Todo" --due 2026-04-15 --priority medium 2>&1)
 assert_contains "Create todo succeeds" "$OUTPUT" "Created todo"
 
 TODO_COUNT_AFTER=$(get_count "Todos")
 assert_count_changed "Todo count increased" "$TODO_COUNT_BEFORE" "$TODO_COUNT_AFTER" "increased"
 
 OUTPUT=$($CLI todo list 2>&1)
-assert_contains "New todo appears in list" "$OUTPUT" "CLI Test Todo"
+assert_contains "New todo appears in list" "$OUTPUT" "CiderTest${TEST_ID}Todo"
 assert_contains "Todo has priority" "$OUTPUT" "medium"
 assert_contains "Todo has due date" "$OUTPUT" "2026-04"
 
@@ -248,8 +250,8 @@ echo ""
 echo -e "${YELLOW}8. Global Search${NC}"
 # ──────────────────────────────────────────────
 
-OUTPUT=$($CLI search "CLI Test" 2>&1)
-assert_contains "Search finds test bookmark" "$OUTPUT" "CLI Test"
+OUTPUT=$($CLI search "CiderTest${TEST_ID}" 2>&1)
+assert_contains "Search finds test bookmark" "$OUTPUT" "CiderTest${TEST_ID}"
 
 OUTPUT=$($CLI search "@bookmarks example" 2>&1)
 # This may or may not find results depending on state
@@ -274,10 +276,9 @@ echo -e "${YELLOW}10. Cleanup${NC}"
 
 # Clean up test data from filesystem
 echo -e "  Cleaning up test artifacts..."
-rm -f ~/CiderVault/Inbox/Notes/"CLI Test Note.md" 2>/dev/null
-rm -f ~/CiderVault/Inbox/Notes/"Untitled.md" 2>/dev/null
-rm -f ~/CiderVault/Inbox/Todos/"CLI Test Todo.ics" 2>/dev/null
-rm -rf ~/CiderVault/"CLI Test Folder" 2>/dev/null
+rm -f ~/CiderVault/Inbox/Notes/CiderTest*.md 2>/dev/null
+rm -f ~/CiderVault/Inbox/Todos/CiderTest*.ics 2>/dev/null
+rm -rf ~/CiderVault/CiderTest* 2>/dev/null
 # Empty trash to clean up deleted test bookmark
 $CLI trash empty >/dev/null 2>&1
 echo -e "  ${GREEN}✓${NC} Test artifacts cleaned up"
