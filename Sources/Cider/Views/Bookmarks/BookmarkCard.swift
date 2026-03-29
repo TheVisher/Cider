@@ -283,6 +283,7 @@ struct BookmarkCard: View {
         }
 
         if let identifier = imageIdentifiers.first {
+            nonisolated(unsafe) let upgradeProvider = provider
             provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
                 guard let data else {
                     onMain { Self.postThumbnailToast("Could not load dropped image", isSuccess: false) }
@@ -300,9 +301,12 @@ struct BookmarkCard: View {
                     } else {
                         let saved = VaultBookmarkService.shared.assignThumbnail(for: bookmarkID, imageData: data, preferredFileExtension: ext)
                         Self.postThumbnailToast(saved ? "Updated bookmark thumbnail" : "Dropped content is not a valid image", isSuccess: saved)
-                        // After saving the static image, try to upgrade to animated source.
-                        // Runs after the initial save completes so it doesn't race.
-                        Self.tryUpgradeToAnimatedSource(provider: provider, bookmarkID: bookmarkID)
+                    }
+                }
+                // Try animated source upgrade — provider is safe to use on main thread
+                if !addToCarousel {
+                    DispatchQueue.main.async {
+                        Self.tryUpgradeToAnimatedSource(provider: upgradeProvider, bookmarkID: bookmarkID)
                     }
                 }
             }
