@@ -23,8 +23,12 @@ struct CiderCLI {
         vaultFileService.ensureInboxDirectories()
         vaultFileService.scan()
 
-        // Wait for async storage initialization
-        try? await Task.sleep(for: .milliseconds(500))
+        // Wait for async storage initialization — poll until notes are loaded
+        // (NotesStorage uses Task { @MainActor } in init which needs actor time)
+        for _ in 0..<20 {
+            try? await Task.sleep(for: .milliseconds(100))
+            if !notesStorage.notes.isEmpty { break }
+        }
 
         let subcommand = args.count > 1 ? args[1] : nil
         let remaining = Array(args.dropFirst(2))
@@ -242,7 +246,7 @@ struct CiderCLI {
             if !title.isEmpty, title != "Untitled" {
                 storage.rename(note: note, to: title)
             }
-            print("Created note: \(note.title) (\(note.id.uuidString.prefix(8)))")
+            print("Created note: \(title) (\(note.id.uuidString.prefix(8)))")
 
         case "get", "show":
             guard let idPrefix = args.first else {
