@@ -1497,10 +1497,110 @@ assert_json_has_key "Has trash" "$OUTPUT" "trash"
 assert_json_has_key "Has sessions" "$OUTPUT" "sessions"
 
 # ═══════════════════════════════════════════════════
+# 44. RECENT
+# ═══════════════════════════════════════════════════
+echo ""
+echo -e "${YELLOW}44. Recent${NC}"
+OUTPUT=$($CLI recent --hours 8760 --limit 5 2>&1)
+assert_contains "Recent runs" "$OUTPUT" "Recent items"
+assert_contains "Recent has results" "$OUTPUT" "]"
+
+OUTPUT=$($CLI recent --type bookmark --hours 8760 --limit 3 2>&1)
+assert_contains "Recent type filter" "$OUTPUT" "🔖"
+
+OUTPUT=$($CLI recent --hours 0 2>&1)
+assert_contains "Recent zero hours" "$OUTPUT" "Recent items"
+
+echo -e "  ${CYAN}── JSON output${NC}"
+OUTPUT=$($CLI recent --hours 8760 --limit 3 --json 2>&1)
+assert_json_valid "Valid JSON" "$OUTPUT"
+assert_json_has_key "Has type" "$OUTPUT" "type"
+assert_json_has_key "Has title" "$OUTPUT" "title"
+assert_json_has_key "Has date" "$OUTPUT" "date"
+
+# ═══════════════════════════════════════════════════
+# 45. SNAPSHOT
+# ═══════════════════════════════════════════════════
+echo ""
+echo -e "${YELLOW}45. Snapshot${NC}"
+OUTPUT=$($CLI snapshot 2>&1)
+assert_contains "Shows items header" "$OUTPUT" "ITEMS"
+assert_contains "Shows bookmarks" "$OUTPUT" "Bookmarks:"
+assert_contains "Shows folders" "$OUTPUT" "FOLDERS"
+assert_contains "Shows vault path" "$OUTPUT" "CiderVault"
+
+echo -e "  ${CYAN}── JSON output${NC}"
+OUTPUT=$($CLI snapshot --json 2>&1)
+assert_json_valid "Valid JSON" "$OUTPUT"
+assert_json_has_key "Has bookmarks" "$OUTPUT" "bookmarks"
+assert_json_has_key "Has topTags" "$OUTPUT" "topTags"
+assert_json_has_key "Has folderCounts" "$OUTPUT" "folderCounts"
+assert_json_has_key "Has recentBookmarks24h" "$OUTPUT" "recentBookmarks24h"
+
+# ═══════════════════════════════════════════════════
+# 46. QUERY
+# ═══════════════════════════════════════════════════
+echo ""
+echo -e "${YELLOW}46. Query${NC}"
+echo -e "  ${CYAN}── Date parsing${NC}"
+OUTPUT=$($CLI query "saved yesterday" 2>&1)
+assert_contains "Yesterday parsed" "$OUTPUT" "date:"
+
+OUTPUT=$($CLI query "things from last week" 2>&1)
+assert_contains "Last week parsed" "$OUTPUT" "date:"
+
+OUTPUT=$($CLI query "saved today" 2>&1)
+assert_contains "Today parsed" "$OUTPUT" "date:"
+
+OUTPUT=$($CLI query "items from last month" 2>&1)
+assert_contains "Last month parsed" "$OUTPUT" "date:"
+
+OUTPUT=$($CLI query "3 days ago" 2>&1)
+assert_contains "N days ago parsed" "$OUTPUT" "date:"
+
+echo -e "  ${CYAN}── Keyword + date${NC}"
+OUTPUT=$($CLI query "claude this month" 2>&1)
+assert_contains "Keyword + date" "$OUTPUT" "results"
+
+echo -e "  ${CYAN}── Empty query${NC}"
+OUTPUT=$($CLI query 2>&1)
+assert_contains "Empty query" "$OUTPUT" "Usage"
+
+echo -e "  ${CYAN}── JSON output${NC}"
+OUTPUT=$($CLI query "saved yesterday" --json 2>&1)
+assert_json_valid "Valid JSON" "$OUTPUT"
+
+# ═══════════════════════════════════════════════════
+# 47. DUPLICATE CHECK
+# ═══════════════════════════════════════════════════
+echo ""
+echo -e "${YELLOW}47. Duplicate Check${NC}"
+# Check for a URL we know exists
+OUTPUT=$($CLI duplicate-check "https://github.com/makeplane/plane" 2>&1)
+assert_contains "Finds duplicate" "$OUTPUT" "duplicate\|Found"
+
+# Check for a URL that doesn't exist
+OUTPUT=$($CLI duplicate-check "https://totallyfakeurl${TEST_ID}.com/nothing" 2>&1)
+assert_contains "No duplicate" "$OUTPUT" "No duplicates"
+
+# Check www normalization
+OUTPUT=$($CLI duplicate-check "http://www.github.com/makeplane/plane" 2>&1)
+assert_contains "Normalized match" "$OUTPUT" "duplicate\|Found"
+
+echo -e "  ${CYAN}── JSON output${NC}"
+OUTPUT=$($CLI duplicate-check "https://github.com/makeplane/plane" --json 2>&1)
+assert_json_valid "Valid JSON" "$OUTPUT"
+assert_json_has_key "Has isDuplicate" "$OUTPUT" "isDuplicate"
+
+echo -e "  ${CYAN}── Missing URL${NC}"
+OUTPUT=$($CLI duplicate-check 2>&1)
+assert_contains "Missing URL" "$OUTPUT" "Usage"
+
+# ═══════════════════════════════════════════════════
 # CLEANUP
 # ═══════════════════════════════════════════════════
 echo ""
-echo -e "${YELLOW}44. Cleanup${NC}"
+echo -e "${YELLOW}48. Cleanup${NC}"
 $CLI trash empty >/dev/null 2>&1
 rm -f ~/CiderVault/Inbox/Notes/CiderTest*.md 2>/dev/null
 rm -f ~/CiderVault/Inbox/Todos/CiderTest*.ics 2>/dev/null

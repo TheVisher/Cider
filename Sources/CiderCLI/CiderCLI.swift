@@ -58,6 +58,14 @@ struct CiderCLI {
             handleTrash(subcommand: subcommand, args: remaining)
         case "status":
             handleStatus()
+        case "recent":
+            handleRecent(args: Array(args.dropFirst()))
+        case "snapshot":
+            handleSnapshot()
+        case "query":
+            await handleQuery(args: Array(args.dropFirst()))
+        case "duplicate-check", "dupecheck":
+            handleDuplicateCheck(args: Array(args.dropFirst()))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -1097,6 +1105,484 @@ struct CiderCLI {
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Recent
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleRecent(args: [String]) {
+        let hoursStr = parseFlag("--hours", from: args) ?? "24"
+        let hours = Double(hoursStr) ?? 24
+        let cutoff = Date().addingTimeInterval(-hours * 3600)
+        let typeFilter = parseFlag("--type", from: args)?.lowercased()
+        let limitStr = parseFlag("--limit", from: args)
+        let limit = Int(limitStr ?? "") ?? 50
+
+        struct RecentItem {
+            let type: String
+            let id: String
+            let title: String
+            let date: Date
+            let subtitle: String?
+            func toDict() -> [String: Any] {
+                var d: [String: Any] = ["type": type, "id": id, "title": title,
+                    "date": ISO8601DateFormatter().string(from: date)]
+                if let s = subtitle { d["subtitle"] = s }
+                return d
+            }
+        }
+
+        var items: [RecentItem] = []
+
+        if typeFilter == nil || typeFilter == "bookmark" {
+            for bm in VaultBookmarkService.shared.bookmarks where bm.createdAt >= cutoff {
+                items.append(RecentItem(type: "bookmark", id: bm.id.uuidString,
+                    title: bm.title, date: bm.createdAt, subtitle: bm.hostDisplay))
+            }
+        }
+        if typeFilter == nil || typeFilter == "note" {
+            for note in NotesStorage.shared.notes where note.createdAt >= cutoff {
+                items.append(RecentItem(type: "note", id: note.id.uuidString,
+                    title: note.title, date: note.createdAt, subtitle: nil))
+            }
+        }
+        if typeFilter == nil || typeFilter == "todo" {
+            for todo in TodoCardStorage.shared.todoCards where todo.createdAt >= cutoff {
+                items.append(RecentItem(type: "todo", id: todo.id.uuidString,
+                    title: todo.title, date: todo.createdAt,
+                    subtitle: todo.isCompleted ? "completed" : "active"))
+            }
+        }
+        if typeFilter == nil || typeFilter == "event" {
+            for card in DateCardStorage.shared.dateCards where card.createdAt >= cutoff {
+                items.append(RecentItem(type: "event", id: card.id.uuidString,
+                    title: card.title, date: card.createdAt,
+                    subtitle: dateFormatter.string(from: card.startAt)))
+            }
+        }
+        if typeFilter == nil || typeFilter == "contact" {
+            for c in ContactStorage.shared.contacts where c.createdAt >= cutoff {
+                items.append(RecentItem(type: "contact", id: c.id.uuidString,
+                    title: c.displayName, date: c.createdAt, subtitle: nil))
+            }
+        }
+        if typeFilter == nil || typeFilter == "file" || typeFilter == "image" {
+            for f in VaultFileService.shared.files where f.createdAt >= cutoff {
+                if typeFilter == "image" && f.fileType != .image { continue }
+                items.append(RecentItem(type: "file", id: f.id.uuidString,
+                    title: f.displayTitle, date: f.createdAt,
+                    subtitle: f.fileType.rawValue))
+            }
+        }
+
+        items.sort { $0.date > $1.date }
+        let results = Array(items.prefix(limit))
+
+        if jsonOutput {
+            outputJSON(results.map { $0.toDict() })
+        } else {
+            let label = hours >= 24 ? "\(Int(hours / 24)) day\(hours >= 48 ? "s" : "")" : "\(Int(hours)) hour\(hours > 1 ? "s" : "")"
+            print("Recent items (last \(label), \(results.count) found):")
+            let icons = ["bookmark": "🔖", "note": "📝", "todo": "☑️", "event": "📅",
+                         "contact": "👤", "file": "📎"]
+            let relFormatter = RelativeDateTimeFormatter()
+            relFormatter.unitsStyle = .abbreviated
+            for item in results {
+                let icon = icons[item.type] ?? "📦"
+                let ago = relFormatter.localizedString(for: item.date, relativeTo: Date())
+                let sub = item.subtitle.map { " — \($0)" } ?? ""
+                print("  \(icon) [\(item.id.prefix(8))] \(item.title)\(sub) (\(ago))")
+            }
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Snapshot
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleSnapshot() {
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
+        let events = DateCardStorage.shared.dateCards
+        let contacts = ContactStorage.shared.contacts
+        let files = VaultFileService.shared.files
+        let sessions = BrowserSessionStorage.shared.sessions
+        let folders = VaultFolderService.shared.folders
+        let labels = CardLabelStorage.shared.labels
+        let boards = KanbanStorage.shared.boards
+        let trash = TrashStorage.shared.allTrashItems()
+
+        let now = Date()
+        let dayAgo = now.addingTimeInterval(-86400)
+        let weekAgo = now.addingTimeInterval(-604800)
+
+        // Count recent items
+        let recentBookmarks24h = bookmarks.filter { $0.createdAt >= dayAgo }.count
+        let recentBookmarks7d = bookmarks.filter { $0.createdAt >= weekAgo }.count
+        let recentNotes24h = notes.filter { $0.createdAt >= dayAgo }.count
+        let recentNotes7d = notes.filter { $0.createdAt >= weekAgo }.count
+
+        // Tag frequency
+        var tagCounts: [String: Int] = [:]
+        for label in labels {
+            let count = bookmarks.filter { $0.labelIDs.contains(label.id) }.count
+                + notes.filter { $0.labelIDs.contains(label.id) }.count
+            if count > 0 { tagCounts[label.name] = count }
+        }
+        let topTags = tagCounts.sorted { $0.value > $1.value }.prefix(15)
+
+        // Folder item counts
+        var folderCounts: [(String, Int)] = []
+        let inboxCount = bookmarks.filter { $0.folderID == nil }.count
+            + notes.filter { $0.folderID == nil }.count
+        folderCounts.append(("Inbox", inboxCount))
+        for folder in folders {
+            let bmCount = bookmarks.filter { $0.folderID == folder.id }.count
+            let noteCount = notes.filter { $0.folderID == folder.id }.count
+            let todoCount = todos.filter { $0.folderID == folder.id }.count
+            let fileCount = files.filter { $0.folderID == folder.id }.count
+            let count = bmCount + noteCount + todoCount + fileCount
+            if count > 0 { folderCounts.append((folder.name, count)) }
+        }
+        folderCounts.sort { $0.1 > $1.1 }
+
+        if jsonOutput {
+            var d: [String: Any] = statusToDict()
+            d["recentBookmarks24h"] = recentBookmarks24h
+            d["recentBookmarks7d"] = recentBookmarks7d
+            d["recentNotes24h"] = recentNotes24h
+            d["recentNotes7d"] = recentNotes7d
+            d["topTags"] = topTags.map { ["name": $0.key, "count": $0.value] as [String: Any] }
+            d["folderCounts"] = folderCounts.map { ["name": $0.0, "count": $0.1] as [String: Any] }
+            d["activeTodos"] = todos.filter { !$0.isCompleted }.map {
+                ["id": $0.id.uuidString, "title": $0.title,
+                 "priority": $0.priority?.rawValue ?? "none"] as [String: Any]
+            }
+            outputJSON(d)
+        } else {
+            print("Cider Vault Snapshot")
+            print("════════════════════════════════════════")
+            print("")
+            print("  ITEMS")
+            print("  ─────")
+            print("  Bookmarks:    \(bookmarks.count)  (+\(recentBookmarks24h) today, +\(recentBookmarks7d) this week)")
+            print("  Notes:        \(notes.count)  (+\(recentNotes24h) today, +\(recentNotes7d) this week)")
+            print("  Todos:        \(todos.filter { !$0.isCompleted }.count) active / \(todos.count) total")
+            print("  Events:       \(events.count)")
+            print("  Contacts:     \(contacts.count)")
+            print("  Files:        \(files.count) (\(files.filter { $0.fileType == .image }.count) images)")
+            print("  Sessions:     \(sessions.count)")
+            print("  Trash:        \(trash.count)")
+            print("")
+            print("  FOLDERS (\(folders.count))")
+            print("  ───────")
+            for (name, count) in folderCounts.prefix(20) {
+                print("  📁 \(name): \(count) items")
+            }
+            if !topTags.isEmpty {
+                print("")
+                print("  TOP TAGS")
+                print("  ────────")
+                for (name, count) in topTags {
+                    print("  🏷️  \(name): \(count)")
+                }
+            }
+            let activeTodos = todos.filter { !$0.isCompleted }
+            if !activeTodos.isEmpty {
+                print("")
+                print("  ACTIVE TODOS")
+                print("  ────────────")
+                for todo in activeTodos.prefix(10) {
+                    let priority = todo.priority.map { " [\($0.rawValue)]" } ?? ""
+                    let due = todo.dueDate.map { " due:\(dateFormatter.string(from: $0))" } ?? ""
+                    print("  ☑️  \(todo.title)\(priority)\(due)")
+                }
+            }
+            print("")
+            print("  Vault: \(StoragePaths.cachedVaultDirectoryURL.path)")
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Query (natural language search)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleQuery(args: [String]) async {
+        let raw = args.filter { $0 != "--json" }.joined(separator: " ")
+        guard !raw.isEmpty else {
+            print("Usage: cider-cli query \"restaurants I saved last week\"")
+            print("Parses natural language time ranges and searches across all fields.")
+            return
+        }
+
+        // Parse time expressions from the query
+        let (keywords, dateRange) = parseNaturalQuery(raw)
+
+        // Search across all types
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
+        let events = DateCardStorage.shared.dateCards
+        let contacts = ContactStorage.shared.contacts
+        let files = VaultFileService.shared.files
+
+        struct QueryResult {
+            let type: String; let id: String; let title: String
+            let date: Date; let subtitle: String?; let score: Int
+            func toDict() -> [String: Any] {
+                var d: [String: Any] = ["type": type, "id": id, "title": title,
+                    "date": ISO8601DateFormatter().string(from: date), "score": score]
+                if let s = subtitle { d["subtitle"] = s }
+                return d
+            }
+        }
+
+        var results: [QueryResult] = []
+        let query = keywords.lowercased()
+
+        // Search bookmarks (title, URL, notes, tags, AI summary, OCR)
+        for bm in bookmarks {
+            if let range = dateRange, bm.createdAt < range.start || bm.createdAt > range.end { continue }
+            var score = 0
+            if bm.title.lowercased().contains(query) { score += 10 }
+            if bm.urlString.lowercased().contains(query) { score += 5 }
+            if bm.notes.lowercased().contains(query) { score += 8 }
+            if bm.tags.contains(where: { $0.lowercased().contains(query) }) { score += 7 }
+            if let summary = bm.aiSummary, summary.lowercased().contains(query) { score += 6 }
+            if let ocr = bm.ocrText, ocr.lowercased().contains(query) { score += 3 }
+            // Check label names
+            let labelNames = bm.labelIDs.compactMap { id in
+                CardLabelStorage.shared.labels.first(where: { $0.id == id })?.name.lowercased()
+            }
+            if labelNames.contains(where: { $0.contains(query) }) { score += 7 }
+            // If no keywords but date range matched, include it
+            if query.isEmpty && dateRange != nil { score = 5 }
+            if score > 0 {
+                results.append(QueryResult(type: "bookmark", id: bm.id.uuidString,
+                    title: bm.title, date: bm.createdAt,
+                    subtitle: bm.hostDisplay, score: score))
+            }
+        }
+
+        // Search notes
+        for note in notes {
+            if let range = dateRange, note.createdAt < range.start || note.createdAt > range.end { continue }
+            var score = 0
+            if note.title.lowercased().contains(query) { score += 10 }
+            if note.content.lowercased().contains(query) { score += 6 }
+            if query.isEmpty && dateRange != nil { score = 5 }
+            if score > 0 {
+                results.append(QueryResult(type: "note", id: note.id.uuidString,
+                    title: note.title, date: note.createdAt, subtitle: nil, score: score))
+            }
+        }
+
+        // Search todos
+        for todo in todos {
+            if let range = dateRange, todo.createdAt < range.start || todo.createdAt > range.end { continue }
+            var score = 0
+            if todo.title.lowercased().contains(query) { score += 10 }
+            if todo.details.lowercased().contains(query) { score += 6 }
+            if query.isEmpty && dateRange != nil { score = 5 }
+            if score > 0 {
+                results.append(QueryResult(type: "todo", id: todo.id.uuidString,
+                    title: todo.title, date: todo.createdAt,
+                    subtitle: todo.isCompleted ? "completed" : "active", score: score))
+            }
+        }
+
+        // Search events
+        for card in events {
+            if let range = dateRange, card.createdAt < range.start || card.createdAt > range.end { continue }
+            var score = 0
+            if card.title.lowercased().contains(query) { score += 10 }
+            if card.details.lowercased().contains(query) { score += 6 }
+            if !card.location.isEmpty && card.location.lowercased().contains(query) { score += 8 }
+            if query.isEmpty && dateRange != nil { score = 5 }
+            if score > 0 {
+                results.append(QueryResult(type: "event", id: card.id.uuidString,
+                    title: card.title, date: card.createdAt,
+                    subtitle: dateFormatter.string(from: card.startAt), score: score))
+            }
+        }
+
+        // Search contacts
+        for c in contacts {
+            if let range = dateRange, c.createdAt < range.start || c.createdAt > range.end { continue }
+            var score = 0
+            if c.displayName.lowercased().contains(query) { score += 10 }
+            if c.email.lowercased().contains(query) { score += 8 }
+            if c.notes.lowercased().contains(query) { score += 6 }
+            if query.isEmpty && dateRange != nil { score = 5 }
+            if score > 0 {
+                results.append(QueryResult(type: "contact", id: c.id.uuidString,
+                    title: c.displayName, date: c.createdAt,
+                    subtitle: c.email.isEmpty ? nil : c.email, score: score))
+            }
+        }
+
+        // Search vault files
+        for f in files {
+            if let range = dateRange, f.createdAt < range.start || f.createdAt > range.end { continue }
+            var score = 0
+            if f.displayTitle.lowercased().contains(query) { score += 10 }
+            if f.notes.lowercased().contains(query) { score += 6 }
+            if let ocr = f.ocrText, ocr.lowercased().contains(query) { score += 3 }
+            if query.isEmpty && dateRange != nil { score = 5 }
+            if score > 0 {
+                results.append(QueryResult(type: "file", id: f.id.uuidString,
+                    title: f.displayTitle, date: f.createdAt,
+                    subtitle: f.fileType.rawValue, score: score))
+            }
+        }
+
+        results.sort { $0.score != $1.score ? $0.score > $1.score : $0.date > $1.date }
+
+        if jsonOutput {
+            outputJSON(results.map { $0.toDict() })
+        } else {
+            var desc = "Query: \(raw)"
+            if let range = dateRange {
+                desc += " (date: \(dateFormatter.string(from: range.start)) to \(dateFormatter.string(from: range.end)))"
+            }
+            if !keywords.isEmpty { desc += " (keywords: \(keywords))" }
+            print("\(desc)")
+            print("\(results.count) results:")
+            let icons = ["bookmark": "🔖", "note": "📝", "todo": "☑️", "event": "📅",
+                         "contact": "👤", "file": "📎"]
+            for result in results.prefix(30) {
+                let icon = icons[result.type] ?? "📦"
+                let sub = result.subtitle.map { " — \($0)" } ?? ""
+                print("  \(icon) [\(result.id.prefix(8))] \(result.title)\(sub)")
+            }
+        }
+    }
+
+    /// Parses natural language time expressions from a query string.
+    /// Returns (remaining keywords, optional date range).
+    static func parseNaturalQuery(_ input: String) -> (String, (start: Date, end: Date)?) {
+        let lower = input.lowercased()
+        let now = Date()
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+
+        var dateRange: (start: Date, end: Date)?
+        var keywords = input
+
+        // Time patterns — order matters (longest match first)
+        let patterns: [(String, (start: Date, end: Date))] = [
+            ("last 2 weeks", (calendar.date(byAdding: .day, value: -14, to: startOfToday)!, now)),
+            ("last two weeks", (calendar.date(byAdding: .day, value: -14, to: startOfToday)!, now)),
+            ("past 2 weeks", (calendar.date(byAdding: .day, value: -14, to: startOfToday)!, now)),
+            ("last week", (calendar.date(byAdding: .day, value: -7, to: startOfToday)!, now)),
+            ("past week", (calendar.date(byAdding: .day, value: -7, to: startOfToday)!, now)),
+            ("this week", (calendar.date(byAdding: .day, value: -7, to: startOfToday)!, now)),
+            ("last month", (calendar.date(byAdding: .month, value: -1, to: startOfToday)!, now)),
+            ("past month", (calendar.date(byAdding: .month, value: -1, to: startOfToday)!, now)),
+            ("this month", (calendar.date(byAdding: .month, value: -1, to: startOfToday)!, now)),
+            ("last 3 days", (calendar.date(byAdding: .day, value: -3, to: startOfToday)!, now)),
+            ("last 3 months", (calendar.date(byAdding: .month, value: -3, to: startOfToday)!, now)),
+            ("last 6 months", (calendar.date(byAdding: .month, value: -6, to: startOfToday)!, now)),
+            ("last year", (calendar.date(byAdding: .year, value: -1, to: startOfToday)!, now)),
+            ("yesterday", (calendar.date(byAdding: .day, value: -1, to: startOfToday)!,
+                           startOfToday)),
+            ("today", (startOfToday, now)),
+            ("this year", (calendar.date(from: calendar.dateComponents([.year], from: now))!, now)),
+            ("recently", (calendar.date(byAdding: .day, value: -3, to: startOfToday)!, now)),
+        ]
+
+        for (phrase, range) in patterns {
+            if lower.contains(phrase) {
+                dateRange = range
+                // Remove the time phrase from keywords
+                let keywordRange = lower.range(of: phrase)!
+                var cleaned = input
+                cleaned.removeSubrange(keywordRange)
+                keywords = cleaned
+                break
+            }
+        }
+
+        // Also match "N days ago", "N weeks ago"
+        if dateRange == nil {
+            let daysAgoPattern = try? NSRegularExpression(pattern: "(\\d+)\\s+days?\\s+ago", options: .caseInsensitive)
+            if let match = daysAgoPattern?.firstMatch(in: input, range: NSRange(input.startIndex..., in: input)),
+               let numRange = Range(match.range(at: 1), in: input),
+               let days = Int(input[numRange]) {
+                dateRange = (calendar.date(byAdding: .day, value: -days, to: startOfToday)!, now)
+                let fullRange = Range(match.range, in: input)!
+                keywords = input.replacingCharacters(in: fullRange, with: "")
+            }
+            let weeksAgoPattern = try? NSRegularExpression(pattern: "(\\d+)\\s+weeks?\\s+ago", options: .caseInsensitive)
+            if dateRange == nil, let match = weeksAgoPattern?.firstMatch(in: input, range: NSRange(input.startIndex..., in: input)),
+               let numRange = Range(match.range(at: 1), in: input),
+               let weeks = Int(input[numRange]) {
+                dateRange = (calendar.date(byAdding: .day, value: -weeks * 7, to: startOfToday)!, now)
+                let fullRange = Range(match.range, in: input)!
+                keywords = input.replacingCharacters(in: fullRange, with: "")
+            }
+        }
+
+        // Clean up keywords
+        keywords = keywords
+            .replacingOccurrences(of: "I saved", with: "")
+            .replacingOccurrences(of: "i saved", with: "")
+            .replacingOccurrences(of: "I added", with: "")
+            .replacingOccurrences(of: "i added", with: "")
+            .replacingOccurrences(of: "saved", with: "")
+            .replacingOccurrences(of: "from", with: "")
+            .replacingOccurrences(of: "about", with: "")
+            .replacingOccurrences(of: "related to", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return (keywords, dateRange)
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Duplicate Check
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleDuplicateCheck(args: [String]) {
+        guard let url = args.first else {
+            print("Usage: cider-cli duplicate-check <url>")
+            return
+        }
+
+        let normalized = url.lowercased()
+            .replacingOccurrences(of: "https://www.", with: "https://")
+            .replacingOccurrences(of: "http://www.", with: "http://")
+            .replacingOccurrences(of: "http://", with: "https://")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        let matches = VaultBookmarkService.shared.bookmarks.filter { bm in
+            let bmNorm = bm.urlString.lowercased()
+                .replacingOccurrences(of: "https://www.", with: "https://")
+                .replacingOccurrences(of: "http://www.", with: "http://")
+                .replacingOccurrences(of: "http://", with: "https://")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return bmNorm == normalized || bmNorm.hasPrefix(normalized) || normalized.hasPrefix(bmNorm)
+        }
+
+        if jsonOutput {
+            outputJSON([
+                "url": url,
+                "isDuplicate": !matches.isEmpty,
+                "matches": matches.map(bookmarkToDict),
+            ] as [String: Any])
+        } else {
+            if matches.isEmpty {
+                print("No duplicates found for: \(url)")
+            } else {
+                print("⚠️  Found \(matches.count) duplicate\(matches.count > 1 ? "s" : ""):")
+                for bm in matches {
+                    let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    print("  [\(bm.id.uuidString.prefix(8))] \(bm.title) (\(folder))")
+                    print("    \(bm.urlString)")
+                }
+            }
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Helpers
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1213,6 +1699,21 @@ struct CiderCLI {
 
         STATUS
           cider-cli status
+
+        RECENT
+          cider-cli recent [--hours <n>] [--type bookmark|note|todo|event|contact|file|image] [--limit <n>]
+
+        SNAPSHOT
+          cider-cli snapshot
+
+        QUERY (natural language search)
+          cider-cli query "restaurants I saved last week"
+          cider-cli query "notes from yesterday"
+          cider-cli query "bookmarks about AI this month"
+          Time: today, yesterday, recently, last week, last month, this year, N days ago, N weeks ago
+
+        DUPLICATE CHECK
+          cider-cli duplicate-check <url>
         """)
     }
 }
