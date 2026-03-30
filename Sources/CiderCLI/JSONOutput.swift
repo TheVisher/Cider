@@ -102,7 +102,10 @@ func outputJSON(_ value: Any) {
     ]
     if !contact.email.isEmpty { d["email"] = contact.email }
     if !contact.phone.isEmpty { d["phone"] = contact.phone }
+    if !contact.address.isEmpty { d["address"] = contact.address }
     if !contact.notes.isEmpty { d["notes"] = contact.notes }
+    if !contact.relationshipLabel.isEmpty { d["relationship"] = contact.relationshipLabel }
+    if let birthday = contact.birthday { d["birthday"] = ISO8601DateFormatter().string(from: birthday) }
     return d
 }
 

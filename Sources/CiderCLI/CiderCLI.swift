@@ -591,9 +591,23 @@ struct CiderCLI {
 
         case "create":
             let name = args.first ?? "New Contact"
-            let email = parseFlag("--email", from: args) ?? ""
-            let phone = parseFlag("--phone", from: args) ?? ""
-            let contact = storage.createContact(displayName: name)
+            let email = parseFlag("--email", from: args)
+            let phone = parseFlag("--phone", from: args)
+            let address = parseFlag("--address", from: args)
+            let notes = parseFlag("--notes", from: args)
+            let relationship = parseFlag("--relationship", from: args)
+            let birthdayStr = parseFlag("--birthday", from: args)
+            var contact = storage.createContact(displayName: name)
+            var needsUpdate = false
+            if let email { contact.email = email; needsUpdate = true }
+            if let phone { contact.phone = phone; needsUpdate = true }
+            if let address { contact.address = address; needsUpdate = true }
+            if let notes { contact.notes = notes; needsUpdate = true }
+            if let relationship { contact.relationshipLabel = relationship; needsUpdate = true }
+            if let birthdayStr, let birthday = dateFormatter.date(from: birthdayStr) {
+                contact.birthday = birthday; needsUpdate = true
+            }
+            if needsUpdate { _ = storage.updateContact(contact) }
             print("Created contact: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
 
         case "delete", "rm":
@@ -612,7 +626,7 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli contact update <id> [--name <name>] [--email <email>] [--phone <phone>] [--notes <notes>]")
+                print("Error: ID prefix required. Usage: cider-cli contact update <id> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]")
                 return
             }
             if var contact = storage.contacts.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
@@ -620,7 +634,12 @@ struct CiderCLI {
                 if let n = parseFlag("--name", from: args) { contact.displayName = n; changed = true }
                 if let e = parseFlag("--email", from: args) { contact.email = e; changed = true }
                 if let p = parseFlag("--phone", from: args) { contact.phone = p; changed = true }
+                if let a = parseFlag("--address", from: args) { contact.address = a; changed = true }
+                if let r = parseFlag("--relationship", from: args) { contact.relationshipLabel = r; changed = true }
                 if let notes = parseFlag("--notes", from: args) { contact.notes = notes; changed = true }
+                if let bday = parseFlag("--birthday", from: args), let date = dateFormatter.date(from: bday) {
+                    contact.birthday = date; changed = true
+                }
                 if changed {
                     _ = storage.updateContact(contact)
                     print("Updated: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
@@ -1658,9 +1677,9 @@ struct CiderCLI {
 
         CONTACTS
           cider-cli contact list
-          cider-cli contact create <name> [--email <email>] [--phone <phone>]
+          cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
           cider-cli contact delete <id-prefix>
-          cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--notes <n>]
+          cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
 
         FILES
           cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name>]
