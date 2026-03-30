@@ -523,10 +523,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showCanvas()
             }
             .store(in: &cancellables)
+
+        // When canvas window closes, revert to accessory app (no Dock icon)
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window)
+            .receive(on: DispatchQueue.main)
+            .sink { _ in
+                NSApp.setActivationPolicy(.accessory)
+            }
+            .store(in: &cancellables)
     }
 
     func showCanvas() {
         guard let window = canvasWindow else { return }
+
+        // Switch to regular app so the window appears in Dock, Cmd+Tab, and Stage Manager
+        NSApp.setActivationPolicy(.regular)
+
         if window.isVisible {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -537,6 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Sync theme with current appearance
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         canvasViewModel?.setTheme(isDark ? "dark" : "light")
+
     }
 
     // MARK: - Notes

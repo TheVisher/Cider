@@ -279,3 +279,42 @@ html, body, #root {
   background: var(--tag-color);
   flex-shrink: 0;
 }
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Level of Detail (LOD) — hide heavy elements when zoomed out
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+/* Medium zoom (0.5–0.8): hide tags, simplify cards */
+.zoom-medium .card-tags,
+.zoom-medium .card-ai-badge {
+  display: none;
+}
+
+/* Small zoom (0.25–0.5): hide thumbnails, show only title + domain */
+.zoom-small .card-thumbnail {
+  display: none;
+}
+
+.zoom-small .card-tags,
+.zoom-small .card-ai-badge {
+  display: none;
+}
+
+.zoom-small .card-meta .card-favicon {
+  display: none;
+}
+
+/* Tiny zoom (<0.25): minimal card — just a colored rectangle */
+.zoom-tiny .card-thumbnail {
+  display: none;
+}
+
+.zoom-tiny .card-content {
+  display: none;
+}
+
+.zoom-tiny .bookmark-card {
+  height: 40px;
+  min-height: 40px;
+  background: var(--card-bg-hover);
+}

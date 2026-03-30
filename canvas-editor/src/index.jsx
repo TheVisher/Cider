@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ReactFlow,
@@ -300,9 +300,20 @@ function CanvasApp() {
   }, [reactFlowInstance, setNodes, setEdges]);
 
   const isDark = theme === 'dark';
+  const containerRef = useRef(null);
+
+  // Track zoom level and set CSS classes for LOD (level of detail)
+  const onViewportChange = useCallback((viewport) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const zoom = viewport.zoom;
+    el.classList.toggle('zoom-tiny', zoom < 0.25);
+    el.classList.toggle('zoom-small', zoom >= 0.25 && zoom < 0.5);
+    el.classList.toggle('zoom-medium', zoom >= 0.5 && zoom < 0.8);
+  }, []);
 
   return (
-    <div className={`canvas-container ${isDark ? 'dark' : 'light'}`}>
+    <div ref={containerRef} className={`canvas-container ${isDark ? 'dark' : 'light'}`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -310,6 +321,7 @@ function CanvasApp() {
         onEdgesChange={handleEdgesChange}
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
+        onViewportChange={onViewportChange}
         nodeTypes={nodeTypes}
         fitView
         minZoom={0.1}

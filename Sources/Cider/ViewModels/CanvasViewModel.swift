@@ -19,7 +19,72 @@ final class CanvasViewModel: ObservableObject {
     @Published private(set) var isReady = false
     @Published var selectedItemID: String?
 
-    init() {}
+    /// Latest canvas JSON from JS — used for flush-saves without JS round-trip.
+    private var latestCanvasJSON: String?
+    private var saveTask: Task<Void, Never>?
+    private var terminationObserver: NSObjectProtocol?
+
+    init() {
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.flushSave() }
+        }
+    }
+
+    // MARK: - Storage
+
+    private var canvasesDirectory: URL {
+        StoragePaths.vaultDirectoryURL()
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("canvases", isDirectory: true)
+    }
+
+    private var defaultCanvasFileURL: URL {
+        canvasesDirectory.appendingPathComponent("default.canvas.json")
+    }
+
+    private func ensureCanvasesDirectory() {
+        try? FileManager.default.createDirectory(
+            at: canvasesDirectory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    private func loadSavedCanvas() -> String? {
+        guard FileManager.default.fileExists(atPath: defaultCanvasFileURL.path) else {
+            return nil
+        }
+        return try? String(contentsOf: defaultCanvasFileURL, encoding: .utf8)
+    }
+
+    private func saveCanvasJSON(_ json: String) {
+        ensureCanvasesDirectory()
+        try? json.write(to: defaultCanvasFileURL, atomically: true, encoding: .utf8)
+        Self.logger.debug("Saved canvas state (\(json.count) chars)")
+    }
+
+    func flushSave() {
+        saveTask?.cancel()
+        saveTask = nil
+
+        guard let json = latestCanvasJSON else { return }
+        saveCanvasJSON(json)
+        latestCanvasJSON = nil
+    }
+
+    private func scheduleDebouncedSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.flushSave()
+        }
+    }
+
+    // MARK: - WebView Setup
 
     @discardableResult
     func ensureWebView() -> WKWebView {
@@ -58,12 +123,99 @@ final class CanvasViewModel: ObservableObject {
         return webView
     }
 
-    // MARK: - Bridge: Swift → JS
+    // MARK: - Canvas Loading
 
-    /// Load demo bookmark items onto the canvas for POC testing.
-    func loadDemoItems() {
+    /// Called when JS signals ready. Loads saved canvas or generates initial layout.
+    func onCanvasReady() {
+        isReady = true
+        Self.logger.info("Canvas editor ready")
+
+        if let savedJSON = loadSavedCanvas() {
+            // Restore saved canvas — but refresh metadata (thumbnails, tags may have changed)
+            loadCanvasWithFreshMetadata(savedJSON)
+        } else {
+            // No saved canvas — generate initial layout from all bookmarks
+            loadAllBookmarks()
+        }
+    }
+
+    /// Load a saved canvas JSON, but refresh each item's metadata from the vault.
+    private func loadCanvasWithFreshMetadata(_ savedJSON: String) {
+        guard let webView = canvasWebView else { return }
+
+        // Parse the saved JSON to get the node list
+        guard let data = savedJSON.data(using: .utf8),
+              let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let nodes = saved["nodes"] as? [[String: Any]] else {
+            // Corrupt save — fall back to initial layout
+            loadAllBookmarks()
+            return
+        }
+
         let bookmarkService = VaultBookmarkService.shared
-        let bookmarks = Array(bookmarkService.bookmarks.prefix(12))
+
+        // Build a set of item IDs already on the canvas
+        let canvasItemIDs = Set(nodes.compactMap { $0["itemID"] as? String })
+
+        // Rebuild nodes with fresh metadata
+        var refreshedNodes: [[String: Any]] = []
+        for node in nodes {
+            guard let itemID = node["itemID"] as? String,
+                  let uuid = UUID(uuidString: itemID),
+                  let bookmark = bookmarkService.bookmarks.first(where: { $0.id == uuid }) else {
+                continue // Skip orphaned nodes (item deleted from vault)
+            }
+
+            var refreshed = node
+            var meta = bookmarkMetadata(for: bookmark)
+            meta["itemID"] = itemID
+            meta["itemType"] = node["itemType"] as? String ?? "bookmark"
+            refreshed["metadata"] = meta
+            refreshedNodes.append(refreshed)
+        }
+
+        // Find bookmarks NOT yet on the canvas — add them at inbox position
+        let inboxX: CGFloat = 0
+        var inboxY: CGFloat = 0
+        for bookmark in bookmarkService.bookmarks {
+            let idString = bookmark.id.uuidString
+            guard !canvasItemIDs.contains(idString) else { continue }
+
+            var meta = bookmarkMetadata(for: bookmark)
+            meta["itemID"] = idString
+            meta["itemType"] = "bookmark"
+
+            let node: [String: Any] = [
+                "id": "node-\(idString)",
+                "itemID": idString,
+                "itemType": "bookmark",
+                "position": ["x": inboxX, "y": inboxY],
+                "nodeType": "bookmarkCard",
+                "metadata": meta,
+            ]
+            refreshedNodes.append(node)
+            inboxY += 260
+        }
+
+        // Rebuild the canvas JSON with refreshed nodes
+        var rebuilt = saved
+        rebuilt["nodes"] = refreshedNodes
+
+        if let rebuiltData = try? JSONSerialization.data(withJSONObject: rebuilt),
+           let rebuiltJSON = String(data: rebuiltData, encoding: .utf8) {
+            let escaped = escapeForJS(rebuiltJSON)
+            webView.evaluateJavaScript("window.canvasBridge?.loadCanvas('\(escaped)')") { _, error in
+                if let error {
+                    Self.logger.error("loadCanvas JS error: \(error)")
+                }
+            }
+        }
+    }
+
+    /// Generate initial canvas layout from all bookmarks in the vault.
+    func loadAllBookmarks() {
+        let bookmarkService = VaultBookmarkService.shared
+        let bookmarks = bookmarkService.bookmarks
 
         guard !bookmarks.isEmpty else {
             Self.logger.warning("No bookmarks available to load onto canvas")
@@ -85,6 +237,8 @@ final class CanvasViewModel: ObservableObject {
             placeItem(uuid: bookmark.id.uuidString, type: "bookmark", x: x, y: y, metadata: metadata)
         }
     }
+
+    // MARK: - Bridge: Swift → JS
 
     /// Place a single item on the canvas.
     func placeItem(uuid: String, type: String, x: CGFloat, y: CGFloat, metadata: [String: Any]) {
@@ -138,20 +292,14 @@ final class CanvasViewModel: ObservableObject {
 
     // MARK: - Bridge: JS → Swift (called by coordinator)
 
-    func markReady() {
-        isReady = true
-        Self.logger.info("Canvas editor ready")
-    }
-
     func handleCanvasChanged(_ jsonString: String) {
-        // POC: just log that we received changes. Persistence comes later.
-        Self.logger.debug("Canvas state changed (\(jsonString.count) chars)")
+        latestCanvasJSON = jsonString
+        scheduleDebouncedSave()
     }
 
     func handleItemClicked(uuid: String, type: String) {
         Self.logger.info("Item clicked: \(uuid) (\(type))")
         selectedItemID = uuid
-        // In the future this opens the NSPanel in inspector mode
         NotificationCenter.default.post(
             name: .canvasItemSelected,
             object: nil,
@@ -161,7 +309,6 @@ final class CanvasViewModel: ObservableObject {
 
     func handleItemDoubleClicked(uuid: String, type: String) {
         Self.logger.info("Item double-clicked: \(uuid) (\(type))")
-        // In the future this opens the item for editing
     }
 
     // MARK: - Helpers
@@ -234,9 +381,7 @@ final class CanvasCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDel
 
             switch message.name {
             case "canvasReady":
-                viewModel.markReady()
-                // Auto-load demo items for POC
-                viewModel.loadDemoItems()
+                viewModel.onCanvasReady()
 
             case "canvasChanged":
                 if let jsonString = message.body as? String {
