@@ -531,6 +531,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.setActivationPolicy(.accessory)
             }
             .store(in: &cancellables)
+
+        // When a canvas card is clicked, show the panel with bookmark details
+        NotificationCenter.default.publisher(for: .canvasItemSelected)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID else { return }
+                // Show the panel first
+                self?.showCiderPanel()
+                // Then open the bookmark details (slight delay for panel to become visible)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NotificationCenter.default.post(
+                        name: .openBookmarkDetails,
+                        object: nil,
+                        userInfo: ["bookmarkID": bookmarkID]
+                    )
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func showCanvas() {

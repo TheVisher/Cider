@@ -300,10 +300,14 @@ final class CanvasViewModel: ObservableObject {
     func handleItemClicked(uuid: String, type: String) {
         Self.logger.info("Item clicked: \(uuid) (\(type))")
         selectedItemID = uuid
+
+        guard let bookmarkID = UUID(uuidString: uuid) else { return }
+
+        // Post canvas item selected — AppDelegate handles showing panel + opening details
         NotificationCenter.default.post(
             name: .canvasItemSelected,
             object: nil,
-            userInfo: ["uuid": uuid, "type": type]
+            userInfo: ["bookmarkID": bookmarkID, "type": type]
         )
     }
 
