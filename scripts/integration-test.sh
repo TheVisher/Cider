@@ -155,6 +155,19 @@ rm -f ~/CiderVault/Inbox/Todos/CiderTest*.ics 2>/dev/null
 rm -f ~/CiderVault/Inbox/"Date Cards"/CiderTest*.ics 2>/dev/null
 rm -f ~/CiderVault/Inbox/Contacts/CiderTest*.vcf 2>/dev/null
 rm -rf ~/CiderVault/CiderTest* 2>/dev/null
+# Clean ghost entries from previous test runs
+for idx in contacts/_cider_contacts_index todos/_cider_todos_index date-cards/_cider_date_cards_index notes/_cider_notes_index; do
+    FILE="$HOME/CiderVault/.cider/${idx}.json"
+    if [ -f "$FILE" ]; then
+        python3 -c "
+import json
+with open('$FILE') as f: data = json.load(f)
+cleaned = {k: v for k, v in data.items() if 'CiderTest' not in v.get('filename', '')}
+if len(cleaned) != len(data):
+    with open('$FILE', 'w') as f: json.dump(cleaned, f, indent=2, sort_keys=True)
+" 2>/dev/null
+    fi
+done
 
 # ═══════════════════════════════════════════════════
 # 1. STATUS
@@ -1610,9 +1623,21 @@ rm -f ~/CiderVault/Inbox/Files/CiderTest*.txt 2>/dev/null
 rm -rf ~/CiderVault/CiderTest* 2>/dev/null
 # Clean auto-created labels from tag tests
 $CLI label delete "CiderTest${TEST_ID}Tag2" >/dev/null 2>&1
-# Clean nested test folders
-rm -rf ~/CiderVault/CiderTest* 2>/dev/null
-echo -e "  ${GREEN}✓${NC} Cleaned up"
+
+# Clean ghost entries from indexes (test creates entries, file cleanup leaves orphans)
+for idx in contacts/_cider_contacts_index todos/_cider_todos_index date-cards/_cider_date_cards_index notes/_cider_notes_index; do
+    FILE="$HOME/CiderVault/.cider/${idx}.json"
+    if [ -f "$FILE" ]; then
+        python3 -c "
+import json
+with open('$FILE') as f: data = json.load(f)
+cleaned = {k: v for k, v in data.items() if 'CiderTest' not in v.get('filename', '')}
+if len(cleaned) != len(data):
+    with open('$FILE', 'w') as f: json.dump(cleaned, f, indent=2, sort_keys=True)
+" 2>/dev/null
+    fi
+done
+echo -e "  ${GREEN}✓${NC} Cleaned up (files + indexes)"
 
 # ═══════════════════════════════════════════════════
 echo ""
