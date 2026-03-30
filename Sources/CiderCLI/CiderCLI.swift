@@ -136,16 +136,20 @@ struct CiderCLI {
             }
 
         case "search":
-            let query = args.joined(separator: " ")
+            let query = args.filter { $0 != "--json" }.joined(separator: " ")
             let results = service.bookmarks.filter {
                 $0.title.localizedCaseInsensitiveContains(query) ||
                 $0.urlString.localizedCaseInsensitiveContains(query) ||
                 $0.notes.localizedCaseInsensitiveContains(query) ||
                 ($0.ocrText ?? "").localizedCaseInsensitiveContains(query)
             }
-            print("Bookmark search '\(query)' (\(results.count)):")
-            for bm in results {
-                print("  [\(bm.id.uuidString.prefix(8))] \(bm.title) — \(bm.urlString)")
+            if jsonOutput {
+                outputJSON(results.map(bookmarkToDict))
+            } else {
+                print("Bookmark search '\(query)' (\(results.count)):")
+                for bm in results {
+                    print("  [\(bm.id.uuidString.prefix(8))] \(bm.title) — \(bm.urlString)")
+                }
             }
 
         case "move":
@@ -155,7 +159,16 @@ struct CiderCLI {
             }
             let folderName = parseFlag("--folder", from: args)
             if let bm = findBookmark(idPrefix, in: service) {
-                let folderID = folderName.flatMap { findFolder(named: $0)?.id }
+                let folderID: UUID?
+                if let name = folderName {
+                    guard let folder = findFolder(named: name) else {
+                        print("Error: No folder found named '\(name)'")
+                        return
+                    }
+                    folderID = folder.id
+                } else {
+                    folderID = nil
+                }
                 let oldFolder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
                 _ = service.assignBookmark(bm.id, toFolder: folderID)
                 let newFolder = folderName ?? "Inbox"
@@ -219,9 +232,32 @@ struct CiderCLI {
                 }
             }
 
+        case "update", "set":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <title>] [--notes <notes>] [--url <url>]")
+                return
+            }
+            if let bm = findBookmark(idPrefix, in: service) {
+                let newTitle = parseFlag("--title", from: args) ?? bm.title
+                let newNotes = parseFlag("--notes", from: args) ?? bm.notes
+                let newURL = parseFlag("--url", from: args)
+                let updated = service.updateDetails(
+                    for: bm.id,
+                    title: newTitle,
+                    notes: newNotes,
+                    tags: bm.tags,
+                    urlString: newURL
+                )
+                if updated {
+                    print("Updated: \(newTitle) (\(bm.id.uuidString.prefix(8)))")
+                } else {
+                    print("No changes to apply")
+                }
+            }
+
         default:
             print("Unknown bookmark command: \(subcommand ?? "nil")")
-            print("Commands: list, add, get, search, move, tag, untag, delete, enrich")
+            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update")
         }
     }
 
@@ -297,7 +333,16 @@ struct CiderCLI {
             }
             let folderName = parseFlag("--folder", from: args)
             if let note = findNote(idPrefix, in: storage) {
-                let folderID = folderName.flatMap { findFolder(named: $0)?.id }
+                let folderID: UUID?
+                if let name = folderName {
+                    guard let folder = findFolder(named: name) else {
+                        print("Error: No folder found named '\(name)'")
+                        return
+                    }
+                    folderID = folder.id
+                } else {
+                    folderID = nil
+                }
                 _ = storage.assignNote(note.id, toFolder: folderID)
                 print("Moved '\(note.title)' → \(folderName ?? "Inbox")")
             }
@@ -313,9 +358,35 @@ struct CiderCLI {
                 print("Deleted: \(note.title) (moved to trash)")
             }
 
+        case "update", "rename":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli note update <id> [--title <title>] [--content <content>]")
+                return
+            }
+            if let note = findNote(idPrefix, in: storage) {
+                var changed = false
+                if let newTitle = parseFlag("--title", from: args) {
+                    storage.rename(note: note, to: newTitle)
+                    print("Renamed: '\(note.title)' → '\(newTitle)'")
+                    changed = true
+                }
+                if let newContent = parseFlag("--content", from: args) {
+                    // Get current note (may have been renamed above), update content, save
+                    let current = storage.notes.first(where: { $0.id == note.id }) ?? note
+                    var updated = current
+                    updated.content = newContent
+                    storage.save(note: updated)
+                    print("Updated content for: \(current.title)")
+                    changed = true
+                }
+                if !changed {
+                    print("No changes specified. Use --title or --content")
+                }
+            }
+
         default:
             print("Unknown note command: \(subcommand ?? "nil")")
-            print("Commands: list, create, get, pin, move, delete")
+            print("Commands: list, create, get, pin, move, delete, update")
         }
     }
 
@@ -385,9 +456,40 @@ struct CiderCLI {
                 print("Error: No todo found with ID prefix: \(idPrefix)")
             }
 
+        case "update", "set":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli todo update <id> [--title <title>] [--details <details>] [--due yyyy-MM-dd] [--priority high|medium|low]")
+                return
+            }
+            if var todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                var changed = false
+                if let t = parseFlag("--title", from: args) { todo.title = t; changed = true }
+                if let d = parseFlag("--details", from: args) { todo.details = d; changed = true }
+                if let ds = parseFlag("--due", from: args), let date = dateFormatter.date(from: ds) {
+                    todo.dueDate = date; changed = true
+                }
+                if let p = parseFlag("--priority", from: args) {
+                    switch p.lowercased() {
+                    case "high": todo.priority = .high; changed = true
+                    case "medium": todo.priority = .medium; changed = true
+                    case "low": todo.priority = .low; changed = true
+                    default: break
+                    }
+                }
+                if changed {
+                    todo.updatedAt = Date()
+                    _ = storage.updateTodoCard(todo)
+                    print("Updated: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
+                } else {
+                    print("No changes specified.")
+                }
+            } else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown todo command: \(subcommand ?? "nil")")
-            print("Commands: list, create, complete, delete")
+            print("Commands: list, create, complete, delete, update")
         }
     }
 
@@ -400,11 +502,15 @@ struct CiderCLI {
         switch subcommand {
         case "list", "ls":
             let cards = storage.dateCards
-            print("Events (\(cards.count)):")
-            for card in cards {
-                let date = dateFormatter.string(from: card.startAt)
-                let completed = card.isCompleted ? " ✅" : ""
-                print("  [\(card.id.uuidString.prefix(8))] \(card.title) — \(date)\(completed)")
+            if jsonOutput {
+                outputJSON(cards.map(eventToDict))
+            } else {
+                print("Events (\(cards.count)):")
+                for card in cards {
+                    let date = dateFormatter.string(from: card.startAt)
+                    let completed = card.isCompleted ? " ✅" : ""
+                    print("  [\(card.id.uuidString.prefix(8))] \(card.title) — \(date)\(completed)")
+                }
             }
 
         case "create":
@@ -414,9 +520,45 @@ struct CiderCLI {
             let card = storage.createDateCard(title: title, startAt: date)
             print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
 
+        case "delete", "rm":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required.")
+                return
+            }
+            if let card = storage.dateCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                if let trashItem = storage.deleteDateCard(card.id) {
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    print("Deleted: \(card.title) (moved to trash)")
+                }
+            } else {
+                print("Error: No event found with ID prefix: \(idPrefix)")
+            }
+
+        case "update", "set":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli event update <id> [--title <title>] [--date yyyy-MM-dd] [--location <location>]")
+                return
+            }
+            if var card = storage.dateCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                var changed = false
+                if let t = parseFlag("--title", from: args) { card.title = t; changed = true }
+                if let ds = parseFlag("--date", from: args), let date = dateFormatter.date(from: ds) {
+                    card.startAt = date; changed = true
+                }
+                if let loc = parseFlag("--location", from: args) { card.location = loc; changed = true }
+                if changed {
+                    _ = storage.updateDateCard(card)
+                    print("Updated: \(card.title) (\(card.id.uuidString.prefix(8)))")
+                } else {
+                    print("No changes specified.")
+                }
+            } else {
+                print("Error: No event found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown event command: \(subcommand ?? "nil")")
-            print("Commands: list, create")
+            print("Commands: list, create, delete, update")
         }
     }
 
@@ -429,10 +571,14 @@ struct CiderCLI {
         switch subcommand {
         case "list", "ls":
             let contacts = storage.contacts
-            print("Contacts (\(contacts.count)):")
-            for contact in contacts {
-                let email = contact.email.isEmpty ? "" : " — \(contact.email)"
-                print("  [\(contact.id.uuidString.prefix(8))] \(contact.displayName)\(email)")
+            if jsonOutput {
+                outputJSON(contacts.map(contactToDict))
+            } else {
+                print("Contacts (\(contacts.count)):")
+                for contact in contacts {
+                    let email = contact.email.isEmpty ? "" : " — \(contact.email)"
+                    print("  [\(contact.id.uuidString.prefix(8))] \(contact.displayName)\(email)")
+                }
             }
 
         case "create":
@@ -442,9 +588,44 @@ struct CiderCLI {
             let contact = storage.createContact(displayName: name)
             print("Created contact: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
 
+        case "delete", "rm":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required.")
+                return
+            }
+            if let contact = storage.contacts.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                if let trashItem = storage.deleteContact(contact.id) {
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    print("Deleted: \(contact.displayName) (moved to trash)")
+                }
+            } else {
+                print("Error: No contact found with ID prefix: \(idPrefix)")
+            }
+
+        case "update", "set":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli contact update <id> [--name <name>] [--email <email>] [--phone <phone>] [--notes <notes>]")
+                return
+            }
+            if var contact = storage.contacts.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                var changed = false
+                if let n = parseFlag("--name", from: args) { contact.displayName = n; changed = true }
+                if let e = parseFlag("--email", from: args) { contact.email = e; changed = true }
+                if let p = parseFlag("--phone", from: args) { contact.phone = p; changed = true }
+                if let notes = parseFlag("--notes", from: args) { contact.notes = notes; changed = true }
+                if changed {
+                    _ = storage.updateContact(contact)
+                    print("Updated: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
+                } else {
+                    print("No changes specified.")
+                }
+            } else {
+                print("Error: No contact found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown contact command: \(subcommand ?? "nil")")
-            print("Commands: list, create")
+            print("Commands: list, create, delete, update")
         }
     }
 
@@ -465,11 +646,15 @@ struct CiderCLI {
                 let folder = findFolder(named: folderName)
                 files = files.filter { $0.folderID == folder?.id }
             }
-            print("Vault files (\(files.count)):")
-            for file in files {
-                let folder = file.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                let size = ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
-                print("  [\(file.id.uuidString.prefix(8))] \(file.displayTitle) — \(file.fileType.displayName), \(size) (\(folder))")
+            if jsonOutput {
+                outputJSON(files.map(vaultFileToDict))
+            } else {
+                print("Vault files (\(files.count)):")
+                for file in files {
+                    let folder = file.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    let size = ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
+                    print("  [\(file.id.uuidString.prefix(8))] \(file.displayTitle) — \(file.fileType.displayName), \(size) (\(folder))")
+                }
             }
 
         case "get", "show":
@@ -502,7 +687,16 @@ struct CiderCLI {
             }
             let folderName = parseFlag("--folder", from: args)
             if let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
-                let folderID = folderName.flatMap { findFolder(named: $0)?.id }
+                let folderID: UUID?
+                if let name = folderName {
+                    guard let folder = findFolder(named: name) else {
+                        print("Error: No folder found named '\(name)'")
+                        return
+                    }
+                    folderID = folder.id
+                } else {
+                    folderID = nil
+                }
                 service.assignFile(file.id, toFolder: folderID)
                 print("Moved '\(file.displayTitle)' → \(folderName ?? "Inbox")")
             } else {
@@ -522,9 +716,33 @@ struct CiderCLI {
                 print("Error: No file found with ID prefix: \(idPrefix)")
             }
 
+        case "update", "set":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli file update <id> [--title <title>] [--notes <notes>]")
+                return
+            }
+            if let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                var changed = false
+                if let t = parseFlag("--title", from: args) {
+                    VaultFileStorage.shared.updateTitle(file.id, title: t)
+                    print("Title set: '\(t)'")
+                    changed = true
+                }
+                if let n = parseFlag("--notes", from: args) {
+                    VaultFileStorage.shared.updateNotes(file.id, notes: n)
+                    print("Notes set for: \(file.displayTitle)")
+                    changed = true
+                }
+                if !changed {
+                    print("No changes specified. Use --title or --notes")
+                }
+            } else {
+                print("Error: No file found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown file command: \(subcommand ?? "nil")")
-            print("Commands: list, get, move, delete")
+            print("Commands: list, get, move, delete, update")
         }
     }
 
@@ -536,11 +754,15 @@ struct CiderCLI {
         switch subcommand {
         case "list", "ls":
             let folders = VaultFolderService.shared.folders
-            print("Folders (\(folders.count)):")
-            for folder in folders {
-                let depth = folder.relativePath.components(separatedBy: "/").count - 1
-                let indent = String(repeating: "  ", count: depth)
-                print("  \(indent)📁 \(folder.name) (\(folder.id.uuidString.prefix(8)))")
+            if jsonOutput {
+                outputJSON(folders.map(folderToDict))
+            } else {
+                print("Folders (\(folders.count)):")
+                for folder in folders {
+                    let depth = folder.relativePath.components(separatedBy: "/").count - 1
+                    let indent = String(repeating: "  ", count: depth)
+                    print("  \(indent)📁 \(folder.name) (\(folder.id.uuidString.prefix(8)))")
+                }
             }
 
         case "create":
@@ -704,9 +926,13 @@ struct CiderCLI {
         switch subcommand {
         case "list", "ls":
             let labels = storage.labels
-            print("Labels (\(labels.count)):")
-            for label in labels {
-                print("  [\(label.id.uuidString.prefix(8))] \(label.name) (\(label.colorHex))")
+            if jsonOutput {
+                outputJSON(labels.map(labelToDict))
+            } else {
+                print("Labels (\(labels.count)):")
+                for label in labels {
+                    print("  [\(label.id.uuidString.prefix(8))] \(label.name) (\(label.colorHex))")
+                }
             }
 
         case "create":
@@ -752,7 +978,7 @@ struct CiderCLI {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     static func handleSearch(args: [String]) async {
-        let query = args.joined(separator: " ")
+        let query = args.filter { $0 != "--json" }.joined(separator: " ")
         guard !query.isEmpty else {
             print("Usage: cider-cli search <query>")
             print("Supports scope modifiers: @bookmarks, @notes, @todos, @events, @images, @files, @folder:<name>, @tag:<name>")
@@ -794,10 +1020,14 @@ struct CiderCLI {
         switch subcommand {
         case "list", "ls":
             let items = TrashStorage.shared.allTrashItems()
-            print("Trash (\(items.count) items):")
-            for item in items {
-                let age = item.deletedAt.formatted(.relative(presentation: .named))
-                print("  [\(item.id.uuidString.prefix(8))] \(item.title) (\(item.itemType.rawValue)) — deleted \(age)")
+            if jsonOutput {
+                outputJSON(items.map(trashItemToDict))
+            } else {
+                print("Trash (\(items.count) items):")
+                for item in items {
+                    let age = item.deletedAt.formatted(.relative(presentation: .named))
+                    print("  [\(item.id.uuidString.prefix(8))] \(item.title) (\(item.itemType.rawValue)) — deleted \(age)")
+                }
             }
 
         case "restore":
@@ -916,6 +1146,7 @@ struct CiderCLI {
           cider-cli bookmark untag <id-prefix> <label-name>
           cider-cli bookmark delete <id-prefix>
           cider-cli bookmark enrich <id-prefix>
+          cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
 
         NOTES
           cider-cli note list [--folder <name>]
@@ -924,20 +1155,26 @@ struct CiderCLI {
           cider-cli note pin <id-prefix>
           cider-cli note move <id-prefix> --folder <name>
           cider-cli note delete <id-prefix>
+          cider-cli note update <id-prefix> [--title <t>] [--content <c>]
 
         TODOS
           cider-cli todo list [--completed]
           cider-cli todo create <title> [--due yyyy-MM-dd] [--priority high|medium|low]
           cider-cli todo complete <id-prefix>
           cider-cli todo delete <id-prefix>
+          cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--priority <p>]
 
         EVENTS
           cider-cli event list
           cider-cli event create <title> [--date yyyy-MM-dd]
+          cider-cli event delete <id-prefix>
+          cider-cli event update <id-prefix> [--title <t>] [--date <d>] [--location <l>]
 
         CONTACTS
           cider-cli contact list
           cider-cli contact create <name> [--email <email>] [--phone <phone>]
+          cider-cli contact delete <id-prefix>
+          cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--notes <n>]
 
         FILES
           cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name>]

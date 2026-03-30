@@ -620,7 +620,7 @@ struct FolderDetailView: View {
                 dragPreviewOverride: multiDragPreview(for: item),
                 onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
                 onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
-                onDelete: { bookmarksViewModel.deleteBookmarks([bookmark]) },
+                onDelete: { handleContextMenuDelete(item: item) { bookmarksViewModel.deleteBookmarks([bookmark]) } },
                 onMoveToFolder: { _ = bookmarksViewModel.assign(bookmark, toFolder: $0) },
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
@@ -641,7 +641,7 @@ struct FolderDetailView: View {
                     NotesStorage.shared.rename(note: note, to: newTitle)
                 },
                 onDelete: {
-                    notesViewModel.deleteNotes([note])
+                    handleContextMenuDelete(item: item) { notesViewModel.deleteNotes([note]) }
                 },
                 onMoveToFolder: { folderID in
                     _ = notesViewModel.assignNote(note, toFolder: folderID)
@@ -671,8 +671,10 @@ struct FolderDetailView: View {
                     ))
                 },
                 onDelete: {
-                    if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                    handleContextMenuDelete(item: item) {
+                        if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                        }
                     }
                 },
                 isSelected: isItemSelected(item),
@@ -696,8 +698,10 @@ struct FolderDetailView: View {
                     ))
                 },
                 onDelete: {
-                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    handleContextMenuDelete(item: item) {
+                        if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                        }
                     }
                 },
                 isSelected: isItemSelected(item),
@@ -723,8 +727,10 @@ struct FolderDetailView: View {
                     ))
                 },
                 onDelete: {
-                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                    handleContextMenuDelete(item: item) {
+                        if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                        }
                     }
                 },
                 isSelected: isItemSelected(item),
@@ -750,8 +756,10 @@ struct FolderDetailView: View {
                     ))
                 },
                 onDelete: {
-                    let trashItem = TrashStorage.shared.trashVaultFile(file)
-                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+                    handleContextMenuDelete(item: item) {
+                        let trashItem = TrashStorage.shared.trashVaultFile(file)
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+                    }
                 },
                 onToggleLabelBulk: onToggleLabelBulk,
                 isSelected: isItemSelected(item),
@@ -774,8 +782,10 @@ struct FolderDetailView: View {
                     ))
                 },
                 onDelete: {
-                    if let trashItem = BrowserSessionStorage.shared.delete(session.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
+                    handleContextMenuDelete(item: item) {
+                        if let trashItem = BrowserSessionStorage.shared.delete(session.id) {
+                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
+                        }
                     }
                 },
                 isSelected: isItemSelected(item),
@@ -805,6 +815,59 @@ struct FolderDetailView: View {
 
     private func isItemSelected(_ item: LibraryItemV2) -> Bool {
         selectedItemIDs.contains(item.id)
+    }
+
+    /// Handles context menu delete: if the item is part of a multi-selection, delete all selected items.
+    /// Otherwise delete just the single item.
+    private func handleContextMenuDelete(item: LibraryItemV2, singleDelete: () -> Void) {
+        if selectedItemIDs.count > 1 && selectedItemIDs.contains(item.id) {
+            // Snapshot ViewModel arrays before the loop — deleting item N updates the
+            // @Published array immediately, so item N+1 lookup would fail without this.
+            let bookmarksSnapshot = bookmarksViewModel.bookmarks
+            let notesSnapshot = notesViewModel.notes
+            var allTrashItems: [TrashItem] = []
+            for id in selectedItemIDs {
+                if id.hasPrefix("bookmark-"),
+                   let uuid = UUID(uuidString: String(id.dropFirst("bookmark-".count))),
+                   let bookmark = bookmarksSnapshot.first(where: { $0.id == uuid }) {
+                    allTrashItems.append(contentsOf: VaultBookmarkService.shared.removeAll([bookmark]))
+                } else if id.hasPrefix("note-"),
+                          let uuid = UUID(uuidString: String(id.dropFirst("note-".count))),
+                          let note = notesSnapshot.first(where: { $0.id == uuid }) {
+                    allTrashItems.append(NotesStorage.shared.delete(note: note))
+                } else if id.hasPrefix("datecard-"),
+                          let uuid = UUID(uuidString: String(id.dropFirst("datecard-".count))) {
+                    if let item = DateCardStorage.shared.deleteDateCard(uuid) {
+                        allTrashItems.append(item)
+                    }
+                } else if id.hasPrefix("contact-"),
+                          let uuid = UUID(uuidString: String(id.dropFirst("contact-".count))) {
+                    if let item = ContactStorage.shared.deleteContact(uuid) {
+                        allTrashItems.append(item)
+                    }
+                } else if id.hasPrefix("todo-"),
+                          let uuid = UUID(uuidString: String(id.dropFirst("todo-".count))) {
+                    if let item = TodoCardStorage.shared.deleteTodoCard(uuid) {
+                        allTrashItems.append(item)
+                    }
+                } else if id.hasPrefix("session-"),
+                          let uuid = UUID(uuidString: String(id.dropFirst("session-".count))) {
+                    if let item = BrowserSessionStorage.shared.delete(uuid) {
+                        allTrashItems.append(item)
+                    }
+                } else if id.hasPrefix("vaultfile-"),
+                          let uuid = UUID(uuidString: String(id.dropFirst("vaultfile-".count))),
+                          let file = VaultFileService.shared.file(for: uuid) {
+                    allTrashItems.append(TrashStorage.shared.trashVaultFile(file))
+                }
+            }
+            if !allTrashItems.isEmpty {
+                CiderUndoManager.shared.record(.bulkDeletedToTrash(allTrashItems))
+            }
+            selectedItemIDs.removeAll()
+        } else {
+            singleDelete()
+        }
     }
 
     private func handleSelect(item: LibraryItemV2) {

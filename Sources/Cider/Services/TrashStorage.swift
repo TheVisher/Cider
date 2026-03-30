@@ -212,6 +212,9 @@ final class TrashStorage {
                 folderID: payload.folderID,
                 createdAt: payload.createdAt
             )
+        } else {
+            // Source file missing — leave manifest intact so item stays visible in trash
+            return
         }
 
         // Remove from whichever manifest actually contains this item
@@ -271,7 +274,11 @@ final class TrashStorage {
                 destDir = StoragePaths.cachedInboxSubdirectoryURL(for: .dateCards)
             }
             try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
-            let destURL = destDir.appendingPathComponent(icsFilename)
+            var destURL = destDir.appendingPathComponent(icsFilename)
+            if fm.fileExists(atPath: destURL.path) {
+                let base = (icsFilename as NSString).deletingPathExtension
+                destURL = destDir.appendingPathComponent("\(base) Restored.ics")
+            }
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.moveItem(at: srcURL, to: destURL)
             }
@@ -328,7 +335,11 @@ final class TrashStorage {
                 destDir = StoragePaths.cachedInboxSubdirectoryURL(for: .todos)
             }
             try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
-            let destURL = destDir.appendingPathComponent(icsFilename)
+            var destURL = destDir.appendingPathComponent(icsFilename)
+            if fm.fileExists(atPath: destURL.path) {
+                let base = (icsFilename as NSString).deletingPathExtension
+                destURL = destDir.appendingPathComponent("\(base) Restored.ics")
+            }
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.moveItem(at: srcURL, to: destURL)
             }
@@ -573,13 +584,19 @@ final class TrashStorage {
         let fm = FileManager.default
         let vaultRoot = StoragePaths.cachedVaultDirectoryURL
 
-        // Determine target directory
+        // Determine target directory — use the original relativePath's parent to restore
+        // to the correct Inbox subdirectory (Images/, Videos/, Files/) rather than bare Inbox/
         let targetDir: URL
         if let folderID = payload.vaultFile.folderID,
            let folder = VaultFolderService.shared.folder(for: folderID) {
             targetDir = vaultRoot.appendingPathComponent(folder.relativePath)
         } else {
-            targetDir = vaultRoot.appendingPathComponent("Inbox")
+            let originalParent = (payload.vaultFile.relativePath as NSString).deletingLastPathComponent
+            if !originalParent.isEmpty {
+                targetDir = vaultRoot.appendingPathComponent(originalParent)
+            } else {
+                targetDir = vaultRoot.appendingPathComponent("Inbox/Files")
+            }
         }
         try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 

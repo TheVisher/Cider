@@ -177,27 +177,23 @@ final class VaultBookmarkService: ObservableObject {
         let oldByID = Dictionary(uniqueKeysWithValues: bookmarks.map { ($0.id, $0) })
 
         // Detect externally changed titles/notes and mark as manually set.
-        // Also preserve in-memory manually-set edits that haven't been persisted yet.
+        // Accept external edits as authoritative (CLI, iMessage bot, etc. write the index).
         for i in updated.indices {
             guard let old = oldByID[updated[i].id] else { continue }
             // Preserve in-memory manual flags — don't let external file clear them
             if old.titleManuallySet { updated[i].titleManuallySet = true }
             if old.notesManuallySet { updated[i].notesManuallySet = true }
-            // Detect new external changes
+            // Detect new external changes and mark as manually set
             if updated[i].title != old.title && !updated[i].titleManuallySet {
                 updated[i].titleManuallySet = true
             }
             if updated[i].notes != old.notes && !updated[i].notesManuallySet {
                 updated[i].notesManuallySet = true
             }
-            // Preserve in-memory title/notes if they were manually set in memory
-            // (user edited but persist hasn't fired yet)
-            if old.titleManuallySet && old.title != updated[i].title {
-                updated[i].title = old.title
-            }
-            if old.notesManuallySet && old.notes != updated[i].notes {
-                updated[i].notes = old.notes
-            }
+            // Note: we intentionally accept the on-disk title/notes as authoritative.
+            // External processes (CLI, iMessage bot) write the index through proper code
+            // paths that set titleManuallySet. Reverting to old in-memory values would
+            // fight those edits.
         }
 
         bookmarks = updated

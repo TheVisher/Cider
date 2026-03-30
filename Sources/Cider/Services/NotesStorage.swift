@@ -831,21 +831,33 @@ final class NotesStorage: ObservableObject {
 
         // For notes in vault/Inbox folders, move the file to Inbox/Notes/ first so trash works correctly
         var noteForTrash = note
-        let trashNotesDir = inboxNotesDirectoryURL
+        var trashNotesDir = inboxNotesDirectoryURL
         if note.relativePath.contains("/") {
             let filename = (note.relativePath as NSString).lastPathComponent
             let vaultFileURL = noteFileURL(for: note)
             let inboxFileURL = trashNotesDir.appendingPathComponent(filename)
+            var moveSucceeded = false
             if FileManager.default.fileExists(atPath: vaultFileURL.path) {
                 try? FileManager.default.createDirectory(at: trashNotesDir, withIntermediateDirectories: true)
-                try? FileManager.default.moveItem(at: vaultFileURL, to: inboxFileURL)
+                do {
+                    try FileManager.default.moveItem(at: vaultFileURL, to: inboxFileURL)
+                    moveSucceeded = true
+                } catch {
+                    os.Logger(subsystem: "com.cider", category: "NotesStorage")
+                        .error("Failed to move note to Inbox before trash: \(error.localizedDescription)")
+                }
             }
-            noteForTrash = Note(
-                id: note.id, title: note.title, content: note.content,
-                createdAt: note.createdAt, modifiedAt: note.modifiedAt,
-                relativePath: "\(StoragePaths.inboxDir)/Notes/\(filename)", labelIDs: note.labelIDs,
-                folderID: note.folderID, isPinned: note.isPinned
-            )
+            if moveSucceeded {
+                noteForTrash = Note(
+                    id: note.id, title: note.title, content: note.content,
+                    createdAt: note.createdAt, modifiedAt: note.modifiedAt,
+                    relativePath: "\(StoragePaths.inboxDir)/Notes/\(filename)", labelIDs: note.labelIDs,
+                    folderID: note.folderID, isPinned: note.isPinned
+                )
+            } else {
+                // Move failed — trash from the original location instead
+                trashNotesDir = vaultFileURL.deletingLastPathComponent()
+            }
         }
         let trashItem = TrashStorage.shared.trashNote(noteForTrash, notesDir: trashNotesDir)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
