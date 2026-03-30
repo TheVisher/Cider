@@ -1,0 +1,281 @@
+/* React Flow base styles */
+@import '@xyflow/react/dist/style.css';
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Global Reset & Theme
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+}
+
+:root {
+  /* Dark theme (default) */
+  --card-bg: rgba(255, 255, 255, 0.06);
+  --card-bg-hover: rgba(255, 255, 255, 0.10);
+  --card-bg-selected: rgba(88, 166, 255, 0.14);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-border-selected: rgba(88, 166, 255, 0.4);
+  --text-primary: rgba(255, 255, 255, 0.90);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --text-tertiary: rgba(255, 255, 255, 0.35);
+  --thumbnail-bg: rgba(255, 255, 255, 0.04);
+  --tag-bg-opacity: 0.12;
+  --tag-border-opacity: 0.20;
+  --canvas-bg: #1a1a1a;
+  --ai-badge-bg: rgba(88, 166, 255, 0.2);
+  --ai-badge-color: rgba(88, 166, 255, 0.9);
+}
+
+[data-theme="light"] {
+  --card-bg: rgba(0, 0, 0, 0.03);
+  --card-bg-hover: rgba(0, 0, 0, 0.06);
+  --card-bg-selected: rgba(0, 122, 255, 0.10);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --card-border-selected: rgba(0, 122, 255, 0.4);
+  --text-primary: rgba(0, 0, 0, 0.85);
+  --text-secondary: rgba(0, 0, 0, 0.50);
+  --text-tertiary: rgba(0, 0, 0, 0.30);
+  --thumbnail-bg: rgba(0, 0, 0, 0.04);
+  --tag-bg-opacity: 0.10;
+  --tag-border-opacity: 0.18;
+  --canvas-bg: #f5f5f5;
+  --ai-badge-bg: rgba(0, 122, 255, 0.15);
+  --ai-badge-color: rgba(0, 122, 255, 0.85);
+}
+
+.canvas-container {
+  width: 100%;
+  height: 100%;
+  background: var(--canvas-bg);
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   React Flow Overrides
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.react-flow__background {
+  background: var(--canvas-bg) !important;
+}
+
+.react-flow__controls button {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--text-primary);
+  border-radius: 6px;
+}
+
+.react-flow__controls button:hover {
+  background: var(--card-bg-hover);
+}
+
+.react-flow__minimap {
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  overflow: hidden;
+}
+
+/* Hide default node selection outline */
+.react-flow__node.selected > .bookmark-card {
+  /* We handle selection styling ourselves */
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Bookmark Card Node
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.bookmark-card {
+  width: 280px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px; /* Radius.md */
+  padding: 8px; /* Spacing.sm */
+  cursor: grab;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.bookmark-card:hover {
+  background: var(--card-bg-hover);
+}
+
+.bookmark-card.selected {
+  background: var(--card-bg-selected);
+  border-color: var(--card-border-selected);
+  box-shadow: 0 0 0 1px var(--card-border-selected);
+}
+
+/* Connection handles — invisible but functional */
+.card-handle {
+  width: 8px !important;
+  height: 8px !important;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.bookmark-card:hover .card-handle {
+  opacity: 0.5;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Thumbnail
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.card-thumbnail {
+  width: 100%;
+  height: 140px;
+  border-radius: 6px; /* Radius.sm */
+  overflow: hidden;
+  position: relative;
+  background: var(--thumbnail-bg);
+}
+
+.card-thumbnail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-thumbnail-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+}
+
+.card-favicon-large {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.card-favicon-placeholder {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.card-ai-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--ai-badge-bg);
+  color: var(--ai-badge-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Card Content
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.card-content {
+  padding-top: 8px; /* Spacing.sm — cardContentSpacing */
+  display: flex;
+  flex-direction: column;
+  gap: 2px; /* Spacing.xxs */
+}
+
+.card-title {
+  font-size: 12px; /* CiderFont.labelSemibold */
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px; /* CiderFont.body */
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.card-favicon {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.card-domain {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-separator {
+  color: var(--text-tertiary);
+  font-size: 10px; /* CiderFont.captionSemibold */
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.card-time {
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Tags
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px; /* Spacing.xs */
+  padding-top: 4px;
+}
+
+.card-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px; /* Radius.xs */
+  font-size: 10px; /* CiderFont.caption */
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--tag-color) calc(var(--tag-bg-opacity) * 100%), transparent);
+  border: 0.5px solid color-mix(in srgb, var(--tag-color) calc(var(--tag-border-opacity) * 100%), transparent);
+}
+
+.card-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tag-color);
+  flex-shrink: 0;
+}

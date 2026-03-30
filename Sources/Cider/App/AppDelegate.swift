@@ -73,6 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var dateCardNotificationService: DateCardNotificationService?
     var dateCardNotificationCancellable: AnyCancellable?
 
+    // Canvas
+    var canvasWindow: CanvasWindow?
+    var canvasViewModel: CanvasViewModel?
+
     // Settings
     var settingsWindow: SettingsWindow?
 
@@ -112,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureAIAssistantPanel()
         observeAIAssistantNotifications()
         startAIAssistantHotkeyDetection()
+        configureCanvasWindow()
 
         // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
         DispatchQueue.main.async { [weak self] in
@@ -283,6 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Cider", action: #selector(toggleCiderPanelFromMenu), keyEquivalent: " "))
+        menu.addItem(NSMenuItem(title: "Open Canvas", action: #selector(openCanvasFromMenu), keyEquivalent: "k"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Cider", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
@@ -291,6 +297,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleCiderPanelFromMenu() {
         toggleCiderPanel()
+    }
+
+    @objc func openCanvasFromMenu() {
+        showCanvas()
     }
 
     // MARK: - Config Changes
@@ -491,6 +501,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func hideSettings() {
         settingsWindow?.orderOut(nil)
+    }
+
+    // MARK: - Canvas
+
+    func configureCanvasWindow() {
+        let vm = CanvasViewModel()
+        canvasViewModel = vm
+
+        let window = CanvasWindow()
+        let contentView = CanvasWindowContentView(viewModel: vm)
+        let hostingView = NSHostingView(rootView: contentView)
+        window.contentView = hostingView
+
+        self.canvasWindow = window
+
+        // Listen for "open canvas" notifications
+        NotificationCenter.default.publisher(for: .openCiderCanvas)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.showCanvas()
+            }
+            .store(in: &cancellables)
+    }
+
+    func showCanvas() {
+        guard let window = canvasWindow else { return }
+        if window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            window.showCentered()
+        }
+
+        // Sync theme with current appearance
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        canvasViewModel?.setTheme(isDark ? "dark" : "light")
     }
 
     // MARK: - Notes

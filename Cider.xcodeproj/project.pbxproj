@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 60;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -15,6 +15,7 @@
 		B1A00000000000000000001B /* cider-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001D /* cider-icon.png */; };
 		B1A00000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001F /* Assets.xcassets */; };
 		B1A000000000000000000020 /* ExcalidrawEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000021 /* ExcalidrawEditor */; };
+		B1A000000000000000000022 /* CanvasEditor in Resources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000023 /* CanvasEditor */; };
 		C08DC7F02F5E077D001B082C /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = C08DC7EF2F5E077D001B082C /* ConvexMobile */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +29,7 @@
 		B1A00000000000000000001D /* cider-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "cider-icon.png"; path = "Sources/Cider/Resources/cider-icon.png"; sourceTree = SOURCE_ROOT; };
 		B1A00000000000000000001F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Sources/Cider/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		B1A000000000000000000021 /* ExcalidrawEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ExcalidrawEditor; path = Sources/Cider/Resources/ExcalidrawEditor; sourceTree = SOURCE_ROOT; };
+		B1A000000000000000000023 /* CanvasEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CanvasEditor; path = Sources/Cider/Resources/CanvasEditor; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +66,7 @@
 			children = (
 				B1A000000000000000000005 /* Sources/CiderApp */,
 				B1A000000000000000000003 /* Cider.entitlements */,
+				B1A000000000000000000023 /* CanvasEditor */,
 				B1A000000000000000000016 /* TipTapEditor */,
 				B1A000000000000000000017 /* ReaderMode */,
 				B1A000000000000000000021 /* ExcalidrawEditor */,
@@ -143,6 +146,7 @@
 				B1A000000000000000000018 /* TipTapEditor in Resources */,
 				B1A000000000000000000019 /* ReaderMode in Resources */,
 				B1A000000000000000000020 /* ExcalidrawEditor in Resources */,
+				B1A000000000000000000022 /* CanvasEditor in Resources */,
 				B1A00000000000000000001A /* menubar-icon.png in Resources */,
 				B1A00000000000000000001B /* cider-icon.png in Resources */,
 				B1A00000000000000000001E /* Assets.xcassets in Resources */,

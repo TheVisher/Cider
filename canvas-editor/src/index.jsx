@@ -1,0 +1,349 @@
+import React, { useCallback, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
+} from '@xyflow/react';
+
+import BookmarkCardNode from './BookmarkCardNode';
+
+// Custom node types registry
+const nodeTypes = {
+  bookmarkCard: BookmarkCardNode,
+};
+
+// Debounce timer for canvas change saves
+let saveTimer = null;
+const SAVE_DEBOUNCE_MS = 1500;
+
+function postMessage(name, data) {
+  const handler = window.webkit?.messageHandlers?.[name];
+  if (handler) {
+    handler.postMessage(data ?? '');
+  }
+}
+
+function CanvasApp() {
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [theme, setTheme] = useState('dark');
+  const reactFlowInstance = useReactFlow();
+  const isLoadingRef = useRef(false);
+
+  // Debounced save — fires after nodes/edges change
+  const handleNodesChange = useCallback((changes) => {
+    if (isLoadingRef.current) {
+      onNodesChange(changes);
+      return;
+    }
+    onNodesChange(changes);
+    scheduleSave();
+  }, [onNodesChange]);
+
+  const handleEdgesChange = useCallback((changes) => {
+    if (isLoadingRef.current) {
+      onEdgesChange(changes);
+      return;
+    }
+    onEdgesChange(changes);
+    scheduleSave();
+  }, [onEdgesChange]);
+
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const currentNodes = reactFlowInstance.getNodes();
+      const currentEdges = reactFlowInstance.getEdges();
+      const viewport = reactFlowInstance.getViewport();
+
+      const canvasData = {
+        version: 1,
+        nodes: currentNodes.map(n => ({
+          id: n.id,
+          itemID: n.data?.itemID,
+          itemType: n.data?.itemType || 'bookmark',
+          position: n.position,
+          size: { width: n.measured?.width || 280, height: n.measured?.height || 200 },
+          parentNode: n.parentId || null,
+        })),
+        edges: currentEdges.map(e => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label || '',
+        })),
+        viewport,
+      };
+
+      postMessage('canvasChanged', JSON.stringify(canvasData));
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  // Handle node click — notify Swift
+  const onNodeClick = useCallback((_event, node) => {
+    if (node.data?.itemID) {
+      postMessage('itemClicked', JSON.stringify({
+        uuid: node.data.itemID,
+        type: node.data.itemType || 'bookmark',
+      }));
+    }
+  }, []);
+
+  // Handle node double-click — notify Swift for editing
+  const onNodeDoubleClick = useCallback((_event, node) => {
+    if (node.data?.itemID) {
+      postMessage('itemDoubleClicked', JSON.stringify({
+        uuid: node.data.itemID,
+        type: node.data.itemType || 'bookmark',
+      }));
+    }
+  }, []);
+
+  // Expose bridge API for Swift
+  React.useEffect(() => {
+    window.canvasBridge = {
+      /**
+       * Load a full canvas state from JSON.
+       */
+      loadCanvas(jsonString) {
+        try {
+          isLoadingRef.current = true;
+          const data = JSON.parse(jsonString);
+
+          const loadedNodes = (data.nodes || []).map(n => ({
+            id: n.id,
+            type: n.nodeType || 'bookmarkCard',
+            position: n.position || { x: 0, y: 0 },
+            parentId: n.parentNode || undefined,
+            data: {
+              itemID: n.itemID,
+              itemType: n.itemType || 'bookmark',
+              ...n.metadata,
+            },
+          }));
+
+          const loadedEdges = (data.edges || []).map(e => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            label: e.label || undefined,
+            type: 'default',
+          }));
+
+          setNodes(loadedNodes);
+          setEdges(loadedEdges);
+
+          if (data.viewport) {
+            setTimeout(() => {
+              reactFlowInstance.setViewport(data.viewport);
+              isLoadingRef.current = false;
+            }, 50);
+          } else {
+            setTimeout(() => {
+              reactFlowInstance.fitView({ padding: 0.2 });
+              isLoadingRef.current = false;
+            }, 50);
+          }
+        } catch (err) {
+          isLoadingRef.current = false;
+          postMessage('canvasError', JSON.stringify({
+            message: `loadCanvas failed: ${err.message}`,
+            stack: err.stack,
+          }));
+        }
+      },
+
+      /**
+       * Get the current canvas state as JSON.
+       */
+      getCanvas() {
+        const currentNodes = reactFlowInstance.getNodes();
+        const currentEdges = reactFlowInstance.getEdges();
+        const viewport = reactFlowInstance.getViewport();
+
+        return JSON.stringify({
+          version: 1,
+          nodes: currentNodes.map(n => ({
+            id: n.id,
+            itemID: n.data?.itemID,
+            itemType: n.data?.itemType || 'bookmark',
+            position: n.position,
+            size: { width: n.measured?.width || 280, height: n.measured?.height || 200 },
+            parentNode: n.parentId || null,
+            nodeType: n.type,
+            metadata: n.data,
+          })),
+          edges: currentEdges.map(e => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            label: e.label || '',
+          })),
+          viewport,
+        });
+      },
+
+      /**
+       * Place a single item on the canvas at the given position.
+       */
+      placeItem(uuid, type, x, y, metadataJSON) {
+        const metadata = metadataJSON ? JSON.parse(metadataJSON) : {};
+        const nodeId = `node-${uuid}`;
+
+        const newNode = {
+          id: nodeId,
+          type: 'bookmarkCard',
+          position: { x, y },
+          data: {
+            itemID: uuid,
+            itemType: type,
+            ...metadata,
+          },
+        };
+
+        setNodes(prev => {
+          // Replace if exists, otherwise add
+          const existing = prev.findIndex(n => n.data?.itemID === uuid);
+          if (existing >= 0) {
+            const updated = [...prev];
+            updated[existing] = { ...updated[existing], ...newNode, id: updated[existing].id };
+            return updated;
+          }
+          return [...prev, newNode];
+        });
+
+        scheduleSave();
+      },
+
+      /**
+       * Remove an item from the canvas.
+       */
+      removeItem(uuid) {
+        setNodes(prev => prev.filter(n => n.data?.itemID !== uuid));
+        scheduleSave();
+      },
+
+      /**
+       * Update an existing item's metadata (e.g., title changed, new tags).
+       */
+      updateItemMetadata(uuid, metadataJSON) {
+        const metadata = metadataJSON ? JSON.parse(metadataJSON) : {};
+        setNodes(prev => prev.map(n => {
+          if (n.data?.itemID === uuid) {
+            return { ...n, data: { ...n.data, ...metadata } };
+          }
+          return n;
+        }));
+      },
+
+      /**
+       * Pan/zoom to fit a specific item.
+       */
+      panToItem(uuid) {
+        const node = reactFlowInstance.getNodes().find(n => n.data?.itemID === uuid);
+        if (node) {
+          reactFlowInstance.setCenter(
+            node.position.x + 140,
+            node.position.y + 100,
+            { zoom: 1, duration: 300 }
+          );
+        }
+      },
+
+      /**
+       * Zoom to fit all nodes.
+       */
+      fitAll() {
+        reactFlowInstance.fitView({ padding: 0.2, duration: 300 });
+      },
+
+      /**
+       * Add an edge between two items.
+       */
+      addEdge(sourceUuid, targetUuid, label) {
+        const sourceNode = reactFlowInstance.getNodes().find(n => n.data?.itemID === sourceUuid);
+        const targetNode = reactFlowInstance.getNodes().find(n => n.data?.itemID === targetUuid);
+        if (sourceNode && targetNode) {
+          const edgeId = `edge-${sourceNode.id}-${targetNode.id}`;
+          setEdges(prev => [...prev, {
+            id: edgeId,
+            source: sourceNode.id,
+            target: targetNode.id,
+            label: label || undefined,
+            type: 'default',
+          }]);
+          scheduleSave();
+        }
+      },
+
+      /**
+       * Set the color theme.
+       */
+      setTheme(newTheme) {
+        setTheme(newTheme === 'light' ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', newTheme === 'light' ? 'light' : 'dark');
+      },
+    };
+
+    // Signal ready to Swift
+    postMessage('canvasReady', '');
+
+    return () => {
+      delete window.canvasBridge;
+    };
+  }, [reactFlowInstance, setNodes, setEdges]);
+
+  const isDark = theme === 'dark';
+
+  return (
+    <div className={`canvas-container ${isDark ? 'dark' : 'light'}`}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={handleNodesChange}
+        onEdgesChange={handleEdgesChange}
+        onNodeClick={onNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick}
+        nodeTypes={nodeTypes}
+        fitView
+        minZoom={0.1}
+        maxZoom={2}
+        defaultEdgeOptions={{ type: 'default', animated: false }}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background
+          color={isDark ? '#333' : '#ccc'}
+          gap={20}
+          size={1}
+        />
+        <Controls
+          showInteractive={false}
+          position="bottom-right"
+        />
+        <MiniMap
+          nodeColor={() => isDark ? '#555' : '#ddd'}
+          maskColor={isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)'}
+          position="bottom-left"
+        />
+      </ReactFlow>
+    </div>
+  );
+}
+
+// Wrap in provider so useReactFlow() works
+function App() {
+  return (
+    <ReactFlowProvider>
+      <CanvasApp />
+    </ReactFlowProvider>
+  );
+}
+
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);

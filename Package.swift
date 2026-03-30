@@ -30,6 +30,7 @@ let package = Package(
                 // swift build is used for compilation verification only.
                 "Resources/TipTapEditor",
                 "Resources/ExcalidrawEditor",
+                "Resources/CanvasEditor",
                 "Resources/ReaderMode",
                 "Resources/Assets.xcassets",
                 "Resources/Info.plist",
