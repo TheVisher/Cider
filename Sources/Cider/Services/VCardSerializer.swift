@@ -198,10 +198,13 @@ enum VCardSerializer {
         }
     }
 
+    /// Birthday formatter uses the current timezone because BDAY is a calendar date,
+    /// not a point in time. Using UTC would shift the date by -1 day in western timezones.
     private static let birthdayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd"
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
         return f
     }()
 

@@ -604,8 +604,13 @@ struct CiderCLI {
             if let address { contact.address = address; needsUpdate = true }
             if let notes { contact.notes = notes; needsUpdate = true }
             if let relationship { contact.relationshipLabel = relationship; needsUpdate = true }
-            if let birthdayStr, let birthday = dateFormatter.date(from: birthdayStr) {
-                contact.birthday = birthday; needsUpdate = true
+            if let birthdayStr {
+                let localDF = DateFormatter()
+                localDF.dateFormat = "yyyy-MM-dd"
+                localDF.timeZone = .current
+                if let birthday = localDF.date(from: birthdayStr) {
+                    contact.birthday = birthday; needsUpdate = true
+                }
             }
             if needsUpdate { _ = storage.updateContact(contact) }
             print("Created contact: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
@@ -637,8 +642,13 @@ struct CiderCLI {
                 if let a = parseFlag("--address", from: args) { contact.address = a; changed = true }
                 if let r = parseFlag("--relationship", from: args) { contact.relationshipLabel = r; changed = true }
                 if let notes = parseFlag("--notes", from: args) { contact.notes = notes; changed = true }
-                if let bday = parseFlag("--birthday", from: args), let date = dateFormatter.date(from: bday) {
-                    contact.birthday = date; changed = true
+                if let bday = parseFlag("--birthday", from: args) {
+                    let localDF = DateFormatter()
+                    localDF.dateFormat = "yyyy-MM-dd"
+                    localDF.timeZone = .current
+                    if let date = localDF.date(from: bday) {
+                        contact.birthday = date; changed = true
+                    }
                 }
                 if changed {
                     _ = storage.updateContact(contact)
