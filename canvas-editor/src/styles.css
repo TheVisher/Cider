@@ -281,39 +281,184 @@ html, body, #root {
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Note Card Node
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.note-card {
+  width: 260px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 8px;
+  cursor: grab;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.note-card:hover {
+  background: var(--card-bg-hover);
+}
+
+.note-card.selected {
+  background: var(--card-bg-selected);
+  border-color: var(--card-border-selected);
+  box-shadow: 0 0 0 1px var(--card-border-selected);
+}
+
+.note-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.note-card-icon {
+  font-size: 16px;
+}
+
+.note-card-pin {
+  font-size: 12px;
+}
+
+.note-card-preview {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Todo Card Node
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.todo-card {
+  width: 260px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--priority-color, var(--card-border));
+  border-radius: 10px;
+  padding: 8px;
+  cursor: grab;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.todo-card:hover {
+  background: var(--card-bg-hover);
+}
+
+.todo-card.selected {
+  background: var(--card-bg-selected);
+  border-color: var(--card-border-selected);
+  border-left-color: var(--priority-color, var(--card-border-selected));
+  box-shadow: 0 0 0 1px var(--card-border-selected);
+}
+
+.todo-card.completed {
+  opacity: 0.6;
+}
+
+.todo-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.todo-card-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--text-primary);
+}
+
+.todo-card-checkbox.checked {
+  background: var(--priority-color, rgba(88, 166, 255, 0.5));
+  border-color: var(--priority-color, rgba(88, 166, 255, 0.5));
+}
+
+.todo-done {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.todo-card-priority {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.todo-card-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.todo-card-progress-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--thumbnail-bg);
+  overflow: hidden;
+}
+
+.todo-card-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--priority-color, rgba(88, 166, 255, 0.7));
+  transition: width 0.2s ease;
+}
+
+.todo-card-progress-text {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Level of Detail (LOD) — hide heavy elements when zoomed out
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-/* Medium zoom (0.5–0.8): hide tags, simplify cards */
+/* Medium zoom (0.5–0.8): hide tags and secondary details */
 .zoom-medium .card-tags,
-.zoom-medium .card-ai-badge {
+.zoom-medium .card-ai-badge,
+.zoom-medium .note-card-preview,
+.zoom-medium .todo-card-progress {
   display: none;
 }
 
-/* Small zoom (0.25–0.5): hide thumbnails, show only title + domain */
-.zoom-small .card-thumbnail {
-  display: none;
-}
-
+/* Small zoom (0.25–0.5): hide thumbnails and heavy content */
+.zoom-small .card-thumbnail,
 .zoom-small .card-tags,
-.zoom-small .card-ai-badge {
+.zoom-small .card-ai-badge,
+.zoom-small .card-meta .card-favicon,
+.zoom-small .note-card-preview,
+.zoom-small .note-card-header,
+.zoom-small .todo-card-progress,
+.zoom-small .todo-card-checkbox {
   display: none;
 }
 
-.zoom-small .card-meta .card-favicon {
+/* Tiny zoom (<0.25): minimal cards */
+.zoom-tiny .card-thumbnail,
+.zoom-tiny .card-content,
+.zoom-tiny .note-card-header {
   display: none;
 }
 
-/* Tiny zoom (<0.25): minimal card — just a colored rectangle */
-.zoom-tiny .card-thumbnail {
-  display: none;
-}
-
-.zoom-tiny .card-content {
-  display: none;
-}
-
-.zoom-tiny .bookmark-card {
+.zoom-tiny .bookmark-card,
+.zoom-tiny .note-card,
+.zoom-tiny .todo-card {
   height: 40px;
   min-height: 40px;
   background: var(--card-bg-hover);

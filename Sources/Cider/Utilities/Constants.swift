@@ -56,6 +56,8 @@ extension View {
 extension Notification.Name {
     static let openCiderCanvas = Notification.Name("cider.openCiderCanvas")
     static let canvasItemSelected = Notification.Name("cider.canvasItemSelected")
+    static let openNoteDetails = Notification.Name("cider.openNoteDetails")
+    static let openTodoDetails = Notification.Name("cider.openTodoDetails")
     static let openCiderSettings = Notification.Name("cider.openCiderSettings")
     static let settingsNavigate = Notification.Name("cider.settingsNavigate")
     static let dismissSettings = Notification.Name("cider.dismissSettings")

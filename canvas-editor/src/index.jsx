@@ -12,10 +12,14 @@ import {
 } from '@xyflow/react';
 
 import BookmarkCardNode from './BookmarkCardNode';
+import NoteCardNode from './NoteCardNode';
+import TodoCardNode from './TodoCardNode';
 
 // Custom node types registry
 const nodeTypes = {
   bookmarkCard: BookmarkCardNode,
+  noteCard: NoteCardNode,
+  todoCard: TodoCardNode,
 };
 
 // Debounce timer for canvas change saves
@@ -192,17 +196,17 @@ function CanvasApp() {
       /**
        * Place a single item on the canvas at the given position.
        */
-      placeItem(uuid, type, x, y, metadataJSON) {
+      placeItem(uuid, nodeType, x, y, metadataJSON) {
         const metadata = metadataJSON ? JSON.parse(metadataJSON) : {};
         const nodeId = `node-${uuid}`;
 
         const newNode = {
           id: nodeId,
-          type: 'bookmarkCard',
+          type: nodeType || 'bookmarkCard',
           position: { x, y },
           data: {
             itemID: uuid,
-            itemType: type,
+            itemType: nodeType === 'noteCard' ? 'note' : nodeType === 'todoCard' ? 'todo' : 'bookmark',
             ...metadata,
           },
         };

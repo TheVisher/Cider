@@ -532,20 +532,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // When a canvas card is clicked, show the panel with bookmark details
+        // When a canvas card is clicked, show the panel with item details
         NotificationCenter.default.publisher(for: .canvasItemSelected)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
-                guard let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID else { return }
+                guard let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID,
+                      let type = notification.userInfo?["type"] as? String else { return }
                 // Show the panel first
                 self?.showCiderPanel()
-                // Then open the bookmark details (slight delay for panel to become visible)
+                // Then open the item details (slight delay for panel to become visible)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    NotificationCenter.default.post(
-                        name: .openBookmarkDetails,
-                        object: nil,
-                        userInfo: ["bookmarkID": bookmarkID]
-                    )
+                    switch type {
+                    case "note":
+                        NotificationCenter.default.post(
+                            name: .openNoteDetails,
+                            object: nil,
+                            userInfo: ["noteID": bookmarkID]
+                        )
+                    case "todo":
+                        NotificationCenter.default.post(
+                            name: .openTodoDetails,
+                            object: nil,
+                            userInfo: ["todoID": bookmarkID]
+                        )
+                    default:
+                        NotificationCenter.default.post(
+                            name: .openBookmarkDetails,
+                            object: nil,
+                            userInfo: ["bookmarkID": bookmarkID]
+                        )
+                    }
                 }
             }
             .store(in: &cancellables)

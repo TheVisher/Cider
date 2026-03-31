@@ -135,7 +135,7 @@ final class CanvasViewModel: ObservableObject {
             loadCanvasWithFreshMetadata(savedJSON)
         } else {
             // No saved canvas — generate initial layout from all bookmarks
-            loadAllBookmarks()
+            loadAllItems()
         }
     }
 
@@ -148,11 +148,13 @@ final class CanvasViewModel: ObservableObject {
               let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let nodes = saved["nodes"] as? [[String: Any]] else {
             // Corrupt save — fall back to initial layout
-            loadAllBookmarks()
+            loadAllItems()
             return
         }
 
-        let bookmarkService = VaultBookmarkService.shared
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
 
         // Build a set of item IDs already on the canvas
         let canvasItemIDs = Set(nodes.compactMap { $0["itemID"] as? String })
@@ -161,40 +163,92 @@ final class CanvasViewModel: ObservableObject {
         var refreshedNodes: [[String: Any]] = []
         for node in nodes {
             guard let itemID = node["itemID"] as? String,
-                  let uuid = UUID(uuidString: itemID),
-                  let bookmark = bookmarkService.bookmarks.first(where: { $0.id == uuid }) else {
-                continue // Skip orphaned nodes (item deleted from vault)
-            }
+                  let uuid = UUID(uuidString: itemID) else { continue }
 
+            let itemType = node["itemType"] as? String ?? "bookmark"
             var refreshed = node
-            var meta = bookmarkMetadata(for: bookmark)
-            meta["itemID"] = itemID
-            meta["itemType"] = node["itemType"] as? String ?? "bookmark"
-            refreshed["metadata"] = meta
-            refreshedNodes.append(refreshed)
+
+            if itemType == "note", let note = notes.first(where: { $0.id == uuid }) {
+                var meta = noteMetadata(for: note)
+                meta["itemID"] = itemID
+                meta["itemType"] = "note"
+                refreshed["metadata"] = meta
+                refreshedNodes.append(refreshed)
+            } else if itemType == "todo", let todo = todos.first(where: { $0.id == uuid }) {
+                var meta = todoMetadata(for: todo)
+                meta["itemID"] = itemID
+                meta["itemType"] = "todo"
+                refreshed["metadata"] = meta
+                refreshedNodes.append(refreshed)
+            } else if let bookmark = bookmarks.first(where: { $0.id == uuid }) {
+                var meta = bookmarkMetadata(for: bookmark)
+                meta["itemID"] = itemID
+                meta["itemType"] = "bookmark"
+                refreshed["metadata"] = meta
+                refreshedNodes.append(refreshed)
+            }
+            // Skip if item not found in any storage (deleted)
         }
 
-        // Find bookmarks NOT yet on the canvas — add them at inbox position
-        let inboxX: CGFloat = 0
-        var inboxY: CGFloat = 0
-        for bookmark in bookmarkService.bookmarks {
-            let idString = bookmark.id.uuidString
-            guard !canvasItemIDs.contains(idString) else { continue }
+        // Find items NOT yet on the canvas — add them below existing items
+        // Calculate the lowest Y position of existing nodes so new items don't overlap
+        var maxY: CGFloat = 0
+        for node in refreshedNodes {
+            if let pos = node["position"] as? [String: Any],
+               let y = pos["y"] as? CGFloat {
+                maxY = max(maxY, y)
+            }
+        }
+        let inboxX: CGFloat = 50
+        var inboxY: CGFloat = maxY + 300 // Start below existing items
+        let inboxColumns = 4
+        let inboxSpacingX: CGFloat = 320
+        let inboxSpacingY: CGFloat = 260
+        var newItemIndex = 0
 
+        func inboxPosition() -> (CGFloat, CGFloat) {
+            let col = newItemIndex % inboxColumns
+            let row = newItemIndex / inboxColumns
+            let x = inboxX + CGFloat(col) * inboxSpacingX
+            let y = inboxY + CGFloat(row) * inboxSpacingY
+            newItemIndex += 1
+            return (x, y)
+        }
+
+        for bookmark in bookmarks where !canvasItemIDs.contains(bookmark.id.uuidString) {
             var meta = bookmarkMetadata(for: bookmark)
+            let idString = bookmark.id.uuidString
             meta["itemID"] = idString
             meta["itemType"] = "bookmark"
+            let (x, y) = inboxPosition()
+            refreshedNodes.append([
+                "id": "node-\(idString)", "itemID": idString, "itemType": "bookmark",
+                "position": ["x": x, "y": y], "nodeType": "bookmarkCard", "metadata": meta,
+            ])
+        }
 
-            let node: [String: Any] = [
-                "id": "node-\(idString)",
-                "itemID": idString,
-                "itemType": "bookmark",
-                "position": ["x": inboxX, "y": inboxY],
-                "nodeType": "bookmarkCard",
-                "metadata": meta,
-            ]
-            refreshedNodes.append(node)
-            inboxY += 260
+        for note in notes where !canvasItemIDs.contains(note.id.uuidString) {
+            var meta = noteMetadata(for: note)
+            let idString = note.id.uuidString
+            meta["itemID"] = idString
+            meta["itemType"] = "note"
+            let (x, y) = inboxPosition()
+            refreshedNodes.append([
+                "id": "node-\(idString)", "itemID": idString, "itemType": "note",
+                "position": ["x": x, "y": y], "nodeType": "noteCard", "metadata": meta,
+            ])
+        }
+
+        for todo in todos where !canvasItemIDs.contains(todo.id.uuidString) {
+            var meta = todoMetadata(for: todo)
+            let idString = todo.id.uuidString
+            meta["itemID"] = idString
+            meta["itemType"] = "todo"
+            let (x, y) = inboxPosition()
+            refreshedNodes.append([
+                "id": "node-\(idString)", "itemID": idString, "itemType": "todo",
+                "position": ["x": x, "y": y], "nodeType": "todoCard", "metadata": meta,
+            ])
         }
 
         // Rebuild the canvas JSON with refreshed nodes
@@ -212,30 +266,51 @@ final class CanvasViewModel: ObservableObject {
         }
     }
 
-    /// Generate initial canvas layout from all bookmarks in the vault.
-    func loadAllBookmarks() {
-        let bookmarkService = VaultBookmarkService.shared
-        let bookmarks = bookmarkService.bookmarks
+    /// Generate initial canvas layout from all items in the vault.
+    func loadAllItems() {
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
 
-        guard !bookmarks.isEmpty else {
-            Self.logger.warning("No bookmarks available to load onto canvas")
-            return
-        }
-
-        // Arrange in a grid: 4 columns, 320px spacing
         let columns = 4
         let spacingX: CGFloat = 320
         let spacingY: CGFloat = 260
+        var index = 0
 
-        for (index, bookmark) in bookmarks.enumerated() {
+        // Place bookmarks
+        for bookmark in bookmarks {
             let col = index % columns
             let row = index / columns
             let x = CGFloat(col) * spacingX + 50
             let y = CGFloat(row) * spacingY + 50
-
             let metadata = bookmarkMetadata(for: bookmark)
             placeItem(uuid: bookmark.id.uuidString, type: "bookmark", x: x, y: y, metadata: metadata)
+            index += 1
         }
+
+        // Place notes in a separate region (offset right)
+        let notesOffsetX: CGFloat = CGFloat(columns) * spacingX + 200
+        for (i, note) in notes.enumerated() {
+            let col = i % columns
+            let row = i / columns
+            let x = notesOffsetX + CGFloat(col) * spacingX
+            let y = CGFloat(row) * spacingY + 50
+            let metadata = noteMetadata(for: note)
+            placeItem(uuid: note.id.uuidString, type: "note", x: x, y: y, metadata: metadata)
+        }
+
+        // Place todos in another region (offset below notes)
+        let todosOffsetY: CGFloat = CGFloat((notes.count / columns) + 2) * spacingY + 50
+        for (i, todo) in todos.enumerated() {
+            let col = i % columns
+            let row = i / columns
+            let x = notesOffsetX + CGFloat(col) * spacingX
+            let y = todosOffsetY + CGFloat(row) * spacingY
+            let metadata = todoMetadata(for: todo)
+            placeItem(uuid: todo.id.uuidString, type: "todo", x: x, y: y, metadata: metadata)
+        }
+
+        Self.logger.info("Loaded \(bookmarks.count) bookmarks, \(notes.count) notes, \(todos.count) todos onto canvas")
     }
 
     // MARK: - Bridge: Swift → JS
@@ -252,8 +327,14 @@ final class CanvasViewModel: ObservableObject {
             metadataJSON = "{}"
         }
 
+        let nodeType: String
+        switch type {
+        case "note": nodeType = "noteCard"
+        case "todo": nodeType = "todoCard"
+        default: nodeType = "bookmarkCard"
+        }
         let escaped = escapeForJS(metadataJSON)
-        let js = "window.canvasBridge?.placeItem('\(uuid)', '\(type)', \(x), \(y), '\(escaped)')"
+        let js = "window.canvasBridge?.placeItem('\(uuid)', '\(nodeType)', \(x), \(y), '\(escaped)')"
         webView.evaluateJavaScript(js) { _, error in
             if let error {
                 Self.logger.error("placeItem JS error: \(error)")
@@ -353,6 +434,79 @@ final class CanvasViewModel: ObservableObject {
         }
 
         meta["hasAISummary"] = bookmark.aiSummary != nil
+
+        return meta
+    }
+
+    private func noteMetadata(for note: Note) -> [String: Any] {
+        var meta: [String: Any] = [
+            "title": note.title,
+            "isPinned": note.isPinned,
+        ]
+
+        // Content preview — first ~200 chars, strip markdown
+        let content = note.resolvedContent
+        let stripped = content
+            .replacingOccurrences(of: #"^#+\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*|__|\*|_|`"#, with: "", options: .regularExpression)
+        let preview = String(stripped.prefix(200)).trimmingCharacters(in: .whitespacesAndNewlines)
+        meta["preview"] = preview
+
+        // Word count
+        let words = content.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+        meta["wordCount"] = words.count
+
+        // Relative time
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        meta["timeAgo"] = formatter.localizedString(for: note.modifiedAt, relativeTo: Date())
+
+        // Tags
+        if !note.labelIDs.isEmpty {
+            let labels = note.labelIDs.compactMap { id in
+                CardLabelStorage.shared.labels.first { $0.id == id }
+            }
+            meta["tags"] = labels.map { ["name": $0.name, "color": $0.colorHex] }
+        }
+
+        return meta
+    }
+
+    private func todoMetadata(for todo: TodoCard) -> [String: Any] {
+        var meta: [String: Any] = [
+            "title": todo.title,
+            "isCompleted": todo.isCompleted,
+        ]
+
+        if let priority = todo.priority {
+            meta["priority"] = priority.rawValue
+        }
+
+        if let dueDate = todo.dueDate {
+            let df = DateFormatter()
+            df.dateStyle = .medium
+            df.timeStyle = .none
+            meta["dueDate"] = df.string(from: dueDate)
+        }
+
+        // Relative time
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        meta["timeAgo"] = formatter.localizedString(for: todo.createdAt, relativeTo: Date())
+
+        // Checklist progress
+        let total = todo.checklist.count
+        let done = todo.checklist.filter(\.isCompleted).count
+        meta["checklistTotal"] = total
+        meta["checklistDone"] = done
+
+        // Tags
+        if !todo.labelIDs.isEmpty {
+            let labels = todo.labelIDs.compactMap { id in
+                CardLabelStorage.shared.labels.first { $0.id == id }
+            }
+            meta["tags"] = labels.map { ["name": $0.name, "color": $0.colorHex] }
+        }
 
         return meta
     }

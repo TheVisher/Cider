@@ -312,6 +312,16 @@ struct CiderPanelView: View {
                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
             openBookmarkDetails(bookmark)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openNoteDetails)) { notification in
+            guard let noteID = notification.userInfo?["noteID"] as? UUID,
+                  let note = NotesStorage.shared.notes.first(where: { $0.id == noteID }) else { return }
+            openNoteDetail(note)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openTodoDetails)) { notification in
+            guard let todoID = notification.userInfo?["todoID"] as? UUID,
+                  let todo = TodoCardStorage.shared.todoCards.first(where: { $0.id == todoID }) else { return }
+            openTodoDetail(todo)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
             let ui = notification.userInfo
             let step = ui?["initialStep"] as? String
