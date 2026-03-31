@@ -1,10 +1,38 @@
-import React, { memo, useState, useCallback } from 'react';
+import React, { memo, useCallback } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
+
+const LAYOUT_MODES = ['grid', 'list', 'masonry'];
+
+const LayoutIcons = {
+  grid: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <rect x="0" y="0" width="6" height="6" rx="1" />
+      <rect x="8" y="0" width="6" height="6" rx="1" />
+      <rect x="0" y="8" width="6" height="6" rx="1" />
+      <rect x="8" y="8" width="6" height="6" rx="1" />
+    </svg>
+  ),
+  list: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <rect x="0" y="0" width="14" height="3" rx="1" />
+      <rect x="0" y="5.5" width="14" height="3" rx="1" />
+      <rect x="0" y="11" width="14" height="3" rx="1" />
+    </svg>
+  ),
+  masonry: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <rect x="0" y="0" width="6" height="8" rx="1" />
+      <rect x="8" y="0" width="6" height="5" rx="1" />
+      <rect x="0" y="10" width="6" height="4" rx="1" />
+      <rect x="8" y="7" width="6" height="7" rx="1" />
+    </svg>
+  ),
+};
 
 /**
  * Custom React Flow node for folder groups.
  * Acts as a parent container — child nodes live inside it.
- * Supports collapse/expand toggle.
+ * Supports collapse/expand toggle and layout mode switching.
  */
 const FolderGroupNode = memo(({ data, selected, id }) => {
   const {
@@ -12,17 +40,27 @@ const FolderGroupNode = memo(({ data, selected, id }) => {
     icon = '📁',
     itemCount = 0,
     collapsed = false,
+    layoutMode = 'grid',
   } = data;
 
   const handleToggleCollapse = useCallback((e) => {
     e.stopPropagation();
-    // Notify Swift about collapse toggle
     postMessage('folderToggleCollapse', JSON.stringify({
       folderId: id,
       folderName: data.folderName,
       collapsed: !collapsed,
     }));
   }, [id, data.folderName, collapsed]);
+
+  const handleCycleLayout = useCallback((e) => {
+    e.stopPropagation();
+    const currentIndex = LAYOUT_MODES.indexOf(layoutMode);
+    const nextMode = LAYOUT_MODES[(currentIndex + 1) % LAYOUT_MODES.length];
+    postMessage('folderLayoutChanged', JSON.stringify({
+      folderId: id,
+      layoutMode: nextMode,
+    }));
+  }, [id, layoutMode]);
 
   return (
     <div className={`folder-group ${selected ? 'selected' : ''} ${collapsed ? 'collapsed' : ''}`}>
@@ -43,13 +81,24 @@ const FolderGroupNode = memo(({ data, selected, id }) => {
           <span className="folder-group-name">{folderName}</span>
           <span className="folder-group-count">{itemCount}</span>
         </div>
-        <button
-          className="folder-group-toggle"
-          onClick={handleToggleCollapse}
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
+        <div className="folder-group-controls">
+          {!collapsed && (
+            <button
+              className="folder-group-layout-btn"
+              onClick={handleCycleLayout}
+              title={`Layout: ${layoutMode}`}
+            >
+              {LayoutIcons[layoutMode]}
+            </button>
+          )}
+          <button
+            className="folder-group-toggle"
+            onClick={handleToggleCollapse}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            {collapsed ? '▸' : '▾'}
+          </button>
+        </div>
       </div>
 
       {/* Connection handles */}

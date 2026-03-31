@@ -528,6 +528,35 @@ html, body, #root {
   background: rgba(0, 0, 0, 0.06);
 }
 
+.folder-group-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.folder-group-layout-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 5px;
+  border-radius: 4px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.folder-group-layout-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .folder-group-layout-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
 .folder-group-toggle {
   background: none;
   border: none;
@@ -546,6 +575,145 @@ html, body, #root {
 
 [data-theme="light"] .folder-group-toggle:hover {
   background: rgba(0, 0, 0, 0.06);
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Grid Layout — uniform card sizes, fixed height
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.layout-grid .bookmark-card {
+  width: 280px;
+  height: 260px;
+  overflow: hidden;
+}
+
+.layout-grid .note-card,
+.layout-grid .todo-card {
+  width: 260px;
+  height: 260px;
+  overflow: hidden;
+}
+
+.layout-grid .card-thumbnail {
+  height: 140px;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   List Layout — horizontal rows, thumbnail left, text right
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.layout-list .bookmark-card {
+  width: 520px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 10px;
+  gap: 10px;
+  height: auto;
+  min-height: 0;
+}
+
+.layout-list .note-card,
+.layout-list .todo-card {
+  width: 520px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 10px;
+  gap: 10px;
+  height: auto;
+  min-height: 0;
+}
+
+.layout-list .card-thumbnail {
+  width: 48px;
+  height: 36px;
+  min-width: 48px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.layout-list .card-thumbnail-img {
+  border-radius: 4px;
+}
+
+.layout-list .card-thumbnail-fallback {
+  border-radius: 4px;
+}
+
+.layout-list .card-favicon-large {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.layout-list .card-favicon-placeholder {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+
+.layout-list .card-content {
+  flex: 1;
+  min-width: 0;
+  padding-top: 0;
+  gap: 1px;
+}
+
+.layout-list .card-title {
+  font-size: 12px;
+  -webkit-line-clamp: 1;
+}
+
+.layout-list .card-meta {
+  font-size: 10px;
+}
+
+.layout-list .card-tags {
+  display: none;
+}
+
+.layout-list .card-ai-badge {
+  display: none;
+}
+
+.layout-list .note-card-header {
+  display: none;
+}
+
+.layout-list .note-card-preview {
+  -webkit-line-clamp: 1;
+  font-size: 10px;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Masonry Layout — variable height, full thumbnails
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.layout-masonry .bookmark-card {
+  width: 280px;
+  height: auto;
+}
+
+.layout-masonry .note-card,
+.layout-masonry .todo-card {
+  width: 280px;
+  height: auto;
+}
+
+.layout-masonry .card-thumbnail {
+  height: auto;
+  aspect-ratio: auto;
+}
+
+.layout-masonry .card-thumbnail-img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.layout-masonry .card-thumbnail-fallback {
+  height: 100px;
 }
 
 /* Resize handles */

@@ -50,6 +50,8 @@ struct CiderCLI {
             handleFolder(subcommand: subcommand, args: remaining)
         case "board":
             handleBoard(subcommand: subcommand, args: remaining)
+        case "canvas":
+            handleCanvas(subcommand: subcommand, args: remaining)
         case "label", "tag":
             handleLabel(subcommand: subcommand, args: remaining)
         case "search":
@@ -955,6 +957,306 @@ struct CiderCLI {
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Canvas Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    private static var canvasesDirectory: URL {
+        StoragePaths.vaultDirectoryURL()
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("canvases", isDirectory: true)
+    }
+
+    private static var defaultCanvasFileURL: URL {
+        canvasesDirectory.appendingPathComponent("default.canvas.json")
+    }
+
+    private static func loadCanvasJSON() -> [String: Any]? {
+        guard FileManager.default.fileExists(atPath: defaultCanvasFileURL.path),
+              let data = try? Data(contentsOf: defaultCanvasFileURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
+    private static func saveCanvasJSON(_ json: [String: Any]) {
+        try? FileManager.default.createDirectory(at: canvasesDirectory, withIntermediateDirectories: true)
+        guard let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) else {
+            print("Error: Failed to serialize canvas JSON")
+            return
+        }
+        try? data.write(to: defaultCanvasFileURL, options: .atomic)
+    }
+
+    static func handleCanvas(subcommand: String?, args: [String]) {
+        switch subcommand {
+        case "list", "ls":
+            let exists = FileManager.default.fileExists(atPath: defaultCanvasFileURL.path)
+            if jsonOutput {
+                outputJSON([["name": "default", "exists": exists]])
+            } else {
+                print("Canvases:")
+                let status = exists ? "✓" : "empty"
+                print("  [default] \(status)")
+            }
+
+        case "show":
+            guard let canvas = loadCanvasJSON() else {
+                print("Error: No canvas found (canvas hasn't been opened yet)")
+                return
+            }
+            if jsonOutput {
+                outputJSON(canvas)
+            } else {
+                let nodes = (canvas["nodes"] as? [[String: Any]]) ?? []
+                let edges = (canvas["edges"] as? [[String: Any]]) ?? []
+                let viewport = canvas["viewport"] as? [String: Any]
+                let zoom = viewport?["zoom"] as? Double ?? 1.0
+
+                // Count by type
+                var typeCounts: [String: Int] = [:]
+                var folderCount = 0
+                for node in nodes {
+                    let nodeType = node["nodeType"] as? String ?? "unknown"
+                    if nodeType == "folderGroup" {
+                        folderCount += 1
+                    } else {
+                        typeCounts[nodeType, default: 0] += 1
+                    }
+                }
+
+                print("Canvas: default")
+                print("  Folders: \(folderCount)")
+                for (type, count) in typeCounts.sorted(by: { $0.key < $1.key }) {
+                    let label = type.replacingOccurrences(of: "Card", with: "s")
+                    print("  \(label.capitalized): \(count)")
+                }
+                print("  Edges: \(edges.count)")
+                print("  Zoom: \(String(format: "%.1f", zoom))x")
+
+                // List nodes with positions
+                print("\nItems:")
+                for node in nodes {
+                    let id = (node["id"] as? String) ?? "?"
+                    let nodeType = node["nodeType"] as? String ?? "unknown"
+                    let pos = node["position"] as? [String: Any]
+                    let x = pos?["x"] as? Double ?? 0
+                    let y = pos?["y"] as? Double ?? 0
+                    let meta = node["metadata"] as? [String: Any]
+                    let title = meta?["title"] as? String
+                        ?? meta?["folderName"] as? String
+                        ?? id
+
+                    let parent = node["parentNode"] as? String
+                    let indent = parent != nil ? "    " : "  "
+                    print("\(indent)[\(id.prefix(12))] \(nodeType): \(title) @ (\(Int(x)), \(Int(y)))")
+                }
+            }
+
+        case "place":
+            guard let itemID = args.first else {
+                print("Error: Usage: cider-cli canvas place <item-id> --x <x> --y <y> [--type bookmark|note|todo]")
+                return
+            }
+
+            let x = Double(parseFlag("--x", from: args) ?? "") ?? 0
+            let y = Double(parseFlag("--y", from: args) ?? "") ?? 0
+
+            // Resolve item type — try to auto-detect if not specified
+            let typeFlag = parseFlag("--type", from: args)
+            let nodeType: String
+            if let t = typeFlag {
+                switch t {
+                case "bookmark", "bm": nodeType = "bookmarkCard"
+                case "note": nodeType = "noteCard"
+                case "todo": nodeType = "todoCard"
+                default: nodeType = "\(t)Card"
+                }
+            } else {
+                // Auto-detect from vault
+                let lowered = itemID.lowercased()
+                if VaultBookmarkService.shared.bookmarks.contains(where: { $0.id.uuidString.lowercased().hasPrefix(lowered) }) {
+                    nodeType = "bookmarkCard"
+                } else if NotesStorage.shared.notes.contains(where: { $0.id.uuidString.lowercased().hasPrefix(lowered) }) {
+                    nodeType = "noteCard"
+                } else if TodoCardStorage.shared.todoCards.contains(where: { $0.id.uuidString.lowercased().hasPrefix(lowered) }) {
+                    nodeType = "todoCard"
+                } else {
+                    print("Error: Item '\(itemID)' not found. Specify --type if using a custom ID.")
+                    return
+                }
+            }
+
+            // Resolve full UUID
+            let fullID: String
+            let lowered = itemID.lowercased()
+            if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id.uuidString.lowercased().hasPrefix(lowered) }) {
+                fullID = bm.id.uuidString
+            } else if let note = NotesStorage.shared.notes.first(where: { $0.id.uuidString.lowercased().hasPrefix(lowered) }) {
+                fullID = note.id.uuidString
+            } else if let todo = TodoCardStorage.shared.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(lowered) }) {
+                fullID = todo.id.uuidString
+            } else {
+                fullID = itemID  // Use as-is if not found (custom ID)
+            }
+
+            var canvas: [String: Any] = loadCanvasJSON() ?? ["version": 1, "nodes": [[String: Any]](), "edges": [[String: Any]](), "viewport": ["x": 0, "y": 0, "zoom": 1.0] as [String: Any]]
+            var nodes = (canvas["nodes"] as? [[String: Any]]) ?? []
+
+            // Remove existing node for this item if present
+            nodes.removeAll { ($0["itemID"] as? String) == fullID }
+
+            let newNode: [String: Any] = [
+                "id": "node-\(fullID)",
+                "itemID": fullID,
+                "itemType": nodeType.replacingOccurrences(of: "Card", with: ""),
+                "nodeType": nodeType,
+                "position": ["x": x, "y": y],
+                "data": [String: Any](),
+                "metadata": [String: Any](),
+            ]
+            nodes.append(newNode)
+            canvas["nodes"] = nodes
+            saveCanvasJSON(canvas)
+            print("Placed \(nodeType) \(fullID.prefix(8)) at (\(Int(x)), \(Int(y)))")
+
+        case "move":
+            guard let itemID = args.first else {
+                print("Error: Usage: cider-cli canvas move <item-id> --x <x> --y <y>")
+                return
+            }
+            guard let canvas = loadCanvasJSON() else {
+                print("Error: No canvas found")
+                return
+            }
+            var nodes = (canvas["nodes"] as? [[String: Any]]) ?? []
+            let lowered = itemID.lowercased()
+
+            guard let idx = nodes.firstIndex(where: {
+                let nodeID = ($0["id"] as? String)?.lowercased() ?? ""
+                let itemUUID = ($0["itemID"] as? String)?.lowercased() ?? ""
+                return nodeID.hasPrefix(lowered) || itemUUID.hasPrefix(lowered)
+            }) else {
+                print("Error: Item '\(itemID)' not found on canvas")
+                return
+            }
+
+            var node = nodes[idx]
+            var pos = (node["position"] as? [String: Any]) ?? ["x": 0, "y": 0]
+            if let xStr = parseFlag("--x", from: args) { pos["x"] = Double(xStr) ?? 0 }
+            if let yStr = parseFlag("--y", from: args) { pos["y"] = Double(yStr) ?? 0 }
+            node["position"] = pos
+            nodes[idx] = node
+
+            var updated = canvas
+            updated["nodes"] = nodes
+            saveCanvasJSON(updated)
+
+            let x = pos["x"] as? Double ?? 0
+            let y = pos["y"] as? Double ?? 0
+            print("Moved \(itemID.prefix(8)) to (\(Int(x)), \(Int(y)))")
+
+        case "link":
+            guard args.count >= 2 else {
+                print("Error: Usage: cider-cli canvas link <id1> <id2> [--label <text>]")
+                return
+            }
+            guard var canvas = loadCanvasJSON() else {
+                print("Error: No canvas found")
+                return
+            }
+            let id1 = args[0].lowercased()
+            let id2 = args[1].lowercased()
+            let label = parseFlag("--label", from: args) ?? ""
+            let nodes = (canvas["nodes"] as? [[String: Any]]) ?? []
+
+            // Find source and target nodes
+            guard let source = nodes.first(where: {
+                let nodeID = ($0["id"] as? String)?.lowercased() ?? ""
+                let itemUUID = ($0["itemID"] as? String)?.lowercased() ?? ""
+                return nodeID.contains(id1) || itemUUID.hasPrefix(id1)
+            }), let sourceID = source["id"] as? String else {
+                print("Error: Source item '\(args[0])' not found on canvas")
+                return
+            }
+            guard let target = nodes.first(where: {
+                let nodeID = ($0["id"] as? String)?.lowercased() ?? ""
+                let itemUUID = ($0["itemID"] as? String)?.lowercased() ?? ""
+                return nodeID.contains(id2) || itemUUID.hasPrefix(id2)
+            }), let targetID = target["id"] as? String else {
+                print("Error: Target item '\(args[1])' not found on canvas")
+                return
+            }
+
+            var edges = (canvas["edges"] as? [[String: Any]]) ?? []
+            let edgeID = "edge-\(sourceID)-\(targetID)"
+
+            // Remove existing edge between these nodes if present
+            edges.removeAll { ($0["id"] as? String) == edgeID }
+
+            var edge: [String: Any] = [
+                "id": edgeID,
+                "source": sourceID,
+                "target": targetID,
+            ]
+            if !label.isEmpty { edge["label"] = label }
+            edges.append(edge)
+            canvas["edges"] = edges
+            saveCanvasJSON(canvas)
+
+            let labelInfo = label.isEmpty ? "" : " with label '\(label)'"
+            print("Linked \(sourceID.prefix(12)) → \(targetID.prefix(12))\(labelInfo)")
+
+        case "remove":
+            guard let itemID = args.first else {
+                print("Error: Usage: cider-cli canvas remove <item-id>")
+                return
+            }
+            guard var canvas = loadCanvasJSON() else {
+                print("Error: No canvas found")
+                return
+            }
+            var nodes = (canvas["nodes"] as? [[String: Any]]) ?? []
+            let lowered = itemID.lowercased()
+            let before = nodes.count
+            let removedNodeIDs = nodes.filter {
+                let nodeID = ($0["id"] as? String)?.lowercased() ?? ""
+                let itemUUID = ($0["itemID"] as? String)?.lowercased() ?? ""
+                return nodeID.hasPrefix(lowered) || itemUUID.hasPrefix(lowered)
+            }.compactMap { $0["id"] as? String }
+
+            nodes.removeAll {
+                let nodeID = ($0["id"] as? String)?.lowercased() ?? ""
+                let itemUUID = ($0["itemID"] as? String)?.lowercased() ?? ""
+                return nodeID.hasPrefix(lowered) || itemUUID.hasPrefix(lowered)
+            }
+
+            // Also remove edges involving removed nodes
+            var edges = (canvas["edges"] as? [[String: Any]]) ?? []
+            edges.removeAll { edge in
+                let src = edge["source"] as? String ?? ""
+                let tgt = edge["target"] as? String ?? ""
+                return removedNodeIDs.contains(src) || removedNodeIDs.contains(tgt)
+            }
+
+            canvas["nodes"] = nodes
+            canvas["edges"] = edges
+            saveCanvasJSON(canvas)
+
+            let removed = before - nodes.count
+            if removed > 0 {
+                print("Removed \(removed) item(s) from canvas")
+            } else {
+                print("Error: Item '\(itemID)' not found on canvas")
+            }
+
+        default:
+            print("Unknown canvas command: \(subcommand ?? "nil")")
+            print("Commands: list, show, place, move, link, remove")
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Label (Tag) Commands
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1709,6 +2011,14 @@ struct CiderCLI {
           cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
+
+        CANVAS
+          cider-cli canvas list
+          cider-cli canvas show
+          cider-cli canvas place <item-id> --x <x> --y <y> [--type bookmark|note|todo]
+          cider-cli canvas move <item-id> --x <x> --y <y>
+          cider-cli canvas link <id1> <id2> [--label <text>]
+          cider-cli canvas remove <item-id>
 
         LABELS (alias: tag)
           cider-cli label list

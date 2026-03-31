@@ -16,6 +16,93 @@ import NoteCardNode from './NoteCardNode';
 import TodoCardNode from './TodoCardNode';
 import FolderGroupNode from './FolderGroupNode';
 
+// Layout dimensions per mode
+const LAYOUT = {
+  grid:    { cardW: 280, cardH: 260, gapX: 20, gapY: 20, columns: 4, inset: 20, headerH: 60 },
+  list:    { cardW: 520, cardH: 52,  gapX: 0,  gapY: 6,  columns: 1, inset: 20, headerH: 60 },
+  masonry: { cardW: 280, gapX: 14, gapY: 14, columns: 3, inset: 20, headerH: 60 },
+};
+
+/**
+ * Reposition child nodes within a folder based on layout mode.
+ * For grid/list: uses fixed dimensions. For masonry: uses measured node heights.
+ * Returns updated nodes array.
+ */
+function layoutFolderChildren(allNodes, folderId, mode, reactFlowInstance) {
+  const L = LAYOUT[mode] || LAYOUT.grid;
+  const children = allNodes.filter(n => n.parentId === folderId);
+  if (children.length === 0) return { nodes: allNodes, folderWidth: 300, folderHeight: 200 };
+
+  const childIds = new Set(children.map(n => n.id));
+  const layoutClass = `layout-${mode}`;
+
+  let positions;
+  if (mode === 'masonry') {
+    // Use measured heights from React Flow's internal node measurements
+    const rfNodes = reactFlowInstance ? reactFlowInstance.getNodes() : [];
+    const measuredMap = new Map();
+    for (const rfn of rfNodes) {
+      if (rfn.measured?.height) {
+        measuredMap.set(rfn.id, rfn.measured.height);
+      }
+    }
+
+    const colHeights = new Array(L.columns).fill(L.headerH);
+    positions = children.map((child) => {
+      const shortestCol = colHeights.indexOf(Math.min(...colHeights));
+      const x = L.inset + shortestCol * (L.cardW + L.gapX);
+      const y = colHeights[shortestCol];
+      // Use measured height if available, otherwise generous fallback
+      const h = measuredMap.get(child.id) || 320;
+      colHeights[shortestCol] = y + h + L.gapY;
+      return { id: child.id, x, y, h };
+    });
+  } else {
+    // Grid or List: simple row/column layout with fixed heights
+    const cardH = L.cardH;
+    positions = children.map((child, i) => {
+      const col = i % L.columns;
+      const row = Math.floor(i / L.columns);
+      return {
+        id: child.id,
+        x: L.inset + col * (L.cardW + L.gapX),
+        y: L.headerH + row * (cardH + L.gapY),
+        h: cardH,
+      };
+    });
+  }
+
+  // Calculate folder size to fit all children
+  const maxX = Math.max(...positions.map(p => p.x + L.cardW)) + L.inset;
+  const maxY = Math.max(...positions.map(p => p.y + p.h)) + L.inset + 20;
+  const folderWidth = Math.max(300, maxX);
+  const folderHeight = Math.max(200, maxY);
+
+  const posMap = new Map(positions.map(p => [p.id, { x: p.x, y: p.y }]));
+
+  const updatedNodes = allNodes.map(n => {
+    if (childIds.has(n.id)) {
+      const pos = posMap.get(n.id);
+      return {
+        ...n,
+        position: pos || n.position,
+        data: { ...n.data, layoutClass },
+        className: layoutClass,
+      };
+    }
+    if (n.id === folderId) {
+      return {
+        ...n,
+        data: { ...n.data, layoutMode: mode },
+        style: { width: folderWidth, height: folderHeight },
+      };
+    }
+    return n;
+  });
+
+  return { nodes: updatedNodes, folderWidth, folderHeight };
+}
+
 // Custom node types registry
 const nodeTypes = {
   bookmarkCard: BookmarkCardNode,
@@ -419,6 +506,58 @@ function CanvasApp() {
           return n;
         }));
         scheduleSave();
+      },
+
+      /**
+       * Set the layout mode for a folder's children.
+       * Two-pass for masonry: apply classes first, then measure and reposition.
+       */
+      setFolderLayout(folderId, mode) {
+        const layoutClass = `layout-${mode}`;
+
+        if (mode === 'masonry') {
+          // Pass 1: Apply layout classes so cards render at natural height,
+          // and spread cards vertically so React Flow measures them properly
+          setNodes(prev => {
+            const children = prev.filter(n => n.parentId === folderId);
+            const childIds = new Set(children.map(n => n.id));
+            let y = 60;
+            return prev.map(n => {
+              if (childIds.has(n.id)) {
+                const pos = { x: 20, y };
+                y += 400; // spread out so nothing overlaps during measurement
+                return { ...n, position: pos, data: { ...n.data, layoutClass }, className: layoutClass };
+              }
+              if (n.id === folderId) {
+                return { ...n, data: { ...n.data, layoutMode: mode }, style: { width: 920, height: y + 100 } };
+              }
+              return n;
+            });
+          });
+
+          // Pass 2: After render, measure actual heights and do real masonry layout
+          setTimeout(() => {
+            setNodes(prev => {
+              const result = layoutFolderChildren(prev, folderId, mode, reactFlowInstance);
+              return result.nodes;
+            });
+            // Pass 3: Re-measure after images may have loaded for final accuracy
+            setTimeout(() => {
+              setNodes(prev => {
+                const result = layoutFolderChildren(prev, folderId, mode, reactFlowInstance);
+                return result.nodes;
+              });
+              scheduleSave();
+            }, 500);
+          }, 250);
+        } else {
+          // Grid/List: single pass with fixed heights
+          setNodes(prev => {
+            const result = layoutFolderChildren(prev, folderId, mode, reactFlowInstance);
+            return result.nodes;
+          });
+          scheduleSave();
+        }
       },
 
       /**

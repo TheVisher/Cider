@@ -104,6 +104,7 @@ final class CanvasViewModel: ObservableObject {
         contentController.add(coord, name: "itemDoubleClicked")
         contentController.add(coord, name: "canvasError")
         contentController.add(coord, name: "folderToggleCollapse")
+        contentController.add(coord, name: "folderLayoutChanged")
 
         let webView = CanvasWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = coord
@@ -611,6 +612,13 @@ final class CanvasViewModel: ObservableObject {
         webView.evaluateJavaScript(js) { _, _ in }
     }
 
+    func handleFolderLayoutChanged(folderId: String, layoutMode: String) {
+        guard let webView = canvasWebView else { return }
+        Self.logger.info("Folder \(folderId) layout: \(layoutMode)")
+        let js = "window.canvasBridge?.setFolderLayout('\(folderId)', '\(layoutMode)')"
+        webView.evaluateJavaScript(js) { _, _ in }
+    }
+
     // MARK: - Helpers
 
     private func bookmarkMetadata(for bookmark: Bookmark) -> [String: Any] {
@@ -786,6 +794,15 @@ final class CanvasCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDel
                    let folderId = dict["folderId"] as? String,
                    let collapsed = dict["collapsed"] as? Bool {
                     viewModel.handleFolderToggleCollapse(folderId: folderId, collapsed: collapsed)
+                }
+
+            case "folderLayoutChanged":
+                if let jsonString = message.body as? String,
+                   let data = jsonString.data(using: .utf8),
+                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let folderId = dict["folderId"] as? String,
+                   let layoutMode = dict["layoutMode"] as? String {
+                    viewModel.handleFolderLayoutChanged(folderId: folderId, layoutMode: layoutMode)
                 }
 
             case "canvasError":
