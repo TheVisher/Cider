@@ -173,18 +173,21 @@ final class CanvasViewModel: ObservableObject {
                 meta["itemID"] = itemID
                 meta["itemType"] = "note"
                 refreshed["metadata"] = meta
+                refreshed["nodeType"] = "noteCard"
                 refreshedNodes.append(refreshed)
             } else if itemType == "todo", let todo = todos.first(where: { $0.id == uuid }) {
                 var meta = todoMetadata(for: todo)
                 meta["itemID"] = itemID
                 meta["itemType"] = "todo"
                 refreshed["metadata"] = meta
+                refreshed["nodeType"] = "todoCard"
                 refreshedNodes.append(refreshed)
             } else if let bookmark = bookmarks.first(where: { $0.id == uuid }) {
                 var meta = bookmarkMetadata(for: bookmark)
                 meta["itemID"] = itemID
                 meta["itemType"] = "bookmark"
                 refreshed["metadata"] = meta
+                refreshed["nodeType"] = "bookmarkCard"
                 refreshedNodes.append(refreshed)
             }
             // Skip if item not found in any storage (deleted)
