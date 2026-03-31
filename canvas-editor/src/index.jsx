@@ -345,6 +345,21 @@ function CanvasApp() {
       },
 
       /**
+       * Pan/zoom to a specific folder group node.
+       */
+      panToGroup(groupId) {
+        const node = reactFlowInstance.getNodes().find(n => n.id === groupId);
+        if (node) {
+          const width = node.measured?.width || node.style?.width || 800;
+          const height = node.measured?.height || node.style?.height || 600;
+          reactFlowInstance.fitBounds(
+            { x: node.position.x, y: node.position.y, width, height },
+            { padding: 0.1, duration: 400 }
+          );
+        }
+      },
+
+      /**
        * Zoom to fit all nodes.
        */
       fitAll() {

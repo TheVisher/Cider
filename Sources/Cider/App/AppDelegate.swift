@@ -510,7 +510,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         canvasViewModel = vm
 
         let window = CanvasWindow()
-        let contentView = CanvasWindowContentView(viewModel: vm)
+        let contentView = CanvasWindowContentView(
+            viewModel: vm,
+            bookmarksViewModel: bookmarksViewModel ?? BookmarksViewModel()
+        )
         let hostingView = NSHostingView(rootView: contentView)
         window.contentView = hostingView
 

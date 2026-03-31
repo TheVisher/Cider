@@ -558,6 +558,14 @@ final class CanvasViewModel: ObservableObject {
         webView.evaluateJavaScript(js) { _, _ in }
     }
 
+    /// Pan the canvas to a specific folder group.
+    func panToFolder(_ folderID: UUID) {
+        guard let webView = canvasWebView else { return }
+        let groupId = "folder-\(folderID.uuidString)"
+        let escaped = escapeForJS(groupId)
+        webView.evaluateJavaScript("window.canvasBridge?.panToGroup('\(escaped)')") { _, _ in }
+    }
+
     /// Zoom to fit all items.
     func fitAll() {
         guard let webView = canvasWebView else { return }
