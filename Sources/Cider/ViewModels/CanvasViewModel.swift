@@ -126,23 +126,34 @@ final class CanvasViewModel: ObservableObject {
 
     // MARK: - Canvas Loading
 
+    /// Tracks whether we've already loaded content for this WebView session.
+    private var hasLoadedContent = false
+
     /// Called when JS signals ready. Loads saved canvas or generates initial layout.
     func onCanvasReady() {
         isReady = true
-        Self.logger.info("Canvas editor ready")
+
+        guard !hasLoadedContent else {
+            Self.logger.debug("Canvas ready fired again — skipping reload")
+            return
+        }
+        hasLoadedContent = true
+        Self.logger.info("Canvas editor ready — loading content")
 
         if let savedJSON = loadSavedCanvas() {
-            // Restore saved canvas — but refresh metadata (thumbnails, tags may have changed)
             loadCanvasWithFreshMetadata(savedJSON)
         } else {
-            // No saved canvas — generate initial layout from all bookmarks
             loadAllItems()
         }
     }
 
     /// Load a saved canvas JSON, but refresh each item's metadata from the vault.
     private func loadCanvasWithFreshMetadata(_ savedJSON: String) {
-        guard let webView = canvasWebView else { return }
+        Self.logger.info("loadCanvasWithFreshMetadata called (\(savedJSON.count) chars)")
+        guard let webView = canvasWebView else {
+            Self.logger.error("loadCanvasWithFreshMetadata: no webView")
+            return
+        }
 
         // Parse the saved JSON to get the node list
         guard let data = savedJSON.data(using: .utf8),
@@ -259,10 +270,9 @@ final class CanvasViewModel: ObservableObject {
         var rebuilt = saved
         rebuilt["nodes"] = refreshedNodes
 
-        if let rebuiltData = try? JSONSerialization.data(withJSONObject: rebuilt),
-           let rebuiltJSON = String(data: rebuiltData, encoding: .utf8) {
-            let escaped = escapeForJS(rebuiltJSON)
-            webView.evaluateJavaScript("window.canvasBridge?.loadCanvas('\(escaped)')") { _, error in
+        if let rebuiltData = try? JSONSerialization.data(withJSONObject: rebuilt) {
+            let base64 = rebuiltData.base64EncodedString()
+            webView.evaluateJavaScript("window.canvasBridge?.loadCanvasBase64('\(base64)')") { _, error in
                 if let error {
                     Self.logger.error("loadCanvas JS error: \(error)")
                 }
@@ -272,6 +282,7 @@ final class CanvasViewModel: ObservableObject {
 
     /// Generate initial canvas layout from all items in the vault, grouped by folder.
     func loadAllItems() {
+        Self.logger.info("loadAllItems called")
         let bookmarks = VaultBookmarkService.shared.bookmarks
         let notes = NotesStorage.shared.notes
         let todos = TodoCardStorage.shared.todoCards
@@ -358,7 +369,7 @@ final class CanvasViewModel: ObservableObject {
                 "style": ["width": groupWidth, "height": groupHeight],
                 "metadata": [
                     "folderName": folder.name,
-                    "icon": folder.icon ?? "📁",
+                    "icon": "📁",
                     "itemCount": items.count,
                     "collapsed": false,
                 ] as [String: Any],
@@ -417,20 +428,27 @@ final class CanvasViewModel: ObservableObject {
         }
 
         // Send everything at once via loadCanvas
+        // Use base64 encoding to avoid JS string escaping issues with special characters
         let canvasData: [String: Any] = [
             "version": 1,
             "nodes": allNodes,
             "edges": [] as [[String: Any]],
         ]
 
-        if let data = try? JSONSerialization.data(withJSONObject: canvasData),
-           let json = String(data: data, encoding: .utf8) {
-            let escaped = escapeForJS(json)
-            canvasWebView?.evaluateJavaScript("window.canvasBridge?.loadCanvas('\(escaped)')") { _, error in
+        do {
+            let data = try JSONSerialization.data(withJSONObject: canvasData)
+            let base64 = data.base64EncodedString()
+            Self.logger.info("Canvas JSON size: \(data.count) bytes, base64: \(base64.count) chars, \(allNodes.count) nodes")
+            let js = "window.canvasBridge?.loadCanvasBase64('\(base64)')"
+            canvasWebView?.evaluateJavaScript(js) { _, error in
                 if let error {
                     Self.logger.error("loadCanvas JS error: \(error)")
+                } else {
+                    Self.logger.info("Canvas data sent successfully")
                 }
             }
+        } catch {
+            Self.logger.error("Failed to serialize canvas data: \(error)")
         }
 
         Self.logger.info("Loaded \(folders.count) folders, \(bookmarks.count) bookmarks, \(notes.count) notes, \(todos.count) todos onto canvas")

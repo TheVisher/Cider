@@ -117,6 +117,21 @@ function CanvasApp() {
       /**
        * Load a full canvas state from JSON.
        */
+      loadCanvasBase64(base64String) {
+        try {
+          // Decode base64 with proper UTF-8 handling (atob alone mangles multi-byte chars)
+          const binaryString = atob(base64String);
+          const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+          const jsonString = new TextDecoder().decode(bytes);
+          this.loadCanvas(jsonString);
+        } catch (err) {
+          postMessage('canvasError', JSON.stringify({
+            message: `loadCanvasBase64 failed: ${err.message}`,
+            stack: err.stack,
+          }));
+        }
+      },
+
       loadCanvas(jsonString) {
         try {
           isLoadingRef.current = true;
