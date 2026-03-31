@@ -23,6 +23,11 @@ final class CanvasViewModel: ObservableObject {
     private var latestCanvasJSON: String?
     private var saveTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
+    private var hotReloadCancellables = Set<AnyCancellable>()
+    private var hotReloadTask: Task<Void, Never>?
+
+    /// Track item IDs currently on canvas for diffing
+    private var knownItemIDs = Set<String>()
 
     init() {
         terminationObserver = NotificationCenter.default.addObserver(
@@ -145,6 +150,176 @@ final class CanvasViewModel: ObservableObject {
             loadCanvasWithFreshMetadata(savedJSON)
         } else {
             loadAllItems()
+        }
+
+        startHotReload()
+    }
+
+    // MARK: - Hot Reload
+
+    /// Start watching vault services for changes and update the canvas live.
+    func startHotReload() {
+        guard hotReloadCancellables.isEmpty else { return }
+        Self.logger.info("Starting canvas hot reload")
+
+        // Snapshot current item IDs
+        refreshKnownItemIDs()
+
+        // Merge all three publishers into one debounced stream
+        let bookmarkPub = VaultBookmarkService.shared.$bookmarks.map { _ in () }
+        let notesPub = NotesStorage.shared.$notes.map { _ in () }
+        let todosPub = TodoCardStorage.shared.$todoCards.map { _ in () }
+
+        bookmarkPub.merge(with: notesPub, todosPub)
+            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.handleVaultChanged()
+            }
+            .store(in: &hotReloadCancellables)
+    }
+
+    /// Stop watching for changes.
+    func stopHotReload() {
+        hotReloadCancellables.removeAll()
+        hotReloadTask?.cancel()
+        hotReloadTask = nil
+    }
+
+    private func refreshKnownItemIDs() {
+        var ids = Set<String>()
+        for bm in VaultBookmarkService.shared.bookmarks { ids.insert(bm.id.uuidString) }
+        for note in NotesStorage.shared.notes { ids.insert(note.id.uuidString) }
+        for todo in TodoCardStorage.shared.todoCards { ids.insert(todo.id.uuidString) }
+        knownItemIDs = ids
+    }
+
+    /// Called when any vault service publishes changes.
+    private func handleVaultChanged() {
+        guard isReady, canvasWebView != nil else { return }
+        Self.logger.info("Vault changed — updating canvas")
+
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
+
+        // Build current item IDs
+        var currentIDs = Set<String>()
+        for bm in bookmarks { currentIDs.insert(bm.id.uuidString) }
+        for note in notes { currentIDs.insert(note.id.uuidString) }
+        for todo in todos { currentIDs.insert(todo.id.uuidString) }
+
+        // New items — add to canvas
+        let newIDs = currentIDs.subtracting(knownItemIDs)
+        // Deleted items — remove from canvas
+        let deletedIDs = knownItemIDs.subtracting(currentIDs)
+
+        // Update metadata for existing items
+        for bm in bookmarks where !newIDs.contains(bm.id.uuidString) {
+            var meta = bookmarkMetadata(for: bm)
+            meta["itemID"] = bm.id.uuidString
+            meta["itemType"] = "bookmark"
+            updateItemMetadata(uuid: bm.id.uuidString, metadata: meta)
+        }
+        for note in notes where !newIDs.contains(note.id.uuidString) {
+            var meta = noteMetadata(for: note)
+            meta["itemID"] = note.id.uuidString
+            meta["itemType"] = "note"
+            updateItemMetadata(uuid: note.id.uuidString, metadata: meta)
+        }
+        for todo in todos where !newIDs.contains(todo.id.uuidString) {
+            var meta = todoMetadata(for: todo)
+            meta["itemID"] = todo.id.uuidString
+            meta["itemType"] = "todo"
+            updateItemMetadata(uuid: todo.id.uuidString, metadata: meta)
+        }
+
+        // Remove deleted items
+        for id in deletedIDs {
+            removeItemFromCanvas(uuid: id)
+        }
+
+        // Place new items in inbox area (query canvas for max Y first)
+        if !newIDs.isEmpty {
+            placeNewItems(newIDs: newIDs, bookmarks: bookmarks, notes: notes, todos: todos)
+        }
+
+        knownItemIDs = currentIDs
+    }
+
+    /// Remove an item from the canvas via JS bridge.
+    private func removeItemFromCanvas(uuid: String) {
+        guard let webView = canvasWebView else { return }
+        let js = "window.canvasBridge?.removeItem('\(uuid)')"
+        webView.evaluateJavaScript(js) { _, error in
+            if let error {
+                Self.logger.error("removeItem JS error: \(error)")
+            }
+        }
+    }
+
+    /// Place newly added vault items onto the canvas in an inbox area.
+    private func placeNewItems(newIDs: Set<String>, bookmarks: [Bookmark], notes: [Note], todos: [TodoCard]) {
+        guard let webView = canvasWebView else { return }
+
+        // Get current canvas bounds to place new items below existing content
+        webView.evaluateJavaScript("window.canvasBridge?.getCanvas()") { [weak self] result, error in
+            guard let self else { return }
+            var maxY: CGFloat = 0
+
+            if let jsonString = result as? String,
+               let data = jsonString.data(using: .utf8),
+               let canvas = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let nodes = canvas["nodes"] as? [[String: Any]] {
+                for node in nodes {
+                    if let pos = node["position"] as? [String: Any] {
+                        let y = (pos["y"] as? Double) ?? 0
+                        let h = (node["size"] as? [String: Any])?["height"] as? Double ?? 280
+                        maxY = max(maxY, CGFloat(y + h))
+                    }
+                }
+            }
+
+            let startY = maxY + 80
+            var index = 0
+            let columns = 4
+            let spacingX: CGFloat = 320
+            let spacingY: CGFloat = 280
+
+            for bm in bookmarks where newIDs.contains(bm.id.uuidString) {
+                var meta = self.bookmarkMetadata(for: bm)
+                meta["itemID"] = bm.id.uuidString
+                meta["itemType"] = "bookmark"
+                let col = index % columns
+                let row = index / columns
+                let x = 50.0 + CGFloat(col) * spacingX
+                let y = startY + CGFloat(row) * spacingY
+                self.placeItem(uuid: bm.id.uuidString, type: "bookmark", x: x, y: y, metadata: meta)
+                index += 1
+            }
+            for note in notes where newIDs.contains(note.id.uuidString) {
+                var meta = self.noteMetadata(for: note)
+                meta["itemID"] = note.id.uuidString
+                meta["itemType"] = "note"
+                let col = index % columns
+                let row = index / columns
+                let x = 50.0 + CGFloat(col) * spacingX
+                let y = startY + CGFloat(row) * spacingY
+                self.placeItem(uuid: note.id.uuidString, type: "note", x: x, y: y, metadata: meta)
+                index += 1
+            }
+            for todo in todos where newIDs.contains(todo.id.uuidString) {
+                var meta = self.todoMetadata(for: todo)
+                meta["itemID"] = todo.id.uuidString
+                meta["itemType"] = "todo"
+                let col = index % columns
+                let row = index / columns
+                let x = 50.0 + CGFloat(col) * spacingX
+                let y = startY + CGFloat(row) * spacingY
+                self.placeItem(uuid: todo.id.uuidString, type: "todo", x: x, y: y, metadata: meta)
+                index += 1
+            }
+
+            Self.logger.info("Placed \(index) new items on canvas at y=\(startY)")
         }
     }
 
