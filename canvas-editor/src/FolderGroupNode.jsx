@@ -1,7 +1,11 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useState, useRef, useEffect } from 'react';
 import { Handle, Position, NodeResizer } from '@xyflow/react';
 
-const LAYOUT_MODES = ['grid', 'list', 'masonry'];
+const LAYOUT_MODES = [
+  { id: 'grid', label: 'Grid' },
+  { id: 'list', label: 'List' },
+  { id: 'masonry', label: 'Masonry' },
+];
 
 const LayoutIcons = {
   grid: (
@@ -32,7 +36,7 @@ const LayoutIcons = {
 /**
  * Custom React Flow node for folder groups.
  * Acts as a parent container — child nodes live inside it.
- * Supports collapse/expand toggle and layout mode switching.
+ * Supports collapse/expand toggle and layout mode switching via popover.
  */
 const FolderGroupNode = memo(({ data, selected, id }) => {
   const {
@@ -43,6 +47,21 @@ const FolderGroupNode = memo(({ data, selected, id }) => {
     layoutMode = 'grid',
   } = data;
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
+
   const handleToggleCollapse = useCallback((e) => {
     e.stopPropagation();
     postMessage('folderToggleCollapse', JSON.stringify({
@@ -52,15 +71,19 @@ const FolderGroupNode = memo(({ data, selected, id }) => {
     }));
   }, [id, data.folderName, collapsed]);
 
-  const handleCycleLayout = useCallback((e) => {
-    e.stopPropagation();
-    const currentIndex = LAYOUT_MODES.indexOf(layoutMode);
-    const nextMode = LAYOUT_MODES[(currentIndex + 1) % LAYOUT_MODES.length];
+  const handleSelectLayout = useCallback((mode) => {
+    setMenuOpen(false);
+    if (mode === layoutMode) return;
     postMessage('folderLayoutChanged', JSON.stringify({
       folderId: id,
-      layoutMode: nextMode,
+      layoutMode: mode,
     }));
   }, [id, layoutMode]);
+
+  const handleToggleMenu = useCallback((e) => {
+    e.stopPropagation();
+    setMenuOpen(prev => !prev);
+  }, []);
 
   return (
     <div className={`folder-group ${selected ? 'selected' : ''} ${collapsed ? 'collapsed' : ''}`}>
@@ -81,15 +104,31 @@ const FolderGroupNode = memo(({ data, selected, id }) => {
           <span className="folder-group-name">{folderName}</span>
           <span className="folder-group-count">{itemCount}</span>
         </div>
-        <div className="folder-group-controls">
+        <div className="folder-group-controls" ref={menuRef}>
           {!collapsed && (
-            <button
-              className="folder-group-layout-btn"
-              onClick={handleCycleLayout}
-              title={`Layout: ${layoutMode}`}
-            >
-              {LayoutIcons[layoutMode]}
-            </button>
+            <div className="folder-group-layout-wrapper">
+              <button
+                className="folder-group-layout-btn"
+                onClick={handleToggleMenu}
+                title="Change layout"
+              >
+                {LayoutIcons[layoutMode]}
+              </button>
+              {menuOpen && (
+                <div className="folder-layout-menu">
+                  {LAYOUT_MODES.map(mode => (
+                    <button
+                      key={mode.id}
+                      className={`folder-layout-menu-item ${mode.id === layoutMode ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); handleSelectLayout(mode.id); }}
+                    >
+                      {LayoutIcons[mode.id]}
+                      <span>{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <button
             className="folder-group-toggle"

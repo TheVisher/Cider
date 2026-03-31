@@ -258,6 +258,22 @@ function CanvasApp() {
             type: 'default',
           }));
 
+          // Apply layout classes to children based on parent folder's layoutMode
+          const folderModes = new Map();
+          for (const n of loadedNodes) {
+            if (n.type === 'folderGroup' && n.data?.layoutMode) {
+              folderModes.set(n.id, n.data.layoutMode);
+            }
+          }
+          for (const n of loadedNodes) {
+            if (n.parentId && folderModes.has(n.parentId)) {
+              const mode = folderModes.get(n.parentId);
+              const layoutClass = `layout-${mode}`;
+              n.data = { ...n.data, layoutClass };
+              n.className = layoutClass;
+            }
+          }
+
           setNodes(loadedNodes);
           setEdges(loadedEdges);
 
@@ -265,6 +281,15 @@ function CanvasApp() {
             setTimeout(() => {
               reactFlowInstance.setViewport(data.viewport);
               isLoadingRef.current = false;
+
+              // Re-layout masonry folders after render so measurements are accurate
+              for (const [folderId, mode] of folderModes) {
+                if (mode === 'masonry') {
+                  setTimeout(() => {
+                    window.canvasBridge?.setFolderLayout(folderId, 'masonry');
+                  }, 300);
+                }
+              }
             }, 50);
           } else {
             setTimeout(() => {

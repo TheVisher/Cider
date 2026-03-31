@@ -534,6 +534,10 @@ html, body, #root {
   gap: 4px;
 }
 
+.folder-group-layout-wrapper {
+  position: relative;
+}
+
 .folder-group-layout-btn {
   background: none;
   border: none;
@@ -555,6 +559,58 @@ html, body, #root {
 
 [data-theme="light"] .folder-group-layout-btn:hover {
   background: rgba(0, 0, 0, 0.06);
+}
+
+.folder-layout-menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  background: rgba(40, 40, 40, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 100;
+  min-width: 120px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="light"] .folder-layout-menu {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.folder-layout-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.folder-layout-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .folder-layout-menu-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.folder-layout-menu-item.active {
+  color: var(--text-primary);
+  background: rgba(88, 166, 255, 0.12);
 }
 
 .folder-group-toggle {
