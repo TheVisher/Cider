@@ -14,12 +14,14 @@ import {
 import BookmarkCardNode from './BookmarkCardNode';
 import NoteCardNode from './NoteCardNode';
 import TodoCardNode from './TodoCardNode';
+import FolderGroupNode from './FolderGroupNode';
 
 // Custom node types registry
 const nodeTypes = {
   bookmarkCard: BookmarkCardNode,
   noteCard: NoteCardNode,
   todoCard: TodoCardNode,
+  folderGroup: FolderGroupNode,
 };
 
 // Debounce timer for canvas change saves
@@ -120,17 +122,28 @@ function CanvasApp() {
           isLoadingRef.current = true;
           const data = JSON.parse(jsonString);
 
-          const loadedNodes = (data.nodes || []).map(n => ({
-            id: n.id,
-            type: n.nodeType || 'bookmarkCard',
-            position: n.position || { x: 0, y: 0 },
-            parentId: n.parentNode || undefined,
-            data: {
-              itemID: n.itemID,
-              itemType: n.itemType || 'bookmark',
-              ...n.metadata,
-            },
-          }));
+          const loadedNodes = (data.nodes || []).map(n => {
+            const node = {
+              id: n.id,
+              type: n.nodeType || 'bookmarkCard',
+              position: n.position || { x: 0, y: 0 },
+              data: {
+                itemID: n.itemID,
+                itemType: n.itemType || 'bookmark',
+                ...n.metadata,
+              },
+            };
+            // Parent-child relationship
+            if (n.parentNode) {
+              node.parentId = n.parentNode;
+              node.extent = 'parent';
+            }
+            // Style (used for folder group sizing)
+            if (n.style) {
+              node.style = n.style;
+            }
+            return node;
+          });
 
           const loadedEdges = (data.edges || []).map(e => ({
             id: e.id,
@@ -181,6 +194,7 @@ function CanvasApp() {
             size: { width: n.measured?.width || 280, height: n.measured?.height || 200 },
             parentNode: n.parentId || null,
             nodeType: n.type,
+            style: n.style || null,
             metadata: n.data,
           })),
           edges: currentEdges.map(e => ({
@@ -223,6 +237,58 @@ function CanvasApp() {
         });
 
         scheduleSave();
+      },
+
+      /**
+       * Place a folder group node on the canvas.
+       */
+      placeFolder(id, x, y, width, height, metadataJSON) {
+        const metadata = metadataJSON ? JSON.parse(metadataJSON) : {};
+        const newNode = {
+          id,
+          type: 'folderGroup',
+          position: { x, y },
+          style: { width, height },
+          data: { ...metadata },
+        };
+        setNodes(prev => {
+          const existing = prev.findIndex(n => n.id === id);
+          if (existing >= 0) {
+            const updated = [...prev];
+            updated[existing] = { ...updated[existing], ...newNode };
+            return updated;
+          }
+          return [...prev, newNode];
+        });
+      },
+
+      /**
+       * Place an item as a child of a folder group.
+       */
+      placeChildItem(uuid, nodeType, x, y, parentId, metadataJSON) {
+        const metadata = metadataJSON ? JSON.parse(metadataJSON) : {};
+        const nodeId = `node-${uuid}`;
+        const newNode = {
+          id: nodeId,
+          type: nodeType || 'bookmarkCard',
+          position: { x, y },
+          parentId,
+          extent: 'parent',
+          data: {
+            itemID: uuid,
+            itemType: nodeType === 'noteCard' ? 'note' : nodeType === 'todoCard' ? 'todo' : 'bookmark',
+            ...metadata,
+          },
+        };
+        setNodes(prev => {
+          const existing = prev.findIndex(n => n.data?.itemID === uuid);
+          if (existing >= 0) {
+            const updated = [...prev];
+            updated[existing] = { ...updated[existing], ...newNode, id: updated[existing].id };
+            return updated;
+          }
+          return [...prev, newNode];
+        });
       },
 
       /**
@@ -284,6 +350,42 @@ function CanvasApp() {
           }]);
           scheduleSave();
         }
+      },
+
+      /**
+       * Toggle folder collapse — hide/show child nodes.
+       */
+      toggleFolderCollapse(folderId, collapsed) {
+        setNodes(prev => prev.map(n => {
+          // Update the folder node's collapsed state + size
+          if (n.id === folderId) {
+            if (collapsed) {
+              // Save expanded size before collapsing
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  collapsed,
+                  _expandedStyle: n.style,
+                },
+                style: { width: 'auto', height: 44 },
+              };
+            } else {
+              // Restore expanded size
+              return {
+                ...n,
+                data: { ...n.data, collapsed },
+                style: n.data._expandedStyle || n.style,
+              };
+            }
+          }
+          // Hide/show child nodes
+          if (n.parentId === folderId) {
+            return { ...n, hidden: collapsed };
+          }
+          return n;
+        }));
+        scheduleSave();
       },
 
       /**

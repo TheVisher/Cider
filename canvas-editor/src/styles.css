@@ -426,6 +426,142 @@ html, body, #root {
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Folder Group Node
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+.folder-group {
+  width: 100%;
+  height: 100%;
+  min-width: 300px;
+  min-height: 200px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1.5px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+[data-theme="light"] .folder-group {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.10);
+}
+
+.folder-group:hover {
+  border-color: rgba(255, 255, 255, 0.20);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="light"] .folder-group:hover {
+  border-color: rgba(0, 0, 0, 0.16);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.folder-group.selected {
+  border-color: var(--card-border-selected);
+  border-style: solid;
+  background: rgba(88, 166, 255, 0.04);
+}
+
+.folder-group.collapsed {
+  min-height: 44px;
+  height: 44px !important;
+  min-width: auto;
+  width: auto !important;
+  border: 1px solid var(--card-border);
+  border-style: solid;
+  border-radius: 10px;
+  background: var(--card-bg);
+  padding: 0;
+}
+
+.folder-group.collapsed:hover {
+  background: var(--card-bg-hover);
+}
+
+.folder-group.collapsed .folder-group-header {
+  border-bottom: none;
+  padding: 8px 12px;
+}
+
+.folder-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .folder-group-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+.folder-group.collapsed .folder-group-header {
+  border-bottom: none;
+}
+
+.folder-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.folder-group-icon {
+  font-size: 16px;
+}
+
+.folder-group-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.folder-group-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+[data-theme="light"] .folder-group-count {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.folder-group-toggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.folder-group-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .folder-group-toggle:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Resize handles */
+.folder-group-resize-line {
+  border-color: var(--card-border-selected) !important;
+}
+
+.folder-group-resize-handle {
+  width: 8px !important;
+  height: 8px !important;
+  background: var(--card-border-selected) !important;
+  border: none !important;
+  border-radius: 2px !important;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Level of Detail (LOD) — hide heavy elements when zoomed out
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 

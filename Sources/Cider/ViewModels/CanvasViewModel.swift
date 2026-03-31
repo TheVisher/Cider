@@ -103,6 +103,7 @@ final class CanvasViewModel: ObservableObject {
         contentController.add(coord, name: "itemClicked")
         contentController.add(coord, name: "itemDoubleClicked")
         contentController.add(coord, name: "canvasError")
+        contentController.add(coord, name: "folderToggleCollapse")
 
         let webView = CanvasWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = coord
@@ -269,51 +270,212 @@ final class CanvasViewModel: ObservableObject {
         }
     }
 
-    /// Generate initial canvas layout from all items in the vault.
+    /// Generate initial canvas layout from all items in the vault, grouped by folder.
     func loadAllItems() {
         let bookmarks = VaultBookmarkService.shared.bookmarks
         let notes = NotesStorage.shared.notes
         let todos = TodoCardStorage.shared.todoCards
+        let folders = VaultFolderService.shared.folders
 
-        let columns = 4
-        let spacingX: CGFloat = 320
-        let spacingY: CGFloat = 260
-        var index = 0
+        // Collect all items by folder
+        struct CanvasItem {
+            let uuid: String
+            let type: String   // "bookmark", "note", "todo"
+            let nodeType: String // "bookmarkCard", "noteCard", "todoCard"
+            let metadata: [String: Any]
+        }
 
-        // Place bookmarks
+        var folderItems: [UUID: [CanvasItem]] = [:]
+        var unfiledItems: [CanvasItem] = []
+
         for bookmark in bookmarks {
-            let col = index % columns
-            let row = index / columns
-            let x = CGFloat(col) * spacingX + 50
-            let y = CGFloat(row) * spacingY + 50
-            let metadata = bookmarkMetadata(for: bookmark)
-            placeItem(uuid: bookmark.id.uuidString, type: "bookmark", x: x, y: y, metadata: metadata)
-            index += 1
+            let item = CanvasItem(
+                uuid: bookmark.id.uuidString, type: "bookmark",
+                nodeType: "bookmarkCard", metadata: bookmarkMetadata(for: bookmark)
+            )
+            if let fid = bookmark.folderID {
+                folderItems[fid, default: []].append(item)
+            } else {
+                unfiledItems.append(item)
+            }
         }
 
-        // Place notes in a separate region (offset right)
-        let notesOffsetX: CGFloat = CGFloat(columns) * spacingX + 200
-        for (i, note) in notes.enumerated() {
-            let col = i % columns
-            let row = i / columns
-            let x = notesOffsetX + CGFloat(col) * spacingX
-            let y = CGFloat(row) * spacingY + 50
-            let metadata = noteMetadata(for: note)
-            placeItem(uuid: note.id.uuidString, type: "note", x: x, y: y, metadata: metadata)
+        for note in notes {
+            let item = CanvasItem(
+                uuid: note.id.uuidString, type: "note",
+                nodeType: "noteCard", metadata: noteMetadata(for: note)
+            )
+            if let fid = note.folderID {
+                folderItems[fid, default: []].append(item)
+            } else {
+                unfiledItems.append(item)
+            }
         }
 
-        // Place todos in another region (offset below notes)
-        let todosOffsetY: CGFloat = CGFloat((notes.count / columns) + 2) * spacingY + 50
-        for (i, todo) in todos.enumerated() {
-            let col = i % columns
-            let row = i / columns
-            let x = notesOffsetX + CGFloat(col) * spacingX
-            let y = todosOffsetY + CGFloat(row) * spacingY
-            let metadata = todoMetadata(for: todo)
-            placeItem(uuid: todo.id.uuidString, type: "todo", x: x, y: y, metadata: metadata)
+        for todo in todos {
+            let item = CanvasItem(
+                uuid: todo.id.uuidString, type: "todo",
+                nodeType: "todoCard", metadata: todoMetadata(for: todo)
+            )
+            if let fid = todo.folderID {
+                folderItems[fid, default: []].append(item)
+            } else {
+                unfiledItems.append(item)
+            }
         }
 
-        Self.logger.info("Loaded \(bookmarks.count) bookmarks, \(notes.count) notes, \(todos.count) todos onto canvas")
+        // Layout constants
+        let columns = 4
+        let cardWidth: CGFloat = 280
+        let cardGapX: CGFloat = 20
+        let cardSpacingX: CGFloat = cardWidth + cardGapX
+        let cardHeight: CGFloat = 260   // card height including tags + meta
+        let cardGapY: CGFloat = 20
+        let cardSpacingY: CGFloat = cardHeight + cardGapY
+        let folderPadding: CGFloat = 60 // top padding for header
+        let folderGap: CGFloat = 80     // gap between folders
+        let folderInset: CGFloat = 20   // padding inside folder edges
+        var currentY: CGFloat = 50
+
+        // Build all nodes at once, then send as a single loadCanvas call
+        // (individual placeItem calls have timing issues with parent-child setup)
+        var allNodes: [[String: Any]] = []
+
+        // Folder groups first (parents must come before children in the array)
+        for folder in folders {
+            let items = folderItems[folder.id] ?? []
+            guard !items.isEmpty else { continue }
+            let groupId = "folder-\(folder.id.uuidString)"
+            let actualColumns = min(columns, max(1, items.count))
+            let rows = max(1, (items.count + columns - 1) / columns)
+            let groupWidth = CGFloat(actualColumns) * cardSpacingX + folderInset * 2
+            let groupHeight = folderPadding + CGFloat(rows) * cardSpacingY + folderInset + 20
+
+            let folderNode: [String: Any] = [
+                "id": groupId,
+                "nodeType": "folderGroup",
+                "position": ["x": 50, "y": currentY],
+                "style": ["width": groupWidth, "height": groupHeight],
+                "metadata": [
+                    "folderName": folder.name,
+                    "icon": folder.icon ?? "📁",
+                    "itemCount": items.count,
+                    "collapsed": false,
+                ] as [String: Any],
+            ]
+            allNodes.append(folderNode)
+
+            // Child items inside the folder
+            for (i, item) in items.enumerated() {
+                let col = i % columns
+                let row = i / columns
+                let x = CGFloat(col) * cardSpacingX + 20
+                let y = folderPadding + CGFloat(row) * cardSpacingY
+
+                var meta = item.metadata
+                meta["itemID"] = item.uuid
+                meta["itemType"] = item.type
+
+                let childNode: [String: Any] = [
+                    "id": "node-\(item.uuid)",
+                    "itemID": item.uuid,
+                    "itemType": item.type,
+                    "nodeType": item.nodeType,
+                    "position": ["x": x, "y": y],
+                    "parentNode": groupId,
+                    "metadata": meta,
+                ]
+                allNodes.append(childNode)
+            }
+
+            currentY += groupHeight + folderGap
+        }
+
+        // Unfiled items below all folders
+        if !unfiledItems.isEmpty {
+            currentY += 40
+            for (i, item) in unfiledItems.enumerated() {
+                let col = i % columns
+                let row = i / columns
+                let x = CGFloat(col) * cardSpacingX + 50
+                let y = currentY + CGFloat(row) * cardSpacingY
+
+                var meta = item.metadata
+                meta["itemID"] = item.uuid
+                meta["itemType"] = item.type
+
+                let node: [String: Any] = [
+                    "id": "node-\(item.uuid)",
+                    "itemID": item.uuid,
+                    "itemType": item.type,
+                    "nodeType": item.nodeType,
+                    "position": ["x": x, "y": y],
+                    "metadata": meta,
+                ]
+                allNodes.append(node)
+            }
+        }
+
+        // Send everything at once via loadCanvas
+        let canvasData: [String: Any] = [
+            "version": 1,
+            "nodes": allNodes,
+            "edges": [] as [[String: Any]],
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: canvasData),
+           let json = String(data: data, encoding: .utf8) {
+            let escaped = escapeForJS(json)
+            canvasWebView?.evaluateJavaScript("window.canvasBridge?.loadCanvas('\(escaped)')") { _, error in
+                if let error {
+                    Self.logger.error("loadCanvas JS error: \(error)")
+                }
+            }
+        }
+
+        Self.logger.info("Loaded \(folders.count) folders, \(bookmarks.count) bookmarks, \(notes.count) notes, \(todos.count) todos onto canvas")
+    }
+
+    /// Place a folder group node on the canvas.
+    private func placeFolder(id: String, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, metadata: [String: Any]) {
+        guard let webView = canvasWebView else { return }
+
+        let metadataJSON: String
+        if let data = try? JSONSerialization.data(withJSONObject: metadata),
+           let str = String(data: data, encoding: .utf8) {
+            metadataJSON = str
+        } else {
+            metadataJSON = "{}"
+        }
+
+        let escaped = escapeForJS(metadataJSON)
+        let js = "window.canvasBridge?.placeFolder('\(id)', \(x), \(y), \(width), \(height), '\(escaped)')"
+        webView.evaluateJavaScript(js) { _, error in
+            if let error {
+                Self.logger.error("placeFolder JS error: \(error)")
+            }
+        }
+    }
+
+    /// Place an item as a child of a folder group.
+    private func placeChildItem(uuid: String, nodeType: String, x: CGFloat, y: CGFloat, parentId: String, metadata: [String: Any]) {
+        guard let webView = canvasWebView else { return }
+
+        let metadataJSON: String
+        if let data = try? JSONSerialization.data(withJSONObject: metadata),
+           let str = String(data: data, encoding: .utf8) {
+            metadataJSON = str
+        } else {
+            metadataJSON = "{}"
+        }
+
+        let escaped = escapeForJS(metadataJSON)
+        let js = "window.canvasBridge?.placeChildItem('\(uuid)', '\(nodeType)', \(x), \(y), '\(parentId)', '\(escaped)')"
+        webView.evaluateJavaScript(js) { _, error in
+            if let error {
+                Self.logger.error("placeChildItem JS error: \(error)")
+            }
+        }
     }
 
     // MARK: - Bridge: Swift → JS
@@ -332,8 +494,8 @@ final class CanvasViewModel: ObservableObject {
 
         let nodeType: String
         switch type {
-        case "note": nodeType = "noteCard"
-        case "todo": nodeType = "todoCard"
+        case "note", "noteCard": nodeType = "noteCard"
+        case "todo", "todoCard": nodeType = "todoCard"
         default: nodeType = "bookmarkCard"
         }
         let escaped = escapeForJS(metadataJSON)
@@ -397,6 +559,14 @@ final class CanvasViewModel: ObservableObject {
 
     func handleItemDoubleClicked(uuid: String, type: String) {
         Self.logger.info("Item double-clicked: \(uuid) (\(type))")
+    }
+
+    func handleFolderToggleCollapse(folderId: String, collapsed: Bool) {
+        guard let webView = canvasWebView else { return }
+        Self.logger.info("Folder \(folderId) collapsed: \(collapsed)")
+        // Toggle visibility of child nodes
+        let js = "window.canvasBridge?.toggleFolderCollapse('\(folderId)', \(collapsed))"
+        webView.evaluateJavaScript(js) { _, _ in }
     }
 
     // MARK: - Helpers
@@ -565,6 +735,15 @@ final class CanvasCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDel
                    let uuid = dict["uuid"] as? String {
                     let type = dict["type"] as? String ?? "bookmark"
                     viewModel.handleItemDoubleClicked(uuid: uuid, type: type)
+                }
+
+            case "folderToggleCollapse":
+                if let jsonString = message.body as? String,
+                   let data = jsonString.data(using: .utf8),
+                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let folderId = dict["folderId"] as? String,
+                   let collapsed = dict["collapsed"] as? Bool {
+                    viewModel.handleFolderToggleCollapse(folderId: folderId, collapsed: collapsed)
                 }
 
             case "canvasError":
