@@ -74,9 +74,12 @@ function CanvasApp() {
           id: n.id,
           itemID: n.data?.itemID,
           itemType: n.data?.itemType || 'bookmark',
+          nodeType: n.type,
           position: n.position,
           size: { width: n.measured?.width || 280, height: n.measured?.height || 200 },
+          style: n.style || null,
           parentNode: n.parentId || null,
+          metadata: n.data,
         })),
         edges: currentEdges.map(e => ({
           id: e.id,
