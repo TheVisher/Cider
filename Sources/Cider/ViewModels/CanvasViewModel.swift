@@ -147,19 +147,32 @@ final class CanvasViewModel: ObservableObject {
         }
     }
 
-    /// Load a saved canvas JSON, but refresh each item's metadata from the vault.
+    /// Load a saved canvas JSON, refreshing metadata for existing items.
+    /// Falls back to loadAllItems() if the save is corrupt or incompatible.
     private func loadCanvasWithFreshMetadata(_ savedJSON: String) {
-        Self.logger.info("loadCanvasWithFreshMetadata called (\(savedJSON.count) chars)")
+        Self.logger.info("Restoring saved canvas (\(savedJSON.count) chars)")
         guard let webView = canvasWebView else {
-            Self.logger.error("loadCanvasWithFreshMetadata: no webView")
+            Self.logger.error("loadCanvasWithFreshMetadata: no webView — falling back")
+            loadAllItems()
             return
         }
 
-        // Parse the saved JSON to get the node list
-        guard let data = savedJSON.data(using: .utf8),
-              let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let nodes = saved["nodes"] as? [[String: Any]] else {
-            // Corrupt save — fall back to initial layout
+        // Parse saved canvas
+        guard let jsonData = savedJSON.data(using: .utf8),
+              let saved = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let nodes = saved["nodes"] as? [[String: Any]],
+              !nodes.isEmpty else {
+            Self.logger.warning("Saved canvas is empty or corrupt — generating fresh layout")
+            loadAllItems()
+            return
+        }
+
+        // Validate: if no folder groups exist but vault has folders with items,
+        // the save is from an older format — regenerate
+        let hasFolderGroups = nodes.contains { ($0["nodeType"] as? String) == "folderGroup" }
+        let vaultHasFolders = !VaultFolderService.shared.folders.isEmpty
+        if !hasFolderGroups && vaultHasFolders {
+            Self.logger.warning("Saved canvas missing folder groups — generating fresh layout")
             loadAllItems()
             return
         }
@@ -168,12 +181,21 @@ final class CanvasViewModel: ObservableObject {
         let notes = NotesStorage.shared.notes
         let todos = TodoCardStorage.shared.todoCards
 
-        // Build a set of item IDs already on the canvas
+        // Build set of item IDs already on canvas
         let canvasItemIDs = Set(nodes.compactMap { $0["itemID"] as? String })
 
-        // Rebuild nodes with fresh metadata
+        // Rebuild nodes: keep folder groups as-is, refresh item metadata
         var refreshedNodes: [[String: Any]] = []
         for node in nodes {
+            let nodeType = node["nodeType"] as? String ?? ""
+
+            // Folder group nodes — keep as-is (they have no itemID)
+            if nodeType == "folderGroup" {
+                refreshedNodes.append(node)
+                continue
+            }
+
+            // Item nodes — refresh metadata
             guard let itemID = node["itemID"] as? String,
                   let uuid = UUID(uuidString: itemID) else { continue }
 
@@ -202,81 +224,85 @@ final class CanvasViewModel: ObservableObject {
                 refreshed["nodeType"] = "bookmarkCard"
                 refreshedNodes.append(refreshed)
             }
-            // Skip if item not found in any storage (deleted)
+            // Item not found in vault → skip (deleted)
         }
 
-        // Find items NOT yet on the canvas — add them below existing items
-        // Calculate the lowest Y position of existing nodes so new items don't overlap
+        // Add new items that aren't on the canvas yet
         var maxY: CGFloat = 0
         for node in refreshedNodes {
-            if let pos = node["position"] as? [String: Any],
-               let y = pos["y"] as? CGFloat {
+            if let pos = node["position"] as? [String: Any] {
+                let y: CGFloat = (pos["y"] as? CGFloat) ?? CGFloat((pos["y"] as? Double) ?? 0)
                 maxY = max(maxY, y)
             }
         }
         let inboxX: CGFloat = 50
-        var inboxY: CGFloat = maxY + 300 // Start below existing items
+        let inboxY: CGFloat = maxY + 400
         let inboxColumns = 4
         let inboxSpacingX: CGFloat = 320
-        let inboxSpacingY: CGFloat = 260
+        let inboxSpacingY: CGFloat = 280
         var newItemIndex = 0
 
         func inboxPosition() -> (CGFloat, CGFloat) {
             let col = newItemIndex % inboxColumns
             let row = newItemIndex / inboxColumns
-            let x = inboxX + CGFloat(col) * inboxSpacingX
-            let y = inboxY + CGFloat(row) * inboxSpacingY
             newItemIndex += 1
-            return (x, y)
+            return (inboxX + CGFloat(col) * inboxSpacingX, inboxY + CGFloat(row) * inboxSpacingY)
         }
 
         for bookmark in bookmarks where !canvasItemIDs.contains(bookmark.id.uuidString) {
             var meta = bookmarkMetadata(for: bookmark)
-            let idString = bookmark.id.uuidString
-            meta["itemID"] = idString
-            meta["itemType"] = "bookmark"
+            let id = bookmark.id.uuidString
+            meta["itemID"] = id; meta["itemType"] = "bookmark"
             let (x, y) = inboxPosition()
             refreshedNodes.append([
-                "id": "node-\(idString)", "itemID": idString, "itemType": "bookmark",
+                "id": "node-\(id)", "itemID": id, "itemType": "bookmark",
                 "position": ["x": x, "y": y], "nodeType": "bookmarkCard", "metadata": meta,
             ])
         }
-
         for note in notes where !canvasItemIDs.contains(note.id.uuidString) {
             var meta = noteMetadata(for: note)
-            let idString = note.id.uuidString
-            meta["itemID"] = idString
-            meta["itemType"] = "note"
+            let id = note.id.uuidString
+            meta["itemID"] = id; meta["itemType"] = "note"
             let (x, y) = inboxPosition()
             refreshedNodes.append([
-                "id": "node-\(idString)", "itemID": idString, "itemType": "note",
+                "id": "node-\(id)", "itemID": id, "itemType": "note",
                 "position": ["x": x, "y": y], "nodeType": "noteCard", "metadata": meta,
             ])
         }
-
         for todo in todos where !canvasItemIDs.contains(todo.id.uuidString) {
             var meta = todoMetadata(for: todo)
-            let idString = todo.id.uuidString
-            meta["itemID"] = idString
-            meta["itemType"] = "todo"
+            let id = todo.id.uuidString
+            meta["itemID"] = id; meta["itemType"] = "todo"
             let (x, y) = inboxPosition()
             refreshedNodes.append([
-                "id": "node-\(idString)", "itemID": idString, "itemType": "todo",
+                "id": "node-\(id)", "itemID": id, "itemType": "todo",
                 "position": ["x": x, "y": y], "nodeType": "todoCard", "metadata": meta,
             ])
         }
 
-        // Rebuild the canvas JSON with refreshed nodes
+        Self.logger.info("Restored \(refreshedNodes.count) nodes (\(newItemIndex) new)")
+
+        // Send to JS
         var rebuilt = saved
         rebuilt["nodes"] = refreshedNodes
+        sendCanvasToJS(rebuilt, webView: webView)
+    }
 
-        if let rebuiltData = try? JSONSerialization.data(withJSONObject: rebuilt) {
-            let base64 = rebuiltData.base64EncodedString()
-            webView.evaluateJavaScript("window.canvasBridge?.loadCanvasBase64('\(base64)')") { _, error in
+    /// Encode canvas data as base64 and send to JS. Falls back to loadAllItems on failure.
+    private func sendCanvasToJS(_ canvasData: [String: Any], webView: WKWebView) {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: canvasData)
+            let base64 = data.base64EncodedString()
+            Self.logger.info("Sending canvas: \(data.count) bytes")
+            webView.evaluateJavaScript("window.canvasBridge?.loadCanvasBase64('\(base64)')") { [weak self] _, error in
                 if let error {
-                    Self.logger.error("loadCanvas JS error: \(error)")
+                    Self.logger.error("loadCanvas JS error: \(error) — falling back to fresh layout")
+                    self?.loadAllItems()
                 }
             }
+        } catch {
+            Self.logger.error("JSON serialization failed: \(error) — falling back to fresh layout")
+            loadAllItems()
         }
     }
 
@@ -435,21 +461,11 @@ final class CanvasViewModel: ObservableObject {
             "edges": [] as [[String: Any]],
         ]
 
-        do {
-            let data = try JSONSerialization.data(withJSONObject: canvasData)
-            let base64 = data.base64EncodedString()
-            Self.logger.info("Canvas JSON size: \(data.count) bytes, base64: \(base64.count) chars, \(allNodes.count) nodes")
-            let js = "window.canvasBridge?.loadCanvasBase64('\(base64)')"
-            canvasWebView?.evaluateJavaScript(js) { _, error in
-                if let error {
-                    Self.logger.error("loadCanvas JS error: \(error)")
-                } else {
-                    Self.logger.info("Canvas data sent successfully")
-                }
-            }
-        } catch {
-            Self.logger.error("Failed to serialize canvas data: \(error)")
+        guard let webView = canvasWebView else {
+            Self.logger.error("loadAllItems: no webView")
+            return
         }
+        sendCanvasToJS(canvasData, webView: webView)
 
         Self.logger.info("Loaded \(folders.count) folders, \(bookmarks.count) bookmarks, \(notes.count) notes, \(todos.count) todos onto canvas")
     }
