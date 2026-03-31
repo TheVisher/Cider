@@ -281,15 +281,6 @@ function CanvasApp() {
             setTimeout(() => {
               reactFlowInstance.setViewport(data.viewport);
               isLoadingRef.current = false;
-
-              // Re-layout masonry folders after render so measurements are accurate
-              for (const [folderId, mode] of folderModes) {
-                if (mode === 'masonry') {
-                  setTimeout(() => {
-                    window.canvasBridge?.setFolderLayout(folderId, 'masonry');
-                  }, 300);
-                }
-              }
             }, 50);
           } else {
             setTimeout(() => {

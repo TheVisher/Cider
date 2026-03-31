@@ -434,33 +434,37 @@ html, body, #root {
   height: 100%;
   min-width: 300px;
   min-height: 200px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1.5px dashed rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
   padding: 0;
   cursor: grab;
   user-select: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
 [data-theme="light"] .folder-group {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.10);
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
 .folder-group:hover {
-  border-color: rgba(255, 255, 255, 0.20);
-  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 [data-theme="light"] .folder-group:hover {
-  border-color: rgba(0, 0, 0, 0.16);
-  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .folder-group.selected {
   border-color: var(--card-border-selected);
-  border-style: solid;
-  background: rgba(88, 166, 255, 0.04);
+  background: rgba(88, 166, 255, 0.06);
+  box-shadow: 0 0 0 1px var(--card-border-selected), 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .folder-group.collapsed {
@@ -469,10 +473,13 @@ html, body, #root {
   min-width: auto;
   width: auto !important;
   border: 1px solid var(--card-border);
-  border-style: solid;
   border-radius: 10px;
   background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   padding: 0;
+  overflow: visible;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 
 .folder-group.collapsed:hover {
@@ -490,14 +497,17 @@ html, body, #root {
   justify-content: space-between;
   padding: 10px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 [data-theme="light"] .folder-group-header {
   border-bottom-color: rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .folder-group.collapsed .folder-group-header {
   border-bottom: none;
+  background: none;
 }
 
 .folder-group-title {
@@ -566,21 +576,19 @@ html, body, #root {
   bottom: 100%;
   right: 0;
   margin-bottom: 4px;
-  background: rgba(40, 40, 40, 0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  background: rgb(38, 38, 42);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
   padding: 4px;
   z-index: 100;
   min-width: 120px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
 }
 
 [data-theme="light"] .folder-layout-menu {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgb(250, 250, 252);
   border-color: rgba(0, 0, 0, 0.1);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
 
 .folder-layout-menu-item {
