@@ -8,6 +8,7 @@ struct CanvasSidebarOverlay: View {
     @Binding var isVisible: Bool
     var zoomLevel: CGFloat = 1.0
     var onCollapse: () -> Void = {}
+    var onSelectFolder: ((UUID?) -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -37,6 +38,9 @@ struct CanvasSidebarOverlay: View {
         .padding(.leading, Spacing.md)
         .padding(.vertical, Spacing.md)
         .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: isVisible)
+        .onChange(of: selectedFolderID) { _, newID in
+            onSelectFolder?(newID)
+        }
     }
 
     // MARK: - Container

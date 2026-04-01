@@ -550,15 +550,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // When a canvas card is clicked, show the panel with item details
+        // When a canvas card is clicked, show the panel with item details.
+        // Suppress when the canvas window is key — the canvas has its own detail overlay.
         NotificationCenter.default.publisher(for: .canvasItemSelected)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
-                guard let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID,
+                guard let self,
+                      let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID,
                       let type = notification.userInfo?["type"] as? String else { return }
-                // Show the panel first
-                self?.showCiderPanel()
-                // Then open the item details (slight delay for panel to become visible)
+
+                // Don't pop the panel when canvas is the active window
+                if self.canvasWindow?.isKeyWindow == true { return }
+
+                self.showCiderPanel()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     switch type {
                     case "note":

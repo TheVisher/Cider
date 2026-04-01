@@ -18,6 +18,10 @@ struct CanvasWindowContentView: View {
                     withAnimation(reduceMotion ? .none : .snappy(duration: 0.3)) {
                         sidebarVisible = false
                     }
+                },
+                onSelectFolder: { folderID in
+                    guard let folderID else { return }
+                    viewModel.panToFolder(folderID)
                 }
             )
 

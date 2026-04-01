@@ -60,6 +60,7 @@ extension Notification.Name {
     static let canvasZoomIn = Notification.Name("cider.canvasZoomIn")
     static let canvasZoomOut = Notification.Name("cider.canvasZoomOut")
     static let canvasResetZoom = Notification.Name("cider.canvasResetZoom")
+    static let canvasPanToFolder = Notification.Name("cider.canvasPanToFolder")
     static let openNoteDetails = Notification.Name("cider.openNoteDetails")
     static let openTodoDetails = Notification.Name("cider.openTodoDetails")
     static let openCiderSettings = Notification.Name("cider.openCiderSettings")

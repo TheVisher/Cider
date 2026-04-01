@@ -119,6 +119,21 @@ struct NativeCanvasView: View {
                     syncViewport()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .canvasPanToFolder)) { notification in
+                guard let cx = notification.userInfo?["x"] as? CGFloat,
+                      let cy = notification.userInfo?["y"] as? CGFloat else { return }
+                // Center the folder group in the viewport
+                let targetPan = CGPoint(
+                    x: geometry.size.width / 2 - cx * currentZoom,
+                    y: geometry.size.height / 2 - cy * currentZoom
+                )
+                withAnimation(reduceMotion ? .none : .snappy(duration: 0.4)) {
+                    currentPan = targetPan
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    syncViewport()
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .canvasResetZoom)) { _ in
                 withAnimation(reduceMotion ? .none : .snappy(duration: 0.3)) {
                     // Adjust pan so the current viewport center stays centered at 100%

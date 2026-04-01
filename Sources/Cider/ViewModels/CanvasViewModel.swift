@@ -397,7 +397,14 @@ final class CanvasViewModel: ObservableObject {
     func panToFolder(_ folderID: UUID) {
         let groupId = "folder-\(folderID.uuidString)"
         guard let node = nodes.first(where: { $0.id == groupId }) else { return }
-        let cx = node.position.x + node.size.width / 2; let cy = node.position.y + node.size.height / 2
-        viewport.offset = CGPoint(x: -cx * viewport.zoom, y: -cy * viewport.zoom)
+
+        NotificationCenter.default.post(
+            name: .canvasPanToFolder,
+            object: nil,
+            userInfo: [
+                "x": node.position.x + node.size.width / 2,
+                "y": node.position.y + node.size.height / 2
+            ]
+        )
     }
 }
