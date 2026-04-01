@@ -20,7 +20,7 @@ struct CanvasCardView: View {
             .frame(width: node.size.width)
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .stroke(CiderColors.controlAccent, lineWidth: viewModel.selectedItemID == node.itemID ? 2 : 0)
+                    .stroke(CiderColors.controlAccent, lineWidth: (node.itemID != nil && viewModel.selectedItemID == node.itemID) ? 2 : 0)
             )
             .shadow(
                 color: isDragging ? CiderColors.shadowMedium : CiderColors.shadowLight,

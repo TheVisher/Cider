@@ -52,13 +52,14 @@ struct NativeCanvasView: View {
             .clipped()
             .background(CiderColors.acrylicTint)
             .background {
-                // Hidden view that hosts the NSEvent monitors for scroll/magnify
+                // Full-size view that hosts the NSEvent monitors for scroll/magnify.
+                // Must have correct frame so coordinate conversion works for zoom-to-cursor.
                 CanvasScrollHandler(
                     zoom: $currentZoom,
                     pan: $currentPan,
                     onChanged: { syncViewport() }
                 )
-                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
             }
             .overlay(alignment: .bottomTrailing) {
                 CanvasMinimapView(
@@ -449,22 +450,24 @@ struct CanvasScrollHandler: NSViewRepresentable {
             let oldZoom = zoom.wrappedValue
             let newZoom = min(max(oldZoom * (1.0 + magnification), CanvasViewport.minZoom), CanvasViewport.maxZoom)
 
-            // Get cursor position in the view's coordinate space
-            // NSEvent.locationInWindow is in window coords (bottom-left origin).
-            // Convert to top-left origin for SwiftUI.
-            guard let window = windowLock.withLock({ $0 }),
-                  let contentView = MainActor.assumeIsolated({ window.contentView }) else {
+            // Convert cursor from window coordinates to the canvas view's local space.
+            // hostView is the NSView embedded in the canvas area via NSViewRepresentable,
+            // so converting through it accounts for title bar, toolbar, and any SwiftUI
+            // layout offsets automatically.
+            let view = hostView
+            guard let canvasView = MainActor.assumeIsolated({ view }),
+                  MainActor.assumeIsolated({ canvasView.bounds.width }) > 0 else {
                 zoom.wrappedValue = newZoom
                 return
             }
 
             let windowPoint = event.locationInWindow
-            let viewPoint = MainActor.assumeIsolated {
-                contentView.convert(windowPoint, from: nil)
+            let localPoint = MainActor.assumeIsolated {
+                canvasView.convert(windowPoint, from: nil)
             }
-            // Flip Y: NSView is bottom-left, SwiftUI is top-left
-            let cursorX = viewPoint.x
-            let cursorY = MainActor.assumeIsolated { contentView.bounds.height } - viewPoint.y
+            // Flip Y: NSView is bottom-left origin, SwiftUI is top-left
+            let cursorX = localPoint.x
+            let cursorY = MainActor.assumeIsolated { canvasView.bounds.height } - localPoint.y
 
             // Canvas point under cursor: canvasP = (screenP - pan) / oldZoom
             let currentPan = pan.wrappedValue
