@@ -3,8 +3,11 @@ import os
 
 /// Frosted glass sidebar that floats over the canvas with equal padding on top, left, and bottom.
 /// Embeds the shared FolderSidebarView so it matches the NSPanel sidebar exactly.
+/// Houses traffic lights, zoom controls, and collapse button in its header.
 struct CanvasSidebarOverlay: View {
     @Binding var isVisible: Bool
+    var zoomLevel: CGFloat = 1.0
+    var onCollapse: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -40,6 +43,8 @@ struct CanvasSidebarOverlay: View {
 
     private var sidebarContainer: some View {
         VStack(spacing: 0) {
+            sidebarHeader
+
             FolderSidebarView(
                 folders: VaultFolderService.shared.legacyFolders,
                 bookmarks: bookmarkService.bookmarks,
@@ -82,20 +87,96 @@ struct CanvasSidebarOverlay: View {
         .shadow(color: CiderColors.shadowLight, radius: 8, x: 0, y: 2)
     }
 
+    // MARK: - Header (Traffic Lights + Controls)
+
+    private var sidebarHeader: some View {
+        HStack(alignment: .top, spacing: CiderPanelDesign.trafficLightSpacing) {
+            // Traffic lights
+            PanelTrafficLightButton(
+                color: .systemRed,
+                symbol: "xmark",
+                help: "Close window"
+            ) {
+                NSApp.keyWindow?.close()
+            }
+            PanelTrafficLightButton(
+                color: .systemYellow,
+                symbol: "minus",
+                help: "Minimize"
+            ) {
+                NSApp.keyWindow?.miniaturize(nil)
+            }
+            PanelTrafficLightButton(
+                color: .systemGreen,
+                symbol: "arrow.up.left.and.arrow.down.right",
+                help: "Zoom"
+            ) {
+                NSApp.keyWindow?.zoom(nil)
+            }
+
+            Spacer(minLength: 0)
+
+            // Zoom level
+            Button {
+                NotificationCenter.default.post(name: .canvasResetZoom, object: nil)
+            } label: {
+                Text("\(Int(zoomLevel * 100))%")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(minWidth: 36)
+            }
+            .buttonStyle(.plain)
+            .help("Reset to 100%")
+
+            // Fit all
+            Button {
+                NotificationCenter.default.post(name: .canvasFitAll, object: nil)
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(
+                        width: CiderPanelDesign.trafficLightTapTarget,
+                        height: CiderPanelDesign.trafficLightTapTarget
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Fit All (⌘0)")
+
+            // Collapse sidebar
+            Button {
+                onCollapse()
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(
+                        width: CiderPanelDesign.trafficLightTapTarget,
+                        height: CiderPanelDesign.trafficLightTapTarget
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Hide sidebar (⌘\\)")
+        }
+        .frame(height: BookmarksDesign.buttonTapTarget, alignment: .top)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.top, Spacing.md)
+        .frame(maxWidth: BookmarksDesign.folderSidebarWidth, alignment: .leading)
+    }
+
     // MARK: - Footer
 
     private var sidebarFooter: some View {
         VStack(spacing: Spacing.sm) {
-            // AI section placeholder
             aiSection
 
             Divider()
                 .background(CiderColors.separator)
                 .padding(.bottom, Spacing.xs)
 
-            // Action buttons — same layout as NSPanel footer
             HStack(spacing: Spacing.sm) {
-                // Settings gear
                 Button {} label: {
                     Image(systemName: "gearshape")
                         .font(CiderFont.bodyMedium)
@@ -111,7 +192,6 @@ struct CanvasSidebarOverlay: View {
 
                 Spacer(minLength: 0)
 
-                // + New pill
                 Button {} label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
@@ -134,7 +214,6 @@ struct CanvasSidebarOverlay: View {
 
                 Spacer(minLength: 0)
 
-                // View options
                 Button {} label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(CiderFont.bodySemibold)
