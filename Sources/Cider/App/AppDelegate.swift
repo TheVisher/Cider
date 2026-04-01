@@ -76,6 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Canvas
     var canvasWindow: CanvasWindow?
     var canvasViewModel: CanvasViewModel?
+    var canvasFrameObservation: NSKeyValueObservation?
+    var isPanelDockedToCanvas = false
+    var frameBeforeDock: NSRect?
 
     // Settings
     var settingsWindow: SettingsWindow?
@@ -511,8 +514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let window = CanvasWindow()
         let contentView = CanvasWindowContentView(
-            viewModel: vm,
-            bookmarksViewModel: bookmarksViewModel ?? BookmarksViewModel()
+            viewModel: vm
         )
         let hostingView = NSHostingView(rootView: contentView)
         window.contentView = hostingView
@@ -527,11 +529,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // When canvas window closes, revert to accessory app (no Dock icon)
+        // When canvas window closes, undock panel and revert to accessory app
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window)
             .receive(on: DispatchQueue.main)
-            .sink { _ in
+            .sink { [weak self] _ in
+                if self?.isPanelDockedToCanvas == true {
+                    self?.undockPanelFromCanvas()
+                    self?.hideCiderPanel()
+                }
                 NSApp.setActivationPolicy(.accessory)
+            }
+            .store(in: &cancellables)
+
+        // When a folder is selected in the panel, pan the canvas to it
+        NotificationCenter.default.publisher(for: .panelFolderSelected)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let folderID = notification.userInfo?["folderID"] as? UUID else { return }
+                self?.canvasViewModel?.panToFolder(folderID)
             }
             .store(in: &cancellables)
 

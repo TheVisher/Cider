@@ -111,6 +111,14 @@ extension AppDelegate {
             }
             .store(in: &cancellables)
 
+        // Canvas panel docking toggle
+        NotificationCenter.default.publisher(for: .togglePanelDock)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.togglePanelDock()
+            }
+            .store(in: &cancellables)
+
         // Bookmark capture hotkey
         NotificationCenter.default.publisher(for: .captureBookmark)
             .receive(on: DispatchQueue.main)
@@ -122,6 +130,12 @@ extension AppDelegate {
 
     func toggleCiderPanel() {
         guard let panel = ciderPanel else { return }
+
+        // If docked to canvas, always undock and hide — don't do multi-monitor move
+        if isPanelDockedToCanvas {
+            hideCiderPanel()
+            return
+        }
 
         if panel.isVisible {
             let config = CiderConfig.load()
@@ -144,6 +158,16 @@ extension AppDelegate {
 
     func showCiderPanel() {
         guard let panel = ciderPanel else { return }
+
+        // If docked, don't reposition — just ensure it's visible and uncollapsed
+        if isPanelDockedToCanvas {
+            panel.setCollapsed(false, animated: false)
+            if !panel.isVisible {
+                panel.orderFront(nil)
+            }
+            return
+        }
+
         if panel.isVisible {
             persistCurrentCiderPanelFrameIfNeeded()
         }
@@ -187,6 +211,10 @@ extension AppDelegate {
     }
 
     func hideCiderPanel() {
+        // If docked, undock first to restore canvas chrome
+        if isPanelDockedToCanvas {
+            undockPanelFromCanvas()
+        }
         persistCurrentCiderPanelFrameIfNeeded()
         ciderShadowPanel?.orderOut(nil)
         ciderPanel?.orderOut(nil)
@@ -351,6 +379,112 @@ extension AppDelegate {
 
     func persistCurrentCiderPanelFrameIfNeeded() {
         guard let panel = ciderPanel, panel.isVisible else { return }
+        // Don't persist docked position as the free-floating position
+        guard !isPanelDockedToCanvas else { return }
         ciderPanelPositionStore.setFrame(panel.persistableFrame)
+    }
+
+    // MARK: - Canvas Docking
+
+    func dockPanelToCanvas() {
+        guard let panel = ciderPanel,
+              let canvas = canvasWindow,
+              canvas.isVisible else { return }
+
+        // Save current free-floating frame for undock restore
+        if !isPanelDockedToCanvas {
+            frameBeforeDock = panel.frame
+        }
+
+        isPanelDockedToCanvas = true
+        NotificationCenter.default.post(name: .panelDockStateChanged, object: nil, userInfo: ["docked": true])
+
+        // Hide canvas traffic lights — panel's take over. Keep toolbar for dock button.
+        canvas.standardWindowButton(.closeButton)?.isHidden = true
+        canvas.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        canvas.standardWindowButton(.zoomButton)?.isHidden = true
+
+        // Position panel on left edge of canvas, overlaying the content
+        updateDockedPanelPosition()
+
+        // Hide shadow when docked — not needed over canvas background
+        ciderShadowPanel?.orderOut(nil)
+
+        // Show panel if not visible
+        if !panel.isVisible {
+            panel.orderFront(nil)
+        }
+
+        // Add panel as child window of canvas — macOS window server handles
+        // positioning sync with zero lag (no KVO needed)
+        canvas.addChildWindow(panel, ordered: .above)
+
+        // Track canvas resize to update panel height (child windows only track position, not size)
+        canvasFrameObservation = canvas.observe(\.frame, options: [.new]) { [weak self] _, _ in
+            guard let self, self.isPanelDockedToCanvas else { return }
+            self.updateDockedPanelPosition()
+        }
+    }
+
+    func undockPanelFromCanvas() {
+        guard let panel = ciderPanel else { return }
+
+        // Remove child window relationship
+        if let canvas = canvasWindow {
+            canvas.removeChildWindow(panel)
+        }
+
+        isPanelDockedToCanvas = false
+        canvasFrameObservation = nil
+        NotificationCenter.default.post(name: .panelDockStateChanged, object: nil, userInfo: ["docked": false])
+
+        // Restore canvas traffic lights and toolbar
+        if let canvas = canvasWindow {
+            canvas.standardWindowButton(.closeButton)?.isHidden = false
+            canvas.standardWindowButton(.miniaturizeButton)?.isHidden = false
+            canvas.standardWindowButton(.zoomButton)?.isHidden = false
+            // Force redraw so buttons appear even if canvas isn't focused
+            canvas.display()
+            canvas.contentView?.needsDisplay = true
+        }
+
+        // Restore to previous free-floating position
+        if let savedFrame = frameBeforeDock {
+            panel.setFrame(savedFrame, display: true)
+            frameBeforeDock = nil
+        }
+
+        // Restore shadow for floating mode
+        ciderShadowPanel?.updateFrame(for: panel.frame)
+        ciderShadowPanel?.orderFront(nil)
+        panel.orderFront(nil)
+        persistCurrentCiderPanelFrameIfNeeded()
+    }
+
+    func togglePanelDock() {
+        if isPanelDockedToCanvas {
+            undockPanelFromCanvas()
+        } else {
+            dockPanelToCanvas()
+        }
+    }
+
+    private func updateDockedPanelPosition() {
+        guard let panel = ciderPanel,
+              let canvas = canvasWindow else { return }
+
+        let canvasFrame = canvas.frame
+        let panelWidth = panel.frame.width
+        let inset: CGFloat = Spacing.md
+
+        let dockedFrame = NSRect(
+            x: canvasFrame.minX + inset,
+            y: canvasFrame.minY + inset,
+            width: min(panelWidth, CiderPanelDesign.panelContentWidth),
+            height: canvasFrame.height - inset * 2
+        )
+
+        panel.setFrame(dockedFrame, display: true)
+        ciderShadowPanel?.updateFrame(for: dockedFrame)
     }
 }

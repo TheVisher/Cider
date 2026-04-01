@@ -239,6 +239,14 @@ struct CiderPanelView: View {
             } else {
                 AIAssistantViewModel.shared.clearContext()
             }
+            // If a folder was selected, notify canvas to pan to it
+            if let fid = newFolderID {
+                NotificationCenter.default.post(
+                    name: .panelFolderSelected,
+                    object: nil,
+                    userInfo: ["folderID": fid]
+                )
+            }
         }
         .onChange(of: tagsCollapsed) { _, newVal in
             var config = CiderConfig.load()

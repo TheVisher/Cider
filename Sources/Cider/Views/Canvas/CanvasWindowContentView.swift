@@ -4,41 +4,26 @@ import SwiftUI
 /// Sidebar + canvas side by side.
 struct CanvasWindowContentView: View {
     @ObservedObject var viewModel: CanvasViewModel
-    @ObservedObject var bookmarksViewModel: BookmarksViewModel
-    @State private var showSidebar = true
+    @State private var panelDocked = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            if showSidebar {
-                CanvasSidebarView(
-                    bookmarksViewModel: bookmarksViewModel,
-                    onSelectFolder: { folderID in
-                        viewModel.panToFolder(folderID)
-                    },
-                    onSelectAll: {
-                        viewModel.fitAll()
-                    }
-                )
-                .transition(.move(edge: .leading))
-
-                Divider()
-            }
-
-            CanvasView(viewModel: viewModel)
-                .frame(minWidth: 400, minHeight: 300)
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                        showSidebar.toggle()
-                    }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .foregroundColor(CiderColors.secondary)
+        CanvasView(viewModel: viewModel)
+            .frame(minWidth: 400, minHeight: 300)
+            .onReceive(NotificationCenter.default.publisher(for: .panelDockStateChanged)) { notification in
+                if let docked = notification.userInfo?["docked"] as? Bool {
+                    panelDocked = docked
                 }
-                .help("Toggle Sidebar")
             }
-        }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        NotificationCenter.default.post(name: .togglePanelDock, object: nil)
+                    } label: {
+                        Image(systemName: panelDocked ? "macwindow.badge.plus" : "macwindow.on.rectangle")
+                            .foregroundColor(CiderColors.secondary)
+                    }
+                    .help(panelDocked ? "Undock Library Panel" : "Dock Library Panel")
+                }
+            }
     }
 }
