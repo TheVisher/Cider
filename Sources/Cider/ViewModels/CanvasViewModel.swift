@@ -1,42 +1,35 @@
+import AppKit
 import Combine
 import Foundation
 import os
-import WebKit
-
-/// Custom WKWebView subclass that prevents window dragging.
-final class CanvasWebView: WKWebView {
-    override var mouseDownCanMoveWindow: Bool { false }
-    override var acceptsFirstResponder: Bool { true }
-}
 
 @MainActor
 final class CanvasViewModel: ObservableObject {
     private static let logger = Logger(subsystem: "com.cider", category: "CanvasViewModel")
 
-    private(set) var canvasWebView: WKWebView?
-    private var coordinator: CanvasCoordinator?
+    // MARK: - Published State
 
-    @Published private(set) var isReady = false
+    @Published var nodes: [CanvasNode] = []
+    @Published var edges: [CanvasEdge] = []
+    @Published var viewport: CanvasViewport = .default
     @Published var selectedItemID: String?
 
-    /// Latest canvas JSON from JS — used for flush-saves without JS round-trip.
-    private var latestCanvasJSON: String?
+    @Published private(set) var titleCache: [String: String] = [:]
+    @Published private(set) var bookmarkLookup: [UUID: Bookmark] = [:]
+    @Published private(set) var noteLookup: [UUID: Note] = [:]
+    @Published private(set) var todoLookup: [UUID: TodoCard] = [:]
+
     private var saveTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
     private var hotReloadCancellables = Set<AnyCancellable>()
-    private var hotReloadTask: Task<Void, Never>?
-
-    /// Track item IDs currently on canvas for diffing
     private var knownItemIDs = Set<String>()
 
     init() {
         terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.flushSave() }
-        }
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in Task { @MainActor [weak self] in self?.flushSave() } }
+        loadCanvas()
+        startHotReload()
     }
 
     // MARK: - Storage
@@ -52,138 +45,292 @@ final class CanvasViewModel: ObservableObject {
     }
 
     private func ensureCanvasesDirectory() {
-        try? FileManager.default.createDirectory(
-            at: canvasesDirectory,
-            withIntermediateDirectories: true
-        )
+        try? FileManager.default.createDirectory(at: canvasesDirectory, withIntermediateDirectories: true)
     }
 
-    private func loadSavedCanvas() -> String? {
-        guard FileManager.default.fileExists(atPath: defaultCanvasFileURL.path) else {
-            return nil
+    // MARK: - Persistence
+
+    func loadCanvas() {
+        guard FileManager.default.fileExists(atPath: defaultCanvasFileURL.path),
+              let data = try? Data(contentsOf: defaultCanvasFileURL) else {
+            Self.logger.info("No saved canvas — generating initial layout")
+            generateInitialLayout(); return
         }
-        return try? String(contentsOf: defaultCanvasFileURL, encoding: .utf8)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawNodes = json["nodes"] as? [[String: Any]], !rawNodes.isEmpty else {
+            Self.logger.warning("Saved canvas empty or corrupt — generating fresh layout")
+            generateInitialLayout(); return
+        }
+        if !(json["native"] as? Bool ?? false) {
+            Self.logger.info("Legacy WebView canvas detected — regenerating native layout")
+            generateInitialLayout(); return
+        }
+
+        var parsed: [CanvasNode] = []
+        for raw in rawNodes {
+            guard let id = raw["id"] as? String else { continue }
+            let nodeType = raw["nodeType"] as? String ?? "bookmarkCard"
+            let itemType: String
+            switch nodeType {
+            case "folderGroup": itemType = "folderGroup"
+            case "noteCard": itemType = "note"
+            case "todoCard": itemType = "todo"
+            default: itemType = "bookmark"
+            }
+            let pos = raw["position"] as? [String: Any]
+            let x = (pos?["x"] as? Double) ?? (pos?["x"] as? CGFloat).map(Double.init) ?? 0
+            let y = (pos?["y"] as? Double) ?? (pos?["y"] as? CGFloat).map(Double.init) ?? 0
+            let sizeDict = (raw["size"] as? [String: Any]) ?? (raw["style"] as? [String: Any])
+            let w = (sizeDict?["width"] as? Double) ?? 280
+            let h = (sizeDict?["height"] as? Double) ?? 260
+            let metadata = raw["metadata"] as? [String: Any]
+            parsed.append(CanvasNode(
+                id: id, itemID: raw["itemID"] as? String, itemType: itemType,
+                position: CGPoint(x: x, y: y), size: CGSize(width: w, height: h),
+                parentNodeID: raw["parentNode"] as? String,
+                layoutMode: metadata?["layoutMode"] as? String,
+                collapsed: (metadata?["collapsed"] as? Bool) ?? false
+            ))
+        }
+
+        var parsedEdges: [CanvasEdge] = []
+        if let rawEdges = json["edges"] as? [[String: Any]] {
+            for raw in rawEdges {
+                guard let id = raw["id"] as? String,
+                      let source = raw["sourceID"] as? String ?? raw["source"] as? String,
+                      let target = raw["targetID"] as? String ?? raw["target"] as? String else { continue }
+                parsedEdges.append(CanvasEdge(id: id, sourceID: source, targetID: target, label: raw["label"] as? String))
+            }
+        }
+
+        if let vpDict = json["viewport"] as? [String: Any] {
+            let ox = (vpDict["offsetX"] as? Double) ?? 0
+            let oy = (vpDict["offsetY"] as? Double) ?? 0
+            let z = (vpDict["zoom"] as? Double) ?? 1.0
+            viewport = CanvasViewport(offset: CGPoint(x: ox, y: oy), zoom: z)
+        }
+
+        // Reconcile with current vault
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
+        var currentVaultIDs = Set<String>()
+        for bm in bookmarks { currentVaultIDs.insert(bm.id.uuidString) }
+        for note in notes { currentVaultIDs.insert(note.id.uuidString) }
+        for todo in todos { currentVaultIDs.insert(todo.id.uuidString) }
+
+        parsed = parsed.filter { node in
+            if node.itemType == "folderGroup" { return true }
+            guard let itemID = node.itemID else { return false }
+            return currentVaultIDs.contains(itemID)
+        }
+
+        let canvasItemIDs = Set(parsed.compactMap(\.itemID))
+        let missingIDs = currentVaultIDs.subtracting(canvasItemIDs)
+        if !missingIDs.isEmpty {
+            let maxY = parsed.map { $0.position.y + $0.size.height }.max() ?? 0
+            var index = 0; let columns = 4; let spacingX: CGFloat = 300; let spacingY: CGFloat = 280; let startY = maxY + 80
+            for bm in bookmarks where missingIDs.contains(bm.id.uuidString) {
+                let col = index % columns; let row = index / columns
+                parsed.append(CanvasNode(id: "node-\(bm.id.uuidString)", itemID: bm.id.uuidString, itemType: "bookmark",
+                    position: CGPoint(x: 50 + CGFloat(col) * spacingX, y: startY + CGFloat(row) * spacingY)))
+                index += 1
+            }
+            for note in notes where missingIDs.contains(note.id.uuidString) {
+                let col = index % columns; let row = index / columns
+                parsed.append(CanvasNode(id: "node-\(note.id.uuidString)", itemID: note.id.uuidString, itemType: "note",
+                    position: CGPoint(x: 50 + CGFloat(col) * spacingX, y: startY + CGFloat(row) * spacingY)))
+                index += 1
+            }
+            for todo in todos where missingIDs.contains(todo.id.uuidString) {
+                let col = index % columns; let row = index / columns
+                parsed.append(CanvasNode(id: "node-\(todo.id.uuidString)", itemID: todo.id.uuidString, itemType: "todo",
+                    position: CGPoint(x: 50 + CGFloat(col) * spacingX, y: startY + CGFloat(row) * spacingY)))
+                index += 1
+            }
+            Self.logger.info("Added \(index) new items to canvas")
+        }
+
+        nodes = parsed; edges = parsedEdges; knownItemIDs = currentVaultIDs
+        Self.logger.info("Loaded canvas: \(parsed.count) nodes, \(parsedEdges.count) edges")
+        rebuildTitleCache(); recalculateFolderSizes()
     }
 
-    private func saveCanvasJSON(_ json: String) {
-        ensureCanvasesDirectory()
-        try? json.write(to: defaultCanvasFileURL, atomically: true, encoding: .utf8)
-        Self.logger.debug("Saved canvas state (\(json.count) chars)")
+    private func generateInitialLayout() {
+        let bookmarks = VaultBookmarkService.shared.bookmarks
+        let notes = NotesStorage.shared.notes
+        let todos = TodoCardStorage.shared.todoCards
+        let folders = VaultFolderService.shared.folders
+        struct VaultItem { let uuid: String; let type: String }
+        var folderItems: [UUID: [VaultItem]] = [:]
+        var unfiledItems: [VaultItem] = []
+        for bm in bookmarks {
+            let item = VaultItem(uuid: bm.id.uuidString, type: "bookmark")
+            if let fid = bm.folderID { folderItems[fid, default: []].append(item) } else { unfiledItems.append(item) }
+        }
+        for note in notes {
+            let item = VaultItem(uuid: note.id.uuidString, type: "note")
+            if let fid = note.folderID { folderItems[fid, default: []].append(item) } else { unfiledItems.append(item) }
+        }
+        for todo in todos {
+            let item = VaultItem(uuid: todo.id.uuidString, type: "todo")
+            if let fid = todo.folderID { folderItems[fid, default: []].append(item) } else { unfiledItems.append(item) }
+        }
+
+        let columns = 4; let cardSpacingX: CGFloat = 300; let cardSpacingY: CGFloat = 280
+        let folderPadding: CGFloat = 60; let folderGap: CGFloat = 80; let folderInset: CGFloat = 20
+        var currentY: CGFloat = 50; var allNodes: [CanvasNode] = []
+
+        for folder in folders {
+            let items = folderItems[folder.id] ?? []
+            guard !items.isEmpty else { continue }
+            let groupId = "folder-\(folder.id.uuidString)"
+            let actualColumns = min(columns, max(1, items.count))
+            let rows = max(1, (items.count + columns - 1) / columns)
+            let groupWidth = CGFloat(actualColumns) * cardSpacingX + folderInset * 2
+            let groupHeight = folderPadding + CGFloat(rows) * cardSpacingY + folderInset + 20
+            allNodes.append(CanvasNode(id: groupId, itemType: "folderGroup",
+                position: CGPoint(x: 50, y: currentY), size: CGSize(width: groupWidth, height: groupHeight), layoutMode: "grid"))
+            for (i, item) in items.enumerated() {
+                let col = i % columns; let row = i / columns
+                allNodes.append(CanvasNode(id: "node-\(item.uuid)", itemID: item.uuid, itemType: item.type,
+                    position: CGPoint(x: CGFloat(col) * cardSpacingX + folderInset, y: folderPadding + CGFloat(row) * cardSpacingY),
+                    parentNodeID: groupId))
+            }
+            currentY += groupHeight + folderGap
+        }
+        if !unfiledItems.isEmpty {
+            currentY += 40
+            for (i, item) in unfiledItems.enumerated() {
+                let col = i % columns; let row = i / columns
+                allNodes.append(CanvasNode(id: "node-\(item.uuid)", itemID: item.uuid, itemType: item.type,
+                    position: CGPoint(x: CGFloat(col) * cardSpacingX + 50, y: currentY + CGFloat(row) * cardSpacingY)))
+            }
+        }
+        nodes = allNodes; edges = []; refreshKnownItemIDs(); scheduleDebouncedSave()
+        Self.logger.info("Generated initial layout: \(allNodes.count) nodes")
+        rebuildTitleCache(); recalculateFolderSizes()
     }
 
-    func flushSave() {
-        saveTask?.cancel()
-        saveTask = nil
+    // MARK: - Title Cache & Lookups
 
-        guard let json = latestCanvasJSON else { return }
-        saveCanvasJSON(json)
-        latestCanvasJSON = nil
+    func rebuildTitleCache() {
+        var titles: [String: String] = [:]; var bmL: [UUID: Bookmark] = [:]; var nL: [UUID: Note] = [:]; var tL: [UUID: TodoCard] = [:]
+        for bm in VaultBookmarkService.shared.bookmarks { titles[bm.id.uuidString] = bm.title; bmL[bm.id] = bm }
+        for note in NotesStorage.shared.notes { titles[note.id.uuidString] = note.title; nL[note.id] = note }
+        for todo in TodoCardStorage.shared.todoCards { titles[todo.id.uuidString] = todo.title; tL[todo.id] = todo }
+        for folder in VaultFolderService.shared.folders { titles["folder-\(folder.id.uuidString)"] = folder.name }
+        titleCache = titles; bookmarkLookup = bmL; noteLookup = nL; todoLookup = tL
     }
+
+    // MARK: - Save
+
+    func flushSave() { saveTask?.cancel(); saveTask = nil; saveCanvasToDisk() }
 
     private func scheduleDebouncedSave() {
         saveTask?.cancel()
         saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            self?.flushSave()
+            try? await Task.sleep(for: .seconds(2)); guard !Task.isCancelled else { return }; self?.saveCanvasToDisk()
         }
     }
 
-    // MARK: - WebView Setup
-
-    @discardableResult
-    func ensureWebView() -> WKWebView {
-        if let existing = canvasWebView {
-            return existing
+    private func saveCanvasToDisk() {
+        ensureCanvasesDirectory()
+        var jsonNodes: [[String: Any]] = []
+        for node in nodes {
+            var dict: [String: Any] = [
+                "id": node.id, "itemType": node.itemType,
+                "position": ["x": node.position.x, "y": node.position.y],
+                "size": ["width": node.size.width, "height": node.size.height],
+            ]
+            if let itemID = node.itemID { dict["itemID"] = itemID }
+            if let parent = node.parentNodeID { dict["parentNode"] = parent }
+            switch node.itemType {
+            case "folderGroup": dict["nodeType"] = "folderGroup"
+            case "note": dict["nodeType"] = "noteCard"
+            case "todo": dict["nodeType"] = "todoCard"
+            default: dict["nodeType"] = "bookmarkCard"
+            }
+            if node.itemType == "folderGroup" {
+                var meta: [String: Any] = ["collapsed": node.collapsed]
+                if let lm = node.layoutMode { meta["layoutMode"] = lm }
+                if node.id.hasPrefix("folder-"),
+                   let uuidStr = node.id.components(separatedBy: "folder-").last,
+                   let uuid = UUID(uuidString: uuidStr),
+                   let folder = VaultFolderService.shared.folders.first(where: { $0.id == uuid }) {
+                    meta["folderName"] = folder.name; meta["icon"] = "📁"
+                    meta["itemCount"] = nodes.filter { $0.parentNodeID == node.id }.count
+                }
+                dict["metadata"] = meta
+            }
+            jsonNodes.append(dict)
         }
-
-        let coord = CanvasCoordinator(viewModel: self)
-        coordinator = coord
-
-        let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(CiderVaultSchemeHandler(), forURLScheme: "cider-vault")
-        let contentController = config.userContentController
-        contentController.add(coord, name: "canvasReady")
-        contentController.add(coord, name: "canvasChanged")
-        contentController.add(coord, name: "itemClicked")
-        contentController.add(coord, name: "itemDoubleClicked")
-        contentController.add(coord, name: "canvasError")
-        contentController.add(coord, name: "folderToggleCollapse")
-        contentController.add(coord, name: "folderLayoutChanged")
-
-        let webView = CanvasWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = coord
-        webView.setValue(false, forKey: "drawsBackground")
-
-        if let resourceURL = Bundle.main.url(
-            forResource: "index",
-            withExtension: "html",
-            subdirectory: "CanvasEditor"
-        ) {
-            let readAccessRoot = resourceURL.deletingLastPathComponent()
-            webView.loadFileURL(resourceURL, allowingReadAccessTo: readAccessRoot)
-        } else {
-            Self.logger.error("CanvasEditor/index.html not found in bundle")
+        var jsonEdges: [[String: Any]] = []
+        for edge in edges {
+            var dict: [String: Any] = ["id": edge.id, "sourceID": edge.sourceID, "targetID": edge.targetID]
+            if let label = edge.label { dict["label"] = label }; jsonEdges.append(dict)
         }
-
-        canvasWebView = webView
-        return webView
+        let canvas: [String: Any] = [
+            "version": 1, "native": true, "nodes": jsonNodes, "edges": jsonEdges,
+            "viewport": ["offsetX": viewport.offset.x, "offsetY": viewport.offset.y, "zoom": viewport.zoom],
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: canvas, options: [.sortedKeys])
+            try data.write(to: defaultCanvasFileURL, options: .atomic)
+            Self.logger.debug("Saved canvas (\(data.count) bytes)")
+        } catch { Self.logger.error("Failed to save canvas: \(error)") }
     }
 
-    // MARK: - Canvas Loading
+    // MARK: - Node Operations
 
-    /// Tracks whether we've already loaded content for this WebView session.
-    private var hasLoadedContent = false
-
-    /// Called when JS signals ready. Loads saved canvas or generates initial layout.
-    func onCanvasReady() {
-        isReady = true
-
-        guard !hasLoadedContent else {
-            Self.logger.debug("Canvas ready fired again — skipping reload")
-            return
-        }
-        hasLoadedContent = true
-        Self.logger.info("Canvas editor ready — loading content")
-
-        if let savedJSON = loadSavedCanvas() {
-            loadCanvasWithFreshMetadata(savedJSON)
-        } else {
-            loadAllItems()
-        }
-
-        startHotReload()
+    func moveNode(id: String, to position: CGPoint) {
+        guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        nodes[index].position = position; scheduleDebouncedSave()
     }
+    func addNode(_ node: CanvasNode) { nodes.append(node); scheduleDebouncedSave() }
+    func removeNode(id: String) { nodes.removeAll { $0.id == id }; scheduleDebouncedSave() }
+
+    func toggleCollapse(nodeID: String) {
+        guard let index = nodes.firstIndex(where: { $0.id == nodeID }) else { return }
+        nodes[index].collapsed.toggle()
+        if nodes[index].collapsed {
+            nodes[index].size = CGSize(width: nodes[index].size.width, height: 44)
+        } else { recalculateFolderSizes() }
+        scheduleDebouncedSave()
+    }
+
+    func recalculateFolderSizes() {
+        let columns = 4; let cardSpacingX: CGFloat = 300; let cardSpacingY: CGFloat = 280
+        let folderPadding: CGFloat = 60; let folderInset: CGFloat = 20
+        for i in nodes.indices {
+            guard nodes[i].itemType == "folderGroup", !nodes[i].collapsed else { continue }
+            let children = nodes.filter { $0.parentNodeID == nodes[i].id }
+            guard !children.isEmpty else { continue }
+            let actualColumns = min(columns, max(1, children.count))
+            let rows = max(1, (children.count + columns - 1) / columns)
+            nodes[i].size = CGSize(
+                width: CGFloat(actualColumns) * cardSpacingX + folderInset * 2,
+                height: folderPadding + CGFloat(rows) * cardSpacingY + folderInset + 20)
+        }
+    }
+
+    func deselectAll() { selectedItemID = nil }
 
     // MARK: - Hot Reload
 
-    /// Start watching vault services for changes and update the canvas live.
     func startHotReload() {
         guard hotReloadCancellables.isEmpty else { return }
-        Self.logger.info("Starting canvas hot reload")
-
-        // Snapshot current item IDs
-        refreshKnownItemIDs()
-
-        // Merge all three publishers into one debounced stream
+        Self.logger.info("Starting canvas hot reload"); refreshKnownItemIDs()
         let bookmarkPub = VaultBookmarkService.shared.$bookmarks.map { _ in () }
         let notesPub = NotesStorage.shared.$notes.map { _ in () }
         let todosPub = TodoCardStorage.shared.$todoCards.map { _ in () }
-
         bookmarkPub.merge(with: notesPub, todosPub)
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.handleVaultChanged()
-            }
+            .sink { [weak self] _ in self?.handleVaultChanged() }
             .store(in: &hotReloadCancellables)
     }
 
-    /// Stop watching for changes.
-    func stopHotReload() {
-        hotReloadCancellables.removeAll()
-        hotReloadTask?.cancel()
-        hotReloadTask = nil
-    }
+    func stopHotReload() { hotReloadCancellables.removeAll() }
 
     private func refreshKnownItemIDs() {
         var ids = Set<String>()
@@ -193,825 +340,64 @@ final class CanvasViewModel: ObservableObject {
         knownItemIDs = ids
     }
 
-    /// Called when any vault service publishes changes.
     private func handleVaultChanged() {
-        guard isReady, canvasWebView != nil else { return }
         Self.logger.info("Vault changed — updating canvas")
-
         let bookmarks = VaultBookmarkService.shared.bookmarks
-        let notes = NotesStorage.shared.notes
-        let todos = TodoCardStorage.shared.todoCards
-
-        // Build current item IDs
+        let notes = NotesStorage.shared.notes; let todos = TodoCardStorage.shared.todoCards
         var currentIDs = Set<String>()
         for bm in bookmarks { currentIDs.insert(bm.id.uuidString) }
         for note in notes { currentIDs.insert(note.id.uuidString) }
         for todo in todos { currentIDs.insert(todo.id.uuidString) }
-
-        // New items — add to canvas
         let newIDs = currentIDs.subtracting(knownItemIDs)
-        // Deleted items — remove from canvas
         let deletedIDs = knownItemIDs.subtracting(currentIDs)
-
-        // Update metadata for existing items
-        for bm in bookmarks where !newIDs.contains(bm.id.uuidString) {
-            var meta = bookmarkMetadata(for: bm)
-            meta["itemID"] = bm.id.uuidString
-            meta["itemType"] = "bookmark"
-            updateItemMetadata(uuid: bm.id.uuidString, metadata: meta)
+        if !deletedIDs.isEmpty {
+            nodes.removeAll { node in guard let itemID = node.itemID else { return false }; return deletedIDs.contains(itemID) }
         }
-        for note in notes where !newIDs.contains(note.id.uuidString) {
-            var meta = noteMetadata(for: note)
-            meta["itemID"] = note.id.uuidString
-            meta["itemType"] = "note"
-            updateItemMetadata(uuid: note.id.uuidString, metadata: meta)
-        }
-        for todo in todos where !newIDs.contains(todo.id.uuidString) {
-            var meta = todoMetadata(for: todo)
-            meta["itemID"] = todo.id.uuidString
-            meta["itemType"] = "todo"
-            updateItemMetadata(uuid: todo.id.uuidString, metadata: meta)
-        }
-
-        // Remove deleted items
-        for id in deletedIDs {
-            removeItemFromCanvas(uuid: id)
-        }
-
-        // Place new items in inbox area (query canvas for max Y first)
         if !newIDs.isEmpty {
-            placeNewItems(newIDs: newIDs, bookmarks: bookmarks, notes: notes, todos: todos)
-        }
-
-        knownItemIDs = currentIDs
-    }
-
-    /// Remove an item from the canvas via JS bridge.
-    private func removeItemFromCanvas(uuid: String) {
-        guard let webView = canvasWebView else { return }
-        let js = "window.canvasBridge?.removeItem('\(uuid)')"
-        webView.evaluateJavaScript(js) { _, error in
-            if let error {
-                Self.logger.error("removeItem JS error: \(error)")
-            }
-        }
-    }
-
-    /// Place newly added vault items onto the canvas in an inbox area.
-    private func placeNewItems(newIDs: Set<String>, bookmarks: [Bookmark], notes: [Note], todos: [TodoCard]) {
-        guard let webView = canvasWebView else { return }
-
-        // Get current canvas bounds to place new items below existing content
-        webView.evaluateJavaScript("window.canvasBridge?.getCanvas()") { [weak self] result, error in
-            guard let self else { return }
-            var maxY: CGFloat = 0
-
-            if let jsonString = result as? String,
-               let data = jsonString.data(using: .utf8),
-               let canvas = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let nodes = canvas["nodes"] as? [[String: Any]] {
-                for node in nodes {
-                    if let pos = node["position"] as? [String: Any] {
-                        let y = (pos["y"] as? Double) ?? 0
-                        let h = (node["size"] as? [String: Any])?["height"] as? Double ?? 280
-                        maxY = max(maxY, CGFloat(y + h))
-                    }
-                }
-            }
-
-            let startY = maxY + 80
-            var index = 0
-            let columns = 4
-            let spacingX: CGFloat = 320
-            let spacingY: CGFloat = 280
-
+            let maxY = nodes.map { $0.position.y + $0.size.height }.max() ?? 0
+            let startY = maxY + 80; var index = 0; let columns = 4; let spacingX: CGFloat = 300; let spacingY: CGFloat = 280
             for bm in bookmarks where newIDs.contains(bm.id.uuidString) {
-                var meta = self.bookmarkMetadata(for: bm)
-                meta["itemID"] = bm.id.uuidString
-                meta["itemType"] = "bookmark"
-                let col = index % columns
-                let row = index / columns
-                let x = 50.0 + CGFloat(col) * spacingX
-                let y = startY + CGFloat(row) * spacingY
-                self.placeItem(uuid: bm.id.uuidString, type: "bookmark", x: x, y: y, metadata: meta)
-                index += 1
+                let col = index % columns; let row = index / columns
+                nodes.append(CanvasNode(id: "node-\(bm.id.uuidString)", itemID: bm.id.uuidString, itemType: "bookmark",
+                    position: CGPoint(x: 50 + CGFloat(col) * spacingX, y: startY + CGFloat(row) * spacingY))); index += 1
             }
             for note in notes where newIDs.contains(note.id.uuidString) {
-                var meta = self.noteMetadata(for: note)
-                meta["itemID"] = note.id.uuidString
-                meta["itemType"] = "note"
-                let col = index % columns
-                let row = index / columns
-                let x = 50.0 + CGFloat(col) * spacingX
-                let y = startY + CGFloat(row) * spacingY
-                self.placeItem(uuid: note.id.uuidString, type: "note", x: x, y: y, metadata: meta)
-                index += 1
+                let col = index % columns; let row = index / columns
+                nodes.append(CanvasNode(id: "node-\(note.id.uuidString)", itemID: note.id.uuidString, itemType: "note",
+                    position: CGPoint(x: 50 + CGFloat(col) * spacingX, y: startY + CGFloat(row) * spacingY))); index += 1
             }
             for todo in todos where newIDs.contains(todo.id.uuidString) {
-                var meta = self.todoMetadata(for: todo)
-                meta["itemID"] = todo.id.uuidString
-                meta["itemType"] = "todo"
-                let col = index % columns
-                let row = index / columns
-                let x = 50.0 + CGFloat(col) * spacingX
-                let y = startY + CGFloat(row) * spacingY
-                self.placeItem(uuid: todo.id.uuidString, type: "todo", x: x, y: y, metadata: meta)
-                index += 1
+                let col = index % columns; let row = index / columns
+                nodes.append(CanvasNode(id: "node-\(todo.id.uuidString)", itemID: todo.id.uuidString, itemType: "todo",
+                    position: CGPoint(x: 50 + CGFloat(col) * spacingX, y: startY + CGFloat(row) * spacingY))); index += 1
             }
-
-            Self.logger.info("Placed \(index) new items on canvas at y=\(startY)")
+            Self.logger.info("Added \(index) new items to canvas")
         }
+        knownItemIDs = currentIDs
+        if !newIDs.isEmpty || !deletedIDs.isEmpty { rebuildTitleCache(); scheduleDebouncedSave() }
     }
 
-    /// Load a saved canvas JSON, refreshing metadata for existing items.
-    /// Falls back to loadAllItems() if the save is corrupt or incompatible.
-    private func loadCanvasWithFreshMetadata(_ savedJSON: String) {
-        Self.logger.info("Restoring saved canvas (\(savedJSON.count) chars)")
-        guard let webView = canvasWebView else {
-            Self.logger.error("loadCanvasWithFreshMetadata: no webView — falling back")
-            loadAllItems()
-            return
-        }
+    // MARK: - Item Click Handling
 
-        // Parse saved canvas
-        guard let jsonData = savedJSON.data(using: .utf8),
-              let saved = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let nodes = saved["nodes"] as? [[String: Any]],
-              !nodes.isEmpty else {
-            Self.logger.warning("Saved canvas is empty or corrupt — generating fresh layout")
-            loadAllItems()
-            return
-        }
-
-        // Validate: if no folder groups exist but vault has folders with items,
-        // the save is from an older format — regenerate
-        let hasFolderGroups = nodes.contains { ($0["nodeType"] as? String) == "folderGroup" }
-        let vaultHasFolders = !VaultFolderService.shared.folders.isEmpty
-        if !hasFolderGroups && vaultHasFolders {
-            Self.logger.warning("Saved canvas missing folder groups — generating fresh layout")
-            loadAllItems()
-            return
-        }
-
-        let bookmarks = VaultBookmarkService.shared.bookmarks
-        let notes = NotesStorage.shared.notes
-        let todos = TodoCardStorage.shared.todoCards
-
-        // Build set of item IDs already on canvas
-        let canvasItemIDs = Set(nodes.compactMap { $0["itemID"] as? String })
-
-        // Rebuild nodes: keep folder groups as-is, refresh item metadata
-        var refreshedNodes: [[String: Any]] = []
-        for node in nodes {
-            let nodeType = node["nodeType"] as? String ?? ""
-
-            // Folder group nodes — keep as-is (they have no itemID)
-            if nodeType == "folderGroup" {
-                refreshedNodes.append(node)
-                continue
-            }
-
-            // Item nodes — refresh metadata
-            guard let itemID = node["itemID"] as? String,
-                  let uuid = UUID(uuidString: itemID) else { continue }
-
-            let itemType = node["itemType"] as? String ?? "bookmark"
-            var refreshed = node
-
-            if itemType == "note", let note = notes.first(where: { $0.id == uuid }) {
-                var meta = noteMetadata(for: note)
-                meta["itemID"] = itemID
-                meta["itemType"] = "note"
-                refreshed["metadata"] = meta
-                refreshed["nodeType"] = "noteCard"
-                refreshedNodes.append(refreshed)
-            } else if itemType == "todo", let todo = todos.first(where: { $0.id == uuid }) {
-                var meta = todoMetadata(for: todo)
-                meta["itemID"] = itemID
-                meta["itemType"] = "todo"
-                refreshed["metadata"] = meta
-                refreshed["nodeType"] = "todoCard"
-                refreshedNodes.append(refreshed)
-            } else if let bookmark = bookmarks.first(where: { $0.id == uuid }) {
-                var meta = bookmarkMetadata(for: bookmark)
-                meta["itemID"] = itemID
-                meta["itemType"] = "bookmark"
-                refreshed["metadata"] = meta
-                refreshed["nodeType"] = "bookmarkCard"
-                refreshedNodes.append(refreshed)
-            }
-            // Item not found in vault → skip (deleted)
-        }
-
-        // Add new items that aren't on the canvas yet
-        var maxY: CGFloat = 0
-        for node in refreshedNodes {
-            if let pos = node["position"] as? [String: Any] {
-                let y: CGFloat = (pos["y"] as? CGFloat) ?? CGFloat((pos["y"] as? Double) ?? 0)
-                maxY = max(maxY, y)
-            }
-        }
-        let inboxX: CGFloat = 50
-        let inboxY: CGFloat = maxY + 400
-        let inboxColumns = 4
-        let inboxSpacingX: CGFloat = 320
-        let inboxSpacingY: CGFloat = 280
-        var newItemIndex = 0
-
-        func inboxPosition() -> (CGFloat, CGFloat) {
-            let col = newItemIndex % inboxColumns
-            let row = newItemIndex / inboxColumns
-            newItemIndex += 1
-            return (inboxX + CGFloat(col) * inboxSpacingX, inboxY + CGFloat(row) * inboxSpacingY)
-        }
-
-        for bookmark in bookmarks where !canvasItemIDs.contains(bookmark.id.uuidString) {
-            var meta = bookmarkMetadata(for: bookmark)
-            let id = bookmark.id.uuidString
-            meta["itemID"] = id; meta["itemType"] = "bookmark"
-            let (x, y) = inboxPosition()
-            refreshedNodes.append([
-                "id": "node-\(id)", "itemID": id, "itemType": "bookmark",
-                "position": ["x": x, "y": y], "nodeType": "bookmarkCard", "metadata": meta,
-            ])
-        }
-        for note in notes where !canvasItemIDs.contains(note.id.uuidString) {
-            var meta = noteMetadata(for: note)
-            let id = note.id.uuidString
-            meta["itemID"] = id; meta["itemType"] = "note"
-            let (x, y) = inboxPosition()
-            refreshedNodes.append([
-                "id": "node-\(id)", "itemID": id, "itemType": "note",
-                "position": ["x": x, "y": y], "nodeType": "noteCard", "metadata": meta,
-            ])
-        }
-        for todo in todos where !canvasItemIDs.contains(todo.id.uuidString) {
-            var meta = todoMetadata(for: todo)
-            let id = todo.id.uuidString
-            meta["itemID"] = id; meta["itemType"] = "todo"
-            let (x, y) = inboxPosition()
-            refreshedNodes.append([
-                "id": "node-\(id)", "itemID": id, "itemType": "todo",
-                "position": ["x": x, "y": y], "nodeType": "todoCard", "metadata": meta,
-            ])
-        }
-
-        Self.logger.info("Restored \(refreshedNodes.count) nodes (\(newItemIndex) new)")
-
-        // Send to JS
-        var rebuilt = saved
-        rebuilt["nodes"] = refreshedNodes
-        sendCanvasToJS(rebuilt, webView: webView)
+    func handleItemClicked(itemID: String, type: String) {
+        Self.logger.info("Item clicked: \(itemID) (\(type))"); selectedItemID = itemID
+        guard let uuid = UUID(uuidString: itemID) else { return }
+        NotificationCenter.default.post(name: .canvasItemSelected, object: nil, userInfo: ["bookmarkID": uuid, "type": type])
     }
 
-    /// Encode canvas data as base64 and send to JS. Falls back to loadAllItems on failure.
-    private func sendCanvasToJS(_ canvasData: [String: Any], webView: WKWebView) {
-        do {
-            let data = try JSONSerialization.data(withJSONObject: canvasData)
-            let base64 = data.base64EncodedString()
-            Self.logger.info("Sending canvas: \(data.count) bytes")
-            webView.evaluateJavaScript("window.canvasBridge?.loadCanvasBase64('\(base64)')") { [weak self] _, error in
-                if let error {
-                    Self.logger.error("loadCanvas JS error: \(error) — falling back to fresh layout")
-                    self?.loadAllItems()
-                }
-            }
-        } catch {
-            Self.logger.error("JSON serialization failed: \(error) — falling back to fresh layout")
-            loadAllItems()
-        }
+    func handleItemDoubleClicked(itemID: String, type: String) {
+        Self.logger.info("Item double-clicked: \(itemID) (\(type))")
+        guard type == "bookmark", let uuid = UUID(uuidString: itemID),
+              let bookmark = bookmarkLookup[uuid], let url = URL(string: bookmark.urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
-    /// Generate initial canvas layout from all items in the vault, grouped by folder.
-    func loadAllItems() {
-        Self.logger.info("loadAllItems called")
-        let bookmarks = VaultBookmarkService.shared.bookmarks
-        let notes = NotesStorage.shared.notes
-        let todos = TodoCardStorage.shared.todoCards
-        let folders = VaultFolderService.shared.folders
+    // MARK: - Navigation
 
-        // Collect all items by folder
-        struct CanvasItem {
-            let uuid: String
-            let type: String   // "bookmark", "note", "todo"
-            let nodeType: String // "bookmarkCard", "noteCard", "todoCard"
-            let metadata: [String: Any]
-        }
-
-        var folderItems: [UUID: [CanvasItem]] = [:]
-        var unfiledItems: [CanvasItem] = []
-
-        for bookmark in bookmarks {
-            let item = CanvasItem(
-                uuid: bookmark.id.uuidString, type: "bookmark",
-                nodeType: "bookmarkCard", metadata: bookmarkMetadata(for: bookmark)
-            )
-            if let fid = bookmark.folderID {
-                folderItems[fid, default: []].append(item)
-            } else {
-                unfiledItems.append(item)
-            }
-        }
-
-        for note in notes {
-            let item = CanvasItem(
-                uuid: note.id.uuidString, type: "note",
-                nodeType: "noteCard", metadata: noteMetadata(for: note)
-            )
-            if let fid = note.folderID {
-                folderItems[fid, default: []].append(item)
-            } else {
-                unfiledItems.append(item)
-            }
-        }
-
-        for todo in todos {
-            let item = CanvasItem(
-                uuid: todo.id.uuidString, type: "todo",
-                nodeType: "todoCard", metadata: todoMetadata(for: todo)
-            )
-            if let fid = todo.folderID {
-                folderItems[fid, default: []].append(item)
-            } else {
-                unfiledItems.append(item)
-            }
-        }
-
-        // Layout constants
-        let columns = 4
-        let cardWidth: CGFloat = 280
-        let cardGapX: CGFloat = 20
-        let cardSpacingX: CGFloat = cardWidth + cardGapX
-        let cardHeight: CGFloat = 260   // card height including tags + meta
-        let cardGapY: CGFloat = 20
-        let cardSpacingY: CGFloat = cardHeight + cardGapY
-        let folderPadding: CGFloat = 60 // top padding for header
-        let folderGap: CGFloat = 80     // gap between folders
-        let folderInset: CGFloat = 20   // padding inside folder edges
-        var currentY: CGFloat = 50
-
-        // Build all nodes at once, then send as a single loadCanvas call
-        // (individual placeItem calls have timing issues with parent-child setup)
-        var allNodes: [[String: Any]] = []
-
-        // Folder groups first (parents must come before children in the array)
-        for folder in folders {
-            let items = folderItems[folder.id] ?? []
-            guard !items.isEmpty else { continue }
-            let groupId = "folder-\(folder.id.uuidString)"
-            let actualColumns = min(columns, max(1, items.count))
-            let rows = max(1, (items.count + columns - 1) / columns)
-            let groupWidth = CGFloat(actualColumns) * cardSpacingX + folderInset * 2
-            let groupHeight = folderPadding + CGFloat(rows) * cardSpacingY + folderInset + 20
-
-            let folderNode: [String: Any] = [
-                "id": groupId,
-                "nodeType": "folderGroup",
-                "position": ["x": 50, "y": currentY],
-                "style": ["width": groupWidth, "height": groupHeight],
-                "metadata": [
-                    "folderName": folder.name,
-                    "icon": "📁",
-                    "itemCount": items.count,
-                    "collapsed": false,
-                ] as [String: Any],
-            ]
-            allNodes.append(folderNode)
-
-            // Child items inside the folder
-            for (i, item) in items.enumerated() {
-                let col = i % columns
-                let row = i / columns
-                let x = CGFloat(col) * cardSpacingX + 20
-                let y = folderPadding + CGFloat(row) * cardSpacingY
-
-                var meta = item.metadata
-                meta["itemID"] = item.uuid
-                meta["itemType"] = item.type
-
-                let childNode: [String: Any] = [
-                    "id": "node-\(item.uuid)",
-                    "itemID": item.uuid,
-                    "itemType": item.type,
-                    "nodeType": item.nodeType,
-                    "position": ["x": x, "y": y],
-                    "parentNode": groupId,
-                    "metadata": meta,
-                ]
-                allNodes.append(childNode)
-            }
-
-            currentY += groupHeight + folderGap
-        }
-
-        // Unfiled items below all folders
-        if !unfiledItems.isEmpty {
-            currentY += 40
-            for (i, item) in unfiledItems.enumerated() {
-                let col = i % columns
-                let row = i / columns
-                let x = CGFloat(col) * cardSpacingX + 50
-                let y = currentY + CGFloat(row) * cardSpacingY
-
-                var meta = item.metadata
-                meta["itemID"] = item.uuid
-                meta["itemType"] = item.type
-
-                let node: [String: Any] = [
-                    "id": "node-\(item.uuid)",
-                    "itemID": item.uuid,
-                    "itemType": item.type,
-                    "nodeType": item.nodeType,
-                    "position": ["x": x, "y": y],
-                    "metadata": meta,
-                ]
-                allNodes.append(node)
-            }
-        }
-
-        // Send everything at once via loadCanvas
-        // Use base64 encoding to avoid JS string escaping issues with special characters
-        let canvasData: [String: Any] = [
-            "version": 1,
-            "nodes": allNodes,
-            "edges": [] as [[String: Any]],
-        ]
-
-        guard let webView = canvasWebView else {
-            Self.logger.error("loadAllItems: no webView")
-            return
-        }
-        sendCanvasToJS(canvasData, webView: webView)
-
-        Self.logger.info("Loaded \(folders.count) folders, \(bookmarks.count) bookmarks, \(notes.count) notes, \(todos.count) todos onto canvas")
-    }
-
-    /// Place a folder group node on the canvas.
-    private func placeFolder(id: String, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, metadata: [String: Any]) {
-        guard let webView = canvasWebView else { return }
-
-        let metadataJSON: String
-        if let data = try? JSONSerialization.data(withJSONObject: metadata),
-           let str = String(data: data, encoding: .utf8) {
-            metadataJSON = str
-        } else {
-            metadataJSON = "{}"
-        }
-
-        let escaped = escapeForJS(metadataJSON)
-        let js = "window.canvasBridge?.placeFolder('\(id)', \(x), \(y), \(width), \(height), '\(escaped)')"
-        webView.evaluateJavaScript(js) { _, error in
-            if let error {
-                Self.logger.error("placeFolder JS error: \(error)")
-            }
-        }
-    }
-
-    /// Place an item as a child of a folder group.
-    private func placeChildItem(uuid: String, nodeType: String, x: CGFloat, y: CGFloat, parentId: String, metadata: [String: Any]) {
-        guard let webView = canvasWebView else { return }
-
-        let metadataJSON: String
-        if let data = try? JSONSerialization.data(withJSONObject: metadata),
-           let str = String(data: data, encoding: .utf8) {
-            metadataJSON = str
-        } else {
-            metadataJSON = "{}"
-        }
-
-        let escaped = escapeForJS(metadataJSON)
-        let js = "window.canvasBridge?.placeChildItem('\(uuid)', '\(nodeType)', \(x), \(y), '\(parentId)', '\(escaped)')"
-        webView.evaluateJavaScript(js) { _, error in
-            if let error {
-                Self.logger.error("placeChildItem JS error: \(error)")
-            }
-        }
-    }
-
-    // MARK: - Bridge: Swift → JS
-
-    /// Place a single item on the canvas.
-    func placeItem(uuid: String, type: String, x: CGFloat, y: CGFloat, metadata: [String: Any]) {
-        guard let webView = canvasWebView else { return }
-
-        let metadataJSON: String
-        if let data = try? JSONSerialization.data(withJSONObject: metadata),
-           let str = String(data: data, encoding: .utf8) {
-            metadataJSON = str
-        } else {
-            metadataJSON = "{}"
-        }
-
-        let nodeType: String
-        switch type {
-        case "note", "noteCard": nodeType = "noteCard"
-        case "todo", "todoCard": nodeType = "todoCard"
-        default: nodeType = "bookmarkCard"
-        }
-        let escaped = escapeForJS(metadataJSON)
-        let js = "window.canvasBridge?.placeItem('\(uuid)', '\(nodeType)', \(x), \(y), '\(escaped)')"
-        webView.evaluateJavaScript(js) { _, error in
-            if let error {
-                Self.logger.error("placeItem JS error: \(error)")
-            }
-        }
-    }
-
-    /// Update an item's metadata on the canvas.
-    func updateItemMetadata(uuid: String, metadata: [String: Any]) {
-        guard let webView = canvasWebView else { return }
-
-        let metadataJSON: String
-        if let data = try? JSONSerialization.data(withJSONObject: metadata),
-           let str = String(data: data, encoding: .utf8) {
-            metadataJSON = str
-        } else {
-            metadataJSON = "{}"
-        }
-
-        let escaped = escapeForJS(metadataJSON)
-        let js = "window.canvasBridge?.updateItemMetadata('\(uuid)', '\(escaped)')"
-        webView.evaluateJavaScript(js) { _, _ in }
-    }
-
-    /// Pan the canvas to a specific folder group.
     func panToFolder(_ folderID: UUID) {
-        guard let webView = canvasWebView else { return }
         let groupId = "folder-\(folderID.uuidString)"
-        let escaped = escapeForJS(groupId)
-        webView.evaluateJavaScript("window.canvasBridge?.panToGroup('\(escaped)')") { _, _ in }
-    }
-
-    /// Zoom to fit all items.
-    func fitAll() {
-        guard let webView = canvasWebView else { return }
-        webView.evaluateJavaScript("window.canvasBridge?.fitAll()") { _, _ in }
-    }
-
-    func setTheme(_ theme: String) {
-        guard let webView = canvasWebView else { return }
-        let safeTheme = theme == "light" ? "light" : "dark"
-        webView.evaluateJavaScript("window.canvasBridge?.setTheme('\(safeTheme)')") { _, _ in }
-    }
-
-    // MARK: - Bridge: JS → Swift (called by coordinator)
-
-    func handleCanvasChanged(_ jsonString: String) {
-        latestCanvasJSON = jsonString
-        scheduleDebouncedSave()
-    }
-
-    func handleItemClicked(uuid: String, type: String) {
-        Self.logger.info("Item clicked: \(uuid) (\(type))")
-        selectedItemID = uuid
-
-        guard let bookmarkID = UUID(uuidString: uuid) else { return }
-
-        // Post canvas item selected — AppDelegate handles showing panel + opening details
-        NotificationCenter.default.post(
-            name: .canvasItemSelected,
-            object: nil,
-            userInfo: ["bookmarkID": bookmarkID, "type": type]
-        )
-    }
-
-    func handleItemDoubleClicked(uuid: String, type: String) {
-        Self.logger.info("Item double-clicked: \(uuid) (\(type))")
-    }
-
-    func handleFolderToggleCollapse(folderId: String, collapsed: Bool) {
-        guard let webView = canvasWebView else { return }
-        Self.logger.info("Folder \(folderId) collapsed: \(collapsed)")
-        // Toggle visibility of child nodes
-        let js = "window.canvasBridge?.toggleFolderCollapse('\(folderId)', \(collapsed))"
-        webView.evaluateJavaScript(js) { _, _ in }
-    }
-
-    func handleFolderLayoutChanged(folderId: String, layoutMode: String) {
-        guard let webView = canvasWebView else { return }
-        Self.logger.info("Folder \(folderId) layout: \(layoutMode)")
-        let js = "window.canvasBridge?.setFolderLayout('\(folderId)', '\(layoutMode)')"
-        webView.evaluateJavaScript(js) { _, _ in }
-    }
-
-    // MARK: - Helpers
-
-    private func bookmarkMetadata(for bookmark: Bookmark) -> [String: Any] {
-        var meta: [String: Any] = [
-            "title": bookmark.title,
-            "url": bookmark.urlString,
-            "domain": bookmark.hostDisplay,
-        ]
-
-        // Favicon from ClipboardStorage cache — use cider-vault:// scheme for WKWebView access
-        let domain = bookmark.hostDisplay
-        let faviconURL = ClipboardStorage.shared.faviconFileURL(for: domain)
-        if FileManager.default.fileExists(atPath: faviconURL.path) {
-            meta["favicon"] = "cider-vault:///" + faviconURL.path
-        }
-
-        // Thumbnail from bookmark's cached file
-        if let thumbnailURL = bookmark.thumbnailFileURL,
-           FileManager.default.fileExists(atPath: thumbnailURL.path) {
-            meta["thumbnail"] = "cider-vault:///" + thumbnailURL.path
-        }
-
-        // Relative time display
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        meta["timeAgo"] = formatter.localizedString(for: bookmark.createdAt, relativeTo: Date())
-
-        // Tag labels with colors
-        if !bookmark.labelIDs.isEmpty {
-            let labels = bookmark.labelIDs.compactMap { id in
-                CardLabelStorage.shared.labels.first { $0.id == id }
-            }
-            meta["tags"] = labels.map { label in
-                ["name": label.name, "color": label.colorHex]
-            }
-        }
-
-        meta["hasAISummary"] = bookmark.aiSummary != nil
-
-        return meta
-    }
-
-    private func noteMetadata(for note: Note) -> [String: Any] {
-        var meta: [String: Any] = [
-            "title": note.title,
-            "isPinned": note.isPinned,
-        ]
-
-        // Content preview — first ~200 chars, strip markdown
-        let content = note.resolvedContent
-        let stripped = content
-            .replacingOccurrences(of: #"^#+\s*"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\*\*|__|\*|_|`"#, with: "", options: .regularExpression)
-        let preview = String(stripped.prefix(200)).trimmingCharacters(in: .whitespacesAndNewlines)
-        meta["preview"] = preview
-
-        // Word count
-        let words = content.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-        meta["wordCount"] = words.count
-
-        // Relative time
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        meta["timeAgo"] = formatter.localizedString(for: note.modifiedAt, relativeTo: Date())
-
-        // Tags
-        if !note.labelIDs.isEmpty {
-            let labels = note.labelIDs.compactMap { id in
-                CardLabelStorage.shared.labels.first { $0.id == id }
-            }
-            meta["tags"] = labels.map { ["name": $0.name, "color": $0.colorHex] }
-        }
-
-        return meta
-    }
-
-    private func todoMetadata(for todo: TodoCard) -> [String: Any] {
-        var meta: [String: Any] = [
-            "title": todo.title,
-            "isCompleted": todo.isCompleted,
-        ]
-
-        if let priority = todo.priority {
-            meta["priority"] = priority.rawValue
-        }
-
-        if let dueDate = todo.dueDate {
-            let df = DateFormatter()
-            df.dateStyle = .medium
-            df.timeStyle = .none
-            meta["dueDate"] = df.string(from: dueDate)
-        }
-
-        // Relative time
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        meta["timeAgo"] = formatter.localizedString(for: todo.createdAt, relativeTo: Date())
-
-        // Checklist progress
-        let total = todo.checklist.count
-        let done = todo.checklist.filter(\.isCompleted).count
-        meta["checklistTotal"] = total
-        meta["checklistDone"] = done
-
-        // Tags
-        if !todo.labelIDs.isEmpty {
-            let labels = todo.labelIDs.compactMap { id in
-                CardLabelStorage.shared.labels.first { $0.id == id }
-            }
-            meta["tags"] = labels.map { ["name": $0.name, "color": $0.colorHex] }
-        }
-
-        return meta
-    }
-
-    private func escapeForJS(_ string: String) -> String {
-        string
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-    }
-}
-
-// MARK: - Coordinator
-
-final class CanvasCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-    private static let logger = Logger(subsystem: "com.cider", category: "CanvasCoordinator")
-    private weak var viewModel: CanvasViewModel?
-
-    init(viewModel: CanvasViewModel) {
-        self.viewModel = viewModel
-    }
-
-    func userContentController(
-        _ userContentController: WKUserContentController,
-        didReceive message: WKScriptMessage
-    ) {
-        Task { @MainActor [weak self] in
-            guard let self, let viewModel = self.viewModel else { return }
-
-            switch message.name {
-            case "canvasReady":
-                viewModel.onCanvasReady()
-
-            case "canvasChanged":
-                if let jsonString = message.body as? String {
-                    viewModel.handleCanvasChanged(jsonString)
-                }
-
-            case "itemClicked":
-                if let jsonString = message.body as? String,
-                   let data = jsonString.data(using: .utf8),
-                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let uuid = dict["uuid"] as? String {
-                    let type = dict["type"] as? String ?? "bookmark"
-                    viewModel.handleItemClicked(uuid: uuid, type: type)
-                }
-
-            case "itemDoubleClicked":
-                if let jsonString = message.body as? String,
-                   let data = jsonString.data(using: .utf8),
-                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let uuid = dict["uuid"] as? String {
-                    let type = dict["type"] as? String ?? "bookmark"
-                    viewModel.handleItemDoubleClicked(uuid: uuid, type: type)
-                }
-
-            case "folderToggleCollapse":
-                if let jsonString = message.body as? String,
-                   let data = jsonString.data(using: .utf8),
-                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let folderId = dict["folderId"] as? String,
-                   let collapsed = dict["collapsed"] as? Bool {
-                    viewModel.handleFolderToggleCollapse(folderId: folderId, collapsed: collapsed)
-                }
-
-            case "folderLayoutChanged":
-                if let jsonString = message.body as? String,
-                   let data = jsonString.data(using: .utf8),
-                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let folderId = dict["folderId"] as? String,
-                   let layoutMode = dict["layoutMode"] as? String {
-                    viewModel.handleFolderLayoutChanged(folderId: folderId, layoutMode: layoutMode)
-                }
-
-            case "canvasError":
-                if let jsonString = message.body as? String {
-                    Self.logger.error("Canvas error: \(jsonString)")
-                }
-
-            default:
-                break
-            }
-        }
-    }
-
-    // MARK: - WKNavigationDelegate
-
-    func webView(
-        _ webView: WKWebView,
-        decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
-    ) {
-        guard let url = navigationAction.request.url else {
-            decisionHandler(.cancel)
-            return
-        }
-
-        let scheme = url.scheme ?? ""
-        if scheme == "file" || scheme == "about" || scheme == "blob" {
-            decisionHandler(.allow)
-            return
-        }
-
-        if scheme == "http" || scheme == "https" {
-            NSWorkspace.shared.open(url)
-        }
-        decisionHandler(.cancel)
+        guard let node = nodes.first(where: { $0.id == groupId }) else { return }
+        let cx = node.position.x + node.size.width / 2; let cy = node.position.y + node.size.height / 2
+        viewport.offset = CGPoint(x: -cx * viewport.zoom, y: -cy * viewport.zoom)
     }
 }

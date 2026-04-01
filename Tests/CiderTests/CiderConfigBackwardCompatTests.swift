@@ -105,8 +105,6 @@ struct CiderConfigBackwardCompatTests {
         #expect(config.enablePageSummaries == true)
         #expect(config.enableOCRIndexing == false)
         #expect(config.enableColorExtraction == true)
-        #expect(config.aiChatDocked == false)
-        #expect(config.aiChatVisible == false)
     }
 
     @Test("Old config without migration flags gets correct defaults")

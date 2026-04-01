@@ -598,9 +598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.showCentered()
         }
 
-        // Sync theme with current appearance
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        canvasViewModel?.setTheme(isDark ? "dark" : "light")
+        // Native SwiftUI respects system appearance automatically
 
     }
 
