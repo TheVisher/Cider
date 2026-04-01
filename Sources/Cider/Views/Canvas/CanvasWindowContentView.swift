@@ -4,10 +4,15 @@ import SwiftUI
 struct CanvasWindowContentView: View {
     @ObservedObject var viewModel: CanvasViewModel
     @State private var panelDocked = false
+    @State private var sidebarVisible = true
 
     var body: some View {
-        NativeCanvasView(viewModel: viewModel)
-            .frame(minWidth: 400, minHeight: 300)
+        ZStack(alignment: .leading) {
+            NativeCanvasView(viewModel: viewModel)
+                .frame(minWidth: 400, minHeight: 300)
+
+            CanvasSidebarOverlay(isVisible: $sidebarVisible)
+        }
             .onReceive(NotificationCenter.default.publisher(for: .panelDockStateChanged)) { notification in
                 if let docked = notification.userInfo?["docked"] as? Bool {
                     panelDocked = docked
@@ -44,6 +49,17 @@ struct CanvasWindowContentView: View {
                             .frame(minWidth: 36)
                     }
                     .help("Reset to 100%")
+                }
+
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        sidebarVisible.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                            .foregroundColor(CiderColors.secondary)
+                    }
+                    .help("Toggle Sidebar (⌘\\)")
+                    .keyboardShortcut("\\", modifiers: .command)
                 }
 
                 ToolbarItem(placement: .primaryAction) {
