@@ -5,6 +5,7 @@ struct CanvasWindowContentView: View {
     @ObservedObject var viewModel: CanvasViewModel
     @State private var panelDocked = false
     @State private var sidebarVisible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -12,7 +13,14 @@ struct CanvasWindowContentView: View {
                 .frame(minWidth: 400, minHeight: 300)
 
             CanvasSidebarOverlay(isVisible: $sidebarVisible)
+
+            if viewModel.selectedItemID != nil {
+                CanvasDetailOverlay(viewModel: viewModel)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(2)
+            }
         }
+        .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: viewModel.selectedItemID)
             .onReceive(NotificationCenter.default.publisher(for: .panelDockStateChanged)) { notification in
                 if let docked = notification.userInfo?["docked"] as? Bool {
                     panelDocked = docked
