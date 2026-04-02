@@ -37,6 +37,7 @@ struct CanvasWindowContentView: View {
                     CanvasDetailOverlay(
                         viewModel: viewModel,
                         canvasSize: geometry.size,
+                        isSidebarVisible: sidebarVisible,
                         onDismiss: { viewModel.deselectAll() }
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))

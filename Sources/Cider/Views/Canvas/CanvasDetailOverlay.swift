@@ -5,6 +5,7 @@ import SwiftUI
 struct CanvasDetailOverlay: View {
     @ObservedObject var viewModel: CanvasViewModel
     let canvasSize: CGSize
+    let isSidebarVisible: Bool
     let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -18,10 +19,25 @@ struct CanvasDetailOverlay: View {
 
     private static let minWidth: CGFloat = BookmarksDesign.detailsSlideOutMinWidth
     private static let minHeight: CGFloat = 400
-    private static let sidebarWidth: CGFloat = BookmarksDesign.detailsSidebarFixedWidth
+    private static let metadataSidebarWidth: CGFloat = BookmarksDesign.detailsSidebarFixedWidth
+    private static let canvasSidebarWidth: CGFloat = BookmarksDesign.folderSidebarWidth
+    private static let modalInset: CGFloat = Spacing.xxl
+
+    /// Available width to the right of the canvas sidebar (or full width if collapsed).
+    private var availableWidth: CGFloat {
+        isSidebarVisible
+            ? canvasSize.width - Self.canvasSidebarWidth
+            : canvasSize.width
+    }
 
     private var modalWidth: CGFloat {
-        max(canvasSize.width * 0.85, Self.minWidth)
+        let target = availableWidth - Self.modalInset * 2
+        return max(min(target, 1200), Self.minWidth)
+    }
+
+    /// Horizontal offset to center the modal in the available space (right of sidebar).
+    private var modalOffsetX: CGFloat {
+        isSidebarVisible ? Self.canvasSidebarWidth / 2 : 0
     }
 
     // MARK: - Body
@@ -33,7 +49,7 @@ struct CanvasDetailOverlay: View {
                 .ignoresSafeArea()
                 .onTapGesture { dismiss() }
 
-            // Modal
+            // Modal — centered in available space (right of sidebar)
             modalContent
                 .frame(width: modalWidth, height: modalHeight)
                 .background { modalBackground }
@@ -44,6 +60,7 @@ struct CanvasDetailOverlay: View {
                         .allowsHitTesting(false)
                 }
                 .shadow(color: CiderColors.shadowHeavy, radius: Spacing.xl, y: Spacing.sm)
+                .offset(x: modalOffsetX)
         }
         .onChange(of: viewModel.selectedItemID) { _, newID in
             updateDraft(for: newID)
@@ -85,10 +102,10 @@ struct CanvasDetailOverlay: View {
                             CiderColors.separator
                                 .frame(width: Spacing.hairline)
                         }
-                        .frame(width: Self.sidebarWidth)
+                        .frame(width: Self.metadataSidebarWidth)
                         .overlay {
                             simpleMetadataSidebar(for: uuid)
-                                .frame(width: Self.sidebarWidth)
+                                .frame(width: Self.metadataSidebarWidth)
                         }
                     }
                 }
@@ -241,13 +258,17 @@ struct CanvasDetailOverlay: View {
 
     @ViewBuilder
     private func heroColumn(for uuid: UUID) -> some View {
-        ScrollView(.vertical, showsIndicators: false) {
+        VStack(spacing: 0) {
             if let bookmark = viewModel.bookmarkLookup[uuid] {
                 bookmarkHero(bookmark)
             } else if let note = viewModel.noteLookup[uuid] {
-                noteHero(note)
+                ScrollView(.vertical, showsIndicators: false) {
+                    noteHero(note)
+                }
             } else if let todo = viewModel.todoLookup[uuid] {
-                todoHero(todo)
+                ScrollView(.vertical, showsIndicators: false) {
+                    todoHero(todo)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -290,7 +311,9 @@ struct CanvasDetailOverlay: View {
                 }
             }
 
-            // Thumbnail hero
+            // Thumbnail hero — centered, constrained, not stretched
+            Spacer(minLength: 0)
+
             if let thumbnailURL = bookmark.thumbnailFileURL {
                 AsyncImage(url: thumbnailURL) { phase in
                     switch phase {
@@ -309,11 +332,14 @@ struct CanvasDetailOverlay: View {
                         EmptyView()
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 bookmarkFallbackHero(bookmark)
             }
+
+            Spacer(minLength: 0)
         }
+        .frame(maxHeight: .infinity)
     }
 
     private func bookmarkFallbackHero(_ bookmark: Bookmark) -> some View {
@@ -422,7 +448,7 @@ struct CanvasDetailOverlay: View {
                 bookmark: bookmark,
                 errorMessage: detailsErrorMessage,
                 folders: VaultFolderService.shared.legacyFolders,
-                width: Self.sidebarWidth,
+                width: Self.metadataSidebarWidth,
                 showBackground: false,
                 onDelete: {
                     let bm = bookmark
