@@ -407,4 +407,16 @@ final class CanvasViewModel: ObservableObject {
             ]
         )
     }
+
+    func panToItem(_ itemID: String) {
+        guard let node = nodes.first(where: { $0.itemID == itemID }) else { return }
+        NotificationCenter.default.post(
+            name: .canvasPanToFolder,
+            object: nil,
+            userInfo: [
+                "x": node.position.x + node.size.width / 2,
+                "y": node.position.y + node.size.height / 2
+            ]
+        )
+    }
 }

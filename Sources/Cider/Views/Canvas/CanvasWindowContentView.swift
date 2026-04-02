@@ -4,6 +4,7 @@ import SwiftUI
 struct CanvasWindowContentView: View {
     @ObservedObject var viewModel: CanvasViewModel
     @State private var sidebarVisible = true
+    @State private var isSearchVisible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -43,15 +44,32 @@ struct CanvasWindowContentView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     .zIndex(2)
                 }
+
+                // Search palette
+                if isSearchVisible {
+                    CanvasSearchOverlay(
+                        viewModel: viewModel,
+                        canvasSize: geometry.size,
+                        isSidebarVisible: sidebarVisible,
+                        onDismiss: { isSearchVisible = false }
+                    )
+                    .transition(.opacity)
+                    .zIndex(3)
+                }
             }
             .ignoresSafeArea()
             .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemID)
             .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: sidebarVisible)
+            .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: isSearchVisible)
         }
         .background {
-            // Hidden button for Escape to deselect
+            // Hidden button for Escape — dismiss search first, then deselect
             Button("") {
-                viewModel.deselectAll()
+                if isSearchVisible {
+                    isSearchVisible = false
+                } else {
+                    viewModel.deselectAll()
+                }
             }
             .keyboardShortcut(.escape, modifiers: [])
             .opacity(0)
@@ -74,6 +92,21 @@ struct CanvasWindowContentView: View {
             .keyboardShortcut("0", modifiers: .command)
             .opacity(0)
             .frame(width: 0, height: 0)
+        }
+        .background {
+            // Hidden button for search palette
+            Button("") {
+                isSearchVisible.toggle()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+        }
+        .onChange(of: viewModel.selectedItemID) { _, newID in
+            // Dismiss search palette when a card is clicked directly on canvas
+            if newID != nil, isSearchVisible {
+                isSearchVisible = false
+            }
         }
         .onChange(of: sidebarVisible) { _, visible in
             // Sync sidebar state to the window for drag-region calculations
