@@ -36,6 +36,24 @@ struct CanvasSearchOverlay: View {
 
     private var isPushedAside: Bool { selectedResult != nil }
 
+    /// When pushed aside, the palette slides left by this amount from center.
+    private var paletteSlideX: CGFloat {
+        guard isPushedAside else { return 0 }
+        // Move palette left so it sits at the left edge of available space
+        let detailWidth = availableWidth - Self.palettePushedWidth - Self.detailGap - Self.modalInset * 2
+        return -(detailWidth + Self.detailGap) / 2
+    }
+
+    /// Detail panel width when shown.
+    private var detailWidth: CGFloat {
+        availableWidth - Self.palettePushedWidth - Self.detailGap - Self.modalInset * 2
+    }
+
+    /// Detail panel offset — positioned to the right of the palette.
+    private var detailSlideX: CGFloat {
+        (Self.palettePushedWidth + Self.detailGap) / 2
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -45,38 +63,22 @@ struct CanvasSearchOverlay: View {
                 .ignoresSafeArea()
                 .onTapGesture { dismissAll() }
 
-            // Content — centered or push-aside
-            if isPushedAside {
-                pushedAsideLayout
-                    .offset(x: modalOffsetX)
-            } else {
-                centeredPalette
-                    .offset(x: modalOffsetX)
+            // Palette — always rendered, slides left when detail shown
+            paletteView
+                .offset(x: modalOffsetX + paletteSlideX)
+
+            // Detail — appears on right when result selected
+            if let _ = selectedResult {
+                detailPanel
+                    .frame(width: max(detailWidth, 300))
+                    .frame(height: detailHeight)
+                    .offset(x: modalOffsetX + detailSlideX)
+                    .padding(.top, canvasSize.height * SearchPaletteDesign.topOffsetFactor)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: isPushedAside)
-    }
-
-    // MARK: - Centered Palette (no result selected)
-
-    private var centeredPalette: some View {
-        paletteView
-    }
-
-    // MARK: - Push-Aside Layout (result selected)
-
-    private var pushedAsideLayout: some View {
-        HStack(alignment: .top, spacing: Self.detailGap) {
-            paletteView
-                .frame(width: Self.palettePushedWidth)
-
-            detailPanel
-                .frame(maxWidth: .infinity)
-                .frame(height: detailHeight)
-        }
-        .frame(width: availableWidth - Self.modalInset * 2)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, canvasSize.height * SearchPaletteDesign.topOffsetFactor)
     }
 
     // MARK: - Palette
