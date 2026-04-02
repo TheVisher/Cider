@@ -7,39 +7,46 @@ struct CanvasWindowContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            NativeCanvasView(viewModel: viewModel)
-                .frame(minWidth: 400, minHeight: 300)
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                NativeCanvasView(viewModel: viewModel)
+                    .frame(minWidth: 400, minHeight: 300)
 
-            CanvasSidebarOverlay(
-                isVisible: $sidebarVisible,
-                zoomLevel: viewModel.viewport.zoom,
-                onCollapse: {
-                    withAnimation(reduceMotion ? .none : .snappy(duration: 0.3)) {
-                        sidebarVisible = false
+                CanvasSidebarOverlay(
+                    isVisible: $sidebarVisible,
+                    zoomLevel: viewModel.viewport.zoom,
+                    onCollapse: {
+                        withAnimation(reduceMotion ? .none : .snappy(duration: 0.3)) {
+                            sidebarVisible = false
+                        }
+                    },
+                    onSelectFolder: { folderID in
+                        guard let folderID else { return }
+                        viewModel.panToFolder(folderID)
                     }
-                },
-                onSelectFolder: { folderID in
-                    guard let folderID else { return }
-                    viewModel.panToFolder(folderID)
+                )
+
+                // Collapsed pill — shows when sidebar is hidden
+                if !sidebarVisible {
+                    collapsedPill
+                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .topLeading)))
                 }
-            )
 
-            // Collapsed pill — shows when sidebar is hidden
-            if !sidebarVisible {
-                collapsedPill
-                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .topLeading)))
-            }
-
-            if viewModel.selectedItemID != nil {
-                CanvasDetailOverlay(viewModel: viewModel)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                // Detail modal with backdrop
+                if viewModel.selectedItemID != nil {
+                    CanvasDetailOverlay(
+                        viewModel: viewModel,
+                        canvasSize: geometry.size,
+                        onDismiss: { viewModel.deselectAll() }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     .zIndex(2)
+                }
             }
+            .ignoresSafeArea()
+            .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemID)
+            .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: sidebarVisible)
         }
-        .ignoresSafeArea()
-        .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: viewModel.selectedItemID)
-        .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: sidebarVisible)
         .background {
             // Hidden button for Escape to deselect
             Button("") {
