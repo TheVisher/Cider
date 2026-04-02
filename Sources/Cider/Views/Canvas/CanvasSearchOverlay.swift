@@ -157,9 +157,10 @@ struct CanvasSearchOverlay: View {
     }
 
     private var detailHeight: CGFloat {
-        let target = canvasSize.height * 0.8
-        let maxH = canvasSize.height - Spacing.xxl * 2
-        return min(max(target, 400), maxH)
+        // Fit between the top offset and the bottom of the canvas with inset
+        let topOffset = canvasSize.height * SearchPaletteDesign.topOffsetFactor
+        let target = canvasSize.height - topOffset - Self.modalInset
+        return max(target, 400)
     }
 
     // MARK: - Detail Toolbar
