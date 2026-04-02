@@ -122,17 +122,7 @@ struct NativeCanvasView: View {
             .onReceive(NotificationCenter.default.publisher(for: .canvasPanToFolder)) { notification in
                 guard let cx = notification.userInfo?["x"] as? CGFloat,
                       let cy = notification.userInfo?["y"] as? CGFloat else { return }
-                // Center the folder group in the viewport
-                let targetPan = CGPoint(
-                    x: geometry.size.width / 2 - cx * currentZoom,
-                    y: geometry.size.height / 2 - cy * currentZoom
-                )
-                withAnimation(reduceMotion ? .none : .snappy(duration: 0.4)) {
-                    currentPan = targetPan
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    syncViewport()
-                }
+                flyToPoint(cx: cx, cy: cy, viewportSize: geometry.size)
             }
             .onReceive(NotificationCenter.default.publisher(for: .canvasResetZoom)) { _ in
                 withAnimation(reduceMotion ? .none : .snappy(duration: 0.3)) {
@@ -149,6 +139,47 @@ struct NativeCanvasView: View {
                     syncViewport()
                 }
             }
+        }
+    }
+
+    // MARK: - Fly-To Navigation
+
+    /// Animated navigation to a canvas point. Scales the zoom-out and duration
+    /// based on distance: short hops just pan, long distances get a fly-over.
+    private func flyToPoint(cx: CGFloat, cy: CGFloat, viewportSize: CGSize) {
+        let originalZoom = currentZoom
+
+        // Current viewport center in canvas coordinates
+        let currentCX = (viewportSize.width / 2 - currentPan.x) / originalZoom
+        let currentCY = (viewportSize.height / 2 - currentPan.y) / originalZoom
+
+        // Distance in canvas space
+        let dx = cx - currentCX
+        let dy = cy - currentCY
+        let distance = sqrt(dx * dx + dy * dy)
+
+        // Scale effect by distance: no zoom-out under 500pt, max at 3000pt+
+        let normalizedDistance = min(max((distance - 500) / 2500, 0), 1)
+
+        // Smooth pan to target — keep it quick even for long distances
+        // so you see a fast slide rather than a slow fade.
+        let duration = 0.3 + normalizedDistance * 0.15  // 0.3s – 0.45s
+
+        let targetPan = CGPoint(
+            x: viewportSize.width / 2 - cx * originalZoom,
+            y: viewportSize.height / 2 - cy * originalZoom
+        )
+
+        let animation: Animation? = reduceMotion
+            ? .none
+            : .timingCurve(0.25, 0.1, 0.25, 1.0, duration: duration) // cubic-bezier ease
+
+        withAnimation(animation) {
+            currentPan = targetPan
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            syncViewport()
         }
     }
 
