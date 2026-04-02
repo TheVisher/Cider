@@ -410,13 +410,18 @@ final class CanvasViewModel: ObservableObject {
 
     func panToItem(_ itemID: String) {
         guard let node = nodes.first(where: { $0.itemID == itemID }) else { return }
+        // Card positions are relative to their parent folder group — add the parent's position
+        var absX = node.position.x + node.size.width / 2
+        var absY = node.position.y + node.size.height / 2
+        if let parentID = node.parentNodeID,
+           let parent = nodes.first(where: { $0.id == parentID }) {
+            absX += parent.position.x
+            absY += parent.position.y
+        }
         NotificationCenter.default.post(
             name: .canvasPanToFolder,
             object: nil,
-            userInfo: [
-                "x": node.position.x + node.size.width / 2,
-                "y": node.position.y + node.size.height / 2
-            ]
+            userInfo: ["x": absX, "y": absY]
         )
     }
 }

@@ -100,6 +100,9 @@ struct SearchPaletteView: View {
     let onDismiss: () -> Void
     var onAction: ((QuickAction) -> Void)?
     var onSelectTag: ((CardLabel) -> Void)?
+    /// When false, selecting a search result calls the open callback but does NOT auto-dismiss.
+    /// Used by the canvas search overlay to keep the palette open for push-aside browsing.
+    var dismissOnResultSelect: Bool = true
 
     @State private var query = ""
     @State private var results: [SearchResult] = []
@@ -332,7 +335,9 @@ struct SearchPaletteView: View {
                     NSWorkspace.shared.open(vaultFile.absoluteURL)
                 }
             }
-            onDismiss()
+            if dismissOnResultSelect {
+                onDismiss()
+            }
         }
     }
 

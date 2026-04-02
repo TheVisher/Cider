@@ -101,7 +101,8 @@ struct CanvasSearchOverlay: View {
             onAction: { _ in
                 dismissAll()
             },
-            onSelectTag: nil
+            onSelectTag: nil,
+            dismissOnResultSelect: false
         )
     }
 
