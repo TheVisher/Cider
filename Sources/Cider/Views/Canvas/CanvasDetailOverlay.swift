@@ -6,6 +6,7 @@ struct CanvasDetailOverlay: View {
     @ObservedObject var viewModel: CanvasViewModel
     let canvasSize: CGSize
     let isSidebarVisible: Bool
+    let isSearchVisible: Bool
     let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -30,14 +31,24 @@ struct CanvasDetailOverlay: View {
             : canvasSize.width
     }
 
+    /// Space reserved for the search palette when it's open.
+    private static let paletteReservedWidth: CGFloat = SearchPaletteDesign.paletteWidth + Spacing.md
+
     private var modalWidth: CGFloat {
-        let target = availableWidth - Self.modalInset * 2
-        return max(min(target, 1200), Self.minWidth)
+        let space = isSearchVisible
+            ? availableWidth - Self.paletteReservedWidth - Self.modalInset
+            : availableWidth - Self.modalInset * 2
+        return max(min(space, 1200), Self.minWidth)
     }
 
-    /// Horizontal offset to center the modal in the available space (right of sidebar).
+    /// Horizontal offset to center the modal in its available space.
     private var modalOffsetX: CGFloat {
-        isSidebarVisible ? Self.canvasSidebarWidth / 2 : 0
+        var offset: CGFloat = isSidebarVisible ? Self.canvasSidebarWidth / 2 : 0
+        if isSearchVisible {
+            // Shift right to make room for the palette on the left
+            offset += Self.paletteReservedWidth / 2
+        }
+        return offset
     }
 
     // MARK: - Body
