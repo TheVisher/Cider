@@ -10,11 +10,19 @@ struct CanvasDetailOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var labelStorage = CardLabelStorage.shared
 
+    // Draft for editable bookmark metadata sidebar
+    @State private var draft: BookmarkDetailsDraft?
+    @State private var detailsErrorMessage: String?
+
     // MARK: - Layout Constants
 
-    private static let modalWidth: CGFloat = 800
+    private static let minWidth: CGFloat = BookmarksDesign.detailsSlideOutMinWidth
     private static let minHeight: CGFloat = 400
     private static let sidebarWidth: CGFloat = BookmarksDesign.detailsSidebarFixedWidth
+
+    private var modalWidth: CGFloat {
+        max(canvasSize.width * 0.85, Self.minWidth)
+    }
 
     // MARK: - Body
 
@@ -27,7 +35,7 @@ struct CanvasDetailOverlay: View {
 
             // Modal
             modalContent
-                .frame(width: Self.modalWidth, height: modalHeight)
+                .frame(width: modalWidth, height: modalHeight)
                 .background { modalBackground }
                 .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                 .overlay {
@@ -36,6 +44,12 @@ struct CanvasDetailOverlay: View {
                         .allowsHitTesting(false)
                 }
                 .shadow(color: CiderColors.shadowHeavy, radius: Spacing.xl, y: Spacing.sm)
+        }
+        .onChange(of: viewModel.selectedItemID) { _, newID in
+            updateDraft(for: newID)
+        }
+        .onAppear {
+            updateDraft(for: viewModel.selectedItemID)
         }
     }
 
@@ -56,14 +70,27 @@ struct CanvasDetailOverlay: View {
                 HStack(spacing: 0) {
                     heroColumn(for: uuid)
 
-                    // Vertical separator
-                    Rectangle()
-                        .fill(CiderColors.separator)
-                        .frame(width: 1)
-
-                    metadataSidebar(for: uuid)
-                        .frame(width: Self.sidebarWidth)
+                    // Bookmark: use the full BookmarkMetadataSidebar from NSPanel
+                    if let bookmark = viewModel.bookmarkLookup[uuid], draft != nil {
+                        bookmarkMetadataSidebarView(bookmark: bookmark)
+                    } else {
+                        // Notes/Todos: simple metadata
+                        VStack(spacing: 0) {
+                            CiderColors.separator
+                                .frame(width: Spacing.hairline)
+                                .frame(maxHeight: .infinity)
+                        }
                         .background(CiderColors.surfaceInput)
+                        .overlay(alignment: .leading) {
+                            CiderColors.separator
+                                .frame(width: Spacing.hairline)
+                        }
+                        .frame(width: Self.sidebarWidth)
+                        .overlay {
+                            simpleMetadataSidebar(for: uuid)
+                                .frame(width: Self.sidebarWidth)
+                        }
+                    }
                 }
             }
         } else {
@@ -91,9 +118,47 @@ struct CanvasDetailOverlay: View {
     }
 
     private func dismiss() {
+        saveDraft()
         withAnimation(reduceMotion ? .none : .snappy(duration: 0.25)) {
             onDismiss()
         }
+    }
+
+    private func updateDraft(for selectedID: String?) {
+        guard let selectedID,
+              let uuid = UUID(uuidString: selectedID),
+              let bookmark = viewModel.bookmarkLookup[uuid] else {
+            draft = nil
+            detailsErrorMessage = nil
+            return
+        }
+        draft = BookmarkDetailsDraft(bookmark: bookmark)
+        detailsErrorMessage = nil
+    }
+
+    private func saveDraft() {
+        guard let draft,
+              let selectedID = viewModel.selectedItemID,
+              let uuid = UUID(uuidString: selectedID),
+              viewModel.bookmarkLookup[uuid] != nil else { return }
+
+        let parsedTags = draft.tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let sourceURL: String? = draft.sourceURL != draft.originalURLString
+            ? draft.sourceURL
+            : nil
+
+        VaultBookmarkService.shared.updateDetails(
+            for: uuid,
+            title: draft.title,
+            notes: draft.notes,
+            tags: parsedTags,
+            labelIDs: draft.labelIDs,
+            urlString: sourceURL
+        )
     }
 
     private var unknownItemPlaceholder: some View {
@@ -124,9 +189,6 @@ struct CanvasDetailOverlay: View {
             }
             .buttonStyle(.plain)
 
-            // Title + domain
-            toolbarTitle(for: uuid)
-
             Spacer(minLength: 0)
 
             // Actions (bookmark-only)
@@ -137,34 +199,6 @@ struct CanvasDetailOverlay: View {
         .padding(.horizontal, Spacing.md)
         .padding(.top, Spacing.xxs)
         .padding(.bottom, Spacing.xs + 1)
-    }
-
-    @ViewBuilder
-    private func toolbarTitle(for uuid: UUID) -> some View {
-        if let bookmark = viewModel.bookmarkLookup[uuid] {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(bookmark.title)
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-                if bookmark.hasURL {
-                    Text(bookmark.hostDisplay)
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(1)
-                }
-            }
-        } else if let note = viewModel.noteLookup[uuid] {
-            Text(note.title)
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
-        } else if let todo = viewModel.todoLookup[uuid] {
-            Text(todo.title)
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
-        }
     }
 
     private func toolbarActions(for bookmark: Bookmark) -> some View {
@@ -277,7 +311,6 @@ struct CanvasDetailOverlay: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                // Fallback letter icon
                 bookmarkFallbackHero(bookmark)
             }
         }
@@ -379,14 +412,65 @@ struct CanvasDetailOverlay: View {
         }
     }
 
-    // MARK: - Metadata Sidebar (Right)
+    // MARK: - Bookmark Metadata Sidebar (reuses NSPanel component)
 
-    private func metadataSidebar(for uuid: UUID) -> some View {
+    @ViewBuilder
+    private func bookmarkMetadataSidebarView(bookmark: Bookmark) -> some View {
+        if let draftBinding = makeDraftBinding() {
+            BookmarkMetadataSidebar(
+                draft: draftBinding,
+                bookmark: bookmark,
+                errorMessage: detailsErrorMessage,
+                folders: VaultFolderService.shared.legacyFolders,
+                width: Self.sidebarWidth,
+                showBackground: false,
+                onDelete: {
+                    let bm = bookmark
+                    dismiss()
+                    let trashItems = VaultBookmarkService.shared.removeAll([bm])
+                    if !trashItems.isEmpty {
+                        CiderUndoManager.shared.record(.bulkDeletedToTrash(trashItems))
+                    }
+                },
+                onFolderChanged: { folderID in
+                    VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID)
+                },
+                onOpenURL: {
+                    if let url = bookmark.url { openURLSafely(url) }
+                },
+                onCopyURL: {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(bookmark.urlString, forType: .string)
+                },
+                onSave: { saveDraft() },
+                onCancel: { dismiss() }
+            )
+            .background(CiderColors.surfaceInput)
+            .overlay(alignment: .leading) {
+                CiderColors.separator
+                    .frame(width: Spacing.hairline)
+            }
+        }
+    }
+
+    private func makeDraftBinding() -> Binding<BookmarkDetailsDraft>? {
+        guard draft != nil else { return nil }
+        return Binding(
+            get: { self.draft! },
+            set: { next in
+                self.draft = next
+                self.detailsErrorMessage = nil
+            }
+        )
+    }
+
+    // MARK: - Simple Metadata Sidebar (Notes/Todos)
+
+    private func simpleMetadataSidebar(for uuid: UUID) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: Spacing.lg) {
-                if let bookmark = viewModel.bookmarkLookup[uuid] {
-                    bookmarkMetadata(bookmark)
-                } else if let note = viewModel.noteLookup[uuid] {
+                if let note = viewModel.noteLookup[uuid] {
                     noteMetadata(note)
                 } else if let todo = viewModel.todoLookup[uuid] {
                     todoMetadata(todo)
@@ -397,89 +481,19 @@ struct CanvasDetailOverlay: View {
         .frame(maxHeight: .infinity)
     }
 
-    // MARK: - Bookmark Metadata
-
-    private func bookmarkMetadata(_ bookmark: Bookmark) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            // Folder
-            if let folderID = bookmark.folderID,
-               let folder = VaultFolderService.shared.folder(for: folderID) {
-                metadataRow(icon: "folder", label: "Folder", value: folder.name)
-            }
-
-            // Tags
-            if !bookmark.labelIDs.isEmpty {
-                labelPills(for: bookmark.labelIDs)
-            }
-
-            // AI Summary
-            if let summary = bookmark.aiSummary, !summary.isEmpty {
-                metadataSection(title: "Summary") {
-                    Text(summary)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.secondary)
-                        .textSelection(.enabled)
-                }
-            }
-
-            // Notes
-            if !bookmark.notes.isEmpty {
-                metadataSection(title: "Notes") {
-                    Text(bookmark.notes)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.secondary)
-                        .textSelection(.enabled)
-                }
-            }
-
-            Divider()
-
-            // Created date
-            metadataRow(
-                icon: "calendar",
-                label: "Added",
-                value: bookmark.createdAt.noteCardDate
-            )
-
-            // Open in Browser
-            if bookmark.hasURL, let url = bookmark.url {
-                Button {
-                    openURLSafely(url)
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "safari")
-                        Text("Open in Browser")
-                    }
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.controlAccent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
     // MARK: - Note Metadata
 
     private func noteMetadata(_ note: Note) -> some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            // Folder
             if let folderID = note.folderID,
                let folder = VaultFolderService.shared.folder(for: folderID) {
                 metadataRow(icon: "folder", label: "Folder", value: folder.name)
             }
 
-            // Tags
             if !note.labelIDs.isEmpty {
                 labelPills(for: note.labelIDs)
             }
 
-            // Word count
             let wordCount = note.wordCount
             if wordCount > 0 {
                 metadataRow(icon: "textformat.abc", label: "Words", value: "\(wordCount)")
@@ -487,7 +501,6 @@ struct CanvasDetailOverlay: View {
 
             Divider()
 
-            // Modified date
             metadataRow(
                 icon: "calendar",
                 label: "Modified",
@@ -500,25 +513,21 @@ struct CanvasDetailOverlay: View {
 
     private func todoMetadata(_ todo: TodoCard) -> some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            // Due date
             if let dueDate = todo.dueDate {
                 metadataRow(icon: "clock", label: "Due", value: dueDate.noteCardDate)
             }
 
-            // Folder
             if let folderID = todo.folderID,
                let folder = VaultFolderService.shared.folder(for: folderID) {
                 metadataRow(icon: "folder", label: "Folder", value: folder.name)
             }
 
-            // Tags
             if !todo.labelIDs.isEmpty {
                 labelPills(for: todo.labelIDs)
             }
 
             Divider()
 
-            // Created date
             metadataRow(
                 icon: "calendar",
                 label: "Created",
@@ -528,15 +537,6 @@ struct CanvasDetailOverlay: View {
     }
 
     // MARK: - Shared Components
-
-    private func metadataSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text(title)
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-            content()
-        }
-    }
 
     private func metadataRow(icon: String, label: String, value: String) -> some View {
         HStack(spacing: Spacing.sm) {
