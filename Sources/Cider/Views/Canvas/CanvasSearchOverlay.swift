@@ -36,41 +36,51 @@ struct CanvasSearchOverlay: View {
 
     private var isPushedAside: Bool { selectedResult != nil }
 
-    /// Left edge of available area (right of sidebar, or 0 if collapsed).
-    private var availableLeadingEdge: CGFloat {
-        isSidebarVisible ? Self.canvasSidebarWidth : 0
+    /// Palette width — narrows when detail is shown.
+    private var paletteWidth: CGFloat {
+        isPushedAside ? Self.palettePushedWidth : SearchPaletteDesign.paletteWidth
     }
 
-    /// Detail panel width — fills the right portion of available space.
+    /// Detail panel width — fills space right of the palette.
     private var detailWidth: CGFloat {
-        max(availableWidth - Self.modalInset * 2 - SearchPaletteDesign.paletteWidth - Self.detailGap, 300)
+        max(availableWidth - Self.modalInset * 2 - Self.palettePushedWidth - Self.detailGap, 300)
+    }
+
+    /// Left edge of available area (right of sidebar).
+    private var availableLeadingEdge: CGFloat {
+        isSidebarVisible ? Self.canvasSidebarWidth : 0
     }
 
     // MARK: - Body
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             // Backdrop
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
                 .onTapGesture { dismissAll() }
 
-            // Palette — always rendered, stays in its natural position
-            // SearchPaletteView has its own GeometryReader and centers itself.
-            // We just need to constrain it to the available area right of the sidebar.
-            paletteView
-                .padding(.leading, availableLeadingEdge)
+            // Two-panel layout: palette left, detail right
+            // Palette has its own GeometryReader — give it a constrained frame
+            // so it centers within the correct area.
+            HStack(alignment: .top, spacing: Self.detailGap) {
+                paletteView
+                    .frame(width: isPushedAside
+                        ? Self.palettePushedWidth + Self.modalInset * 2
+                        : availableWidth)
+                    .frame(maxHeight: .infinity)
 
-            // Detail — anchored to the right edge of available space
-            if let _ = selectedResult {
-                detailPanel
-                    .frame(width: detailWidth)
-                    .frame(height: detailHeight)
-                    .padding(.top, canvasSize.height * SearchPaletteDesign.topOffsetFactor)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.trailing, Self.modalInset)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                if isPushedAside {
+                    detailPanel
+                        .frame(width: detailWidth)
+                        .frame(height: detailHeight)
+                        .padding(.top, canvasSize.height * SearchPaletteDesign.topOffsetFactor)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.trailing, Self.modalInset)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .padding(.leading, availableLeadingEdge)
         }
         .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: isPushedAside)
     }
@@ -98,7 +108,8 @@ struct CanvasSearchOverlay: View {
                 dismissAll()
             },
             onSelectTag: nil,
-            dismissOnResultSelect: false
+            dismissOnResultSelect: false,
+            overrideWidth: isPushedAside ? Self.palettePushedWidth : nil
         )
     }
 

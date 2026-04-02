@@ -103,6 +103,8 @@ struct SearchPaletteView: View {
     /// When false, selecting a search result calls the open callback but does NOT auto-dismiss.
     /// Used by the canvas search overlay to keep the palette open for push-aside browsing.
     var dismissOnResultSelect: Bool = true
+    /// Override the palette content width. Defaults to `SearchPaletteDesign.paletteWidth`.
+    var overrideWidth: CGFloat?
 
     @State private var query = ""
     @State private var results: [SearchResult] = []
@@ -221,7 +223,7 @@ struct SearchPaletteView: View {
                     defaultContent
                 }
             }
-            .frame(width: SearchPaletteDesign.paletteWidth)
+            .frame(width: overrideWidth ?? SearchPaletteDesign.paletteWidth)
             .background(
                 ZStack {
                     VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
