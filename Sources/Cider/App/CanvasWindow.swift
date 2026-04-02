@@ -32,6 +32,9 @@ final class CanvasWindow: NSWindow {
         // Remove any toolbar so the titlebar collapses to zero height
         toolbar = nil
 
+        // Persist window frame across launches
+        setFrameAutosaveName("CiderCanvasWindow")
+
         // Hide native traffic lights — custom ones live in the sidebar overlay
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -146,6 +149,14 @@ final class CanvasWindow: NSWindow {
     }
 
     func showCentered() {
+        // If the system restored a saved frame, just show the window
+        if setFrameUsingName("CiderCanvasWindow") {
+            makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        // First launch — center on the screen under the cursor
         let mouseLocation = NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
             ?? NSScreen.main
