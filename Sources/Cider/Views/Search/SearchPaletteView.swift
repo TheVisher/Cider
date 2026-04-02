@@ -110,6 +110,7 @@ struct SearchPaletteView: View {
     @State private var selectedIndex: Int = -1
     @State private var activeScope = SearchScope(cleanQuery: "")
     @FocusState private var isSearchFieldFocused: Bool
+    @State private var keyMonitor: Any?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: - Filtered Data
@@ -245,23 +246,36 @@ struct SearchPaletteView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background {
-            // Hidden buttons for arrow key + return handling (NSPanel workaround)
-            VStack(spacing: 0) {
-                Button("") { handleArrowDown() }
-                    .keyboardShortcut(.downArrow, modifiers: [])
-                Button("") { handleArrowUp() }
-                    .keyboardShortcut(.upArrow, modifiers: [])
-                Button("") { handleReturn() }
-                    .keyboardShortcut(.return, modifiers: [])
-            }
-            .frame(width: 0, height: 0)
-            .opacity(0)
-        }
         .transition(.opacity)
-        .task {
-            try? await Task.sleep(for: .milliseconds(150))
-            isSearchFieldFocused = true
+        .onAppear {
+            // Raw key event monitor — intercepts arrow keys and return before the text field
+            // consumes them. Works in both NSPanel and regular NSWindow contexts.
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
+                switch Int(event.keyCode) {
+                case 125: // Down arrow
+                    handleArrowDown()
+                    return nil
+                case 126: // Up arrow
+                    handleArrowUp()
+                    return nil
+                case 36: // Return
+                    handleReturn()
+                    return nil
+                default:
+                    return event
+                }
+            }
+            // Focus the search field after a short delay
+            Task {
+                try? await Task.sleep(for: .milliseconds(150))
+                isSearchFieldFocused = true
+            }
+        }
+        .onDisappear {
+            if let monitor = keyMonitor {
+                NSEvent.removeMonitor(monitor)
+                keyMonitor = nil
+            }
         }
         .onChange(of: query) { _, newQuery in
             selectedIndex = -1
