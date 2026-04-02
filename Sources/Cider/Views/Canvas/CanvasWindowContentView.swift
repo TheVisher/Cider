@@ -33,19 +33,7 @@ struct CanvasWindowContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .topLeading)))
                 }
 
-                // Detail modal with backdrop
-                if viewModel.selectedItemID != nil {
-                    CanvasDetailOverlay(
-                        viewModel: viewModel,
-                        canvasSize: geometry.size,
-                        isSidebarVisible: sidebarVisible,
-                        onDismiss: { viewModel.deselectAll() }
-                    )
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                    .zIndex(2)
-                }
-
-                // Search palette
+                // Search palette (below detail modal)
                 if isSearchVisible {
                     CanvasSearchOverlay(
                         viewModel: viewModel,
@@ -54,6 +42,18 @@ struct CanvasWindowContentView: View {
                         onDismiss: { isSearchVisible = false }
                     )
                     .transition(.opacity)
+                    .zIndex(2)
+                }
+
+                // Detail modal (on top of search palette)
+                if viewModel.selectedItemID != nil {
+                    CanvasDetailOverlay(
+                        viewModel: viewModel,
+                        canvasSize: geometry.size,
+                        isSidebarVisible: sidebarVisible,
+                        onDismiss: { viewModel.deselectAll() }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     .zIndex(3)
                 }
             }
@@ -63,12 +63,12 @@ struct CanvasWindowContentView: View {
             .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: isSearchVisible)
         }
         .background {
-            // Hidden button for Escape — dismiss search first, then deselect
+            // Hidden button for Escape — dismiss detail first, then search, then deselect
             Button("") {
-                if isSearchVisible {
-                    isSearchVisible = false
-                } else {
+                if viewModel.selectedItemID != nil {
                     viewModel.deselectAll()
+                } else if isSearchVisible {
+                    isSearchVisible = false
                 }
             }
             .keyboardShortcut(.escape, modifiers: [])
@@ -101,12 +101,6 @@ struct CanvasWindowContentView: View {
             .keyboardShortcut("f", modifiers: .command)
             .opacity(0)
             .frame(width: 0, height: 0)
-        }
-        .onChange(of: viewModel.selectedItemID) { _, newID in
-            // Dismiss search palette when a card is clicked directly on canvas
-            if newID != nil, isSearchVisible {
-                isSearchVisible = false
-            }
         }
         .onChange(of: sidebarVisible) { _, visible in
             // Sync sidebar state to the window for drag-region calculations
