@@ -36,45 +36,39 @@ struct CanvasSearchOverlay: View {
 
     private var isPushedAside: Bool { selectedResult != nil }
 
-    /// When pushed aside, the palette slides left by this amount from center.
-    private var paletteSlideX: CGFloat {
-        guard isPushedAside else { return 0 }
-        // Move palette left so it sits at the left edge of available space
-        let detailWidth = availableWidth - Self.palettePushedWidth - Self.detailGap - Self.modalInset * 2
-        return -(detailWidth + Self.detailGap) / 2
+    /// Left edge of available area (right of sidebar, or 0 if collapsed).
+    private var availableLeadingEdge: CGFloat {
+        isSidebarVisible ? Self.canvasSidebarWidth : 0
     }
 
-    /// Detail panel width when shown.
+    /// Detail panel width — fills the right portion of available space.
     private var detailWidth: CGFloat {
-        availableWidth - Self.palettePushedWidth - Self.detailGap - Self.modalInset * 2
-    }
-
-    /// Detail panel offset — positioned to the right of the palette.
-    private var detailSlideX: CGFloat {
-        (Self.palettePushedWidth + Self.detailGap) / 2
+        max(availableWidth - Self.modalInset * 2 - SearchPaletteDesign.paletteWidth - Self.detailGap, 300)
     }
 
     // MARK: - Body
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             // Backdrop
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
                 .onTapGesture { dismissAll() }
 
-            // Palette — always rendered, slides left when detail shown
+            // Palette — always rendered, stays in its natural position
+            // SearchPaletteView has its own GeometryReader and centers itself.
+            // We just need to constrain it to the available area right of the sidebar.
             paletteView
-                .offset(x: modalOffsetX + paletteSlideX)
+                .padding(.leading, availableLeadingEdge)
 
-            // Detail — appears on right when result selected
+            // Detail — anchored to the right edge of available space
             if let _ = selectedResult {
                 detailPanel
-                    .frame(width: max(detailWidth, 300))
+                    .frame(width: detailWidth)
                     .frame(height: detailHeight)
-                    .offset(x: modalOffsetX + detailSlideX)
                     .padding(.top, canvasSize.height * SearchPaletteDesign.topOffsetFactor)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.trailing, Self.modalInset)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
