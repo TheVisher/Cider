@@ -14,18 +14,17 @@ struct UtilityPanelBookmarkDetail: View {
     var body: some View {
         Group {
             if let bookmark, let draft = Binding($draft) {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        BookmarkDetailsHeroPreview(
-                            bookmark: bookmark,
-                            draft: draft.wrappedValue
-                        )
-                        .frame(height: 200)
-                        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.top, Spacing.sm)
-                        .padding(.bottom, Spacing.md)
+                HStack(alignment: .top, spacing: 0) {
+                    // Hero image (left)
+                    BookmarkDetailsHeroPreview(
+                        bookmark: bookmark,
+                        draft: draft.wrappedValue
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    .padding(Spacing.md)
 
+                    // Metadata sidebar (right, scrollable)
+                    ScrollView {
                         BookmarkMetadataSidebar(
                             draft: draft,
                             bookmark: bookmark,

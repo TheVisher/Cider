@@ -39,8 +39,8 @@ struct UtilityPanelShell<Content: View>: View {
                 shadowPadding: 0,
                 topPadding: 0,
                 bottomPadding: 0,
-                resizeCornerSize: UtilityPanelDesign.resizeCornerSize,
-                resizeEdgeThickness: UtilityPanelDesign.resizeEdgeThickness
+                resizeCornerSize: 28,
+                resizeEdgeThickness: 12
             )
         }
     }
