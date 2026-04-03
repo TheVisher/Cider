@@ -20,7 +20,7 @@ struct UtilityPanelBookmarkDetail: View {
                             bookmark: bookmark,
                             draft: draft.wrappedValue
                         )
-                        .frame(maxHeight: 200)
+                        .frame(height: 200)
                         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.sm)
