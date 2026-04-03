@@ -15,6 +15,13 @@ extension AppDelegate {
         let panel = CiderUtilityPanel()
         self.ciderUtilityPanel = panel
 
+        panel.onNavigateBack = { [weak self] in
+            self?.utilityPanelCoordinator.goBack()
+        }
+        panel.onNavigateForward = { [weak self] in
+            self?.utilityPanelCoordinator.goForward()
+        }
+
         let shadowPanel = CiderShadowPanel()
         self.utilityPanelShadowPanel = shadowPanel
 

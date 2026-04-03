@@ -7,6 +7,10 @@ private let logger = Logger(subsystem: "com.cider.app", category: "CiderUtilityP
 
 final class CiderUtilityPanel: NSPanel {
 
+    // Navigation callback for mouse back/forward buttons
+    var onNavigateBack: (() -> Void)?
+    var onNavigateForward: (() -> Void)?
+
     // Window dragging state
     private var dragStartOrigin: NSPoint?
     private var dragStartMouse: NSPoint?
@@ -135,6 +139,17 @@ final class CiderUtilityPanel: NSPanel {
             dragStartOrigin = nil
             dragStartMouse = nil
             isDragging = false
+            super.sendEvent(event)
+
+        case .otherMouseUp:
+            // Mouse button 3 = back, button 4 = forward
+            if event.buttonNumber == 3 {
+                onNavigateBack?()
+                return
+            } else if event.buttonNumber == 4 {
+                onNavigateForward?()
+                return
+            }
             super.sendEvent(event)
 
         default:
