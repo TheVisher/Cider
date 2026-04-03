@@ -66,21 +66,28 @@ extension AppDelegate {
 
         let targetWidth: CGFloat
         if let preferred = utilityPanelCoordinator.preferredWidth {
+            // Entering a narrow tool mode — save current width first
+            if utilityPanelSavedItemWidth == nil {
+                utilityPanelSavedItemWidth = panel.frame.width
+            }
             targetWidth = preferred
         } else {
-            // No preferred width (items, search) — restore to default if narrowed
-            let currentWidth = panel.frame.width
-            if currentWidth < UtilityPanelDesign.panelContentWidth {
-                targetWidth = UtilityPanelDesign.panelContentWidth
+            // Returning to item/search mode — restore saved width
+            if let saved = utilityPanelSavedItemWidth {
+                targetWidth = saved
+                utilityPanelSavedItemWidth = nil
             } else {
-                return // Already wide enough, don't shrink user-resized panels
+                return // No saved width, keep current
             }
         }
 
         let currentFrame = panel.frame
-        guard abs(currentFrame.width - targetWidth) > 2 else { return }
+        guard abs(currentFrame.width - targetWidth) > 2 else {
+            utilityPanelSavedItemWidth = nil
+            return
+        }
 
-        // Anchor left edge: only change width (and right edge moves)
+        // Anchor left edge: only change width (right edge moves)
         let newFrame = NSRect(
             x: currentFrame.origin.x,
             y: currentFrame.origin.y,

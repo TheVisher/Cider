@@ -69,6 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var utilityPanelFrameObservation: NSKeyValueObservation?
     let utilityPanelPositionStore = CiderPanelPositionStore.utilityPanelShared
     let utilityPanelCoordinator = UtilityPanelCoordinator()
+    /// Saved panel width before narrowing for a tool mode, so we can restore it
+    var utilityPanelSavedItemWidth: CGFloat?
 
     // Services
     var servicesProvider: CiderServicesProvider?

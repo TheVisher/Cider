@@ -110,9 +110,11 @@ struct UtilityPanelHeaderBar: View {
                     coordinator.openTool(.search)
                 }
             } label: {
+                let hasResults = !coordinator.searchResults.isEmpty
+                let isActive = coordinator.activeTool == .search
                 Image(systemName: "magnifyingglass")
                     .font(CiderFont.bodySemibold)
-                    .foregroundColor(coordinator.activeTool == .search ? CiderColors.controlAccent : CiderColors.secondary)
+                    .foregroundColor(isActive ? CiderColors.controlAccent : hasResults ? CiderColors.secondary : CiderColors.quaternary)
                     .frame(
                         width: UtilityPanelDesign.toolButtonSize,
                         height: UtilityPanelDesign.toolButtonSize
@@ -120,7 +122,8 @@ struct UtilityPanelHeaderBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Search")
+            .disabled(coordinator.searchResults.isEmpty && coordinator.activeTool != .search)
+            .help(coordinator.searchResults.isEmpty ? "No search results" : "Search")
 
             Button {
                 if coordinator.activeTool == .clipboard {
