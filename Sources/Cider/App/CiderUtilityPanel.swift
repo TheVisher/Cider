@@ -98,6 +98,11 @@ final class CiderUtilityPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         switch event.type {
         case .leftMouseDown:
+            // Let resize handles take priority over header bar dragging
+            if isInResizeZone(event.locationInWindow) {
+                super.sendEvent(event)
+                return
+            }
             if isInHeaderBar(event.locationInWindow) {
                 dragStartOrigin = frame.origin
                 dragStartMouse = NSEvent.mouseLocation
@@ -135,6 +140,12 @@ final class CiderUtilityPanel: NSPanel {
         default:
             super.sendEvent(event)
         }
+    }
+
+    private func isInResizeZone(_ locationInWindow: NSPoint) -> Bool {
+        guard let contentView else { return false }
+        let hitView = contentView.hitTest(locationInWindow)
+        return hitView is PanelEdgeResizeNSView
     }
 
     private func isInHeaderBar(_ locationInWindow: NSPoint) -> Bool {
