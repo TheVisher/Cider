@@ -146,6 +146,21 @@ extension AppDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        // Option+A hotkey → open AI chat in utility panel
+        NotificationCenter.default.publisher(for: .toggleAIAssistantPanel)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, CiderConfig.load().useNewPanel else { return }
+                if self.ciderUtilityPanel?.isVisible == true,
+                   self.utilityPanelCoordinator.activeTool == .aiChat {
+                    self.hideUtilityPanel()
+                } else {
+                    self.utilityPanelCoordinator.openTool(.aiChat)
+                    self.showUtilityPanel()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Toggle

@@ -142,11 +142,15 @@ struct UtilityPanelHeaderBar: View {
             .help("Clipboard")
 
             Button {
-                NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+                if coordinator.activeTool == .aiChat {
+                    coordinator.closeActive()
+                } else {
+                    coordinator.openTool(.aiChat)
+                }
             } label: {
                 Image(systemName: "sparkles")
                     .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.secondary)
+                    .foregroundColor(coordinator.activeTool == .aiChat ? CiderColors.controlAccent : CiderColors.secondary)
                     .frame(
                         width: UtilityPanelDesign.toolButtonSize,
                         height: UtilityPanelDesign.toolButtonSize

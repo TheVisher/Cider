@@ -26,7 +26,9 @@ struct UtilityPanelContentView: View {
             PanelSearchResultsView(coordinator: coordinator)
         case .clipboard:
             ClipboardViewerView()
-        case .aiChat, .capture:
+        case .aiChat:
+            AIAssistantPanelView(viewModel: AIAssistantViewModel.shared, isStandalone: false)
+        case .capture:
             PlaceholderMode().contentView
         }
     }

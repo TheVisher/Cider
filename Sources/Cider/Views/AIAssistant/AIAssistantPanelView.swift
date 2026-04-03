@@ -3,6 +3,7 @@ import SwiftUI
 /// Root view for the AI Assistant floating panel.
 struct AIAssistantPanelView: View {
     @ObservedObject var viewModel: AIAssistantViewModel
+    var isStandalone: Bool = true
 
     @ObservedObject private var conversationStorage = AIConversationStorage.shared
     @ObservedObject private var modelManager = MLXModelManager.shared
@@ -11,23 +12,21 @@ struct AIAssistantPanelView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        if isStandalone {
+            standaloneBody
+        } else {
+            embeddedBody
+        }
+    }
+
+    private var standaloneBody: some View {
         ZStack {
             AcrylicPanelBackground(
                 cornerRadius: AIAssistantPanelDesign.cornerRadius
             )
 
-            VStack(spacing: 0) {
-                titleBar
-                Divider().background(CiderColors.separator)
-                messageList
-                Divider().background(CiderColors.separator)
-                AIAssistantInputView(
-                    isStreaming: viewModel.isStreaming,
-                    onSend: { viewModel.send($0) },
-                    onStop: { viewModel.stopStreaming() }
-                )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: AIAssistantPanelDesign.cornerRadius, style: .continuous))
+            chatContent
+                .clipShape(RoundedRectangle(cornerRadius: AIAssistantPanelDesign.cornerRadius, style: .continuous))
         }
         .overlay {
             PanelEdgeResizeView(horizontalResizeEnabled: true)
@@ -41,19 +40,39 @@ struct AIAssistantPanelView: View {
         }
     }
 
+    private var embeddedBody: some View {
+        chatContent
+    }
+
+    private var chatContent: some View {
+        VStack(spacing: 0) {
+            titleBar
+            Divider().background(CiderColors.separator)
+            messageList
+            Divider().background(CiderColors.separator)
+            AIAssistantInputView(
+                isStreaming: viewModel.isStreaming,
+                onSend: { viewModel.send($0) },
+                onStop: { viewModel.stopStreaming() }
+            )
+        }
+    }
+
     // MARK: - Title Bar
 
     private var titleBar: some View {
         HStack(spacing: Spacing.sm) {
-            Button {
-                NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.tertiary)
+            if isStandalone {
+                Button {
+                    NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Close")
             }
-            .buttonStyle(.plain)
-            .help("Close")
 
             Image(systemName: "sparkles")
                 .font(CiderFont.bodyMedium)
