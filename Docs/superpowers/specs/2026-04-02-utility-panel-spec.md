@@ -130,14 +130,17 @@ The panel is `.nonActivatingPanel` by default — it doesn't steal focus from ot
 ### Focus-follows-mouse (default)
 When the mouse hovers over the panel, it becomes key window and accepts keyboard input. When the mouse leaves, it gives up key status. This makes the panel feel like a HUD — hover over it, start typing, move away and it's passive again.
 
+**Editing exception:** The panel does NOT resign key window while a text field has active first responder, a mouse-down/drag is in progress, or IME composition is active. It only resigns on mouse-exit when in a passive state (viewing, scrolling, not editing). This prevents accidental focus loss mid-sentence.
+
 ### Click-to-focus (setting)
 Optional setting for users who find hover-focus annoying. Panel only becomes key window when explicitly clicked.
 
 ### Escape behavior
-Escape always works the same regardless of focus mode:
-- In detail → pops back in history (to search results, previous item, etc.)
-- In tool view → closes the tool, returns to last item
-- With nothing in history → hides the panel
+Escape means "I'm done" — it closes the panel. Back/forward buttons handle history navigation.
+
+- **If a text field is focused** (note editor, search, AI chat): first Escape unfocuses the text field / cancels editing. Second Escape closes the panel.
+- **If no text field is focused**: Escape closes (hides) the panel immediately.
+- Panel remembers its state when hidden. Double-tap Option reopens to where you left off.
 
 ---
 
@@ -296,8 +299,9 @@ class PanelHistory: ObservableObject {
     }
 
     enum PanelHistoryType {
-        case item(itemID: UUID)         // references a dot
-        case tool(ToolMode)             // clipboard, AI, search, capture
+        case item(itemID: UUID)                         // single item
+        case splitView(itemID1: UUID, itemID2: UUID)    // two items side by side
+        case tool(ToolMode)                             // clipboard, AI, search, capture
     }
 
     func push(_ entry: PanelHistoryEntry) { ... }
@@ -306,7 +310,13 @@ class PanelHistory: ObservableObject {
 }
 ```
 
-The history stack includes both items and tools in chronological order. Dots are a separate visual representation of just the items. Back/forward walks the history stack. Clicking a dot is equivalent to pushing a history entry for that item.
+The history stack includes items, split views, and tools in chronological order. Dots are a separate visual representation of just the items.
+
+**Key behaviors:**
+- Back/forward walks the history stack. Clicking a dot pushes an item history entry.
+- **Split view in history:** Back from split view returns to whatever preceded it. Forward restores the split. Split view is a first-class history entry with both item IDs.
+- **Evicted items in history:** If Back lands on a history entry whose dot was evicted, the item is re-opened into a dot (evicting the oldest unpinned, same as opening a new item). The history stores the `itemID`, not a dot reference — the vault still has the data. Navigating back simply restores the item to a dot slot.
+- **Tool transitions:** Tools don't consume dots but are tracked in history. Back from clipboard → returns to previous view (item or another tool).
 
 ---
 
@@ -336,7 +346,17 @@ protocol CanvasNavigator {
 ## Phase Plan
 
 ### Phase 0: State Model Spike (before any UI)
-Define and test the dot buffer, back/forward history, and mode switching logic in isolation. Write the transition table. Validate edge cases: all pinned, split view open/close, tool mode cycling, dedup. This is the foundation everything hangs on.
+Define and test the dot buffer, back/forward history, and mode switching logic in isolation. Write the transition table. This is the foundation everything hangs on.
+
+Edge cases to validate:
+- All 5 dots pinned → open 6th item → toast, rejected
+- Split view open → open single item → split collapses, new item gets dot
+- Split view encoded in history → Back restores split, Forward re-enters it
+- Tool mode cycling (item → clipboard → AI → Back → Back → item)
+- Dedup: open existing item → focus dot, push history entry
+- Evicted dot in history: Back lands on evicted item → re-open into dot (evict oldest unpinned)
+- Escape: unfocuses text field first, second Escape hides panel
+- History doesn't grow unbounded — cap at reasonable limit (e.g. 50 entries)
 
 ### Phase 1: Panel Shell + Toggle
 - New `CiderUtilityPanel` NSPanel subclass
