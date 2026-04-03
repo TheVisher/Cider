@@ -131,6 +131,13 @@ final class UtilityPanelCoordinator: ObservableObject {
     func closeActive() {
         if activeTool != nil {
             activeTool = nil
+            // Restore the most recent dot item if one exists
+            if let lastIndex = buffer.slots.lastIndex(where: { $0 != nil }),
+               let slot = buffer.slots[lastIndex],
+               let item = itemTypeMap[slot.itemID] {
+                buffer.activeIndex = lastIndex
+                activeItem = item
+            }
             return
         }
         guard let activeItem else { return }
