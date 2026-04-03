@@ -43,6 +43,16 @@ final class UtilityPanelCoordinator: ObservableObject {
     /// The currently active tool mode (nil = showing an item or placeholder)
     @Published private(set) var activeTool: ToolMode?
 
+    /// Preferred panel width for the current mode. Nil = keep current width.
+    var preferredWidth: CGFloat? {
+        guard let tool = activeTool else { return nil }
+        return switch tool {
+        case .aiChat: AIAssistantPanelDesign.defaultWidth
+        case .clipboard: ClipboardPanelDesign.narrowWidth
+        case .search, .capture: nil
+        }
+    }
+
     // MARK: - Search State
 
     /// Persists across back/forward so returning to search shows the same results

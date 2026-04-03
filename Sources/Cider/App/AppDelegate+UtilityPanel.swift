@@ -42,6 +42,59 @@ extension AppDelegate {
             width: UtilityPanelDesign.panelContentWidth,
             height: UtilityPanelDesign.panelContentHeight
         ))
+
+        // Animate panel width when switching between item/tool modes
+        utilityPanelCoordinator.$activeTool
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.animateToPreferredWidth()
+            }
+            .store(in: &cancellables)
+
+        utilityPanelCoordinator.$activeItem
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] item in
+                guard item != nil else { return }
+                self?.animateToPreferredWidth()
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Resizes the panel to the current mode's preferred width, anchoring the left edge.
+    private func animateToPreferredWidth() {
+        guard let panel = ciderUtilityPanel, panel.isVisible else { return }
+
+        let targetWidth: CGFloat
+        if let preferred = utilityPanelCoordinator.preferredWidth {
+            targetWidth = preferred
+        } else {
+            // No preferred width (items, search) — restore to default if narrowed
+            let currentWidth = panel.frame.width
+            if currentWidth < UtilityPanelDesign.panelContentWidth {
+                targetWidth = UtilityPanelDesign.panelContentWidth
+            } else {
+                return // Already wide enough, don't shrink user-resized panels
+            }
+        }
+
+        let currentFrame = panel.frame
+        guard abs(currentFrame.width - targetWidth) > 2 else { return }
+
+        // Anchor left edge: only change width (and right edge moves)
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y,
+            width: targetWidth,
+            height: currentFrame.height
+        )
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(newFrame, display: true)
+        }
+
+        utilityPanelShadowPanel?.updateFrame(for: newFrame)
     }
 
     // MARK: - Notifications
