@@ -12,40 +12,42 @@ struct UtilityPanelBookmarkDetail: View {
     }
 
     var body: some View {
-        if let bookmark, let draft = Binding($draft) {
-            ScrollView {
-                BookmarkMetadataSidebar(
-                    draft: draft,
-                    bookmark: bookmark,
-                    errorMessage: errorMessage,
-                    folders: bookmarksViewModel.folders,
-                    width: .infinity,
-                    showBackground: false,
-                    onDelete: nil,
-                    onFolderChanged: { folderID in
-                        self.draft?.folderID = folderID
-                        saveDetails()
-                    },
-                    onOpenURL: {
-                        if let url = bookmark.url {
-                            NSWorkspace.shared.open(url)
-                        }
-                    },
-                    onCopyURL: {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(bookmark.urlString, forType: .string)
-                    },
-                    onSave: { saveDetails() },
-                    onCancel: { loadDraft() }
-                )
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
+        Group {
+            if let bookmark, let draft = Binding($draft) {
+                ScrollView {
+                    BookmarkMetadataSidebar(
+                        draft: draft,
+                        bookmark: bookmark,
+                        errorMessage: errorMessage,
+                        folders: bookmarksViewModel.folders,
+                        width: .infinity,
+                        showBackground: false,
+                        onDelete: nil,
+                        onFolderChanged: { folderID in
+                            self.draft?.folderID = folderID
+                            saveDetails()
+                        },
+                        onOpenURL: {
+                            if let url = bookmark.url {
+                                NSWorkspace.shared.open(url)
+                            }
+                        },
+                        onCopyURL: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(bookmark.urlString, forType: .string)
+                        },
+                        onSave: { saveDetails() },
+                        onCancel: { loadDraft() }
+                    )
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                }
+            } else {
+                PlaceholderMode().contentView
             }
-            .onAppear { loadDraft() }
-            .onChange(of: bookmarkID) { _, _ in loadDraft() }
-        } else {
-            PlaceholderMode().contentView
         }
+        .onAppear { loadDraft() }
+        .onChange(of: bookmarkID) { _, _ in loadDraft() }
     }
 
     private func loadDraft() {

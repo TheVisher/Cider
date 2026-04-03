@@ -32,5 +32,8 @@ struct UtilityPanelShell<Content: View>: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: UtilityPanelDesign.cornerRadius, style: .continuous))
+        .overlay {
+            PanelEdgeResizeView()
+        }
     }
 }

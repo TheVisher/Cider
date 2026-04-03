@@ -209,7 +209,21 @@ extension AppDelegate {
         guard let screen else { return }
 
         let visibleFrame = screen.visibleFrame
-        panel.setFrame(visibleFrame, display: true)
+
+        // Toggle: if already maximized, restore to default size centered on screen
+        let isMaximized = abs(panel.frame.width - visibleFrame.width) < 2
+            && abs(panel.frame.height - visibleFrame.height) < 2
+
+        if isMaximized {
+            let defaultWidth = UtilityPanelDesign.panelContentWidth
+            let defaultHeight = UtilityPanelDesign.panelContentHeight
+            let x = visibleFrame.midX - defaultWidth / 2
+            let y = visibleFrame.midY - defaultHeight / 2
+            panel.setFrame(NSRect(x: x, y: y, width: defaultWidth, height: defaultHeight), display: true)
+        } else {
+            panel.setFrame(visibleFrame, display: true)
+        }
+
         persistCurrentUtilityPanelFrameIfNeeded()
     }
 
