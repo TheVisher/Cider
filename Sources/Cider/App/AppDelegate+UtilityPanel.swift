@@ -95,13 +95,23 @@ extension AppDelegate {
             return
         }
 
-        // Anchor left edge, but clamp to screen if expanding would go off-screen
+        // Decide anchor edge: pin to whichever screen edge the panel is closer to.
+        // This keeps the panel stable where the user placed it.
         var newX = currentFrame.origin.x
         let screen = panel.screen ?? NSScreen.main
         if let visibleFrame = screen?.visibleFrame {
-            let rightEdge = newX + targetWidth
-            if rightEdge > visibleFrame.maxX {
-                newX = max(visibleFrame.minX, visibleFrame.maxX - targetWidth)
+            let distToLeft = currentFrame.minX - visibleFrame.minX
+            let distToRight = visibleFrame.maxX - currentFrame.maxX
+            if distToRight < distToLeft {
+                // Closer to right edge — anchor right, grow leftward
+                let currentRight = currentFrame.maxX
+                newX = max(visibleFrame.minX, currentRight - targetWidth)
+            } else {
+                // Closer to left edge — anchor left, grow rightward
+                let rightEdge = newX + targetWidth
+                if rightEdge > visibleFrame.maxX {
+                    newX = max(visibleFrame.minX, visibleFrame.maxX - targetWidth)
+                }
             }
         }
 
