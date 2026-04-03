@@ -3,20 +3,46 @@ import AppKit
 
 struct PanelEdgeResizeView: NSViewRepresentable {
     var horizontalResizeEnabled: Bool = true
+    var minWidth: CGFloat = CiderPanelDesign.panelMinWidth
+    var minHeight: CGFloat = CiderPanelDesign.panelMinHeight
+    var shadowPadding: CGFloat = CiderPanelDesign.shadowPadding
+    var topPadding: CGFloat = CiderPanelDesign.topPadding
+    var bottomPadding: CGFloat = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
+    var resizeCornerSize: CGFloat = CiderPanelDesign.resizeCornerSize
+    var resizeEdgeThickness: CGFloat = CiderPanelDesign.resizeEdgeThickness
 
     func makeNSView(context: Context) -> PanelEdgeResizeNSView {
         let view = PanelEdgeResizeNSView()
         view.horizontalResizeEnabled = horizontalResizeEnabled
+        applyConfig(to: view)
         return view
     }
 
     func updateNSView(_ nsView: PanelEdgeResizeNSView, context: Context) {
         nsView.horizontalResizeEnabled = horizontalResizeEnabled
+        applyConfig(to: nsView)
+    }
+
+    private func applyConfig(to view: PanelEdgeResizeNSView) {
+        view.minW = minWidth
+        view.minH = minHeight
+        view.hPad = shadowPadding
+        view.topPad = topPadding
+        view.bottomPad = bottomPadding
+        view.cornerSize = resizeCornerSize
+        view.edgeInset = resizeEdgeThickness
     }
 }
 
 final class PanelEdgeResizeNSView: NSView {
     var horizontalResizeEnabled: Bool = true
+    var minW: CGFloat = CiderPanelDesign.panelMinWidth
+    var minH: CGFloat = CiderPanelDesign.panelMinHeight
+    var hPad: CGFloat = CiderPanelDesign.shadowPadding
+    var topPad: CGFloat = CiderPanelDesign.topPadding
+    var bottomPad: CGFloat = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
+    var cornerSize: CGFloat = CiderPanelDesign.resizeCornerSize
+    var edgeInset: CGFloat = CiderPanelDesign.resizeEdgeThickness
     private var trackingArea: NSTrackingArea?
     private var currentZone: ResizeZone = .none
 
@@ -88,10 +114,6 @@ final class PanelEdgeResizeNSView: NSView {
         let initialFrame = window.frame
         let initialMouse = NSEvent.mouseLocation
 
-        // Use design constants directly — window.minSize reports (0,0)
-        // because borderless panels don't enforce minSize natively.
-        let minW = CiderPanelDesign.panelMinWidth
-        let minH = CiderPanelDesign.panelMinHeight
         let maxW = window.maxSize.width
 
         var keepRunning = true
@@ -140,12 +162,6 @@ final class PanelEdgeResizeNSView: NSView {
     }
 
     private func resolveRawZone(at point: NSPoint) -> ResizeZone {
-        let hPad = CiderPanelDesign.shadowPadding
-        let topPad = CiderPanelDesign.topPadding
-        let bottomPad = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
-        let cornerSize = CiderPanelDesign.resizeCornerSize
-        let edgeInset: CGFloat = CiderPanelDesign.resizeEdgeThickness  // extend this many pt into the content for easier grab
-
         // Content rect — the visible acrylic area (NSView: y=0 is bottom)
         let contentMinX = hPad
         let contentMaxX = bounds.width - hPad
