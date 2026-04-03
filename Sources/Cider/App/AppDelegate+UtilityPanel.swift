@@ -131,6 +131,21 @@ extension AppDelegate {
                 self.showUtilityPanel()
             }
             .store(in: &cancellables)
+
+        // Option+V hotkey → open clipboard in utility panel
+        NotificationCenter.default.publisher(for: .toggleClipboardViewer)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, CiderConfig.load().useNewPanel else { return }
+                if self.ciderUtilityPanel?.isVisible == true,
+                   self.utilityPanelCoordinator.activeTool == .clipboard {
+                    self.hideUtilityPanel()
+                } else {
+                    self.utilityPanelCoordinator.openTool(.clipboard)
+                    self.showUtilityPanel()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Toggle

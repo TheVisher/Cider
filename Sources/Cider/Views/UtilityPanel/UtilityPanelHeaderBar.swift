@@ -123,11 +123,15 @@ struct UtilityPanelHeaderBar: View {
             .help("Search")
 
             Button {
-                NotificationCenter.default.post(name: .toggleClipboardViewer, object: nil)
+                if coordinator.activeTool == .clipboard {
+                    coordinator.closeActive()
+                } else {
+                    coordinator.openTool(.clipboard)
+                }
             } label: {
                 Image(systemName: "doc.on.clipboard")
                     .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.secondary)
+                    .foregroundColor(coordinator.activeTool == .clipboard ? CiderColors.controlAccent : CiderColors.secondary)
                     .frame(
                         width: UtilityPanelDesign.toolButtonSize,
                         height: UtilityPanelDesign.toolButtonSize

@@ -24,7 +24,9 @@ struct UtilityPanelContentView: View {
         switch tool {
         case .search:
             PanelSearchResultsView(coordinator: coordinator)
-        case .clipboard, .aiChat, .capture:
+        case .clipboard:
+            ClipboardViewerView()
+        case .aiChat, .capture:
             PlaceholderMode().contentView
         }
     }
