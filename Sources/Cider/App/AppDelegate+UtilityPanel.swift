@@ -94,9 +94,18 @@ extension AppDelegate {
             return
         }
 
-        // Anchor left edge: only change width (right edge moves)
+        // Anchor left edge, but clamp to screen if expanding would go off-screen
+        var newX = currentFrame.origin.x
+        let screen = panel.screen ?? NSScreen.main
+        if let visibleFrame = screen?.visibleFrame {
+            let rightEdge = newX + targetWidth
+            if rightEdge > visibleFrame.maxX {
+                newX = max(visibleFrame.minX, visibleFrame.maxX - targetWidth)
+            }
+        }
+
         let newFrame = NSRect(
-            x: currentFrame.origin.x,
+            x: newX,
             y: currentFrame.origin.y,
             width: targetWidth,
             height: currentFrame.height
