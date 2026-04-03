@@ -51,7 +51,7 @@ Dots represent **items only** (bookmarks, notes, todos, images). Tool modes (cli
 - Click → jump to that item
 - Oldest unpinned dot gets replaced when a new item is opened
 - **Pinning:** Small pin icon on hover/click. Pinned dots are not evicted.
-- **All 5 pinned:** Opening a 6th item shows a brief toast "Unpin an item to open a new one" — no silent data loss.
+- **All 5 pinned or non-evictable:** Opening a 6th item shows a brief toast "Unpin or save an item to open a new one" — no silent data loss. Items with unsaved work (`canEvict = false`) are treated as pinned for eviction purposes.
 - **Dedup:** Opening an item that already has a dot → focuses the existing dot, does not create a duplicate.
 - Empty dots shown as dim/outline when fewer than 5 items are open
 - Split view: two dots connected by a small bar, indicating they're linked. Consumes 2 dot slots. Opening a new item while in split view collapses the split first.
@@ -76,8 +76,16 @@ Change per mode. For bookmark detail: Copy, Open in Browser. For notes: Share. F
 ### Item Views (stored in dots)
 Bookmarks, notes, todos, images — things you pulled from the canvas drawer. Each occupies a dot. Max 5. Pinnable. Evictable (oldest unpinned). Color-coded.
 
-### Tool Views (header buttons, not in dots)
-Clipboard, AI Chat, Search Results, Capture — utility surfaces. Always available via header buttons. Persist their state when you switch away and back (clipboard stays scrolled, AI chat keeps conversation, search keeps results). Do NOT consume dot slots.
+### Tool Views (not in dots)
+Utility surfaces that do NOT consume dot slots. Persist their state when you switch away and back (clipboard stays scrolled, AI chat keeps conversation, search keeps results).
+
+**Header-button tools** (always one click away):
+- Clipboard — dedicated header button
+- AI Chat — dedicated header button
+
+**Contextual tools** (entered via specific actions, no header button):
+- Search Results — entered via "Open in Panel" from canvas palette
+- Capture — entered via drag onto panel, or when panel has no active item
 
 ### Back/Forward History (includes everything)
 The back/forward stack tracks ALL views in order — both items and tools. If you view a bookmark, open clipboard, view a note, Back goes: note → clipboard → bookmark. The history is "what did I look at, in order" regardless of type.
@@ -350,6 +358,7 @@ Define and test the dot buffer, back/forward history, and mode switching logic i
 
 Edge cases to validate:
 - All 5 dots pinned → open 6th item → toast, rejected
+- Unpinned dot with unsaved work (canEvict = false) → treated as pinned for eviction, skipped
 - Split view open → open single item → split collapses, new item gets dot
 - Split view encoded in history → Back restores split, Forward re-enters it
 - Tool mode cycling (item → clipboard → AI → Back → Back → item)
