@@ -13,30 +13,7 @@ struct UtilityPanelDotView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Circle()
-            .fill(dotFill)
-            .frame(
-                width: UtilityPanelDesign.dotDiameter,
-                height: UtilityPanelDesign.dotDiameter
-            )
-            .overlay {
-                if isActive, slot != nil {
-                    Circle()
-                        .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
-                        .frame(
-                            width: UtilityPanelDesign.dotDiameter + Spacing.xxs,
-                            height: UtilityPanelDesign.dotDiameter + Spacing.xxs
-                        )
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if let slot, slot.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.tertiary)
-                        .offset(x: Spacing.xs, y: Spacing.xs)
-                }
-            }
+        dotContent
             .scaleEffect(isHovered && slot != nil ? 1.3 : 1.0)
             .animation(reduceMotion ? .none : .snappy, value: isHovered)
             .frame(
@@ -65,6 +42,33 @@ struct UtilityPanelDotView: View {
                     Button("Close") {
                         buffer.clear(at: index)
                     }
+                }
+            }
+    }
+
+    private var dotContent: some View {
+        let pinSize = UtilityPanelDesign.dotDiameter * 0.4
+        return Circle()
+            .fill(dotFill)
+            .frame(
+                width: UtilityPanelDesign.dotDiameter,
+                height: UtilityPanelDesign.dotDiameter
+            )
+            .overlay {
+                if isActive, slot != nil {
+                    Circle()
+                        .stroke(CiderColors.borderStrong, lineWidth: CiderBorder.innerStrokeWidth)
+                        .frame(
+                            width: UtilityPanelDesign.dotDiameter + Spacing.xxs,
+                            height: UtilityPanelDesign.dotDiameter + Spacing.xxs
+                        )
+                }
+            }
+            .overlay {
+                if let slot, slot.isPinned {
+                    Circle()
+                        .fill(CiderColors.primary)
+                        .frame(width: pinSize, height: pinSize)
                 }
             }
     }

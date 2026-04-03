@@ -43,6 +43,9 @@ final class UtilityPanelCoordinator: ObservableObject {
     /// Map from dot slot itemID → UtilityPanelActiveItem (to recover type info from history)
     private var itemTypeMap: [UUID: UtilityPanelActiveItem] = [:]
 
+    /// Stores the last-known title for each item so back/forward can restore evicted items
+    private var titleMap: [UUID: String] = [:]
+
     // MARK: - Open Item
 
     func openItem(_ item: UtilityPanelActiveItem, title: String) {
@@ -57,6 +60,7 @@ final class UtilityPanelCoordinator: ObservableObject {
         switch result {
         case .opened, .focused:
             itemTypeMap[item.itemID] = item
+            titleMap[item.itemID] = title
             activeItem = item
             history.push(PanelHistoryEntry(type: item.historyType))
             logger.debug("Opened \(title) in utility panel")
@@ -107,7 +111,8 @@ final class UtilityPanelCoordinator: ObservableObject {
         switch entry.type {
         case .item(let itemID):
             if let item = itemTypeMap[itemID] {
-                let title = buffer.slots.compactMap({ $0 }).first(where: { $0.itemID == itemID })?.title
+                let title = titleMap[itemID]
+                    ?? buffer.slots.compactMap({ $0 }).first(where: { $0.itemID == itemID })?.title
                     ?? "Item"
                 let slot = DotSlot(
                     itemID: itemID,
