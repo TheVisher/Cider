@@ -23,14 +23,14 @@ struct UtilityPanelBookmarkDetail: View {
                     .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                     .padding(Spacing.md)
 
-                    // Metadata sidebar (right, scrollable)
+                    // Metadata sidebar (right, fixed width, scrollable)
                     ScrollView {
                         BookmarkMetadataSidebar(
                             draft: draft,
                             bookmark: bookmark,
                             errorMessage: errorMessage,
                             folders: bookmarksViewModel.folders,
-                            width: .infinity,
+                            width: BookmarksDesign.detailsSidebarFixedWidth,
                             showBackground: false,
                             onDelete: nil,
                             onFolderChanged: { folderID in
@@ -49,9 +49,9 @@ struct UtilityPanelBookmarkDetail: View {
                             onSave: { saveDetails() },
                             onCancel: { loadDraft() }
                         )
-                        .padding(.horizontal, Spacing.md)
                         .padding(.vertical, Spacing.sm)
                     }
+                    .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
                 }
             } else {
                 PlaceholderMode().contentView
