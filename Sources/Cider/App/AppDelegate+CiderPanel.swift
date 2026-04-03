@@ -129,6 +129,12 @@ extension AppDelegate {
     }
 
     func toggleCiderPanel() {
+        // Route to utility panel if the user has opted in
+        if CiderConfig.load().useNewPanel {
+            toggleUtilityPanel()
+            return
+        }
+
         guard let panel = ciderPanel else { return }
 
         // If docked to canvas, always undock and hide — don't do multi-monitor move

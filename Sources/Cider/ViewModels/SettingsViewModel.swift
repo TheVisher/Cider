@@ -70,6 +70,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var openOnMouseScreen: Bool {
         didSet { saveConfig() }
     }
+    @Published var useNewPanel: Bool {
+        didSet { saveConfig() }
+    }
     @Published var enableSpotlightIndexing: Bool {
         didSet { saveConfig() }
     }
@@ -166,6 +169,7 @@ final class SettingsViewModel: ObservableObject {
         self.directoryOverrides = config.directoryOverrides
         self.rememberPanelPosition = config.rememberPanelPosition
         self.openOnMouseScreen = config.openOnMouseScreen
+        self.useNewPanel = config.useNewPanel
         self.enableSpotlightIndexing = config.enableSpotlightIndexing
         self.bookmarksDefaultViewMode = config.bookmarksDefaultViewMode
         self.bookmarksCardSize = config.bookmarksCardSize
@@ -273,6 +277,7 @@ final class SettingsViewModel: ObservableObject {
         config.clipboardImageRetentionDays = clipboardImageRetentionDays
         config.clipboardMaxImageStorageMB = clipboardMaxImageStorageMB
         config.clipboardPanelPosition = clipboardPanelPosition
+        config.useNewPanel = useNewPanel
         config.save()
 
         // Post notification so AppDelegate can respond

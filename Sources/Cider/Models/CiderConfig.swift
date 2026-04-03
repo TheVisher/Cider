@@ -190,6 +190,7 @@ struct CiderConfig: Codable {
         case openOnMouseScreen
         case sessionRestoreBrowserBundleID
         case tableColumnConfig
+        case useNewPanel
     }
 
     var showMenuBarIcon: Bool
@@ -266,6 +267,7 @@ struct CiderConfig: Codable {
     var openOnMouseScreen: Bool  // Whether to open the panel on the screen where the mouse cursor is
     var sessionRestoreBrowserBundleID: String?  // Bundle ID of preferred browser for restoring session tabs (nil = system default)
     var tableColumnConfig: TableColumnConfig  // Persisted table list view column widths, order, visibility
+    var useNewPanel: Bool  // Whether to activate the new utility panel instead of the classic panel
 
     static let storageKey = "CiderConfig"
 
@@ -338,7 +340,8 @@ struct CiderConfig: Codable {
             lastReconciliationAt: 0,
             openOnMouseScreen: false,
             sessionRestoreBrowserBundleID: nil,
-            tableColumnConfig: .default
+            tableColumnConfig: .default,
+            useNewPanel: false
         )
     }
 
@@ -551,6 +554,7 @@ struct CiderConfig: Codable {
         openOnMouseScreen = try container.decodeIfPresent(Bool.self, forKey: .openOnMouseScreen) ?? false
         sessionRestoreBrowserBundleID = try container.decodeIfPresent(String.self, forKey: .sessionRestoreBrowserBundleID)
         tableColumnConfig = try container.decodeIfPresent(TableColumnConfig.self, forKey: .tableColumnConfig) ?? .default
+        useNewPanel = try container.decodeIfPresent(Bool.self, forKey: .useNewPanel) ?? false
     }
 
     init(
@@ -625,7 +629,8 @@ struct CiderConfig: Codable {
         lastReconciliationAt: Double = 0,
         openOnMouseScreen: Bool = false,
         sessionRestoreBrowserBundleID: String? = nil,
-        tableColumnConfig: TableColumnConfig = .default
+        tableColumnConfig: TableColumnConfig = .default,
+        useNewPanel: Bool = false
     ) {
         self.showMenuBarIcon = showMenuBarIcon
         self.textSize = textSize
@@ -699,5 +704,6 @@ struct CiderConfig: Codable {
         self.openOnMouseScreen = openOnMouseScreen
         self.sessionRestoreBrowserBundleID = sessionRestoreBrowserBundleID
         self.tableColumnConfig = tableColumnConfig
+        self.useNewPanel = useNewPanel
     }
 }

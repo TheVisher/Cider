@@ -3,9 +3,13 @@ import AppKit
 @MainActor
 final class CiderPanelPositionStore {
     static let shared = CiderPanelPositionStore()
+    static let utilityPanelShared = CiderPanelPositionStore(
+        storageKey: "CiderUtilityPanelFrame",
+        perScreenStorageKey: "CiderUtilityPanelFramePerScreen"
+    )
 
-    private let storageKey = "CiderPanelFrame"
-    private let perScreenStorageKey = "CiderPanelFramePerScreen"
+    private let storageKey: String
+    private let perScreenStorageKey: String
 
     /// Legacy single-frame cache (fallback for first launch after upgrade)
     private var cachedFrame: NSRect?
@@ -13,7 +17,12 @@ final class CiderPanelPositionStore {
     /// Per-screen frame cache, keyed by screen identifier (e.g. "3440x1440")
     private var perScreenFrames: [String: NSRect] = [:]
 
-    private init() {
+    private init(
+        storageKey: String = "CiderPanelFrame",
+        perScreenStorageKey: String = "CiderPanelFramePerScreen"
+    ) {
+        self.storageKey = storageKey
+        self.perScreenStorageKey = perScreenStorageKey
         loadFromDefaults()
     }
 

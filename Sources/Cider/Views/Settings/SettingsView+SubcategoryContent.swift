@@ -69,6 +69,12 @@ extension SettingsView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 SettingsSection(title: "Panel") {
                     SettingsToggleRow(
+                        title: "Use new utility panel",
+                        subtitle: "Activate the new lightweight panel instead of the classic panel",
+                        isOn: $viewModel.useNewPanel
+                    )
+
+                    SettingsToggleRow(
                         title: "Remember panel position",
                         subtitle: "Reopen the panel at its last position and size",
                         isOn: $viewModel.rememberPanelPosition

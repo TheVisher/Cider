@@ -63,6 +63,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var aiAssistantPanelFrameObservation: NSKeyValueObservation?
     var aiAssistantHotkeyDetector: AIAssistantHotkeyDetector?
 
+    // Utility Panel
+    var ciderUtilityPanel: CiderUtilityPanel?
+    var utilityPanelShadowPanel: CiderShadowPanel?
+    var utilityPanelFrameObservation: NSKeyValueObservation?
+    let utilityPanelPositionStore = CiderPanelPositionStore.utilityPanelShared
+    let utilityPanelCoordinator = UtilityPanelCoordinator()
+
     // Services
     var servicesProvider: CiderServicesProvider?
 
@@ -119,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureAIAssistantPanel()
         observeAIAssistantNotifications()
         startAIAssistantHotkeyDetection()
+        configureUtilityPanel()
+        observeUtilityPanelNotifications()
         configureCanvasWindow()
 
         // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene

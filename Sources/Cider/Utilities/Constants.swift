@@ -85,6 +85,8 @@ extension Notification.Name {
     static let trashContentsChanged = Notification.Name("cider.trashContentsChanged")
     static let openExternalSourceAndSelectFile = Notification.Name("cider.openExternalSourceAndSelectFile")
     static let snapCiderPanel = Notification.Name("cider.snapCiderPanel")
+    static let toggleUtilityPanel = Notification.Name("cider.toggleUtilityPanel")
+    static let dismissUtilityPanel = Notification.Name("cider.dismissUtilityPanel")
     static let expandCiderPanelForSlideOut = Notification.Name("cider.expandCiderPanelForSlideOut")
     static let restoreCiderPanelAfterSlideOut = Notification.Name("cider.restoreCiderPanelAfterSlideOut")
     static let requestScreenCapture = Notification.Name("cider.requestScreenCapture")
@@ -501,6 +503,43 @@ enum CiderPanelDesign {
     static let sidebarCompactThreshold: CGFloat = 680
     static let sidebarBackgroundOpacity: CGFloat = 0.04
     static let sidebarDividerOpacity: CGFloat = 0.2
+}
+
+enum UtilityPanelDesign {
+    static let defaultWidth: CGFloat = 440
+    static let defaultHeight: CGFloat = 560
+    static let minWidth: CGFloat = 340
+    static let minHeight: CGFloat = 360
+    static let cornerRadius: CGFloat = Radius.lg
+    static let headerBarHeight: CGFloat = 40
+    static let dotDiameter: CGFloat = 8
+    static let dotTapTarget: CGFloat = Spacing.lg
+    static let dotSpacing: CGFloat = Spacing.xs
+    static let navButtonSize: CGFloat = 24
+    static let toolButtonSize: CGFloat = 28
+    static let headerHorizontalPadding: CGFloat = Spacing.md
+    static let resizeEdgeThickness: CGFloat = 6
+    static let resizeCornerSize: CGFloat = 20
+
+    static var panelContentWidth: CGFloat { defaultWidth }
+    static var panelContentHeight: CGFloat { defaultHeight }
+    static var panelMinWidth: CGFloat { minWidth }
+    static var panelMinHeight: CGFloat { minHeight }
+}
+
+// MARK: - Utility Panel Dot Colors
+
+extension PanelItemType {
+    var dotColor: Color {
+        switch self {
+        case .bookmark: CiderColors.controlAccent
+        case .note:     Color.orange
+        case .todo:     Color.green
+        case .image:    Color.purple
+        case .contact:  Color.pink
+        case .event:    Color.yellow
+        }
+    }
 }
 
 enum ClipboardPanelDesign {
