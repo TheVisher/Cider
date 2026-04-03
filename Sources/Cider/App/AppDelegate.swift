@@ -214,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         flushNotesDraftIfNeeded()
+        persistCurrentUtilityPanelFrameIfNeeded()
         stopBookmarkClipboardReviewTimer()
         bookmarkCaptureToastHideWorkItem?.cancel()
         bookmarkCaptureToastPanel?.orderOut(nil)

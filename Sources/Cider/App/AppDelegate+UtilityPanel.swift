@@ -29,6 +29,7 @@ extension AppDelegate {
             guard let frame = change.newValue else { return }
             DispatchQueue.main.async { [weak self] in
                 self?.utilityPanelShadowPanel?.updateFrame(for: frame)
+                self?.persistCurrentUtilityPanelFrameIfNeeded()
             }
         }
 
@@ -349,6 +350,14 @@ extension AppDelegate {
 
     func persistCurrentUtilityPanelFrameIfNeeded() {
         guard let panel = ciderUtilityPanel, panel.isVisible else { return }
-        utilityPanelPositionStore.setFrame(panel.frame)
+        // Don't persist a narrow tool-mode width as the saved frame —
+        // save the remembered item width instead if we're in a narrow mode
+        if utilityPanelCoordinator.preferredWidth != nil, let savedWidth = utilityPanelSavedItemWidth {
+            var frame = panel.frame
+            frame.size.width = savedWidth
+            utilityPanelPositionStore.setFrame(frame)
+        } else {
+            utilityPanelPositionStore.setFrame(panel.frame)
+        }
     }
 }
