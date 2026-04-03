@@ -119,6 +119,18 @@ extension AppDelegate {
                 self.showUtilityPanel()
             }
             .store(in: &cancellables)
+
+        // Search results → open in utility panel
+        NotificationCenter.default.publisher(for: .openSearchInPanel)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self, CiderConfig.load().useNewPanel else { return }
+                let query = notification.userInfo?["query"] as? String ?? ""
+                let results = notification.userInfo?["results"] as? [SearchResult] ?? []
+                self.utilityPanelCoordinator.openSearchInPanel(query: query, results: results)
+                self.showUtilityPanel()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Toggle

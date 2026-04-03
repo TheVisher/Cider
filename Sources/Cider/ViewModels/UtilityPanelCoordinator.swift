@@ -40,6 +40,15 @@ final class UtilityPanelCoordinator: ObservableObject {
     /// The currently displayed item (nil = placeholder/tool mode)
     @Published private(set) var activeItem: UtilityPanelActiveItem?
 
+    /// The currently active tool mode (nil = showing an item or placeholder)
+    @Published private(set) var activeTool: ToolMode?
+
+    // MARK: - Search State
+
+    /// Persists across back/forward so returning to search shows the same results
+    @Published var searchQuery: String = ""
+    @Published var searchResults: [SearchResult] = []
+
     /// Map from dot slot itemID → UtilityPanelActiveItem (to recover type info from history)
     private var itemTypeMap: [UUID: UtilityPanelActiveItem] = [:]
 
@@ -49,6 +58,8 @@ final class UtilityPanelCoordinator: ObservableObject {
     // MARK: - Open Item
 
     func openItem(_ item: UtilityPanelActiveItem, title: String) {
+        activeTool = nil
+
         let slot = DotSlot(
             itemID: item.itemID,
             itemType: item.panelItemType,
@@ -70,6 +81,39 @@ final class UtilityPanelCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Tool Mode
+
+    func openTool(_ tool: ToolMode) {
+        activeTool = tool
+        activeItem = nil
+        buffer.activeIndex = nil
+        history.push(PanelHistoryEntry(type: .tool(tool)))
+        logger.debug("Opened tool: \(tool.rawValue)")
+    }
+
+    func openSearchInPanel(query: String, results: [SearchResult]) {
+        searchQuery = query
+        searchResults = results
+        openTool(.search)
+    }
+
+    /// Maps a SearchResult to the appropriate item type and opens it in detail mode.
+    func openSearchResultAsItem(_ result: SearchResult) {
+        let item: UtilityPanelActiveItem? = switch result.type {
+        case .bookmark: .bookmark(result.id)
+        case .note: .note(result.id)
+        case .todo: .todo(result.id)
+        default: nil
+        }
+
+        guard let item else {
+            logger.info("No detail view for search result type: \(String(describing: result.type))")
+            return
+        }
+
+        openItem(item, title: result.title)
+    }
+
     // MARK: - Navigation
 
     func goBack() {
@@ -85,6 +129,10 @@ final class UtilityPanelCoordinator: ObservableObject {
     // MARK: - Close Active
 
     func closeActive() {
+        if activeTool != nil {
+            activeTool = nil
+            return
+        }
         guard let activeItem else { return }
         if let index = buffer.index(of: activeItem.itemID) {
             buffer.clear(at: index)
@@ -98,6 +146,7 @@ final class UtilityPanelCoordinator: ObservableObject {
     /// Called when user clicks a dot directly.
     func activateDot(at index: Int) {
         guard let slot = buffer.slots[index] else { return }
+        activeTool = nil
         buffer.activeIndex = index
         if let item = itemTypeMap[slot.itemID] {
             activeItem = item
@@ -110,6 +159,7 @@ final class UtilityPanelCoordinator: ObservableObject {
     private func navigateToEntry(_ entry: PanelHistoryEntry) {
         switch entry.type {
         case .item(let itemID):
+            activeTool = nil
             if let item = itemTypeMap[itemID] {
                 let title = titleMap[itemID]
                     ?? buffer.slots.compactMap({ $0 }).first(where: { $0.itemID == itemID })?.title
@@ -131,9 +181,10 @@ final class UtilityPanelCoordinator: ObservableObject {
             // Phase 6 — not implemented yet
             break
 
-        case .tool:
-            // Phase 4/5 — not implemented yet
+        case .tool(let mode):
+            activeTool = mode
             activeItem = nil
+            buffer.activeIndex = nil
         }
     }
 }

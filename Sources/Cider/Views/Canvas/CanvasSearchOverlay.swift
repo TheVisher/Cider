@@ -26,16 +26,37 @@ struct CanvasSearchOverlay: View {
             onOpenBookmark: { bookmark in
                 viewModel.panToItem(bookmark.id.uuidString)
                 viewModel.selectedItemID = bookmark.id.uuidString
+                if CiderConfig.load().useNewPanel {
+                    NotificationCenter.default.post(
+                        name: .openBookmarkDetails,
+                        object: nil,
+                        userInfo: ["bookmarkID": bookmark.id]
+                    )
+                }
             },
             onOpenNote: { note in
                 viewModel.panToItem(note.id.uuidString)
                 viewModel.selectedItemID = note.id.uuidString
+                if CiderConfig.load().useNewPanel {
+                    NotificationCenter.default.post(
+                        name: .openNoteDetails,
+                        object: nil,
+                        userInfo: ["noteID": note.id]
+                    )
+                }
             },
             onOpenDateCard: nil,
             onOpenContact: nil,
             onOpenTodo: { todo in
                 viewModel.panToItem(todo.id.uuidString)
                 viewModel.selectedItemID = todo.id.uuidString
+                if CiderConfig.load().useNewPanel {
+                    NotificationCenter.default.post(
+                        name: .openTodoDetails,
+                        object: nil,
+                        userInfo: ["todoID": todo.id]
+                    )
+                }
             },
             onSpawnSearchTab: nil,
             onDismiss: { onDismiss() },
@@ -43,6 +64,13 @@ struct CanvasSearchOverlay: View {
                 onDismiss()
             },
             onSelectTag: nil,
+            onOpenInPanel: { query, results in
+                NotificationCenter.default.post(
+                    name: .openSearchInPanel,
+                    object: nil,
+                    userInfo: ["query": query, "results": results]
+                )
+            },
             dismissOnResultSelect: false
         )
     }

@@ -9,23 +9,43 @@ struct UtilityPanelContentView: View {
 
     var body: some View {
         Group {
-            switch coordinator.activeItem {
-            case .bookmark(let id):
-                UtilityPanelBookmarkDetail(
-                    bookmarkID: id,
-                    bookmarksViewModel: bookmarksViewModel
-                )
-            case .note(let id):
-                UtilityPanelNoteDetail(
-                    noteID: id,
-                    notesViewModel: notesViewModel
-                )
-            case .todo(let id):
-                UtilityPanelTodoDetail(todoID: id)
-            case nil:
-                PlaceholderMode().contentView
+            if let tool = coordinator.activeTool {
+                toolView(for: tool)
+            } else {
+                itemView
             }
         }
+        .animation(reduceMotion ? .none : .snappy, value: coordinator.activeTool)
         .animation(reduceMotion ? .none : .snappy, value: coordinator.activeItem)
+    }
+
+    @ViewBuilder
+    private func toolView(for tool: ToolMode) -> some View {
+        switch tool {
+        case .search:
+            PanelSearchResultsView(coordinator: coordinator)
+        case .clipboard, .aiChat, .capture:
+            PlaceholderMode().contentView
+        }
+    }
+
+    @ViewBuilder
+    private var itemView: some View {
+        switch coordinator.activeItem {
+        case .bookmark(let id):
+            UtilityPanelBookmarkDetail(
+                bookmarkID: id,
+                bookmarksViewModel: bookmarksViewModel
+            )
+        case .note(let id):
+            UtilityPanelNoteDetail(
+                noteID: id,
+                notesViewModel: notesViewModel
+            )
+        case .todo(let id):
+            UtilityPanelTodoDetail(todoID: id)
+        case nil:
+            PlaceholderMode().contentView
+        }
     }
 }

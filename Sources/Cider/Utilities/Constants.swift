@@ -63,6 +63,7 @@ extension Notification.Name {
     static let canvasPanToFolder = Notification.Name("cider.canvasPanToFolder")
     static let openNoteDetails = Notification.Name("cider.openNoteDetails")
     static let openTodoDetails = Notification.Name("cider.openTodoDetails")
+    static let openSearchInPanel = Notification.Name("cider.openSearchInPanel")
     static let openCiderSettings = Notification.Name("cider.openCiderSettings")
     static let settingsNavigate = Notification.Name("cider.settingsNavigate")
     static let dismissSettings = Notification.Name("cider.dismissSettings")

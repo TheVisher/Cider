@@ -100,6 +100,8 @@ struct SearchPaletteView: View {
     let onDismiss: () -> Void
     var onAction: ((QuickAction) -> Void)?
     var onSelectTag: ((CardLabel) -> Void)?
+    /// Callback to transfer the current query + results to the utility panel.
+    var onOpenInPanel: ((String, [SearchResult]) -> Void)? = nil
     /// When false, selecting a search result calls the open callback but does NOT auto-dismiss.
     /// Used by the canvas search overlay to keep the palette open for push-aside browsing.
     var dismissOnResultSelect: Bool = true
@@ -383,6 +385,19 @@ struct SearchPaletteView: View {
                         .foregroundColor(CiderColors.tertiary)
                 }
                 .buttonStyle(.plain)
+            }
+
+            if let onOpenInPanel, !results.isEmpty {
+                Button {
+                    onOpenInPanel(query, results)
+                    onDismiss()
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(CiderFont.headingMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Open results in panel")
             }
 
             Text("esc")

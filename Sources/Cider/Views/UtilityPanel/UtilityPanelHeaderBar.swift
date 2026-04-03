@@ -104,6 +104,25 @@ struct UtilityPanelHeaderBar: View {
     private var toolButtons: some View {
         HStack(spacing: Spacing.xxs) {
             Button {
+                if coordinator.activeTool == .search {
+                    coordinator.closeActive()
+                } else if !coordinator.searchResults.isEmpty {
+                    coordinator.openTool(.search)
+                }
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(coordinator.activeTool == .search ? CiderColors.controlAccent : CiderColors.secondary)
+                    .frame(
+                        width: UtilityPanelDesign.toolButtonSize,
+                        height: UtilityPanelDesign.toolButtonSize
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Search")
+
+            Button {
                 NotificationCenter.default.post(name: .toggleClipboardViewer, object: nil)
             } label: {
                 Image(systemName: "doc.on.clipboard")
@@ -138,6 +157,14 @@ struct UtilityPanelHeaderBar: View {
     // MARK: - Computed
 
     private var currentTitle: String {
+        if let tool = coordinator.activeTool {
+            return switch tool {
+            case .search: "Search"
+            case .clipboard: "Clipboard"
+            case .aiChat: "AI Chat"
+            case .capture: "Capture"
+            }
+        }
         if let activeIndex = coordinator.buffer.activeIndex,
            let slot = coordinator.buffer.slots[activeIndex] {
             return slot.title
