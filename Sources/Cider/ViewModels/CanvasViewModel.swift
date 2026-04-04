@@ -12,7 +12,21 @@ final class CanvasViewModel: ObservableObject {
     @Published var nodes: [CanvasNode] = []
     @Published var edges: [CanvasEdge] = []
     @Published var viewport: CanvasViewport = .default
-    @Published var selectedItemID: String?
+    @Published var selectedItemIDs: Set<String> = []
+
+    /// Backward-compatible single-selection accessor.
+    /// Returns the selected ID only when exactly one item is selected.
+    /// The setter replaces the entire selection with a single item (or clears it).
+    var selectedItemID: String? {
+        get { selectedItemIDs.count == 1 ? selectedItemIDs.first : nil }
+        set {
+            if let id = newValue {
+                selectedItemIDs = [id]
+            } else {
+                selectedItemIDs.removeAll()
+            }
+        }
+    }
 
     @Published private(set) var titleCache: [String: String] = [:]
     @Published private(set) var bookmarkLookup: [UUID: Bookmark] = [:]
@@ -314,7 +328,7 @@ final class CanvasViewModel: ObservableObject {
         }
     }
 
-    func deselectAll() { selectedItemID = nil }
+    func deselectAll() { selectedItemIDs.removeAll() }
 
     // MARK: - Hot Reload
 
@@ -380,9 +394,26 @@ final class CanvasViewModel: ObservableObject {
     // MARK: - Item Click Handling
 
     func handleItemClicked(itemID: String, type: String) {
-        Self.logger.info("Item clicked: \(itemID) (\(type))"); selectedItemID = itemID
-        guard let uuid = UUID(uuidString: itemID) else { return }
-        NotificationCenter.default.post(name: .canvasItemSelected, object: nil, userInfo: ["bookmarkID": uuid, "type": type])
+        let isCommandHeld = NSEvent.modifierFlags.contains(.command)
+        Self.logger.info("Item clicked: \(itemID) (\(type)), cmd=\(isCommandHeld)")
+
+        if isCommandHeld {
+            // Toggle selection — add or remove from multi-select
+            if selectedItemIDs.contains(itemID) {
+                selectedItemIDs.remove(itemID)
+            } else {
+                selectedItemIDs.insert(itemID)
+            }
+        } else {
+            // Single select — replace entire selection
+            selectedItemIDs = [itemID]
+        }
+
+        // Post notification only for single selection (detail overlay, panel sync)
+        if selectedItemIDs.count == 1 {
+            guard let uuid = UUID(uuidString: itemID) else { return }
+            NotificationCenter.default.post(name: .canvasItemSelected, object: nil, userInfo: ["bookmarkID": uuid, "type": type])
+        }
     }
 
     func handleItemDoubleClicked(itemID: String, type: String) {

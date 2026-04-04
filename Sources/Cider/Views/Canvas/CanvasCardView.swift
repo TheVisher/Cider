@@ -20,7 +20,7 @@ struct CanvasCardView: View {
             .frame(width: node.size.width)
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .stroke(CiderColors.controlAccent, lineWidth: (node.itemID != nil && viewModel.selectedItemID == node.itemID) ? 2 : 0)
+                    .stroke(CiderColors.controlAccent, lineWidth: (node.itemID != nil && viewModel.selectedItemIDs.contains(node.itemID ?? "")) ? 2 : 0)
             )
             .shadow(
                 color: isDragging ? CiderColors.shadowMedium : CiderColors.shadowLight,
@@ -66,7 +66,7 @@ struct CanvasCardView: View {
                 onShowDetails: { viewModel.handleItemClicked(itemID: itemID, type: "bookmark") },
                 onOpen: { viewModel.handleItemDoubleClicked(itemID: itemID, type: "bookmark") },
                 onDelete: {},
-                isSelected: viewModel.selectedItemID == itemID
+                isSelected: viewModel.selectedItemIDs.contains(itemID)
             )
         } else {
             missingItemCard(type: "Bookmark")
@@ -88,7 +88,7 @@ struct CanvasCardView: View {
                 onRename: { _ in },
                 onDelete: {},
                 onMoveToFolder: { _ in },
-                isSelected: viewModel.selectedItemID == itemID
+                isSelected: viewModel.selectedItemIDs.contains(itemID)
             )
         } else {
             missingItemCard(type: "Note")
@@ -103,7 +103,7 @@ struct CanvasCardView: View {
             TodoCardCardView(
                 todoCard: todo,
                 onOpen: { viewModel.handleItemClicked(itemID: itemID, type: "todo") },
-                isSelected: viewModel.selectedItemID == itemID
+                isSelected: viewModel.selectedItemIDs.contains(itemID)
             )
         } else {
             missingItemCard(type: "Todo")

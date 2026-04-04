@@ -64,7 +64,7 @@ struct CanvasWindowContentView: View {
                     .padding(Spacing.lg)
             }
             .ignoresSafeArea()
-            .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemID)
+            .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemIDs)
             .animation(reduceMotion ? .none : .snappy(duration: 0.3), value: sidebarVisible)
             .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: isSearchVisible)
         }
