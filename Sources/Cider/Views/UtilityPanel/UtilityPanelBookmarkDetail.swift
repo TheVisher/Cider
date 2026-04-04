@@ -3,6 +3,7 @@ import SwiftUI
 struct UtilityPanelBookmarkDetail: View {
     let bookmarkID: UUID
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
+    var compact: Bool = false
     @StateObject private var webViewStore = DetailWebViewStore()
     @State private var draft: BookmarkDetailsDraft?
     @State private var errorMessage: String?
@@ -12,25 +13,16 @@ struct UtilityPanelBookmarkDetail: View {
     }
 
     var body: some View {
-        Group {
-            if let bookmark, let draft = Binding($draft) {
-                HStack(alignment: .top, spacing: 0) {
-                    // Hero image (left)
-                    BookmarkDetailsHeroPreview(
-                        bookmark: bookmark,
-                        draft: draft.wrappedValue
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                    .padding(Spacing.md)
-
-                    // Metadata sidebar (right, fixed width, scrollable)
+        if compact {
+            Group {
+                if let bookmark, let draft = Binding($draft) {
                     ScrollView {
                         BookmarkMetadataSidebar(
                             draft: draft,
                             bookmark: bookmark,
                             errorMessage: errorMessage,
                             folders: bookmarksViewModel.folders,
-                            width: BookmarksDesign.detailsSidebarFixedWidth,
+                            width: .infinity,
                             showBackground: false,
                             onDelete: nil,
                             onFolderChanged: { folderID in
@@ -49,16 +41,63 @@ struct UtilityPanelBookmarkDetail: View {
                             onSave: { saveDetails() },
                             onCancel: { loadDraft() }
                         )
-                        .padding(.vertical, Spacing.sm)
+                        .padding(Spacing.md)
                     }
-                    .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+                } else {
+                    PlaceholderMode().contentView
                 }
-            } else {
-                PlaceholderMode().contentView
             }
+            .onAppear { loadDraft() }
+            .onChange(of: bookmarkID) { _, _ in loadDraft() }
+        } else {
+            Group {
+                if let bookmark, let draft = Binding($draft) {
+                    HStack(alignment: .top, spacing: 0) {
+                        // Hero image (left)
+                        BookmarkDetailsHeroPreview(
+                            bookmark: bookmark,
+                            draft: draft.wrappedValue
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                        .padding(Spacing.md)
+
+                        // Metadata sidebar (right, fixed width, scrollable)
+                        ScrollView {
+                            BookmarkMetadataSidebar(
+                                draft: draft,
+                                bookmark: bookmark,
+                                errorMessage: errorMessage,
+                                folders: bookmarksViewModel.folders,
+                                width: BookmarksDesign.detailsSidebarFixedWidth,
+                                showBackground: false,
+                                onDelete: nil,
+                                onFolderChanged: { folderID in
+                                    self.draft?.folderID = folderID
+                                    saveDetails()
+                                },
+                                onOpenURL: {
+                                    if let url = bookmark.url {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                },
+                                onCopyURL: {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(bookmark.urlString, forType: .string)
+                                },
+                                onSave: { saveDetails() },
+                                onCancel: { loadDraft() }
+                            )
+                            .padding(.vertical, Spacing.sm)
+                        }
+                        .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+                    }
+                } else {
+                    PlaceholderMode().contentView
+                }
+            }
+            .onAppear { loadDraft() }
+            .onChange(of: bookmarkID) { _, _ in loadDraft() }
         }
-        .onAppear { loadDraft() }
-        .onChange(of: bookmarkID) { _, _ in loadDraft() }
     }
 
     private func loadDraft() {
