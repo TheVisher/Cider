@@ -133,4 +133,62 @@ final class UtilityPanelCoordinatorTests: XCTestCase {
         XCTAssertEqual(coord.buffer.slots[1]?.itemType, .note)
         XCTAssertEqual(coord.buffer.slots[2]?.itemType, .todo)
     }
+
+    // MARK: - Split View
+
+    func testOpenSplitViewSetsSplitItems() {
+        let coord = UtilityPanelCoordinator()
+        let id1 = UUID(), id2 = UUID()
+        coord.openItem(.bookmark(id1), title: "First")
+        coord.openItem(.note(id2), title: "Second")
+        coord.openSplitView(item1: .bookmark(id1), item2: .note(id2))
+
+        XCTAssertNotNil(coord.splitItems)
+        XCTAssertNil(coord.activeItem)
+        XCTAssertNotNil(coord.buffer.linkedPair)
+    }
+
+    func testOpenItemCollapsesSplit() {
+        let coord = UtilityPanelCoordinator()
+        let id1 = UUID(), id2 = UUID()
+        coord.openItem(.bookmark(id1), title: "First")
+        coord.openItem(.note(id2), title: "Second")
+        coord.openSplitView(item1: .bookmark(id1), item2: .note(id2))
+
+        let id3 = UUID()
+        coord.openItem(.todo(id3), title: "Third")
+
+        XCTAssertNil(coord.splitItems)
+        XCTAssertNil(coord.buffer.linkedPair)
+        XCTAssertEqual(coord.activeItem, .todo(id3))
+    }
+
+    func testSplitViewInHistory() {
+        let coord = UtilityPanelCoordinator()
+        let id1 = UUID(), id2 = UUID()
+        coord.openItem(.bookmark(id1), title: "First")
+        coord.openItem(.note(id2), title: "Second")
+        coord.openSplitView(item1: .bookmark(id1), item2: .note(id2))
+
+        let id3 = UUID()
+        coord.openItem(.todo(id3), title: "Third")
+        XCTAssertNil(coord.splitItems)
+
+        coord.goBack()
+        XCTAssertNotNil(coord.splitItems)
+        XCTAssertNil(coord.activeItem)
+        XCTAssertNotNil(coord.buffer.linkedPair)
+    }
+
+    func testCloseSplitClearsBothDots() {
+        let coord = UtilityPanelCoordinator()
+        let id1 = UUID(), id2 = UUID()
+        coord.openItem(.bookmark(id1), title: "First")
+        coord.openItem(.note(id2), title: "Second")
+        coord.openSplitView(item1: .bookmark(id1), item2: .note(id2))
+
+        coord.closeActive()
+        XCTAssertNil(coord.splitItems)
+        XCTAssertEqual(coord.buffer.filledCount, 0)
+    }
 }

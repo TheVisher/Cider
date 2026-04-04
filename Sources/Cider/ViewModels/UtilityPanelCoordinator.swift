@@ -43,8 +43,12 @@ final class UtilityPanelCoordinator: ObservableObject {
     /// The currently active tool mode (nil = showing an item or placeholder)
     @Published private(set) var activeTool: ToolMode?
 
+    /// The two items shown side-by-side in split view (nil = not in split mode)
+    @Published private(set) var splitItems: (UtilityPanelActiveItem, UtilityPanelActiveItem)?
+
     /// Preferred panel width for the current mode. Nil = keep current width.
     var preferredWidth: CGFloat? {
+        if splitItems != nil { return UtilityPanelDesign.splitDefaultWidth }
         guard let tool = activeTool else { return nil }
         return switch tool {
         case .aiChat: AIAssistantPanelDesign.defaultWidth
@@ -67,7 +71,13 @@ final class UtilityPanelCoordinator: ObservableObject {
 
     // MARK: - Open Item
 
+    /// Look up the UtilityPanelActiveItem for a dot slot (for context menu wiring)
+    func itemForSlot(_ slot: DotSlot) -> UtilityPanelActiveItem? {
+        itemTypeMap[slot.itemID]
+    }
+
     func openItem(_ item: UtilityPanelActiveItem, title: String) {
+        collapseSplit()
         activeTool = nil
 
         let slot = DotSlot(
@@ -94,6 +104,7 @@ final class UtilityPanelCoordinator: ObservableObject {
     // MARK: - Tool Mode
 
     func openTool(_ tool: ToolMode) {
+        collapseSplit()
         activeTool = tool
         activeItem = nil
         buffer.activeIndex = nil
@@ -150,6 +161,16 @@ final class UtilityPanelCoordinator: ObservableObject {
             }
             return
         }
+        if splitItems != nil {
+            if let pair = buffer.linkedPair {
+                let (i1, i2) = pair
+                buffer.unlink() // unlink first so clear doesn't double-unlink
+                buffer.clear(at: i1)
+                buffer.clear(at: i2)
+            }
+            splitItems = nil
+            return
+        }
         guard let activeItem else { return }
         if let index = buffer.index(of: activeItem.itemID) {
             buffer.clear(at: index)
@@ -163,6 +184,10 @@ final class UtilityPanelCoordinator: ObservableObject {
     /// Called when user clicks a dot directly.
     func activateDot(at index: Int) {
         guard let slot = buffer.slots[index] else { return }
+        // If tapping a dot that IS part of the current split, do nothing
+        if splitItems != nil && buffer.isLinked(index) { return }
+        // If tapping a dot that's NOT part of the split, collapse it
+        if splitItems != nil { collapseSplit() }
         activeTool = nil
         buffer.activeIndex = index
         if let item = itemTypeMap[slot.itemID] {
@@ -171,7 +196,47 @@ final class UtilityPanelCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Split View
+
+    func openSplitView(item1: UtilityPanelActiveItem, item2: UtilityPanelActiveItem) {
+        collapseSplit()
+        activeTool = nil
+        activeItem = nil
+
+        let title1 = titleMap[item1.itemID] ?? "Item"
+        let title2 = titleMap[item2.itemID] ?? "Item"
+        let slot1 = DotSlot(itemID: item1.itemID, itemType: item1.panelItemType, title: title1)
+        let slot2 = DotSlot(itemID: item2.itemID, itemType: item2.panelItemType, title: title2)
+
+        let r1 = buffer.open(item: slot1)
+        if case .rejected = r1 {
+            logger.info("Split view rejected — cannot open first item")
+            return
+        }
+        let r2 = buffer.open(item: slot2)
+        if case .rejected = r2 {
+            logger.info("Split view rejected — cannot open second item")
+            return
+        }
+
+        guard let i1 = buffer.index(of: item1.itemID),
+              let i2 = buffer.index(of: item2.itemID) else { return }
+
+        buffer.link(i1, i2)
+        itemTypeMap[item1.itemID] = item1
+        itemTypeMap[item2.itemID] = item2
+        splitItems = (item1, item2)
+        history.push(PanelHistoryEntry(type: .splitView(itemID1: item1.itemID, itemID2: item2.itemID)))
+        logger.debug("Opened split view: \(title1) vs \(title2)")
+    }
+
     // MARK: - Private
+
+    private func collapseSplit() {
+        guard splitItems != nil else { return }
+        buffer.unlink()
+        splitItems = nil
+    }
 
     private func navigateToEntry(_ entry: PanelHistoryEntry) {
         switch entry.type {
@@ -194,9 +259,27 @@ final class UtilityPanelCoordinator: ObservableObject {
                 activeItem = item
             }
 
-        case .splitView:
-            // Phase 6 — not implemented yet
-            break
+        case .splitView(let itemID1, let itemID2):
+            activeTool = nil
+            collapseSplit()
+            guard let item1 = itemTypeMap[itemID1],
+                  let item2 = itemTypeMap[itemID2] else {
+                logger.info("Cannot restore split — item type info missing")
+                return
+            }
+            let title1 = titleMap[itemID1] ?? "Item"
+            let title2 = titleMap[itemID2] ?? "Item"
+            let slot1 = DotSlot(itemID: itemID1, itemType: item1.panelItemType, title: title1)
+            let slot2 = DotSlot(itemID: itemID2, itemType: item2.panelItemType, title: title2)
+            let r1 = buffer.open(item: slot1)
+            if case .rejected = r1 { return }
+            let r2 = buffer.open(item: slot2)
+            if case .rejected = r2 { return }
+            if let i1 = buffer.index(of: itemID1), let i2 = buffer.index(of: itemID2) {
+                buffer.link(i1, i2)
+                activeItem = nil
+                splitItems = (item1, item2)
+            }
 
         case .tool(let mode):
             activeTool = mode
