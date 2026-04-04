@@ -134,18 +134,16 @@ struct UtilityPanelDotRow: View {
             let totalDots = CGFloat(DotBuffer.capacity)
             let rowWidth = totalDots * dotSize + (totalDots - 1) * spacing
             let step = dotSize + spacing
-            let center1 = CGFloat(pair.0) * step + dotSize / 2
-            let center2 = CGFloat(pair.1) * step + dotSize / 2
-            let barWidth = center2 - center1
-            let barMidX = (center1 + center2) / 2
+            // Bar spans between the inner edges of the two dots (not centers)
+            let leftEdge = CGFloat(pair.0) * step + dotSize / 2 + UtilityPanelDesign.dotDiameter / 2
+            let rightEdge = CGFloat(pair.1) * step + dotSize / 2 - UtilityPanelDesign.dotDiameter / 2
+            let barWidth = rightEdge - leftEdge
+            let barMidX = (leftEdge + rightEdge) / 2
 
-            RoundedRectangle(cornerRadius: 1)
-                .fill(CiderColors.controlAccent)
-                .frame(width: barWidth, height: UtilityPanelDesign.dotLinkBarHeight)
-                .offset(
-                    x: barMidX - rowWidth / 2,
-                    y: UtilityPanelDesign.dotDiameter / 2 + Spacing.xxs
-                )
+            RoundedRectangle(cornerRadius: 0.5)
+                .fill(CiderColors.borderStrong)
+                .frame(width: max(0, barWidth), height: 1)
+                .offset(x: barMidX - rowWidth / 2)
         }
     }
 }

@@ -42,7 +42,7 @@ struct SplitContentView: View {
                 compact: true
             )
         case .note(let id):
-            UtilityPanelNoteDetail(noteID: id, notesViewModel: notesViewModel)
+            SplitNotePreview(noteID: id)
         case .todo(let id):
             UtilityPanelTodoDetail(todoID: id)
         }
@@ -73,5 +73,44 @@ struct SplitContentView: View {
                     NSCursor.pop()
                 }
             }
+    }
+}
+
+// MARK: - Read-Only Note Preview for Split View
+
+/// Renders note content as plain text in a scrollable view.
+/// Used instead of InlineNoteEditorView in split mode because the TipTap
+/// editor shares a single selectedNote on NotesViewModel — two editors
+/// would fight over which note is selected.
+private struct SplitNotePreview: View {
+    let noteID: UUID
+
+    @ObservedObject private var notesStorage = NotesStorage.shared
+
+    private var note: Note? {
+        notesStorage.notes.first(where: { $0.id == noteID })
+    }
+
+    var body: some View {
+        if let note {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text(note.title)
+                        .font(CiderFont.headingSemibold)
+                        .foregroundColor(CiderColors.primary)
+
+                    Text(note.content)
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.secondary)
+                        .textSelection(.enabled)
+
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Spacing.md)
+            }
+        } else {
+            PlaceholderMode().contentView
+        }
     }
 }
