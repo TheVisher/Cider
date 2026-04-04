@@ -5,6 +5,8 @@ struct CanvasWindowContentView: View {
     @ObservedObject var viewModel: CanvasViewModel
     @State private var sidebarVisible = true
     @State private var isSearchVisible = false
+    @State private var showNewItemPopover = false
+    @State private var isCreateButtonHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -56,6 +58,10 @@ struct CanvasWindowContentView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     .zIndex(3)
                 }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                canvasCreateButton
+                    .padding(Spacing.lg)
             }
             .ignoresSafeArea()
             .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemID)
@@ -199,5 +205,81 @@ struct CanvasWindowContentView: View {
         .padding(.leading, Spacing.md)
         .padding(.top, Spacing.md)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - Create Button
+
+    /// Floating "+" button in the bottom-right corner for creating new items.
+    private var canvasCreateButton: some View {
+        Button {
+            showNewItemPopover = true
+        } label: {
+            Image(systemName: "plus")
+                .font(CiderFont.headingSemibold)
+                .foregroundColor(CiderColors.primary)
+                .frame(width: 40, height: 40)
+                .background(CiderColors.surfaceElevated)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
+                )
+                .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 4)
+                .scaleEffect(isCreateButtonHovered ? 1.05 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(reduceMotion ? .none : .snappy(duration: 0.2)) {
+                isCreateButtonHovered = hovering
+            }
+        }
+        .help("Create new item")
+        .popover(isPresented: $showNewItemPopover, arrowEdge: .top) {
+            NewItemPopover(
+                folders: VaultFolderService.shared.legacyFolders,
+                onCreateBookmark: { urlString, title in
+                    VaultBookmarkService.shared.add(urlString: urlString, title: title)
+                },
+                onCreateNote: { title, content in
+                    var note = NotesStorage.shared.createNew(initialContent: content)
+                    if !title.isEmpty { note.title = title; NotesStorage.shared.save(note: note) }
+                },
+                onCreateEvent: { title, date, allDay in
+                    DateCardStorage.shared.createDateCard(
+                        title: title,
+                        startAt: date,
+                        allDay: allDay
+                    )
+                },
+                onCreateContact: { name, relationship in
+                    var contact = ContactStorage.shared.createContact(displayName: name)
+                    if !relationship.isEmpty {
+                        contact.relationshipLabel = relationship
+                        ContactStorage.shared.updateContact(contact)
+                    }
+                },
+                onCreateTodo: { card in
+                    TodoCardStorage.shared.addTodoCard(card)
+                },
+                onOpenTodoEditor: {
+                    // No-op on canvas — todo editor is panel-specific
+                },
+                onCreateFolder: { name, parentID in
+                    VaultFolderService.shared.createFolder(name: name, parentID: parentID)
+                },
+                onCreateTab: { _, _ in
+                    // No-op on canvas — tabs are panel-specific
+                },
+                onCreateTag: { name, colorHex in
+                    CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)
+                },
+                onCreateWhiteboard: { name in
+                    WhiteboardStorage.shared.createCanvas(name: name)
+                },
+                onDismiss: {
+                    showNewItemPopover = false
+                }
+            )
+        }
     }
 }
