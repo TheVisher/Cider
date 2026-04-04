@@ -521,6 +521,11 @@ enum UtilityPanelDesign {
     static let headerHorizontalPadding: CGFloat = Spacing.md
     static let resizeEdgeThickness: CGFloat = 6
     static let resizeCornerSize: CGFloat = 20
+    static let splitDefaultWidth: CGFloat = 880
+    static let splitMinPaneWidth: CGFloat = 200
+    static let splitDividerWidth: CGFloat = Spacing.xxs
+    static let splitDividerGrabWidth: CGFloat = Spacing.sm
+    static let dotLinkBarHeight: CGFloat = 2
 
     static var panelContentWidth: CGFloat { defaultWidth }
     static var panelContentHeight: CGFloat { defaultHeight }
