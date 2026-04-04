@@ -59,6 +59,13 @@ struct CanvasWindowContentView: View {
                     .zIndex(3)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if viewModel.selectedItemIDs.count >= 2 {
+                    bulkActionBar
+                        .padding(.bottom, Spacing.xl)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 canvasCreateButton
                     .padding(Spacing.lg)
@@ -205,6 +212,76 @@ struct CanvasWindowContentView: View {
         .padding(.leading, Spacing.md)
         .padding(.top, Spacing.md)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - Bulk Action Bar
+
+    /// Floating pill bar shown when 2+ items are selected.
+    private var bulkActionBar: some View {
+        HStack(spacing: Spacing.md) {
+            Text("\(viewModel.selectedItemIDs.count) selected")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.primary)
+
+            Divider()
+                .frame(height: 16)
+
+            Button {
+                viewModel.deleteSelectedItems()
+            } label: {
+                Image(systemName: "trash")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.destructive)
+            }
+            .buttonStyle(.plain)
+            .help("Delete selected items")
+
+            Menu {
+                Button("Inbox (no folder)") {
+                    viewModel.moveSelectedToFolder(nil)
+                }
+                Divider()
+                ForEach(VaultFolderService.shared.folders) { folder in
+                    Button(folder.name) {
+                        viewModel.moveSelectedToFolder(folder.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "folder")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Move selected to folder")
+
+            Divider()
+                .frame(height: 16)
+
+            Button {
+                viewModel.deselectAll()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Deselect all")
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+        .background {
+            VisualEffectView(
+                material: .underWindowBackground,
+                blendingMode: .withinWindow
+            )
+        }
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
+        )
+        .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 2)
     }
 
     // MARK: - Create Button

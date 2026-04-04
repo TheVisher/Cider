@@ -330,6 +330,72 @@ final class CanvasViewModel: ObservableObject {
 
     func deselectAll() { selectedItemIDs.removeAll() }
 
+    // MARK: - Bulk Operations
+
+    /// Trash all currently selected items via TrashStorage and remove their canvas nodes.
+    func deleteSelectedItems() {
+        guard !selectedItemIDs.isEmpty else { return }
+        var trashItems: [TrashItem] = []
+
+        for itemID in selectedItemIDs {
+            removeNode(id: itemID)
+            guard let uuid = UUID(uuidString: itemID) else { continue }
+
+            if let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == uuid }) {
+                let trashItem = VaultBookmarkService.shared.remove(bookmark)
+                trashItems.append(trashItem)
+            } else if let note = NotesStorage.shared.notes.first(where: { $0.id == uuid }) {
+                let trashItem = NotesStorage.shared.delete(note: note)
+                trashItems.append(trashItem)
+            } else if let _ = TodoCardStorage.shared.todoCards.first(where: { $0.id == uuid }) {
+                if let trashItem = TodoCardStorage.shared.deleteTodoCard(uuid) {
+                    trashItems.append(trashItem)
+                }
+            }
+        }
+
+        if !trashItems.isEmpty {
+            CiderUndoManager.shared.record(.bulkDeletedToTrash(trashItems))
+        }
+
+        selectedItemIDs.removeAll()
+        Self.logger.info("Bulk deleted \(trashItems.count) items from canvas")
+    }
+
+    /// Move all currently selected bookmark items to a folder.
+    func moveSelectedToFolder(_ folderID: UUID?) {
+        guard !selectedItemIDs.isEmpty else { return }
+        var movedItems: [BulkMoveItem] = []
+
+        for itemID in selectedItemIDs {
+            guard let uuid = UUID(uuidString: itemID) else { continue }
+
+            if let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == uuid }) {
+                let fromFolderID = bookmark.folderID
+                if VaultBookmarkService.shared.assignBookmark(uuid, toFolder: folderID) {
+                    movedItems.append(BulkMoveItem(
+                        itemID: uuid,
+                        itemType: .bookmark,
+                        title: bookmark.title,
+                        fromFolderID: fromFolderID
+                    ))
+                }
+            }
+        }
+
+        if !movedItems.isEmpty {
+            let folderName: String
+            if let folderID, let folder = VaultFolderService.shared.folder(for: folderID) {
+                folderName = folder.name
+            } else {
+                folderName = "Inbox"
+            }
+            CiderUndoManager.shared.record(.bulkMoved(movedItems, toFolderID: folderID, folderName: folderName))
+        }
+
+        Self.logger.info("Bulk moved \(movedItems.count) items to folder")
+    }
+
     // MARK: - Hot Reload
 
     func startHotReload() {
