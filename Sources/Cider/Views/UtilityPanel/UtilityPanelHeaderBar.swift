@@ -24,6 +24,8 @@ struct UtilityPanelHeaderBar: View {
                       let item1 = coordinator.itemForSlot(slot1),
                       let item2 = coordinator.itemForSlot(slot2) else { return }
                 coordinator.openSplitView(item1: item1, item2: item2)
+            }, onClose: { index in
+                coordinator.closeDot(at: index)
             })
 
             // Title

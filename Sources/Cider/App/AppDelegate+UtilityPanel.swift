@@ -66,6 +66,14 @@ extension AppDelegate {
                 self?.animateToPreferredWidth()
             }
             .store(in: &cancellables)
+
+        utilityPanelCoordinator.$splitItems
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] split in
+                guard split != nil else { return }
+                self?.animateToPreferredWidth()
+            }
+            .store(in: &cancellables)
     }
 
     /// Resizes the panel to the current mode's preferred width, anchoring the left edge.

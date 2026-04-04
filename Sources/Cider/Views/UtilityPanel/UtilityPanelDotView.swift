@@ -9,6 +9,7 @@ struct UtilityPanelDotView: View {
     @ObservedObject var buffer: DotBuffer
     var onTap: (Int) -> Void
     var onCompare: ((Int, Int) -> Void)?
+    var onClose: ((Int) -> Void)?
 
     @State private var isHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,7 +53,11 @@ struct UtilityPanelDotView: View {
                         }
                     }
                     Button("Close") {
-                        buffer.clear(at: index)
+                        if let onClose {
+                            onClose(index)
+                        } else {
+                            buffer.clear(at: index)
+                        }
                     }
                 }
             }
@@ -99,6 +104,7 @@ struct UtilityPanelDotRow: View {
     @ObservedObject var buffer: DotBuffer
     var onDotTap: (Int) -> Void
     var onCompare: ((Int, Int) -> Void)?
+    var onClose: ((Int) -> Void)?
 
     var body: some View {
         HStack(spacing: UtilityPanelDesign.dotSpacing) {
@@ -109,7 +115,8 @@ struct UtilityPanelDotRow: View {
                     index: index,
                     buffer: buffer,
                     onTap: onDotTap,
-                    onCompare: onCompare
+                    onCompare: onCompare,
+                    onClose: onClose
                 )
             }
         }

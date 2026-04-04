@@ -137,6 +137,23 @@ final class UtilityPanelCoordinator: ObservableObject {
 
     // MARK: - Navigation
 
+    /// Close a specific dot slot, cleaning up split/active state as needed.
+    func closeDot(at index: Int) {
+        if splitItems != nil && buffer.isLinked(index) {
+            closeActive() // closes the whole split
+            return
+        }
+        if let activeItem, buffer.index(of: activeItem.itemID) == index {
+            closeActive() // closes the active item
+            return
+        }
+        // Just clear the dot (not currently active)
+        if let itemID = buffer.slots[index]?.itemID {
+            buffer.clear(at: index)
+            itemTypeMap.removeValue(forKey: itemID)
+        }
+    }
+
     func goBack() {
         guard let entry = history.back() else { return }
         navigateToEntry(entry)
