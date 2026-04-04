@@ -48,6 +48,8 @@ struct FolderSidebarView: View {
     @State private var renamingFolderID: UUID?
     @State private var renamingFolderName = ""
     @State private var tagsExpanded = false
+    @State private var isTagCreationFieldVisible = false
+    @State private var draftTagName = ""
     @State private var foldersCollapsed = false
     @State private var sourcesCollapsed = false
     @State private var foldersHeaderHovered = false
@@ -135,6 +137,16 @@ struct FolderSidebarView: View {
                             .foregroundColor(CiderColors.secondary)
 
                         Spacer(minLength: 0)
+
+                        Button {
+                            toggleFolderCreationField()
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("New folder")
                     }
                     .padding(.top, Spacing.xs)
                     .contentShape(Rectangle())
@@ -168,6 +180,12 @@ struct FolderSidebarView: View {
                                     .textFieldStyle(.roundedBorder)
                                     .onSubmit {
                                         commitFolderCreation()
+                                    }
+                                    .onExitCommand {
+                                        withAnimation(reduceMotion ? .none : .snappy) {
+                                            draftFolderName = ""
+                                            isFolderCreationFieldVisible = false
+                                        }
                                     }
 
                                 Button("Create") {
@@ -263,6 +281,21 @@ struct FolderSidebarView: View {
                 }
 
                 Spacer(minLength: 0)
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        isTagCreationFieldVisible.toggle()
+                        if !isTagCreationFieldVisible {
+                            draftTagName = ""
+                        }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("New tag")
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -310,6 +343,30 @@ struct FolderSidebarView: View {
                         }
                     }
                     .padding(.horizontal, CiderBorder.innerStrokeInset)
+                }
+
+                if isTagCreationFieldVisible {
+                    HStack(spacing: Spacing.sm) {
+                        TextField("New tag name", text: $draftTagName)
+                            .textFieldStyle(.roundedBorder)
+                            .font(CiderFont.body)
+                            .onSubmit {
+                                commitTagCreation()
+                            }
+                            .onExitCommand {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    draftTagName = ""
+                                    isTagCreationFieldVisible = false
+                                }
+                            }
+
+                        Button("Create") {
+                            commitTagCreation()
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(CiderColors.controlAccent)
+                    }
+                    .padding(.horizontal, Spacing.xs)
                 }
             }
         }
@@ -673,6 +730,15 @@ struct FolderSidebarView: View {
         draftFolderName = ""
         isFolderCreationFieldVisible = false
         selectFolder(created.id)
+    }
+
+    private func commitTagCreation() {
+        let trimmed = draftTagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        _ = CardLabelStorage.shared.createLabel(name: trimmed)
+        draftTagName = ""
+        isTagCreationFieldVisible = false
     }
 
     private func commitSubFolderCreation() {

@@ -55,6 +55,12 @@ struct CanvasSidebarOverlay: View {
                 notes: notesStorage.notes,
                 selectedFolderID: $selectedFolderID,
                 expandedFolderIDs: $expandedFolderIDs,
+                onCreateFolder: { name, parentID in
+                    guard let vaultFolder = VaultFolderService.shared.createFolder(name: name, parentID: parentID) else {
+                        return nil
+                    }
+                    return Folder(id: vaultFolder.id, name: vaultFolder.name, parentID: parentID)
+                },
                 searchText: $sidebarSearchText,
                 showBackground: false,
                 labels: labelStorage.labels,
