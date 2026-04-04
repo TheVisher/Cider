@@ -103,7 +103,7 @@ struct UtilityPanelBookmarkDetail: View {
     private func loadDraft() {
         guard let bookmark else { return }
         draft = BookmarkDetailsDraft(bookmark: bookmark)
-        if bookmark.hasURL, let url = bookmark.url {
+        if !compact, bookmark.hasURL, let url = bookmark.url {
             webViewStore.preload(url: url, bookmarkID: bookmark.id)
         }
     }

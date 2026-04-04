@@ -163,10 +163,13 @@ final class UtilityPanelCoordinator: ObservableObject {
         }
         if splitItems != nil {
             if let pair = buffer.linkedPair {
-                let (i1, i2) = pair
-                buffer.unlink() // unlink first so clear doesn't double-unlink
-                buffer.clear(at: i1)
-                buffer.clear(at: i2)
+                let id1 = buffer.slots[pair.0]?.itemID
+                let id2 = buffer.slots[pair.1]?.itemID
+                buffer.unlink()
+                buffer.clear(at: pair.0)
+                buffer.clear(at: pair.1)
+                if let id1 { itemTypeMap.removeValue(forKey: id1) }
+                if let id2 { itemTypeMap.removeValue(forKey: id2) }
             }
             splitItems = nil
             return
@@ -199,6 +202,10 @@ final class UtilityPanelCoordinator: ObservableObject {
     // MARK: - Split View
 
     func openSplitView(item1: UtilityPanelActiveItem, item2: UtilityPanelActiveItem) {
+        guard item1.itemID != item2.itemID else {
+            logger.info("Split view requires two distinct items")
+            return
+        }
         collapseSplit()
         activeTool = nil
         activeItem = nil

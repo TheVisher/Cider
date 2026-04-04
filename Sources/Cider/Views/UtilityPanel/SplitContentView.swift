@@ -23,7 +23,7 @@ struct SplitContentView: View {
                     .frame(width: leftWidth)
                     .clipped()
 
-                divider(totalWidth: totalWidth)
+                divider(totalWidth: totalWidth, totalHeight: geo.size.height)
 
                 paneView(for: item2)
                     .frame(width: rightWidth)
@@ -48,14 +48,12 @@ struct SplitContentView: View {
         }
     }
 
-    private func divider(totalWidth: CGFloat) -> some View {
+    private func divider(totalWidth: CGFloat, totalHeight: CGFloat) -> some View {
         Rectangle()
             .fill(CiderColors.borderSubtle)
             .frame(width: UtilityPanelDesign.splitDividerWidth)
-            .contentShape(Rectangle().size(
-                width: UtilityPanelDesign.splitDividerGrabWidth,
-                height: 10000
-            ))
+            .padding(.horizontal, (UtilityPanelDesign.splitDividerGrabWidth - UtilityPanelDesign.splitDividerWidth) / 2)
+            .contentShape(Rectangle())
             .gesture(
                 DragGesture()
                     .onChanged { value in

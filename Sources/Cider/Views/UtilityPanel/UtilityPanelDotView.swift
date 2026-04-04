@@ -124,6 +124,8 @@ struct UtilityPanelDotRow: View {
         if let pair = buffer.linkedPair {
             let dotSize = UtilityPanelDesign.dotTapTarget
             let spacing = UtilityPanelDesign.dotSpacing
+            let totalDots = CGFloat(DotBuffer.capacity)
+            let rowWidth = totalDots * dotSize + (totalDots - 1) * spacing
             let step = dotSize + spacing
             let center1 = CGFloat(pair.0) * step + dotSize / 2
             let center2 = CGFloat(pair.1) * step + dotSize / 2
@@ -133,9 +135,9 @@ struct UtilityPanelDotRow: View {
             RoundedRectangle(cornerRadius: 1)
                 .fill(CiderColors.controlAccent)
                 .frame(width: barWidth, height: UtilityPanelDesign.dotLinkBarHeight)
-                .position(
-                    x: barMidX,
-                    y: dotSize / 2 + UtilityPanelDesign.dotDiameter / 2 + Spacing.xxs
+                .offset(
+                    x: barMidX - rowWidth / 2,
+                    y: UtilityPanelDesign.dotDiameter / 2 + Spacing.xxs
                 )
         }
     }
