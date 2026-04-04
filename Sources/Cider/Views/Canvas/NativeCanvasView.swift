@@ -61,6 +61,14 @@ struct NativeCanvasView: View {
                 )
                 .allowsHitTesting(false)
             }
+            .overlay {
+                // Invisible drop target for URLs dragged from browsers / text
+                CanvasDropZone(
+                    zoom: effectiveZoom,
+                    pan: effectivePan,
+                    viewModel: viewModel
+                )
+            }
             .overlay(alignment: .bottomTrailing) {
                 CanvasMinimapView(
                     viewModel: viewModel,
@@ -543,5 +551,115 @@ enum CanvasNodeColors {
         case "todo": return CiderColors.success.opacity(0.6)
         default: return CiderColors.surfaceElevated
         }
+    }
+}
+
+// MARK: - Canvas Drop Zone
+
+/// Invisible overlay that accepts dragged URLs from browsers and text, creating
+/// bookmark cards at the drop location on the canvas.
+struct CanvasDropZone: NSViewRepresentable {
+    let zoom: CGFloat
+    let pan: CGPoint
+    let viewModel: CanvasViewModel
+
+    private static let logger = Logger(subsystem: "com.cider.app", category: "CanvasDropZone")
+
+    func makeNSView(context: Context) -> CanvasDropTargetView {
+        let view = CanvasDropTargetView()
+        view.onDrop = { [viewModel] screenPoint, urls in
+            handleDroppedURLs(urls, at: screenPoint, in: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: CanvasDropTargetView, context: Context) {
+        nsView.onDrop = { [viewModel] screenPoint, urls in
+            handleDroppedURLs(urls, at: screenPoint, in: nsView)
+        }
+    }
+
+    private func handleDroppedURLs(_ urls: [URL], at viewPoint: CGPoint, in view: NSView) {
+        // Convert the drop point (in view coordinates, bottom-left origin)
+        // to canvas coordinates: flip Y, then reverse pan+zoom transform
+        let flippedY = view.bounds.height - viewPoint.y
+        let canvasX = (viewPoint.x - pan.x) / zoom
+        let canvasY = (flippedY - pan.y) / zoom
+
+        for (index, url) in urls.enumerated() {
+            let offsetY = CGFloat(index) * 280 // Stack multiple drops vertically
+            let dropPosition = CGPoint(x: canvasX, y: canvasY + offsetY)
+
+            Self.logger.info("Dropped URL on canvas: \(url.absoluteString, privacy: .public)")
+
+            if let bookmark = VaultBookmarkService.shared.add(
+                urlString: url.absoluteString,
+                title: url.host ?? url.absoluteString
+            ) {
+                let node = CanvasNode(
+                    id: "node-\(bookmark.id.uuidString)",
+                    itemID: bookmark.id.uuidString,
+                    itemType: "bookmark",
+                    position: dropPosition
+                )
+                viewModel.addNode(node)
+            }
+        }
+    }
+}
+
+/// AppKit view that registers for URL/string drag types and forwards drops.
+final class CanvasDropTargetView: NSView {
+    var onDrop: ((_ viewPoint: CGPoint, _ urls: [URL]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.URL, .fileURL, .string])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let pasteboard = sender.draggingPasteboard
+        // Accept if there's a web URL or text that looks like a URL
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+           urls.contains(where: { !$0.isFileURL }) {
+            return .copy
+        }
+        if let text = pasteboard.string(forType: .string),
+           let url = URL(string: text), url.scheme?.hasPrefix("http") == true {
+            return .copy
+        }
+        return []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return draggingEntered(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pasteboard = sender.draggingPasteboard
+        let dropPoint = convert(sender.draggingLocation, from: nil)
+        var webURLs: [URL] = []
+
+        // Collect web URLs from pasteboard
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] {
+            webURLs.append(contentsOf: urls.filter { !$0.isFileURL })
+        }
+
+        // Fall back to plain text that parses as a URL
+        if webURLs.isEmpty,
+           let text = pasteboard.string(forType: .string),
+           let url = URL(string: text), url.scheme?.hasPrefix("http") == true {
+            webURLs.append(url)
+        }
+
+        guard !webURLs.isEmpty else { return false }
+
+        DispatchQueue.main.async { [onDrop] in
+            onDrop?(dropPoint, webURLs)
+        }
+        return true
     }
 }
