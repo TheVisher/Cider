@@ -305,4 +305,45 @@ final class DotBufferTests: XCTestCase {
         XCTAssertEqual(result, .opened(index: 0), "Slot 0 is oldest unpinned")
         XCTAssertEqual(buffer.slots[0]?.itemID, sixthID)
     }
+
+    // MARK: - Linked Pair (Split View)
+
+    func testLinkSetsLinkedPair() {
+        let buffer = DotBuffer()
+        buffer.open(item: makeSlot(title: "A"))
+        buffer.open(item: makeSlot(title: "B"))
+        buffer.link(0, 1)
+        XCTAssertEqual(buffer.linkedPair?.0, 0)
+        XCTAssertEqual(buffer.linkedPair?.1, 1)
+        XCTAssertTrue(buffer.isLinked(0))
+        XCTAssertTrue(buffer.isLinked(1))
+        XCTAssertFalse(buffer.isLinked(2))
+        XCTAssertEqual(buffer.linkedPartner(of: 0), 1)
+    }
+
+    func testUnlinkClearsLinkedPair() {
+        let buffer = DotBuffer()
+        buffer.open(item: makeSlot(title: "A"))
+        buffer.open(item: makeSlot(title: "B"))
+        buffer.link(0, 1)
+        buffer.unlink()
+        XCTAssertNil(buffer.linkedPair)
+        XCTAssertFalse(buffer.isLinked(0))
+    }
+
+    func testLinkEmptySlotIsNoOp() {
+        let buffer = DotBuffer()
+        buffer.open(item: makeSlot(title: "A"))
+        buffer.link(0, 1)
+        XCTAssertNil(buffer.linkedPair)
+    }
+
+    func testClearLinkedSlotUnlinks() {
+        let buffer = DotBuffer()
+        buffer.open(item: makeSlot(title: "A"))
+        buffer.open(item: makeSlot(title: "B"))
+        buffer.link(0, 1)
+        buffer.clear(at: 0)
+        XCTAssertNil(buffer.linkedPair)
+    }
 }

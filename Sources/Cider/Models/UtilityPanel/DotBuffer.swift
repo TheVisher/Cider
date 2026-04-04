@@ -55,6 +55,7 @@ final class DotBuffer: ObservableObject {
 
     @Published private(set) var slots: [DotSlot?] = Array(repeating: nil, count: capacity)
     @Published var activeIndex: Int?
+    @Published private(set) var linkedPair: (Int, Int)?
 
     /// Insertion order counter — used to determine which unpinned dot is oldest.
     private var insertionOrder: [Int: UInt64] = [:]
@@ -111,6 +112,7 @@ final class DotBuffer: ObservableObject {
 
     func clear(at index: Int) {
         guard slots.indices.contains(index) else { return }
+        if isLinked(index) { unlink() }
         slots[index] = nil
         insertionOrder.removeValue(forKey: index)
         if activeIndex == index {
@@ -123,6 +125,33 @@ final class DotBuffer: ObservableObject {
         insertionOrder.removeAll()
         nextOrder = 0
         activeIndex = nil
+        linkedPair = nil
+    }
+
+    // MARK: - Linked Pair (Split View)
+
+    func link(_ index1: Int, _ index2: Int) {
+        guard index1 != index2,
+              (0..<Self.capacity).contains(index1),
+              (0..<Self.capacity).contains(index2),
+              slots[index1] != nil, slots[index2] != nil else { return }
+        linkedPair = (min(index1, index2), max(index1, index2))
+    }
+
+    func unlink() {
+        linkedPair = nil
+    }
+
+    func isLinked(_ index: Int) -> Bool {
+        guard let pair = linkedPair else { return false }
+        return pair.0 == index || pair.1 == index
+    }
+
+    func linkedPartner(of index: Int) -> Int? {
+        guard let pair = linkedPair else { return nil }
+        if pair.0 == index { return pair.1 }
+        if pair.1 == index { return pair.0 }
+        return nil
     }
 
     // MARK: - Queries
