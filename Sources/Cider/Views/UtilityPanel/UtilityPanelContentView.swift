@@ -11,6 +11,13 @@ struct UtilityPanelContentView: View {
         Group {
             if let tool = coordinator.activeTool {
                 toolView(for: tool)
+            } else if let split = coordinator.splitItems {
+                SplitContentView(
+                    item1: split.0,
+                    item2: split.1,
+                    bookmarksViewModel: bookmarksViewModel,
+                    notesViewModel: notesViewModel
+                )
             } else {
                 itemView
             }

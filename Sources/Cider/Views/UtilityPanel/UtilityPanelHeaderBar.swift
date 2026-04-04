@@ -182,6 +182,14 @@ struct UtilityPanelHeaderBar: View {
             case .capture: "Capture"
             }
         }
+        if coordinator.splitItems != nil {
+            if let pair = coordinator.buffer.linkedPair,
+               let t1 = coordinator.buffer.slots[pair.0]?.title,
+               let t2 = coordinator.buffer.slots[pair.1]?.title {
+                return "\(t1) vs \(t2)"
+            }
+            return "Compare"
+        }
         if let activeIndex = coordinator.buffer.activeIndex,
            let slot = coordinator.buffer.slots[activeIndex] {
             return slot.title
