@@ -16,9 +16,15 @@ struct UtilityPanelHeaderBar: View {
             navButtons
 
             // Dot row
-            UtilityPanelDotRow(buffer: coordinator.buffer) { index in
+            UtilityPanelDotRow(buffer: coordinator.buffer, onDotTap: { index in
                 coordinator.activateDot(at: index)
-            }
+            }, onCompare: { index1, index2 in
+                guard let slot1 = coordinator.buffer.slots[index1],
+                      let slot2 = coordinator.buffer.slots[index2],
+                      let item1 = coordinator.itemForSlot(slot1),
+                      let item2 = coordinator.itemForSlot(slot2) else { return }
+                coordinator.openSplitView(item1: item1, item2: item2)
+            })
 
             // Title
             Text(currentTitle)

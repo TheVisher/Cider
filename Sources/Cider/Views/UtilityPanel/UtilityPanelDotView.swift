@@ -8,6 +8,7 @@ struct UtilityPanelDotView: View {
     let index: Int
     @ObservedObject var buffer: DotBuffer
     var onTap: (Int) -> Void
+    var onCompare: ((Int, Int) -> Void)?
 
     @State private var isHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -37,6 +38,17 @@ struct UtilityPanelDotView: View {
                             buffer.unpin(at: index)
                         } else {
                             buffer.pin(at: index)
+                        }
+                    }
+                    if !buffer.isLinked(index), let onCompare {
+                        Menu("Compare with...") {
+                            ForEach(0..<DotBuffer.capacity, id: \.self) { otherIndex in
+                                if otherIndex != index, let otherSlot = buffer.slots[otherIndex] {
+                                    Button(otherSlot.title) {
+                                        onCompare(index, otherIndex)
+                                    }
+                                }
+                            }
                         }
                     }
                     Button("Close") {
@@ -86,6 +98,7 @@ struct UtilityPanelDotView: View {
 struct UtilityPanelDotRow: View {
     @ObservedObject var buffer: DotBuffer
     var onDotTap: (Int) -> Void
+    var onCompare: ((Int, Int) -> Void)?
 
     var body: some View {
         HStack(spacing: UtilityPanelDesign.dotSpacing) {
@@ -95,9 +108,35 @@ struct UtilityPanelDotRow: View {
                     isActive: buffer.activeIndex == index,
                     index: index,
                     buffer: buffer,
-                    onTap: onDotTap
+                    onTap: onDotTap,
+                    onCompare: onCompare
                 )
             }
+        }
+        .overlay {
+            linkBarOverlay
+        }
+        .frame(height: UtilityPanelDesign.dotTapTarget)
+    }
+
+    @ViewBuilder
+    private var linkBarOverlay: some View {
+        if let pair = buffer.linkedPair {
+            let dotSize = UtilityPanelDesign.dotTapTarget
+            let spacing = UtilityPanelDesign.dotSpacing
+            let step = dotSize + spacing
+            let center1 = CGFloat(pair.0) * step + dotSize / 2
+            let center2 = CGFloat(pair.1) * step + dotSize / 2
+            let barWidth = center2 - center1
+            let barMidX = (center1 + center2) / 2
+
+            RoundedRectangle(cornerRadius: 1)
+                .fill(CiderColors.controlAccent)
+                .frame(width: barWidth, height: UtilityPanelDesign.dotLinkBarHeight)
+                .position(
+                    x: barMidX,
+                    y: dotSize / 2 + UtilityPanelDesign.dotDiameter / 2 + Spacing.xxs
+                )
         }
     }
 }
