@@ -620,6 +620,11 @@ final class CanvasDropTargetView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    // Pass through all non-drag mouse events to the canvas below
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let pasteboard = sender.draggingPasteboard
         // Accept if there's a web URL or text that looks like a URL

@@ -6,7 +6,7 @@ struct CanvasWindowContentView: View {
     @State private var sidebarVisible = true
     @State private var isSearchVisible = false
     @State private var showNewItemPopover = false
-    @State private var isCreateButtonHovered = false
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -66,9 +66,11 @@ struct CanvasWindowContentView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                canvasCreateButton
-                    .padding(Spacing.lg)
+            .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { _ in
+                showNewItemPopover = true
+            }
+            .popover(isPresented: $showNewItemPopover) {
+                newItemPopoverContent
             }
             .ignoresSafeArea()
             .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemIDs)
@@ -284,35 +286,10 @@ struct CanvasWindowContentView: View {
         .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 2)
     }
 
-    // MARK: - Create Button
+    // MARK: - New Item Popover
 
-    /// Floating "+" button in the bottom-right corner for creating new items.
-    private var canvasCreateButton: some View {
-        Button {
-            showNewItemPopover = true
-        } label: {
-            Image(systemName: "plus")
-                .font(CiderFont.headingSemibold)
-                .foregroundColor(CiderColors.primary)
-                .frame(width: 40, height: 40)
-                .background(CiderColors.surfaceElevated)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(CiderColors.borderDefault, lineWidth: CiderBorder.innerStrokeWidth)
-                )
-                .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 4)
-                .scaleEffect(isCreateButtonHovered ? 1.05 : 1.0)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(reduceMotion ? .none : .snappy(duration: 0.2)) {
-                isCreateButtonHovered = hovering
-            }
-        }
-        .help("Create new item")
-        .popover(isPresented: $showNewItemPopover, arrowEdge: .top) {
-            NewItemPopover(
+    private var newItemPopoverContent: some View {
+        NewItemPopover(
                 folders: VaultFolderService.shared.legacyFolders,
                 onCreateBookmark: { urlString, title in
                     VaultBookmarkService.shared.add(urlString: urlString, title: title)
@@ -357,6 +334,5 @@ struct CanvasWindowContentView: View {
                     showNewItemPopover = false
                 }
             )
-        }
     }
 }

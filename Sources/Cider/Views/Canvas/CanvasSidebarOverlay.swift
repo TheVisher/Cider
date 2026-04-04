@@ -202,7 +202,9 @@ struct CanvasSidebarOverlay: View {
 
                 Spacer(minLength: 0)
 
-                Button {} label: {
+                Button {
+                    NotificationCenter.default.post(name: .openNewItemPopover, object: nil)
+                } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
                             .font(CiderFont.captionSemibold)
