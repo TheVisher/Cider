@@ -36,7 +36,7 @@ struct UtilityPanelContentView: View {
         case .aiChat:
             AIAssistantPanelView(viewModel: AIAssistantViewModel.shared, isStandalone: false)
         case .capture:
-            PlaceholderMode().contentView
+            UtilityPanelCaptureView()
         }
     }
 
