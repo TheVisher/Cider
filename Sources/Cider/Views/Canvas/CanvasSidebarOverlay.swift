@@ -21,6 +21,7 @@ struct CanvasSidebarOverlay: View {
     @State private var sidebarSearchText = ""
     @State private var selectedTagIDs: Set<UUID> = []
     @State private var tagsCollapsed = false
+    @State private var showNewItemPopover = false
 
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "Cider",
@@ -203,7 +204,7 @@ struct CanvasSidebarOverlay: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    NotificationCenter.default.post(name: .openNewItemPopover, object: nil)
+                    showNewItemPopover = true
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "plus")
@@ -223,6 +224,45 @@ struct CanvasSidebarOverlay: View {
                 .buttonStyle(.plain)
                 .fixedSize()
                 .help("Create new item")
+                .popover(isPresented: $showNewItemPopover, arrowEdge: .top) {
+                    NewItemPopover(
+                        folders: VaultFolderService.shared.legacyFolders,
+                        onCreateBookmark: { urlString, title in
+                            VaultBookmarkService.shared.add(urlString: urlString, title: title)
+                        },
+                        onCreateNote: { title, content in
+                            var note = NotesStorage.shared.createNew(initialContent: content)
+                            if !title.isEmpty { note.title = title; NotesStorage.shared.save(note: note) }
+                        },
+                        onCreateEvent: { title, date, allDay in
+                            DateCardStorage.shared.createDateCard(title: title, startAt: date, allDay: allDay)
+                        },
+                        onCreateContact: { name, relationship in
+                            var contact = ContactStorage.shared.createContact(displayName: name)
+                            if !relationship.isEmpty {
+                                contact.relationshipLabel = relationship
+                                ContactStorage.shared.updateContact(contact)
+                            }
+                        },
+                        onCreateTodo: { card in
+                            TodoCardStorage.shared.addTodoCard(card)
+                        },
+                        onOpenTodoEditor: {},
+                        onCreateFolder: { name, parentID in
+                            VaultFolderService.shared.createFolder(name: name, parentID: parentID)
+                        },
+                        onCreateTab: { _, _ in },
+                        onCreateTag: { name, colorHex in
+                            CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)
+                        },
+                        onCreateWhiteboard: { name in
+                            WhiteboardStorage.shared.createCanvas(name: name)
+                        },
+                        onDismiss: {
+                            showNewItemPopover = false
+                        }
+                    )
+                }
 
                 Spacer(minLength: 0)
 

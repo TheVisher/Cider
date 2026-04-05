@@ -5,7 +5,6 @@ struct CanvasWindowContentView: View {
     @ObservedObject var viewModel: CanvasViewModel
     @State private var sidebarVisible = true
     @State private var isSearchVisible = false
-    @State private var showNewItemPopover = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -65,12 +64,6 @@ struct CanvasWindowContentView: View {
                         .padding(.bottom, Spacing.xl)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { _ in
-                showNewItemPopover = true
-            }
-            .popover(isPresented: $showNewItemPopover) {
-                newItemPopoverContent
             }
             .ignoresSafeArea()
             .animation(reduceMotion ? .none : .snappy(duration: 0.25), value: viewModel.selectedItemIDs)
@@ -286,53 +279,4 @@ struct CanvasWindowContentView: View {
         .shadow(color: CiderColors.shadowMedium, radius: 8, x: 0, y: 2)
     }
 
-    // MARK: - New Item Popover
-
-    private var newItemPopoverContent: some View {
-        NewItemPopover(
-                folders: VaultFolderService.shared.legacyFolders,
-                onCreateBookmark: { urlString, title in
-                    VaultBookmarkService.shared.add(urlString: urlString, title: title)
-                },
-                onCreateNote: { title, content in
-                    var note = NotesStorage.shared.createNew(initialContent: content)
-                    if !title.isEmpty { note.title = title; NotesStorage.shared.save(note: note) }
-                },
-                onCreateEvent: { title, date, allDay in
-                    DateCardStorage.shared.createDateCard(
-                        title: title,
-                        startAt: date,
-                        allDay: allDay
-                    )
-                },
-                onCreateContact: { name, relationship in
-                    var contact = ContactStorage.shared.createContact(displayName: name)
-                    if !relationship.isEmpty {
-                        contact.relationshipLabel = relationship
-                        ContactStorage.shared.updateContact(contact)
-                    }
-                },
-                onCreateTodo: { card in
-                    TodoCardStorage.shared.addTodoCard(card)
-                },
-                onOpenTodoEditor: {
-                    // No-op on canvas — todo editor is panel-specific
-                },
-                onCreateFolder: { name, parentID in
-                    VaultFolderService.shared.createFolder(name: name, parentID: parentID)
-                },
-                onCreateTab: { _, _ in
-                    // No-op on canvas — tabs are panel-specific
-                },
-                onCreateTag: { name, colorHex in
-                    CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)
-                },
-                onCreateWhiteboard: { name in
-                    WhiteboardStorage.shared.createCanvas(name: name)
-                },
-                onDismiss: {
-                    showNewItemPopover = false
-                }
-            )
-    }
 }
