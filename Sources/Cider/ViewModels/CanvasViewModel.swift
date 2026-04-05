@@ -475,10 +475,21 @@ final class CanvasViewModel: ObservableObject {
             selectedItemIDs = [itemID]
         }
 
-        // Post notification only for single selection (detail overlay, panel sync)
+        // Post notification for panel sync
         if selectedItemIDs.count == 1 {
             guard let uuid = UUID(uuidString: itemID) else { return }
             NotificationCenter.default.post(name: .canvasItemSelected, object: nil, userInfo: ["bookmarkID": uuid, "type": type])
+        } else if selectedItemIDs.count == 2 {
+            // When exactly 2 items are Cmd+selected, notify for split view
+            let ids = Array(selectedItemIDs)
+            NotificationCenter.default.post(
+                name: .canvasItemSelected,
+                object: nil,
+                userInfo: [
+                    "splitItemIDs": ids,
+                    "type": "split"
+                ]
+            )
         }
     }
 

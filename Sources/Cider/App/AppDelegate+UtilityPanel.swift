@@ -162,6 +162,29 @@ extension AppDelegate {
             .sink { [weak self] notification in
                 guard let self else { return }
                 guard CiderConfig.load().useNewPanel else { return }
+
+                // Check for split view (2 items Cmd+selected)
+                if let splitIDs = notification.userInfo?["splitItemIDs"] as? [String],
+                   notification.userInfo?["type"] as? String == "split",
+                   splitIDs.count == 2 {
+                    let uuid1 = UUID(uuidString: splitIDs[0])
+                    let uuid2 = UUID(uuidString: splitIDs[1])
+                    if let id1 = uuid1, let id2 = uuid2 {
+                        let item1 = self.resolveCanvasItem(id: id1)
+                        let item2 = self.resolveCanvasItem(id: id2)
+                        if let item1, let item2 {
+                            let title1 = self.resolveTitle(for: id1, item: item1)
+                            let title2 = self.resolveTitle(for: id2, item: item2)
+                            self.utilityPanelCoordinator.openItem(item1, title: title1)
+                            self.utilityPanelCoordinator.openItem(item2, title: title2)
+                            self.utilityPanelCoordinator.openSplitView(item1: item1, item2: item2)
+                            self.showUtilityPanel()
+                        }
+                    }
+                    return
+                }
+
+                // Single item selection
                 guard let itemID = notification.userInfo?["bookmarkID"] as? UUID,
                       let type = notification.userInfo?["type"] as? String else { return }
 
@@ -376,6 +399,25 @@ extension AppDelegate {
             utilityPanelPositionStore.setFrame(frame)
         } else {
             utilityPanelPositionStore.setFrame(panel.frame)
+        }
+    }
+
+    // MARK: - Canvas Item Resolution
+
+    private func resolveCanvasItem(id: UUID) -> UtilityPanelActiveItem? {
+        if NotesStorage.shared.notes.contains(where: { $0.id == id }) { return .note(id) }
+        if TodoCardStorage.shared.todoCard(for: id) != nil { return .todo(id) }
+        return .bookmark(id)
+    }
+
+    private func resolveTitle(for id: UUID, item: UtilityPanelActiveItem) -> String {
+        switch item {
+        case .bookmark:
+            return VaultBookmarkService.shared.bookmarks.first(where: { $0.id == id })?.title ?? "Bookmark"
+        case .note:
+            return NotesStorage.shared.notes.first(where: { $0.id == id })?.title ?? "Note"
+        case .todo:
+            return TodoCardStorage.shared.todoCard(for: id)?.title ?? "Todo"
         }
     }
 }
