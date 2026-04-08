@@ -83,7 +83,7 @@ Restaurants are common enough to deserve specific rules:
 | Confidence | Action |
 |------------|--------|
 | High (obvious domain match) | Route directly, no confirmation needed |
-| Medium (likely but not certain) | Route to best guess, mention it in response |
+| Medium (likely but not certain) | Route to best guess, mention it in response. If entity resolution is also weak, prefer Inbox over incorrect routing. |
 | Low (genuinely ambiguous) | Put in Inbox, tell the user |
 
 ## What NOT To Do

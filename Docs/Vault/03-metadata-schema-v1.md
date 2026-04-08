@@ -33,6 +33,8 @@ summary: "Chinese dumplings in Bellevue, WA"  # One-line for indexes
 - `tags` — lowercase, hyphenated. Not duplicates of kind or folder name.
 - `summary` — short enough to scan in an index. One sentence max.
 
+**Minimum viable metadata:** Before an item leaves Inbox, it must have `kind`, `title`, and `summary`. Without these three, the item stays in Inbox.
+
 ## Allowed `kind` Values
 
 | Kind | Meaning | When to Use |
