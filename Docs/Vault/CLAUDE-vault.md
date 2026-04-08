@@ -388,9 +388,32 @@ Follow the Vault Behavior Contract sequence:
    - Product → `Life/Shopping/{Name}.webloc`
    - Tech tutorial → `Tech/{Topic}/{Name}.webloc`
    - Unknown → `Inbox/Bookmarks/{Name}.webloc`
-5. **Save** — Use `$CLI bookmark add "{url}" --title "{Descriptive Title}" --folder "{Folder}"`. Use a descriptive title — "Dumpling World - Everett WA" not "TikTok". For TikTok/Instagram, name it after the actual content (the place, product, recipe), not the creator.
-6. **Metadata** — Update the bookmark's notes with extracted info: `$CLI bookmark update {ID} --notes "{summary with key details}"`. Add tags if relevant.
-7. **Respond** — Tell the user what you saved, where, and key details.
+5. **Ensure folder exists** — If the target folder doesn't exist, create it: `mkdir -p ~/CiderVault/{full/path}` (e.g., `mkdir -p ~/CiderVault/Food/Restaurants/Taiwanese`).
+6. **Save directly to folder** — Use `$CLI bookmark add "{url}" --title "{Descriptive Title}" --folder "{Folder Name}"`. The `--folder` flag matches by leaf folder name (e.g., `--folder "Taiwanese"`). **Always include --folder.** Bookmarks should NEVER land in Inbox when the agent is processing them. Use a descriptive title — "Dumpling World - Everett WA" not "TikTok". For TikTok/Instagram, name it after the actual content (the place, product, recipe), not the creator.
+7. **Metadata** — Update the bookmark's notes with extracted info: `$CLI bookmark update {ID} --notes "{summary with key details}"`. Add tags if relevant.
+8. **Respond** — Tell the user what you saved, where, and key details.
+
+### Someone tells you a fact about a person
+
+Follow the Vault Behavior Contract sequence:
+
+1. **Resolve** — Check if this person already exists:
+   - `ls ~/CiderVault/People/` — check for existing folder
+   - `$CLI search "{name}" --json` — check contacts and notes
+   - Check `Inbox/Contacts/` and `Inbox/Notes/` for pre-existing files about this person
+2. **Route** — Person information always goes to `People/{Name}/`:
+   - `mkdir -p ~/CiderVault/People/{Name}`
+3. **Create or merge**:
+   - **New person:** Create `People/{Name}/profile.md` with frontmatter (`kind: person`, `title`, `relationship`, `summary`) and the fact.
+   - **Existing person:** Append the fact to their existing `profile.md` under the appropriate section (Basics, Sizes, Favorites, Gift Ideas, etc.).
+   - **Contact file:** Create or update `.vcf` in `People/{Name}/` (not `Inbox/Contacts/`).
+   - **Birthday/event:** Create `.ics` in `Inbox/Date Cards/` (Cider needs these here for the calendar), but ALSO record the birthday in `People/{Name}/profile.md`.
+4. **Migrate if needed** — If the person has files in `Inbox/Contacts/` or `Inbox/Notes/` from before the new routing, move them to `People/{Name}/`:
+   ```bash
+   mv ~/CiderVault/Inbox/Contacts/"{Name}*.vcf" ~/CiderVault/People/{Name}/
+   mv ~/CiderVault/Inbox/Notes/"{Name}*.md" ~/CiderVault/People/{Name}/
+   ```
+5. **Respond** — Confirm what was saved and where.
 
 ### Someone asks "what bookmarks do I have about X?"
 1. Read `.cider/bookmarks/_cider_bookmarks_index.json`
