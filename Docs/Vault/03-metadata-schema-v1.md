@@ -27,7 +27,7 @@ summary: "Chinese dumplings in Bellevue, WA"  # One-line for indexes
 
 **Rules:**
 - `id` — use existing Cider UUID if the item already has one. Generate with `uuidgen` for new items.
-- `kind` — required for agent reasoning. See allowed values below.
+- `kind` — **required before an item is considered fully classified.** An item without a `kind` is still a `capture` and needs triage. See allowed values below.
 - `title` — descriptive, not the source name. "Dumpling World" not "TikTok".
 - `source` — the original URL, or how it arrived.
 - `tags` — lowercase, hyphenated. Not duplicates of kind or folder name.
@@ -46,7 +46,7 @@ summary: "Chinese dumplings in Bellevue, WA"  # One-line for indexes
 | `capture` | Unclassified incoming item | Just arrived, not yet triaged. Temporary kind. |
 
 **Rules:**
-- `capture` is temporary. The agent should upgrade it to a real kind when it has enough context.
+- `capture` is temporary and **must be upgraded** to a specific kind when enough context is available. An item should not remain `capture` across multiple sessions.
 - A single item has exactly one `kind`. Not multiple.
 - `kind` is metadata, not a folder name. A `place` can live in `Food/Restaurants/` or `Life/Medical/`.
 

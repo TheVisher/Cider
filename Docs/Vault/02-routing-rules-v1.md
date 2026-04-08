@@ -2,9 +2,12 @@
 
 > How incoming captures get placed into the vault. Fast, obvious routing first — refinement later.
 
-## Core Principle
+## Core Principles
 
-The agent should classify quickly and conservatively. When confident, route directly. When uncertain, put it in Inbox and move on. Do not spend 12 steps classifying a single URL.
+1. **Fast, obvious routing.** The agent should classify quickly and conservatively. When confident, route directly. When uncertain, put it in Inbox and move on. Do not spend 12 steps classifying a single URL.
+2. **Inbox must be drained.** Inbox items must be triaged within the same session when possible. The agent should revisit Inbox items when new context is available. Inbox is not a long-term storage location.
+3. **One location per item.** Each item must be routed to exactly one location. Do not place the same item in multiple folders.
+4. **Merge before create.** Before creating a new entity, check if a matching one already exists. If it does, merge into it. Do not create duplicate folders or files for the same person, place, project, or topic. See Entity Resolution Rules for the lookup process.
 
 ## Decision Flow
 

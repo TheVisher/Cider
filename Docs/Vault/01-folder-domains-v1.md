@@ -23,6 +23,8 @@ CiderVault/
 3. **Inbox is temporary.** Nothing should stay there long-term. The agent triages items out within one session when possible.
 4. **Subfolders are flexible.** Create them as needed within the domains. The agent can create `Food/Restaurants/Thai/` without asking.
 5. **Folder names are human-readable.** Use plain English, title case, no abbreviations. `3D Printing` not `3d-printing`.
+6. **Single source of truth.** Each item has exactly one canonical location in the vault. Do not duplicate files across folders. Use metadata and tags for relationships.
+7. **Life/ must always use subfolders.** Never store files directly in `Life/`. Always use `Life/Travel/`, `Life/Medical/`, etc.
 
 ## Domain Definitions
 
@@ -60,7 +62,7 @@ Examples:
 
 ### Tech
 
-Reference material for technology: setup guides, troubleshooting, workflows, CLI commands, recurring problems and fixes. This is "how things work" knowledge.
+Knowledge about systems, tools, setup, troubleshooting, and workflows. If it's about HOW something works or HOW to fix something → Tech. If you're BUILDING something → Projects. If you're just INTERESTED in it → Hobbies.
 
 Examples:
 - `Tech/Streaming/Streamio/` — setup, troubleshooting, fixes
