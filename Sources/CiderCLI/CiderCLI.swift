@@ -1630,9 +1630,37 @@ struct CiderCLI {
     }
 
     static func findFolder(named name: String) -> VaultFolder? {
-        VaultFolderService.shared.folders.first {
+        // Check registered folders first
+        if let existing = VaultFolderService.shared.folders.first(where: {
             $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) {
+            return existing
         }
+
+        // If not registered but directory exists on disk, scan to pick it up
+        let vaultURL = StoragePaths.cachedVaultDirectoryURL
+        let fm = FileManager.default
+        if let enumerator = fm.enumerator(at: vaultURL, includingPropertiesForKeys: [URLResourceKey.isDirectoryKey],
+                                           options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+            while let url = enumerator.nextObject() as? URL {
+                guard let isDir = try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory, isDir else {
+                    enumerator.skipDescendants()
+                    continue
+                }
+                if url.lastPathComponent.localizedCaseInsensitiveCompare(name) == .orderedSame {
+                    // Found a matching directory — determine parent
+                    let parentName = url.deletingLastPathComponent().lastPathComponent
+                    let parentID = VaultFolderService.shared.folders.first(where: {
+                        $0.name.localizedCaseInsensitiveCompare(parentName) == .orderedSame
+                    })?.id
+                    // Register it
+                    if let folder = VaultFolderService.shared.createFolder(name: url.lastPathComponent, parentID: parentID) {
+                        return folder
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     static func findBookmark(_ idPrefix: String, in service: VaultBookmarkService) -> Bookmark? {
