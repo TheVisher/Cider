@@ -102,14 +102,13 @@ struct CiderCLI {
 
         case "add", "create":
             guard let url = args.first else {
-                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name>]")
+                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--path <vault-relative-path>] [--folder <name>]")
                 return
             }
             let title = parseFlag("--title", from: args)
-            let folderName = parseFlag("--folder", from: args)
             let bookmark = service.add(urlString: url, title: title)
             if let bookmark {
-                if let folderName, let folder = findFolder(named: folderName) {
+                if let folder = resolveFolder(from: args) {
                     _ = service.assignBookmark(bookmark.id, toFolder: folder.id)
                 }
                 print("Created bookmark: \(bookmark.title) (\(bookmark.id.uuidString.prefix(8)))")
@@ -162,24 +161,14 @@ struct CiderCLI {
 
         case "move":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark move <id> --folder <name>")
+                print("Error: ID prefix required. Usage: cider-cli bookmark move <id> --path <vault-relative-path> | --folder <name>")
                 return
             }
-            let folderName = parseFlag("--folder", from: args)
             if let bm = findBookmark(idPrefix, in: service) {
-                let folderID: UUID?
-                if let name = folderName {
-                    guard let folder = findFolder(named: name) else {
-                        print("Error: No folder found named '\(name)'")
-                        return
-                    }
-                    folderID = folder.id
-                } else {
-                    folderID = nil
-                }
+                let folder = resolveFolder(from: args)
                 let oldFolder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                _ = service.assignBookmark(bm.id, toFolder: folderID)
-                let newFolder = folderName ?? "Inbox"
+                _ = service.assignBookmark(bm.id, toFolder: folder?.id)
+                let newFolder = folder?.name ?? "Inbox"
                 print("Moved '\(bm.title)' from \(oldFolder) → \(newFolder)")
             }
 
@@ -298,12 +287,11 @@ struct CiderCLI {
         case "create":
             let title = args.first ?? "Untitled"
             let content = parseFlag("--content", from: args) ?? ""
-            let folderName = parseFlag("--folder", from: args)
             let note = storage.createNew(initialContent: content)
             if !title.isEmpty, title != "Untitled" {
                 storage.rename(note: note, to: title)
             }
-            if let folderName, let folder = findFolder(named: folderName) {
+            if let folder = resolveFolder(from: args) {
                 _ = storage.assignNote(note.id, toFolder: folder.id)
             }
             print("Created note: \(title) (\(note.id.uuidString.prefix(8)))")
@@ -427,7 +415,6 @@ struct CiderCLI {
             let title = args.first ?? "Untitled Todo"
             let dueString = parseFlag("--due", from: args)
             let priorityString = parseFlag("--priority", from: args)
-            let folderName = parseFlag("--folder", from: args)
             let dueDate = dueString.flatMap { dateFormatter.date(from: $0) }
             let priority: TodoPriority? = {
                 switch priorityString?.lowercased() {
@@ -438,7 +425,7 @@ struct CiderCLI {
                 }
             }()
             var todo = storage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
-            if let folderName, let folder = findFolder(named: folderName) {
+            if let folder = resolveFolder(from: args) {
                 todo.folderID = folder.id
                 _ = storage.updateTodoCard(todo)
             }
@@ -533,10 +520,9 @@ struct CiderCLI {
         case "create":
             let title = args.first ?? "Untitled Event"
             let dateString = parseFlag("--date", from: args) ?? dateFormatter.string(from: Date())
-            let folderName = parseFlag("--folder", from: args)
             let date = dateFormatter.date(from: dateString) ?? Date()
             var card = storage.createDateCard(title: title, startAt: date)
-            if let folderName, let folder = findFolder(named: folderName) {
+            if let folder = resolveFolder(from: args) {
                 card.folderID = folder.id
                 _ = storage.updateDateCard(card)
             }
@@ -611,7 +597,6 @@ struct CiderCLI {
             let notes = parseFlag("--notes", from: args)
             let relationship = parseFlag("--relationship", from: args)
             let birthdayStr = parseFlag("--birthday", from: args)
-            let folderName = parseFlag("--folder", from: args)
             var contact = storage.createContact(displayName: name)
             var needsUpdate = false
             if let email { contact.email = email; needsUpdate = true }
@@ -627,7 +612,7 @@ struct CiderCLI {
                     contact.birthday = birthday; needsUpdate = true
                 }
             }
-            if let folderName, let folder = findFolder(named: folderName) {
+            if let folder = resolveFolder(from: args) {
                 contact.folderID = folder.id; needsUpdate = true
             }
             if needsUpdate { _ = storage.updateContact(contact) }
@@ -1679,6 +1664,63 @@ struct CiderCLI {
             }
         }
         return nil
+    }
+
+    /// Resolves --path or --folder from args to a VaultFolder. Prefers --path.
+    static func resolveFolder(from args: [String]) -> VaultFolder? {
+        if let path = parseFlag("--path", from: args) {
+            return findOrCreateFolderByPath(path)
+        }
+        if let name = parseFlag("--folder", from: args) {
+            return findFolder(named: name)
+        }
+        return nil
+    }
+
+    /// Resolves a vault-relative path (e.g. "People/Baine") to a registered VaultFolder.
+    /// Creates the directory and registers each path component if needed.
+    static func findOrCreateFolderByPath(_ relativePath: String) -> VaultFolder? {
+        let vaultURL = StoragePaths.cachedVaultDirectoryURL
+
+        // Ensure the full directory exists on disk
+        let fullURL = vaultURL.appendingPathComponent(relativePath)
+        try? FileManager.default.createDirectory(at: fullURL, withIntermediateDirectories: true)
+
+        // Check if this exact path is already registered
+        if let existing = VaultFolderService.shared.folders.first(where: {
+            $0.relativePath.localizedCaseInsensitiveCompare(relativePath) == .orderedSame
+        }) {
+            return existing
+        }
+
+        // Walk the path and register each component
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return nil }
+
+        var currentPath = ""
+        var parentID: UUID?
+        var lastFolder: VaultFolder?
+
+        for component in components {
+            currentPath = currentPath.isEmpty ? component : currentPath + "/" + component
+
+            let existing = VaultFolderService.shared.folders.first(where: {
+                $0.relativePath.localizedCaseInsensitiveCompare(currentPath) == .orderedSame
+            })
+
+            if let existing {
+                parentID = existing.id
+                lastFolder = existing
+            } else {
+                if let created = VaultFolderService.shared.createFolder(name: component, parentID: parentID) {
+                    parentID = created.id
+                    lastFolder = created
+                } else {
+                    return nil
+                }
+            }
+        }
+        return lastFolder
     }
 
     static func findBookmark(_ idPrefix: String, in service: VaultBookmarkService) -> Bookmark? {
