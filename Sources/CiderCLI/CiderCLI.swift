@@ -298,9 +298,13 @@ struct CiderCLI {
         case "create":
             let title = args.first ?? "Untitled"
             let content = parseFlag("--content", from: args) ?? ""
+            let folderName = parseFlag("--folder", from: args)
             let note = storage.createNew(initialContent: content)
             if !title.isEmpty, title != "Untitled" {
                 storage.rename(note: note, to: title)
+            }
+            if let folderName, let folder = findFolder(named: folderName) {
+                _ = storage.assignNote(note.id, toFolder: folder.id)
             }
             print("Created note: \(title) (\(note.id.uuidString.prefix(8)))")
 
@@ -423,6 +427,7 @@ struct CiderCLI {
             let title = args.first ?? "Untitled Todo"
             let dueString = parseFlag("--due", from: args)
             let priorityString = parseFlag("--priority", from: args)
+            let folderName = parseFlag("--folder", from: args)
             let dueDate = dueString.flatMap { dateFormatter.date(from: $0) }
             let priority: TodoPriority? = {
                 switch priorityString?.lowercased() {
@@ -432,7 +437,11 @@ struct CiderCLI {
                 default: return nil
                 }
             }()
-            let todo = storage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
+            var todo = storage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
+            if let folderName, let folder = findFolder(named: folderName) {
+                todo.folderID = folder.id
+                _ = storage.updateTodoCard(todo)
+            }
             print("Created todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
 
         case "complete", "done":
@@ -524,8 +533,13 @@ struct CiderCLI {
         case "create":
             let title = args.first ?? "Untitled Event"
             let dateString = parseFlag("--date", from: args) ?? dateFormatter.string(from: Date())
+            let folderName = parseFlag("--folder", from: args)
             let date = dateFormatter.date(from: dateString) ?? Date()
-            let card = storage.createDateCard(title: title, startAt: date)
+            var card = storage.createDateCard(title: title, startAt: date)
+            if let folderName, let folder = findFolder(named: folderName) {
+                card.folderID = folder.id
+                _ = storage.updateDateCard(card)
+            }
             print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
 
         case "delete", "rm":
@@ -597,6 +611,7 @@ struct CiderCLI {
             let notes = parseFlag("--notes", from: args)
             let relationship = parseFlag("--relationship", from: args)
             let birthdayStr = parseFlag("--birthday", from: args)
+            let folderName = parseFlag("--folder", from: args)
             var contact = storage.createContact(displayName: name)
             var needsUpdate = false
             if let email { contact.email = email; needsUpdate = true }
@@ -611,6 +626,9 @@ struct CiderCLI {
                 if let birthday = localDF.date(from: birthdayStr) {
                     contact.birthday = birthday; needsUpdate = true
                 }
+            }
+            if let folderName, let folder = findFolder(named: folderName) {
+                contact.folderID = folder.id; needsUpdate = true
             }
             if needsUpdate { _ = storage.updateContact(contact) }
             print("Created contact: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
@@ -1693,7 +1711,7 @@ struct CiderCLI {
 
         NOTES
           cider-cli note list [--folder <name>]
-          cider-cli note create <title> [--content <text>]
+          cider-cli note create <title> [--content <text>] [--folder <name>]
           cider-cli note get <id-prefix>
           cider-cli note pin <id-prefix>
           cider-cli note move <id-prefix> --folder <name>
@@ -1702,20 +1720,20 @@ struct CiderCLI {
 
         TODOS
           cider-cli todo list [--completed]
-          cider-cli todo create <title> [--due yyyy-MM-dd] [--priority high|medium|low]
+          cider-cli todo create <title> [--due yyyy-MM-dd] [--priority high|medium|low] [--folder <name>]
           cider-cli todo complete <id-prefix>
           cider-cli todo delete <id-prefix>
           cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--priority <p>]
 
         EVENTS
           cider-cli event list
-          cider-cli event create <title> [--date yyyy-MM-dd]
+          cider-cli event create <title> [--date yyyy-MM-dd] [--folder <name>]
           cider-cli event delete <id-prefix>
           cider-cli event update <id-prefix> [--title <t>] [--date <d>] [--location <l>]
 
         CONTACTS
           cider-cli contact list
-          cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
+          cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name>]
           cider-cli contact delete <id-prefix>
           cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
 
