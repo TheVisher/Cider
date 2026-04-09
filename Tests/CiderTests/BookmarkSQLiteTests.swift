@@ -463,6 +463,59 @@ struct BookmarkSQLiteTests {
 
     // MARK: - Empty Database
 
+    // MARK: - Enrichment Fields
+
+    @Test("Enrichment status and lastEnrichedAt round-trip through SQLite")
+    func enrichmentFieldsRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let enrichedDate = Date()
+        let bookmark = Bookmark(
+            title: "Enriched Bookmark",
+            urlString: "https://enriched.com",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: enrichedDate
+        )
+
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+
+        #expect(service2.bookmarks.count == 1)
+        let loaded = service2.bookmarks[0]
+        #expect(loaded.enrichmentStatus == "complete")
+        #expect(loaded.lastEnrichedAt != nil)
+        #expect(abs(loaded.lastEnrichedAt!.timeIntervalSince(enrichedDate)) < 0.001)
+    }
+
+    @Test("Nil enrichment fields round-trip as nil")
+    func enrichmentFieldsNil() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let bookmark = Bookmark(
+            title: "No Enrichment",
+            urlString: "https://noenrich.com"
+        )
+
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+
+        let loaded = service2.bookmarks[0]
+        #expect(loaded.enrichmentStatus == nil)
+        #expect(loaded.lastEnrichedAt == nil)
+    }
+
+    // MARK: - Empty Database
+
     @Test("Empty database loads empty bookmarks array")
     func emptyDatabaseLoadsEmpty() throws {
         let (db, url) = try makeTestDB()

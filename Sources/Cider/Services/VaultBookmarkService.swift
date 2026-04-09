@@ -132,8 +132,14 @@ final class VaultBookmarkService: ObservableObject {
             // One-time migration: persist JSON bookmarks to SQLite
             if !cached.isEmpty, let db = resolvedDatabase {
                 logger.info("Migrating \(cached.count) bookmarks from JSON to SQLite")
-                for bookmark in cached {
-                    persistBookmarkToDatabase(db, bookmark: bookmark)
+                do {
+                    try db.withTransaction {
+                        for bookmark in cached {
+                            try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to migrate JSON bookmarks to SQLite: \(error.localizedDescription)")
                 }
             }
             // Verify cache against disk in background, adopt orphans
@@ -151,8 +157,14 @@ final class VaultBookmarkService: ObservableObject {
         writeIndexCache()
         // Persist scanned bookmarks to SQLite
         if let db = resolvedDatabase {
-            for bookmark in scanned {
-                persistBookmarkToDatabase(db, bookmark: bookmark)
+            do {
+                try db.withTransaction {
+                    for bookmark in scanned {
+                        try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
+                    }
+                }
+            } catch {
+                logger.error("Failed to persist scanned bookmarks to SQLite: \(error.localizedDescription)")
             }
         }
         scheduleEnrichmentForIncompleteBookmarks()
@@ -2182,7 +2194,8 @@ final class VaultBookmarkService: ObservableObject {
                        b.url, b.notes, b.notes_manually_set, b.title_manually_set,
                        b.ai_summary, b.ocr_text, b.dominant_colors, b.media_type,
                        b.thumbnail_relative_path, b.thumbnail_remote_url, b.original_image_path,
-                       b.carousel_image_paths, b.reader_unavailable, b.preferred_hero_mode
+                       b.carousel_image_paths, b.reader_unavailable, b.preferred_hero_mode,
+                       b.enrichment_status, b.last_enriched_at
                 FROM items i
                 JOIN bookmarks b ON b.item_id = i.id
                 WHERE i.type = 'bookmark'
@@ -2224,7 +2237,9 @@ final class VaultBookmarkService: ObservableObject {
                     preferredHeroMode: stmt.optionalString(at: 19),
                     relativePath: stmt.optionalString(at: 5),
                     titleManuallySet: stmt.bool(at: 9),
-                    notesManuallySet: stmt.bool(at: 8)
+                    notesManuallySet: stmt.bool(at: 8),
+                    enrichmentStatus: stmt.optionalString(at: 20),
+                    lastEnrichedAt: stmt.optionalDouble(at: 21).map { DatabaseHelpers.decodeDate($0) }
                 )
 
                 // Load labels from join table
@@ -2328,8 +2343,9 @@ final class VaultBookmarkService: ObservableObject {
                 item_id, url, notes, notes_manually_set, title_manually_set,
                 ai_summary, ocr_text, dominant_colors, media_type,
                 thumbnail_relative_path, thumbnail_remote_url, original_image_path,
-                carousel_image_paths, reader_unavailable, preferred_hero_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                carousel_image_paths, reader_unavailable, preferred_hero_mode,
+                enrichment_status, last_enriched_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """)
         let dominantColorsJSON: String? = bookmark.dominantColors.map { DatabaseHelpers.encode($0) }
         let carouselJSON: String? = bookmark.carouselImagePaths.map { DatabaseHelpers.encode($0) }
@@ -2350,6 +2366,8 @@ final class VaultBookmarkService: ObservableObject {
             .bind(carouselJSON, at: 13)
             .bind(readerUnavailableInt, at: 14)
             .bind(bookmark.preferredHeroMode, at: 15)
+            .bind(bookmark.enrichmentStatus, at: 16)
+            .bind(bookmark.lastEnrichedAt.map { DatabaseHelpers.encode($0) }, at: 17)
         try bkStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert current
