@@ -7,6 +7,9 @@ import os
 @MainActor
 final class CiderDatabase {
 
+    /// Shared app-wide database instance. Must be opened during app launch.
+    static let shared = CiderDatabase()
+
     private let logger = Logger(subsystem: "com.cider.app", category: "CiderDatabase")
     private var db: OpaquePointer?
 
