@@ -197,9 +197,9 @@ final class CardLabelStorage: ObservableObject {
             loadFromDatabase(db)
         } else {
             loadFromJSON()
-            // One-time migration: if we loaded labels from JSON and the database
-            // is now available, persist them to SQLite so future launches use the DB.
-            if !labels.isEmpty, let db = resolvedDatabase {
+            // One-time migration: if we loaded from JSON and DB is available, persist to SQLite
+            if !labels.isEmpty, CiderDatabase.shared.isOpen {
+                let db = CiderDatabase.shared
                 logger.info("Migrating \(self.labels.count) labels from JSON to SQLite")
                 for label in labels {
                     persistToDatabase(db, label: label)

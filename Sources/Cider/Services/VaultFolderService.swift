@@ -777,9 +777,9 @@ final class VaultFolderService {
             loadFromDatabase(db)
         } else {
             loadIndexFromJSON()
-            // One-time migration: if we loaded folders from JSON and the database
-            // is now available, persist them to SQLite so future launches use the DB.
-            if !index.isEmpty, let db = resolvedDatabase {
+            // One-time migration: if we loaded from JSON and DB is available, persist to SQLite
+            if !index.isEmpty, CiderDatabase.shared.isOpen {
+                let db = CiderDatabase.shared
                 logger.info("Migrating \(self.index.count) folders from JSON to SQLite")
                 for folder in index.values {
                     persistToDatabase(db, folder: folder)
