@@ -82,6 +82,11 @@ final class VaultBookmarkService: ObservableObject {
     private var lastAdoptionScan: Date = .distantPast
     private let adoptionDebounceInterval: TimeInterval = 5
 
+    // MARK: - Database
+
+    /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
+    private var database: CiderDatabase?
+
     // MARK: - Init
 
     private init() {
@@ -90,12 +95,32 @@ final class VaultBookmarkService: ObservableObject {
         startIndexWatcher()
     }
 
+    /// Testing-only initializer with an explicit database.
+    /// Does NOT call loadBookmarks() — tests call loadBookmarksFromDatabase() directly.
+    init(database: CiderDatabase) {
+        self.database = database
+    }
+
     // MARK: - Load
 
-    /// Loads bookmarks: tries index cache first, falls back to full vault scan.
+    /// Loads bookmarks: tries SQLite first, then index cache, then full vault scan.
     private func loadBookmarks() {
         cancelAllEnrichmentTasks()
 
+        // Try SQLite first
+        if let db = resolvedDatabase {
+            loadBookmarksFromDatabase(db)
+            if !bookmarks.isEmpty {
+                logger.info("Loaded \(self.bookmarks.count) bookmarks from database")
+                Task { @MainActor [weak self] in
+                    self?.adoptOrphanedVaultFiles()
+                    self?.scheduleEnrichmentForIncompleteBookmarks()
+                }
+                return
+            }
+        }
+
+        // Fall back to JSON index cache
         if var cached = loadFromIndexCache() {
             // Filter out bookmarks whose .webloc file no longer exists on disk
             cached = cached.filter { bookmark in
@@ -104,6 +129,13 @@ final class VaultBookmarkService: ObservableObject {
             }
             bookmarks = cached
             logger.info("Loaded \(cached.count) bookmarks from index cache")
+            // One-time migration: persist JSON bookmarks to SQLite
+            if !cached.isEmpty, let db = resolvedDatabase {
+                logger.info("Migrating \(cached.count) bookmarks from JSON to SQLite")
+                for bookmark in cached {
+                    persistBookmarkToDatabase(db, bookmark: bookmark)
+                }
+            }
             // Verify cache against disk in background, adopt orphans
             Task { @MainActor [weak self] in
                 self?.adoptOrphanedVaultFiles()
@@ -117,6 +149,12 @@ final class VaultBookmarkService: ObservableObject {
         bookmarks = scanned
         logger.info("Scanned \(scanned.count) bookmarks from vault folders")
         writeIndexCache()
+        // Persist scanned bookmarks to SQLite
+        if let db = resolvedDatabase {
+            for bookmark in scanned {
+                persistBookmarkToDatabase(db, bookmark: bookmark)
+            }
+        }
         scheduleEnrichmentForIncompleteBookmarks()
     }
 
@@ -257,7 +295,17 @@ final class VaultBookmarkService: ObservableObject {
     /// Writes the index cache and pushes to sync. Does NOT write monolithic JSON/HTML.
     private func persist() {
         writeIndexCache()
+        persistAllBookmarksToDatabase()
         SyncService.shared.pushAfterLocalChange()
+    }
+
+    /// Persist all current bookmarks to the database.
+    /// Mirrors the writeIndexCache() approach — full snapshot of current state.
+    private func persistAllBookmarksToDatabase() {
+        guard let db = resolvedDatabase else { return }
+        for bookmark in bookmarks {
+            persistBookmarkToDatabase(db, bookmark: bookmark)
+        }
     }
 
     /// Writes the sidecar entry for a specific bookmark in its folder directory.
@@ -386,6 +434,7 @@ final class VaultBookmarkService: ObservableObject {
         let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
         deleteWeblocFileOnly(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
+        deleteBookmarkFromDatabase(bookmark.id)
         persist()
         return trashItem
     }
@@ -406,6 +455,9 @@ final class VaultBookmarkService: ObservableObject {
         }
         let ids = Set(bookmarksToDelete.map(\.id))
         bookmarks.removeAll { ids.contains($0.id) }
+        for id in ids {
+            deleteBookmarkFromDatabase(id)
+        }
         persist()
         return trashItems
     }
@@ -2104,6 +2156,271 @@ final class VaultBookmarkService: ObservableObject {
         try? fm.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
         try? fm.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
         try? fm.createDirectory(at: inboxBookmarksDir, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Database Persistence
+
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    // Internal for testing
+    /// SELECT all bookmarks from the database (items JOIN bookmarks), loading
+    /// labels, dismissed labels, and tags from join tables.
+    func loadBookmarksFromDatabase(_ db: CiderDatabase) {
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                       b.url, b.notes, b.notes_manually_set, b.title_manually_set,
+                       b.ai_summary, b.ocr_text, b.dominant_colors, b.media_type,
+                       b.thumbnail_relative_path, b.thumbnail_remote_url, b.original_image_path,
+                       b.carousel_image_paths, b.reader_unavailable, b.preferred_hero_mode
+                FROM items i
+                JOIN bookmarks b ON b.item_id = i.id
+                WHERE i.type = 'bookmark'
+                ORDER BY i.created_at DESC;
+                """)
+            var loaded: [Bookmark] = []
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
+
+                // Decode JSON-encoded array fields
+                let dominantColors = DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 12))
+                let carouselPaths = DatabaseHelpers.decodeStringArray(stmt.optionalString(at: 17))
+                let mediaTypeRaw = stmt.optionalString(at: 13)
+                let mediaType = mediaTypeRaw.flatMap { BookmarkMediaType(rawValue: $0) }
+
+                let readerUnavailable = stmt.optionalBool(at: 18)
+
+                var bookmark = Bookmark(
+                    id: id,
+                    title: stmt.string(at: 1),
+                    urlString: stmt.string(at: 6),
+                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                    updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
+                    notes: stmt.string(at: 7),
+                    tags: [],
+                    labelIDs: [],
+                    dismissedLabelIDs: [],
+                    folderID: folderID,
+                    thumbnailRemoteURLString: stmt.optionalString(at: 15),
+                    thumbnailRelativePath: stmt.optionalString(at: 14),
+                    originalImageRelativePath: stmt.optionalString(at: 16),
+                    aiSummary: stmt.optionalString(at: 10),
+                    ocrText: stmt.optionalString(at: 11),
+                    dominantColors: dominantColors.isEmpty ? nil : dominantColors,
+                    mediaType: mediaType,
+                    carouselImagePaths: carouselPaths.isEmpty ? nil : carouselPaths,
+                    readerUnavailable: readerUnavailable,
+                    preferredHeroMode: stmt.optionalString(at: 19),
+                    relativePath: stmt.optionalString(at: 5),
+                    titleManuallySet: stmt.bool(at: 9),
+                    notesManuallySet: stmt.bool(at: 8)
+                )
+
+                // Load labels from join table
+                bookmark.labelIDs = try loadLabelIDs(db, itemID: id)
+                bookmark.dismissedLabelIDs = try loadDismissedLabelIDs(db, itemID: id)
+                bookmark.tags = try loadTags(db, itemID: id)
+
+                loaded.append(bookmark)
+            }
+            bookmarks = loaded
+            logger.info("Loaded \(loaded.count) bookmarks from database")
+        } catch {
+            logger.error("Failed to load bookmarks from database: \(error.localizedDescription)")
+            bookmarks = []
+        }
+    }
+
+    /// Load label IDs from the item_labels join table for a given item.
+    private func loadLabelIDs(_ db: CiderDatabase, itemID: UUID) throws -> [UUID] {
+        let stmt = try db.prepare("SELECT label_id FROM item_labels WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var ids: [UUID] = []
+        while try stmt.step() {
+            if let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) {
+                ids.append(id)
+            }
+        }
+        return ids
+    }
+
+    /// Load dismissed label IDs from the dismissed_labels join table for a given item.
+    private func loadDismissedLabelIDs(_ db: CiderDatabase, itemID: UUID) throws -> [UUID] {
+        let stmt = try db.prepare("SELECT label_id FROM dismissed_labels WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var ids: [UUID] = []
+        while try stmt.step() {
+            if let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) {
+                ids.append(id)
+            }
+        }
+        return ids
+    }
+
+    /// Load tag names from item_tags JOIN tags for a given item.
+    private func loadTags(_ db: CiderDatabase, itemID: UUID) throws -> [String] {
+        let stmt = try db.prepare("""
+            SELECT t.name FROM item_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.item_id = ?;
+            """)
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var names: [String] = []
+        while try stmt.step() {
+            names.append(stmt.string(at: 0))
+        }
+        return names
+    }
+
+    // Internal for testing
+    /// Persist a single bookmark to the database (items + bookmarks + join tables) in a transaction.
+    func persistBookmarkToDatabase(_ bookmark: Bookmark) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite persist for bookmark \(bookmark.id)")
+            return
+        }
+        persistBookmarkToDatabase(db, bookmark: bookmark)
+    }
+
+    // Internal for testing
+    /// Persist a single bookmark to the given database inside a transaction.
+    func persistBookmarkToDatabase(_ db: CiderDatabase, bookmark: Bookmark) {
+        do {
+            try db.withTransaction {
+                // 1. INSERT OR REPLACE into items
+                let itemStmt = try db.prepare("""
+                    INSERT OR REPLACE INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+                    VALUES (?, 'bookmark', ?, ?, ?, ?, ?);
+                    """)
+                let itemID = DatabaseHelpers.encode(bookmark.id)
+                let folderIDText: String? = bookmark.folderID.map { DatabaseHelpers.encode($0) }
+                itemStmt.bind(itemID, at: 1)
+                    .bind(bookmark.title, at: 2)
+                    .bind(DatabaseHelpers.encode(bookmark.createdAt), at: 3)
+                    .bind(DatabaseHelpers.encode(bookmark.updatedAt), at: 4)
+                    .bind(folderIDText, at: 5)
+                    .bind(bookmark.relativePath, at: 6)
+                try itemStmt.step()
+
+                // 2. INSERT OR REPLACE into bookmarks
+                let bkStmt = try db.prepare("""
+                    INSERT OR REPLACE INTO bookmarks (
+                        item_id, url, notes, notes_manually_set, title_manually_set,
+                        ai_summary, ocr_text, dominant_colors, media_type,
+                        thumbnail_relative_path, thumbnail_remote_url, original_image_path,
+                        carousel_image_paths, reader_unavailable, preferred_hero_mode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """)
+                let dominantColorsJSON: String? = bookmark.dominantColors.map { DatabaseHelpers.encode($0) }
+                let carouselJSON: String? = bookmark.carouselImagePaths.map { DatabaseHelpers.encode($0) }
+                let readerUnavailableInt: Int64? = bookmark.readerUnavailable.map { $0 ? 1 : 0 }
+
+                bkStmt.bind(itemID, at: 1)
+                    .bind(bookmark.urlString, at: 2)
+                    .bind(bookmark.notes, at: 3)
+                    .bind(bookmark.notesManuallySet ? Int64(1) : Int64(0), at: 4)
+                    .bind(bookmark.titleManuallySet ? Int64(1) : Int64(0), at: 5)
+                    .bind(bookmark.aiSummary, at: 6)
+                    .bind(bookmark.ocrText, at: 7)
+                    .bind(dominantColorsJSON, at: 8)
+                    .bind(bookmark.mediaType?.rawValue, at: 9)
+                    .bind(bookmark.thumbnailRelativePath, at: 10)
+                    .bind(bookmark.thumbnailRemoteURLString, at: 11)
+                    .bind(bookmark.originalImageRelativePath, at: 12)
+                    .bind(carouselJSON, at: 13)
+                    .bind(readerUnavailableInt, at: 14)
+                    .bind(bookmark.preferredHeroMode, at: 15)
+                try bkStmt.step()
+
+                // 3. Sync item_labels: delete all, re-insert current
+                let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
+                delLabels.bind(itemID, at: 1)
+                try delLabels.step()
+
+                if !bookmark.labelIDs.isEmpty {
+                    let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
+                    for labelID in bookmark.labelIDs {
+                        insLabel.reset()
+                        insLabel.bind(itemID, at: 1)
+                            .bind(DatabaseHelpers.encode(labelID), at: 2)
+                        try insLabel.step()
+                    }
+                }
+
+                // 4. Sync dismissed_labels: delete all, re-insert current
+                let delDismissed = try db.prepare("DELETE FROM dismissed_labels WHERE item_id = ?;")
+                delDismissed.bind(itemID, at: 1)
+                try delDismissed.step()
+
+                if !bookmark.dismissedLabelIDs.isEmpty {
+                    let insDismissed = try db.prepare("INSERT INTO dismissed_labels (item_id, label_id) VALUES (?, ?);")
+                    for labelID in bookmark.dismissedLabelIDs {
+                        insDismissed.reset()
+                        insDismissed.bind(itemID, at: 1)
+                            .bind(DatabaseHelpers.encode(labelID), at: 2)
+                        try insDismissed.step()
+                    }
+                }
+
+                // 5. Sync item_tags: find-or-create tags, delete all item_tags, re-insert
+                let delTags = try db.prepare("DELETE FROM item_tags WHERE item_id = ?;")
+                delTags.bind(itemID, at: 1)
+                try delTags.step()
+
+                if !bookmark.tags.isEmpty {
+                    let findTag = try db.prepare("SELECT id FROM tags WHERE name = ?;")
+                    let createTag = try db.prepare("INSERT INTO tags (id, name) VALUES (?, ?);")
+                    let insItemTag = try db.prepare("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?);")
+
+                    for tagName in bookmark.tags {
+                        // Find or create tag
+                        findTag.reset()
+                        findTag.bind(tagName, at: 1)
+                        let tagID: String
+                        if try findTag.step() {
+                            tagID = findTag.string(at: 0)
+                        } else {
+                            tagID = DatabaseHelpers.encode(UUID())
+                            createTag.reset()
+                            createTag.bind(tagID, at: 1).bind(tagName, at: 2)
+                            try createTag.step()
+                        }
+
+                        // Insert item_tag
+                        insItemTag.reset()
+                        insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
+                        try insItemTag.step()
+                    }
+                }
+            }
+        } catch {
+            logger.error("Failed to persist bookmark \(bookmark.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Delete a bookmark from the database by ID. CASCADE handles detail + join tables.
+    func deleteBookmarkFromDatabase(_ bookmarkID: UUID) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite delete for bookmark \(bookmarkID)")
+            return
+        }
+        deleteBookmarkFromDatabase(db, bookmarkID: bookmarkID)
+    }
+
+    // Internal for testing
+    /// DELETE a bookmark from the given database by ID.
+    func deleteBookmarkFromDatabase(_ db: CiderDatabase, bookmarkID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(bookmarkID), at: 1)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to delete bookmark \(bookmarkID) from database: \(error.localizedDescription)")
+        }
     }
 
 }
