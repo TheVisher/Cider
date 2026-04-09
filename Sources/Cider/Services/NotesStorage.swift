@@ -17,6 +17,11 @@ final class NotesStorage: ObservableObject {
     @Published private(set) var notes: [Note] = []
 
     private let logger = Logger(subsystem: "com.cider.app", category: "NotesStorage")
+
+    // MARK: - Database
+
+    /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
+    private var database: CiderDatabase?
     private var directoryURL: URL
     private var directoryFileDescriptor: Int32 = -1
     private var directorySource: DispatchSourceFileSystemObject?
@@ -67,6 +72,19 @@ final class NotesStorage: ObservableObject {
         self.directoryURL = StoragePaths.directoryURL(for: .notes)
         ensureDirectory()
         startDirectoryWatcher()
+
+        // Try SQLite first
+        if let db = resolvedDatabase {
+            loadNotesFromDatabase(db)
+            if !notes.isEmpty {
+                logger.info("Loaded \(self.notes.count) notes from database")
+                Task { @MainActor [weak self] in
+                    self?.loadVaultFolderNotes()
+                }
+                return
+            }
+        }
+
         let dirURL = directoryURL
         let idxURL = dirURL.appendingPathComponent(indexFileName)
         let idxName = indexFileName
@@ -79,7 +97,28 @@ final class NotesStorage: ObservableObject {
             self.notes = result.notes
             if result.needsSave { self.saveIndex() }
             self.loadVaultFolderNotes()
+
+            // One-time migration: persist JSON notes to SQLite
+            if !self.notes.isEmpty, let db = self.resolvedDatabase {
+                self.logger.info("Migrating \(self.notes.count) notes from JSON to SQLite")
+                do {
+                    try db.withTransaction {
+                        for note in self.notes {
+                            try self.persistNoteToDatabaseInner(db, note: note)
+                        }
+                    }
+                } catch {
+                    self.logger.error("Failed to migrate JSON notes to SQLite: \(error.localizedDescription)")
+                }
+            }
         }
+    }
+
+    /// Testing-only initializer with an explicit database.
+    /// Does NOT call loadNotes() — tests call loadNotesFromDatabase() directly.
+    init(database: CiderDatabase) {
+        self.database = database
+        self.directoryURL = StoragePaths.directoryURL(for: .notes)
     }
 
     /// The base directory URL where notes metadata index is stored (.cider/notes/).
@@ -489,6 +528,7 @@ final class NotesStorage: ObservableObject {
 
         let note = Note(id: uuid, title: title, content: initialContent, createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
         return note
     }
 
@@ -571,6 +611,7 @@ final class NotesStorage: ObservableObject {
             relativePath: inboxRelativePath
         )
         notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
         return note
     }
 
@@ -628,6 +669,7 @@ final class NotesStorage: ObservableObject {
         if let idx = notes.firstIndex(where: { $0.id == note.id }) {
             notes[idx].modifiedAt = Date()
             notes[idx].content = note.content
+            persistNoteToDatabase(notes[idx])
         }
     }
 
@@ -689,6 +731,7 @@ final class NotesStorage: ObservableObject {
                 notes[idx].title = sanitized
                 notes[idx].relativePath = newRelativePath
                 notes[idx].modifiedAt = Date()
+                persistNoteToDatabase(notes[idx])
             }
             SyncService.shared.pushAfterLocalChange()
         } catch {
@@ -711,6 +754,9 @@ final class NotesStorage: ObservableObject {
             return a.createdAt > b.createdAt
         }
         saveIndex()
+        if let pinnedNote = notes.first(where: { $0.id == noteID }) {
+            persistNoteToDatabase(pinnedNote)
+        }
         SyncService.shared.pushAfterLocalChange()
         return true
     }
@@ -781,6 +827,7 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        persistNoteToDatabase(notes[idx])
         SyncService.shared.pushAfterLocalChange()
         return true
     }
@@ -795,6 +842,7 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        persistNoteToDatabase(notes[idx])
         SidecarService.shared.syncNote(notes[idx])
         return true
     }
@@ -808,21 +856,37 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        persistNoteToDatabase(notes[idx])
         SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
     func removeLabelsFromAll(labelID: UUID) {
         var changed = false
+        var affectedNotes: [Note] = []
         for i in notes.indices where notes[i].labelIDs.contains(labelID) {
             notes[i].labelIDs.removeAll { $0 == labelID }
             if var entry = index[notes[i].id] {
                 entry.labelIDs = notes[i].labelIDs
                 index[notes[i].id] = entry
             }
+            affectedNotes.append(notes[i])
             changed = true
         }
-        if changed { saveIndex() }
+        if changed {
+            saveIndex()
+            if let db = resolvedDatabase {
+                do {
+                    try db.withTransaction {
+                        for note in affectedNotes {
+                            try persistNoteToDatabaseInner(db, note: note)
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to persist notes after label removal: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     @discardableResult
@@ -861,6 +925,7 @@ final class NotesStorage: ObservableObject {
         }
         let trashItem = TrashStorage.shared.trashNote(noteForTrash, notesDir: trashNotesDir)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
+        deleteNoteFromDatabase(note.id)
         index.removeValue(forKey: note.id)
         saveIndex()
         notes.removeAll { $0.id == note.id }
@@ -935,6 +1000,7 @@ final class NotesStorage: ObservableObject {
             isPinned: isPinned
         )
         notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
     }
 
     /// Update an existing note from a sync pull (remote is newer).
@@ -1000,6 +1066,7 @@ final class NotesStorage: ObservableObject {
             isPinned: isPinned ? true : nil
         )
         saveIndex()
+        persistNoteToDatabase(notes[idx])
     }
 
     /// Delete a note from a sync pull (remote deleted it).
@@ -1017,6 +1084,10 @@ final class NotesStorage: ObservableObject {
         // Also load vault-folder notes that scanNotes() can't find
         if folderID != nil {
             loadVaultFolderNotes()
+        }
+        // Persist restored note to database
+        if let restoredNote = notes.first(where: { $0.id == noteID }) {
+            persistNoteToDatabase(restoredNote)
         }
         // Cancel pending sync deletion and push so the note reappears on web
         SyncService.shared.cancelNoteDeletion(of: noteID)
@@ -1334,6 +1405,164 @@ final class NotesStorage: ObservableObject {
             guard !filename.isEmpty else { return }
 
             referenced.insert(filename)
+        }
+    }
+
+    // MARK: - Database Persistence
+
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    // Internal for testing
+    /// SELECT all notes from the database (items JOIN notes), loading
+    /// labelIDs from the item_labels join table.
+    func loadNotesFromDatabase(_ db: CiderDatabase) {
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                       n.content, n.is_pinned
+                FROM items i
+                JOIN notes n ON n.item_id = i.id
+                WHERE i.type = 'note'
+                ORDER BY n.is_pinned DESC, i.created_at DESC;
+                """)
+            var loaded: [Note] = []
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
+
+                var note = Note(
+                    id: id,
+                    title: stmt.string(at: 1),
+                    content: stmt.string(at: 6),
+                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                    modifiedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
+                    relativePath: stmt.optionalString(at: 5) ?? "",
+                    labelIDs: [],
+                    folderID: folderID,
+                    isPinned: stmt.bool(at: 7)
+                )
+
+                // Load labels from join table
+                note.labelIDs = try loadLabelIDs(db, itemID: id)
+
+                loaded.append(note)
+            }
+            notes = loaded
+            logger.info("Loaded \(loaded.count) notes from database")
+        } catch {
+            logger.error("Failed to load notes from database: \(error.localizedDescription)")
+            notes = []
+        }
+    }
+
+    /// Load label IDs from the item_labels join table for a given item.
+    private func loadLabelIDs(_ db: CiderDatabase, itemID: UUID) throws -> [UUID] {
+        let stmt = try db.prepare("SELECT label_id FROM item_labels WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var ids: [UUID] = []
+        while try stmt.step() {
+            if let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) {
+                ids.append(id)
+            }
+        }
+        return ids
+    }
+
+    // Internal for testing
+    /// Persist a single note to the database (items + notes + item_labels) in a transaction.
+    func persistNoteToDatabase(_ note: Note) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite persist for note \(note.id)")
+            return
+        }
+        persistNoteToDatabase(db, note: note)
+    }
+
+    // Internal for testing
+    /// Persist a single note to the given database inside its own transaction.
+    func persistNoteToDatabase(_ db: CiderDatabase, note: Note) {
+        do {
+            try db.withTransaction {
+                try persistNoteToDatabaseInner(db, note: note)
+            }
+        } catch {
+            logger.error("Failed to persist note \(note.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Core persist logic for a single note — must be called inside a transaction.
+    private func persistNoteToDatabaseInner(_ db: CiderDatabase, note: Note) throws {
+        // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE)
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'note', ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                updated_at = excluded.updated_at,
+                folder_id = excluded.folder_id,
+                relative_path = excluded.relative_path;
+            """)
+        let itemID = DatabaseHelpers.encode(note.id)
+        let folderIDText: String? = note.folderID.map { DatabaseHelpers.encode($0) }
+        let relPath: String? = note.relativePath.isEmpty ? nil : note.relativePath
+        itemStmt.bind(itemID, at: 1)
+            .bind(note.title, at: 2)
+            .bind(DatabaseHelpers.encode(note.createdAt), at: 3)
+            .bind(DatabaseHelpers.encode(note.modifiedAt), at: 4)
+            .bind(folderIDText, at: 5)
+            .bind(relPath, at: 6)
+        try itemStmt.step()
+
+        // 2. UPSERT into notes
+        let noteStmt = try db.prepare("""
+            INSERT INTO notes (item_id, content, is_pinned)
+            VALUES (?, ?, ?)
+            ON CONFLICT(item_id) DO UPDATE SET
+                content = excluded.content,
+                is_pinned = excluded.is_pinned;
+            """)
+        noteStmt.bind(itemID, at: 1)
+            .bind(note.content, at: 2)
+            .bind(note.isPinned ? Int64(1) : Int64(0), at: 3)
+        try noteStmt.step()
+
+        // 3. Sync item_labels: delete all, re-insert current
+        let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
+        delLabels.bind(itemID, at: 1)
+        try delLabels.step()
+
+        if !note.labelIDs.isEmpty {
+            let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
+            for labelID in note.labelIDs {
+                insLabel.reset()
+                insLabel.bind(itemID, at: 1)
+                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                try insLabel.step()
+            }
+        }
+    }
+
+    /// Delete a note from the database by ID. CASCADE handles detail + join tables.
+    func deleteNoteFromDatabase(_ noteID: UUID) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite delete for note \(noteID)")
+            return
+        }
+        deleteNoteFromDatabase(db, noteID: noteID)
+    }
+
+    // Internal for testing
+    /// DELETE a note from the given database by ID.
+    func deleteNoteFromDatabase(_ db: CiderDatabase, noteID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(noteID), at: 1)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to delete note \(noteID) from database: \(error.localizedDescription)")
         }
     }
 
