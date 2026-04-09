@@ -107,10 +107,11 @@ struct CiderDatabaseTests {
         let db1 = CiderDatabase()
         try db1.open(at: url)
         let folderID = UUID().uuidString
-        try db1.runSQL("""
-            INSERT INTO folders (id, relative_path, created_at, updated_at)
-            VALUES ('\(folderID)', 'test/path', 0.0, 0.0);
-            """)
+        let insertFolder = try db1.prepare(
+            "INSERT INTO folders (id, relative_path, created_at, updated_at) VALUES (?, ?, 0.0, 0.0);"
+        )
+        insertFolder.bind(folderID, at: 1).bind("test/path", at: 2)
+        try insertFolder.step()
         db1.close()
 
         // Second open: verify data persists and version is still 1
@@ -141,13 +142,20 @@ struct CiderDatabaseTests {
         defer { db.close() }
 
         try db.withTransaction {
-            try db.runSQL("""
-                INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
-                VALUES ('label1', 'Test', '#FF0000', 'custom', 0.0, 0.0);
-                """)
+            let insert = try db.prepare(
+                "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+            )
+            insert.bind("label1", at: 1)
+                .bind("Test", at: 2)
+                .bind("#FF0000", at: 3)
+                .bind("custom", at: 4)
+                .bind(0.0, at: 5)
+                .bind(0.0, at: 6)
+            try insert.step()
         }
 
-        let stmt = try db.prepare("SELECT name FROM labels WHERE id = 'label1';")
+        let stmt = try db.prepare("SELECT name FROM labels WHERE id = ?;")
+        stmt.bind("label1", at: 1)
         let hasRow = try stmt.step()
         #expect(hasRow)
         #expect(stmt.string(at: 0) == "Test")
@@ -164,10 +172,16 @@ struct CiderDatabaseTests {
 
         do {
             try db.withTransaction {
-                try db.runSQL("""
-                    INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
-                    VALUES ('label2', 'RolledBack', '#00FF00', 'custom', 0.0, 0.0);
-                    """)
+                let insert = try db.prepare(
+                    "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+                )
+                insert.bind("label2", at: 1)
+                    .bind("RolledBack", at: 2)
+                    .bind("#00FF00", at: 3)
+                    .bind("custom", at: 4)
+                    .bind(0.0, at: 5)
+                    .bind(0.0, at: 6)
+                try insert.step()
                 // Force an error with invalid SQL
                 try db.runSQL("INSERT INTO nonexistent_table VALUES (1);")
             }
@@ -176,7 +190,8 @@ struct CiderDatabaseTests {
         }
 
         // The label should not exist because the transaction was rolled back
-        let stmt = try db.prepare("SELECT count(*) FROM labels WHERE id = 'label2';")
+        let stmt = try db.prepare("SELECT count(*) FROM labels WHERE id = ?;")
+        stmt.bind("label2", at: 1)
         try stmt.step()
         #expect(stmt.int(at: 0) == 0)
     }
@@ -194,10 +209,16 @@ struct CiderDatabaseTests {
 
         // Inserting an item with a non-existent folder_id should fail
         #expect(throws: CiderDatabaseError.self) {
-            try db.runSQL("""
-                INSERT INTO items (id, type, title, created_at, updated_at, folder_id)
-                VALUES ('item1', 'bookmark', 'Test', 0.0, 0.0, 'nonexistent_folder');
-                """)
+            let stmt = try db.prepare(
+                "INSERT INTO items (id, type, title, created_at, updated_at, folder_id) VALUES (?, ?, ?, ?, ?, ?);"
+            )
+            stmt.bind("item1", at: 1)
+                .bind("bookmark", at: 2)
+                .bind("Test", at: 3)
+                .bind(0.0, at: 4)
+                .bind(0.0, at: 5)
+                .bind("nonexistent_folder", at: 6)
+            try stmt.step()
         }
     }
 
@@ -274,7 +295,7 @@ struct CiderDatabaseTests {
         defer { db.close() }
 
         let itemID = UUID().uuidString
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = Date().timeIntervalSince1970
 
         // Insert using prepared statement
         let insert = try db.prepare("""
@@ -310,19 +331,29 @@ struct CiderDatabaseTests {
         defer { db.close() }
 
         let itemID = UUID().uuidString
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = Date().timeIntervalSince1970
 
         // Insert item + bookmark detail
-        try db.runSQL("""
-            INSERT INTO items (id, type, title, created_at, updated_at)
-            VALUES ('\(itemID)', 'bookmark', 'Test', \(now), \(now));
-            """)
-        try db.runSQL("""
-            INSERT INTO bookmarks (item_id, url) VALUES ('\(itemID)', 'https://example.com');
-            """)
+        let insertItem = try db.prepare(
+            "INSERT INTO items (id, type, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?);"
+        )
+        insertItem.bind(itemID, at: 1)
+            .bind("bookmark", at: 2)
+            .bind("Test", at: 3)
+            .bind(now, at: 4)
+            .bind(now, at: 5)
+        try insertItem.step()
+
+        let insertBookmark = try db.prepare(
+            "INSERT INTO bookmarks (item_id, url) VALUES (?, ?);"
+        )
+        insertBookmark.bind(itemID, at: 1).bind("https://example.com", at: 2)
+        try insertBookmark.step()
 
         // Delete the item - cascade should remove the bookmark row
-        try db.runSQL("DELETE FROM items WHERE id = '\(itemID)';")
+        let deleteItem = try db.prepare("DELETE FROM items WHERE id = ?;")
+        deleteItem.bind(itemID, at: 1)
+        try deleteItem.step()
 
         let stmt = try db.prepare("SELECT count(*) FROM bookmarks WHERE item_id = ?;")
         stmt.bind(itemID, at: 1)

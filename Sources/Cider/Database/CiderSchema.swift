@@ -8,7 +8,7 @@ enum CiderSchema {
 
     static let createSchemaVersion = """
         CREATE TABLE IF NOT EXISTS schema_version (
-            version INTEGER NOT NULL
+            version INTEGER PRIMARY KEY
         );
         """
 

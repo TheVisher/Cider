@@ -17,14 +17,14 @@ enum DatabaseHelpers {
 
     // MARK: - Date ↔ REAL
 
-    /// Encode a Date as a Double (timeIntervalSinceReferenceDate) for REAL storage.
+    /// Encode a Date as a Double (Unix timestamp, seconds since 1970) for REAL storage.
     static func encode(_ date: Date) -> Double {
-        date.timeIntervalSinceReferenceDate
+        date.timeIntervalSince1970
     }
 
-    /// Decode a REAL column value to a Date.
+    /// Decode a REAL column value (Unix timestamp) to a Date.
     static func decodeDate(_ real: Double) -> Date {
-        Date(timeIntervalSinceReferenceDate: real)
+        Date(timeIntervalSince1970: real)
     }
 
     // MARK: - [String] ↔ JSON TEXT

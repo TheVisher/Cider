@@ -39,7 +39,7 @@ enum DatabaseMigrations {
             }
 
             // Set version to 1
-            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (1);")
+            try runOnDB(db, "INSERT OR REPLACE INTO schema_version (version) VALUES (1);")
         }
 
         logger.info("Migration to v1 complete")
@@ -78,10 +78,10 @@ enum DatabaseMigrations {
 
     private static func runOnDB(_ db: OpaquePointer, _ sql: String) throws {
         var errorMessage: UnsafeMutablePointer<CChar>?
+        defer { sqlite3_free(errorMessage) }
         let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
         if rc != SQLITE_OK {
             let message = errorMessage.map { String(cString: $0) } ?? "unknown error"
-            sqlite3_free(errorMessage)
             throw CiderDatabaseError.runExec(message)
         }
     }

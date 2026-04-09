@@ -47,7 +47,7 @@ final class SQLStatement {
     /// Bind an Int value at the given 1-based index.
     @discardableResult
     func bind(_ value: Int, at index: Int32) -> Self {
-        sqlite3_bind_int(stmt, index, Int32(value))
+        sqlite3_bind_int64(stmt, index, Int64(value))
         return self
     }
 

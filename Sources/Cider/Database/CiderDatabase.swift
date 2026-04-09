@@ -32,13 +32,20 @@ final class CiderDatabase {
 
         db = handle
 
-        // Enable WAL mode for concurrent reads
-        try runSQL("PRAGMA journal_mode=WAL;")
-        // Enable foreign key enforcement
-        try runSQL("PRAGMA foreign_keys=ON;")
+        do {
+            // Enable WAL mode for concurrent reads
+            try runSQL("PRAGMA journal_mode=WAL;")
+            // Enable foreign key enforcement
+            try runSQL("PRAGMA foreign_keys=ON;")
 
-        // Run schema migrations
-        try DatabaseMigrations.runMigrations(on: handle)
+            // Run schema migrations
+            try DatabaseMigrations.runMigrations(on: handle)
+        } catch {
+            // Close the handle to avoid leaking on setup failure
+            sqlite3_close_v2(handle)
+            db = nil
+            throw error
+        }
 
         logger.info("Database opened successfully")
     }
@@ -46,7 +53,7 @@ final class CiderDatabase {
     /// Close the database connection.
     func close() {
         guard let db else { return }
-        sqlite3_close(db)
+        sqlite3_close_v2(db)
         self.db = nil
         logger.info("Database closed")
     }
@@ -60,10 +67,10 @@ final class CiderDatabase {
     func runSQL(_ sql: String) throws {
         guard let db else { throw CiderDatabaseError.runExec("Database not open") }
         var errorMessage: UnsafeMutablePointer<CChar>?
+        defer { sqlite3_free(errorMessage) }
         let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
         if rc != SQLITE_OK {
             let message = errorMessage.map { String(cString: $0) } ?? "unknown error"
-            sqlite3_free(errorMessage)
             throw CiderDatabaseError.runExec(message)
         }
     }
@@ -82,7 +89,7 @@ final class CiderDatabase {
 
     /// Run a block inside a SQLite transaction.
     /// Commits on success, rolls back on throw.
-    func withTransaction<T>(_ body: () throws -> T) throws -> T {
+    func withTransaction<T>(_ body: @MainActor () throws -> T) throws -> T {
         try runSQL("BEGIN TRANSACTION;")
         do {
             let result = try body()
