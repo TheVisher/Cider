@@ -124,8 +124,8 @@ struct VaultFolderServiceSQLiteTests {
         #expect(service3.folders.isEmpty)
     }
 
-    @Test("INSERT OR REPLACE updates existing folder")
-    func insertOrReplaceUpdates() throws {
+    @Test("UPSERT updates existing folder")
+    func upsertUpdatesExistingFolder() throws {
         let (db, url) = try makeTestDB()
         defer { db.close(); cleanup(url) }
 

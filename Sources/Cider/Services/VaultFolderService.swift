@@ -829,12 +829,18 @@ final class VaultFolderService {
     }
 
     // Internal for testing
-    /// INSERT OR REPLACE a single folder into the given database.
+    /// UPSERT a single folder into the given database (ON CONFLICT avoids DELETE+INSERT; consistent with items/labels pattern).
     func persistToDatabase(_ db: CiderDatabase, folder: VaultFolder) {
         do {
             let stmt = try db.prepare("""
-                INSERT OR REPLACE INTO folders (id, relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y)
-                VALUES (?, ?, ?, ?, ?, ?, ?);
+                INSERT INTO folders (id, relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    relative_path = excluded.relative_path,
+                    updated_at = excluded.updated_at,
+                    icon = excluded.icon,
+                    cover_image_path = excluded.cover_image_path,
+                    cover_image_offset_y = excluded.cover_image_offset_y;
                 """)
             stmt.bind(DatabaseHelpers.encode(folder.id), at: 1)
                 .bind(folder.relativePath, at: 2)

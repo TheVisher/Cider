@@ -2322,10 +2322,15 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Core persist logic for a single bookmark — must be called inside a transaction.
     private func persistBookmarkToDatabaseInner(_ db: CiderDatabase, bookmark: Bookmark) throws {
-        // 1. INSERT OR REPLACE into items
+        // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE)
         let itemStmt = try db.prepare("""
-            INSERT OR REPLACE INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
-            VALUES (?, 'bookmark', ?, ?, ?, ?, ?);
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'bookmark', ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                updated_at = excluded.updated_at,
+                folder_id = excluded.folder_id,
+                relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(bookmark.id)
         let folderIDText: String? = bookmark.folderID.map { DatabaseHelpers.encode($0) }
@@ -2337,15 +2342,33 @@ final class VaultBookmarkService: ObservableObject {
             .bind(bookmark.relativePath, at: 6)
         try itemStmt.step()
 
-        // 2. INSERT OR REPLACE into bookmarks
+        // 2. UPSERT into bookmarks (item_id is PK; safe since bookmarks has no CASCADE children,
+        //    but consistent with the items pattern above)
         let bkStmt = try db.prepare("""
-            INSERT OR REPLACE INTO bookmarks (
+            INSERT INTO bookmarks (
                 item_id, url, notes, notes_manually_set, title_manually_set,
                 ai_summary, ocr_text, dominant_colors, media_type,
                 thumbnail_relative_path, thumbnail_remote_url, original_image_path,
                 carousel_image_paths, reader_unavailable, preferred_hero_mode,
                 enrichment_status, last_enriched_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(item_id) DO UPDATE SET
+                url = excluded.url,
+                notes = excluded.notes,
+                notes_manually_set = excluded.notes_manually_set,
+                title_manually_set = excluded.title_manually_set,
+                ai_summary = excluded.ai_summary,
+                ocr_text = excluded.ocr_text,
+                dominant_colors = excluded.dominant_colors,
+                media_type = excluded.media_type,
+                thumbnail_relative_path = excluded.thumbnail_relative_path,
+                thumbnail_remote_url = excluded.thumbnail_remote_url,
+                original_image_path = excluded.original_image_path,
+                carousel_image_paths = excluded.carousel_image_paths,
+                reader_unavailable = excluded.reader_unavailable,
+                preferred_hero_mode = excluded.preferred_hero_mode,
+                enrichment_status = excluded.enrichment_status,
+                last_enriched_at = excluded.last_enriched_at;
             """)
         let dominantColorsJSON: String? = bookmark.dominantColors.map { DatabaseHelpers.encode($0) }
         let carouselJSON: String? = bookmark.carouselImagePaths.map { DatabaseHelpers.encode($0) }

@@ -239,7 +239,7 @@ final class CardLabelStorage: ObservableObject {
         }
     }
 
-    /// INSERT OR REPLACE a single label into the database.
+    /// UPSERT a single label into the database.
     func persistToDatabase(_ label: CardLabel) {
         guard let db = resolvedDatabase else {
             logger.warning("No database available, skipping SQLite persist for label \(label.id)")
@@ -249,12 +249,17 @@ final class CardLabelStorage: ObservableObject {
     }
 
     // Internal for testing
-    /// INSERT OR REPLACE a single label into the given database.
+    /// UPSERT a single label into the given database (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE on item_labels/dismissed_labels).
     func persistToDatabase(_ db: CiderDatabase, label: CardLabel) {
         do {
             let stmt = try db.prepare("""
-                INSERT OR REPLACE INTO labels (id, name, color_hex, kind, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?);
+                INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    color_hex = excluded.color_hex,
+                    kind = excluded.kind,
+                    updated_at = excluded.updated_at;
                 """)
             stmt.bind(DatabaseHelpers.encode(label.id), at: 1)
                 .bind(label.name, at: 2)
