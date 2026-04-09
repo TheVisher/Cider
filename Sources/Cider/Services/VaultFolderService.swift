@@ -742,6 +742,7 @@ final class VaultFolderService {
             if !indexedPaths.contains(relativePath) {
                 let folder = VaultFolder(relativePath: relativePath)
                 index[folder.id] = folder
+                persistFolderToDatabase(folder)
             }
         }
     }
