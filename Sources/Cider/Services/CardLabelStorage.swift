@@ -23,7 +23,8 @@ final class CardLabelStorage: ObservableObject {
         return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
     }
     private var backupFileURL: URL {
-        let dir = StoragePaths.directoryURL(for: .labels)
+        let dir = StoragePaths.vaultDirectoryURL()
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
         StoragePaths.ensureDirectory(dir)
         return StoragePaths.jsonFileURL(fileName: backupFileName, in: dir)
     }
@@ -189,14 +190,25 @@ final class CardLabelStorage: ObservableObject {
     }
 
     /// Load labels from SQLite, falling back to JSON if the database is unavailable.
+    /// When JSON labels are loaded and the database later becomes available,
+    /// this also performs a one-time migration of JSON labels into SQLite.
     private func loadFromDatabaseOrJSON() {
         if let db = resolvedDatabase {
             loadFromDatabase(db)
         } else {
             loadFromJSON()
+            // One-time migration: if we loaded labels from JSON and the database
+            // is now available, persist them to SQLite so future launches use the DB.
+            if !labels.isEmpty, let db = resolvedDatabase {
+                logger.info("Migrating \(self.labels.count) labels from JSON to SQLite")
+                for label in labels {
+                    persistToDatabase(db, label: label)
+                }
+            }
         }
     }
 
+    // Internal for testing
     /// SELECT all labels from the database, ordered by name.
     func loadFromDatabase(_ db: CiderDatabase) {
         do {
@@ -236,6 +248,7 @@ final class CardLabelStorage: ObservableObject {
         persistToDatabase(db, label: label)
     }
 
+    // Internal for testing
     /// INSERT OR REPLACE a single label into the given database.
     func persistToDatabase(_ db: CiderDatabase, label: CardLabel) {
         do {
@@ -264,6 +277,7 @@ final class CardLabelStorage: ObservableObject {
         deleteFromDatabase(db, labelID: labelID)
     }
 
+    // Internal for testing
     /// DELETE a label from the given database by ID.
     func deleteFromDatabase(_ db: CiderDatabase, labelID: UUID) {
         do {
@@ -288,6 +302,7 @@ final class CardLabelStorage: ObservableObject {
             labels = snapshot.labels
             sortLabels()
         } catch {
+            logger.error("Failed to load labels from JSON: \(error.localizedDescription)")
             labels = []
         }
     }
