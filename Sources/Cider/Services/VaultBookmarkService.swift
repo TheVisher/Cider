@@ -301,10 +301,17 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Persist all current bookmarks to the database.
     /// Mirrors the writeIndexCache() approach — full snapshot of current state.
+    /// Wraps all writes in a single transaction for performance.
     private func persistAllBookmarksToDatabase() {
         guard let db = resolvedDatabase else { return }
-        for bookmark in bookmarks {
-            persistBookmarkToDatabase(db, bookmark: bookmark)
+        do {
+            try db.withTransaction {
+                for bookmark in bookmarks {
+                    try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
+                }
+            }
+        } catch {
+            logger.error("Failed to persist bookmarks to database: \(error.localizedDescription)")
         }
     }
 
@@ -2287,118 +2294,123 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     // Internal for testing
-    /// Persist a single bookmark to the given database inside a transaction.
+    /// Persist a single bookmark to the given database inside its own transaction.
     func persistBookmarkToDatabase(_ db: CiderDatabase, bookmark: Bookmark) {
         do {
             try db.withTransaction {
-                // 1. INSERT OR REPLACE into items
-                let itemStmt = try db.prepare("""
-                    INSERT OR REPLACE INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
-                    VALUES (?, 'bookmark', ?, ?, ?, ?, ?);
-                    """)
-                let itemID = DatabaseHelpers.encode(bookmark.id)
-                let folderIDText: String? = bookmark.folderID.map { DatabaseHelpers.encode($0) }
-                itemStmt.bind(itemID, at: 1)
-                    .bind(bookmark.title, at: 2)
-                    .bind(DatabaseHelpers.encode(bookmark.createdAt), at: 3)
-                    .bind(DatabaseHelpers.encode(bookmark.updatedAt), at: 4)
-                    .bind(folderIDText, at: 5)
-                    .bind(bookmark.relativePath, at: 6)
-                try itemStmt.step()
-
-                // 2. INSERT OR REPLACE into bookmarks
-                let bkStmt = try db.prepare("""
-                    INSERT OR REPLACE INTO bookmarks (
-                        item_id, url, notes, notes_manually_set, title_manually_set,
-                        ai_summary, ocr_text, dominant_colors, media_type,
-                        thumbnail_relative_path, thumbnail_remote_url, original_image_path,
-                        carousel_image_paths, reader_unavailable, preferred_hero_mode
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                    """)
-                let dominantColorsJSON: String? = bookmark.dominantColors.map { DatabaseHelpers.encode($0) }
-                let carouselJSON: String? = bookmark.carouselImagePaths.map { DatabaseHelpers.encode($0) }
-                let readerUnavailableInt: Int64? = bookmark.readerUnavailable.map { $0 ? 1 : 0 }
-
-                bkStmt.bind(itemID, at: 1)
-                    .bind(bookmark.urlString, at: 2)
-                    .bind(bookmark.notes, at: 3)
-                    .bind(bookmark.notesManuallySet ? Int64(1) : Int64(0), at: 4)
-                    .bind(bookmark.titleManuallySet ? Int64(1) : Int64(0), at: 5)
-                    .bind(bookmark.aiSummary, at: 6)
-                    .bind(bookmark.ocrText, at: 7)
-                    .bind(dominantColorsJSON, at: 8)
-                    .bind(bookmark.mediaType?.rawValue, at: 9)
-                    .bind(bookmark.thumbnailRelativePath, at: 10)
-                    .bind(bookmark.thumbnailRemoteURLString, at: 11)
-                    .bind(bookmark.originalImageRelativePath, at: 12)
-                    .bind(carouselJSON, at: 13)
-                    .bind(readerUnavailableInt, at: 14)
-                    .bind(bookmark.preferredHeroMode, at: 15)
-                try bkStmt.step()
-
-                // 3. Sync item_labels: delete all, re-insert current
-                let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
-                delLabels.bind(itemID, at: 1)
-                try delLabels.step()
-
-                if !bookmark.labelIDs.isEmpty {
-                    let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
-                    for labelID in bookmark.labelIDs {
-                        insLabel.reset()
-                        insLabel.bind(itemID, at: 1)
-                            .bind(DatabaseHelpers.encode(labelID), at: 2)
-                        try insLabel.step()
-                    }
-                }
-
-                // 4. Sync dismissed_labels: delete all, re-insert current
-                let delDismissed = try db.prepare("DELETE FROM dismissed_labels WHERE item_id = ?;")
-                delDismissed.bind(itemID, at: 1)
-                try delDismissed.step()
-
-                if !bookmark.dismissedLabelIDs.isEmpty {
-                    let insDismissed = try db.prepare("INSERT INTO dismissed_labels (item_id, label_id) VALUES (?, ?);")
-                    for labelID in bookmark.dismissedLabelIDs {
-                        insDismissed.reset()
-                        insDismissed.bind(itemID, at: 1)
-                            .bind(DatabaseHelpers.encode(labelID), at: 2)
-                        try insDismissed.step()
-                    }
-                }
-
-                // 5. Sync item_tags: find-or-create tags, delete all item_tags, re-insert
-                let delTags = try db.prepare("DELETE FROM item_tags WHERE item_id = ?;")
-                delTags.bind(itemID, at: 1)
-                try delTags.step()
-
-                if !bookmark.tags.isEmpty {
-                    let findTag = try db.prepare("SELECT id FROM tags WHERE name = ?;")
-                    let createTag = try db.prepare("INSERT INTO tags (id, name) VALUES (?, ?);")
-                    let insItemTag = try db.prepare("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?);")
-
-                    for tagName in bookmark.tags {
-                        // Find or create tag
-                        findTag.reset()
-                        findTag.bind(tagName, at: 1)
-                        let tagID: String
-                        if try findTag.step() {
-                            tagID = findTag.string(at: 0)
-                        } else {
-                            tagID = DatabaseHelpers.encode(UUID())
-                            createTag.reset()
-                            createTag.bind(tagID, at: 1).bind(tagName, at: 2)
-                            try createTag.step()
-                        }
-
-                        // Insert item_tag
-                        insItemTag.reset()
-                        insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
-                        try insItemTag.step()
-                    }
-                }
+                try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
             }
         } catch {
             logger.error("Failed to persist bookmark \(bookmark.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Core persist logic for a single bookmark — must be called inside a transaction.
+    private func persistBookmarkToDatabaseInner(_ db: CiderDatabase, bookmark: Bookmark) throws {
+        // 1. INSERT OR REPLACE into items
+        let itemStmt = try db.prepare("""
+            INSERT OR REPLACE INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'bookmark', ?, ?, ?, ?, ?);
+            """)
+        let itemID = DatabaseHelpers.encode(bookmark.id)
+        let folderIDText: String? = bookmark.folderID.map { DatabaseHelpers.encode($0) }
+        itemStmt.bind(itemID, at: 1)
+            .bind(bookmark.title, at: 2)
+            .bind(DatabaseHelpers.encode(bookmark.createdAt), at: 3)
+            .bind(DatabaseHelpers.encode(bookmark.updatedAt), at: 4)
+            .bind(folderIDText, at: 5)
+            .bind(bookmark.relativePath, at: 6)
+        try itemStmt.step()
+
+        // 2. INSERT OR REPLACE into bookmarks
+        let bkStmt = try db.prepare("""
+            INSERT OR REPLACE INTO bookmarks (
+                item_id, url, notes, notes_manually_set, title_manually_set,
+                ai_summary, ocr_text, dominant_colors, media_type,
+                thumbnail_relative_path, thumbnail_remote_url, original_image_path,
+                carousel_image_paths, reader_unavailable, preferred_hero_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """)
+        let dominantColorsJSON: String? = bookmark.dominantColors.map { DatabaseHelpers.encode($0) }
+        let carouselJSON: String? = bookmark.carouselImagePaths.map { DatabaseHelpers.encode($0) }
+        let readerUnavailableInt: Int64? = bookmark.readerUnavailable.map { $0 ? 1 : 0 }
+
+        bkStmt.bind(itemID, at: 1)
+            .bind(bookmark.urlString, at: 2)
+            .bind(bookmark.notes, at: 3)
+            .bind(bookmark.notesManuallySet ? Int64(1) : Int64(0), at: 4)
+            .bind(bookmark.titleManuallySet ? Int64(1) : Int64(0), at: 5)
+            .bind(bookmark.aiSummary, at: 6)
+            .bind(bookmark.ocrText, at: 7)
+            .bind(dominantColorsJSON, at: 8)
+            .bind(bookmark.mediaType?.rawValue, at: 9)
+            .bind(bookmark.thumbnailRelativePath, at: 10)
+            .bind(bookmark.thumbnailRemoteURLString, at: 11)
+            .bind(bookmark.originalImageRelativePath, at: 12)
+            .bind(carouselJSON, at: 13)
+            .bind(readerUnavailableInt, at: 14)
+            .bind(bookmark.preferredHeroMode, at: 15)
+        try bkStmt.step()
+
+        // 3. Sync item_labels: delete all, re-insert current
+        let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
+        delLabels.bind(itemID, at: 1)
+        try delLabels.step()
+
+        if !bookmark.labelIDs.isEmpty {
+            let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
+            for labelID in bookmark.labelIDs {
+                insLabel.reset()
+                insLabel.bind(itemID, at: 1)
+                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                try insLabel.step()
+            }
+        }
+
+        // 4. Sync dismissed_labels: delete all, re-insert current
+        let delDismissed = try db.prepare("DELETE FROM dismissed_labels WHERE item_id = ?;")
+        delDismissed.bind(itemID, at: 1)
+        try delDismissed.step()
+
+        if !bookmark.dismissedLabelIDs.isEmpty {
+            let insDismissed = try db.prepare("INSERT INTO dismissed_labels (item_id, label_id) VALUES (?, ?);")
+            for labelID in bookmark.dismissedLabelIDs {
+                insDismissed.reset()
+                insDismissed.bind(itemID, at: 1)
+                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                try insDismissed.step()
+            }
+        }
+
+        // 5. Sync item_tags: find-or-create tags, delete all item_tags, re-insert
+        let delTags = try db.prepare("DELETE FROM item_tags WHERE item_id = ?;")
+        delTags.bind(itemID, at: 1)
+        try delTags.step()
+
+        if !bookmark.tags.isEmpty {
+            let findTag = try db.prepare("SELECT id FROM tags WHERE name = ?;")
+            let createTag = try db.prepare("INSERT INTO tags (id, name) VALUES (?, ?);")
+            let insItemTag = try db.prepare("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?);")
+
+            for tagName in bookmark.tags {
+                // Find or create tag
+                findTag.reset()
+                findTag.bind(tagName, at: 1)
+                let tagID: String
+                if try findTag.step() {
+                    tagID = findTag.string(at: 0)
+                } else {
+                    tagID = DatabaseHelpers.encode(UUID())
+                    createTag.reset()
+                    createTag.bind(tagID, at: 1).bind(tagName, at: 2)
+                    try createTag.step()
+                }
+
+                // Insert item_tag
+                insItemTag.reset()
+                insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
+                try insItemTag.step()
+            }
         }
     }
 
