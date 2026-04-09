@@ -28,6 +28,9 @@ final class VaultFolderService {
     /// Whether we're currently performing a mutation (suppresses FSEvents reconcile).
     private var isMutating = false
 
+    /// Explicit database instance (injected for testing).
+    private let database: CiderDatabase?
+
     // MARK: - Paths
 
     private let metaDirName = ".cider/folders"
@@ -63,10 +66,18 @@ final class VaultFolderService {
     // MARK: - Init
 
     private init() {
+        self.database = nil
         ensureDirectories()
-        loadIndex()
+        loadIndexFromDatabaseOrJSON()
         reconcileWithFilesystem()
         startWatching()
+    }
+
+    /// Testing-only initializer that accepts an explicit database instance.
+    /// Skips filesystem operations (directory creation, FSEvents, reconciliation).
+    init(database: CiderDatabase) {
+        self.database = database
+        loadFromDatabase(database)
     }
 
     // MARK: - CRUD
@@ -117,6 +128,7 @@ final class VaultFolderService {
 
         let folder = VaultFolder(relativePath: relativePath)
         index[folder.id] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
 
@@ -165,10 +177,12 @@ final class VaultFolderService {
                 entry.relativePath = newRelativePath
                 entry.updatedAt = Date()
                 index[id] = entry
+                persistFolderToDatabase(entry)
             } else if entry.relativePath.hasPrefix(oldPrefix) {
                 entry.relativePath = newRelativePath + "/" + entry.relativePath.dropFirst(oldPrefix.count)
                 entry.updatedAt = Date()
                 index[id] = entry
+                persistFolderToDatabase(entry)
             }
         }
 
@@ -215,9 +229,10 @@ final class VaultFolderService {
             deletedFolders.append(entry)
         }
 
-        // Remove from index
+        // Remove from index and database
         for deleted in deletedFolders {
             index.removeValue(forKey: deleted.id)
+            deleteFolderFromDatabase(folderID: deleted.id)
         }
 
         let payload = VaultFolderTrashPayload(folder: folder)
@@ -272,6 +287,7 @@ final class VaultFolderService {
         var restoredFolder = folder
         restoredFolder.updatedAt = Date()
         index[folder.id] = restoredFolder
+        persistFolderToDatabase(restoredFolder)
 
         // Re-scan for any subdirectories that were inside the restored folder
         scanSubdirectories(of: folder.relativePath)
@@ -297,6 +313,7 @@ final class VaultFolderService {
         folder.icon = icon
         folder.updatedAt = Date()
         index[folderID] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
@@ -330,6 +347,7 @@ final class VaultFolderService {
         folder.coverImagePath = coverRelPath
         folder.updatedAt = Date()
         index[folderID] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
@@ -342,6 +360,7 @@ final class VaultFolderService {
         folder.coverImageOffsetY = offsetY
         folder.updatedAt = Date()
         index[folderID] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
         return true
@@ -358,6 +377,7 @@ final class VaultFolderService {
         folder.coverImageOffsetY = nil
         folder.updatedAt = Date()
         index[folderID] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
@@ -487,6 +507,7 @@ final class VaultFolderService {
             icon: icon
         )
         index[folder.id] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
 
@@ -525,9 +546,11 @@ final class VaultFolderService {
                     if id == folderID {
                         entry.relativePath = newRelativePath
                         index[id] = entry
+                        persistFolderToDatabase(entry)
                     } else if entry.relativePath.hasPrefix(oldPrefix) {
                         entry.relativePath = newRelativePath + "/" + entry.relativePath.dropFirst(oldPrefix.count)
                         index[id] = entry
+                        persistFolderToDatabase(entry)
                     }
                 }
                 folder = index[folderID]!
@@ -540,6 +563,7 @@ final class VaultFolderService {
         folder.icon = icon
         folder.updatedAt = remoteUpdatedAt
         index[folderID] = folder
+        persistFolderToDatabase(folder)
         saveIndex()
         rebuildFolders()
 
@@ -556,13 +580,15 @@ final class VaultFolderService {
         isMutating = true
         defer { isMutating = false }
 
-        // Remove all descendants from index
+        // Remove all descendants from index and database
         let prefix = folder.relativePath + "/"
         let descendantIDs = index.filter { $0.value.relativePath.hasPrefix(prefix) }.map(\.key)
         for id in descendantIDs {
             index.removeValue(forKey: id)
+            deleteFolderFromDatabase(folderID: id)
         }
         index.removeValue(forKey: folderID)
+        deleteFolderFromDatabase(folderID: folderID)
 
         // Remove directory (contains all sub-folders and filed cards)
         if FileManager.default.fileExists(atPath: directoryURL.path) {
@@ -603,7 +629,7 @@ final class VaultFolderService {
         stopWatching()
         StoragePaths.invalidateCachedDirectory()
         ensureDirectories()
-        loadIndex()
+        loadIndexFromDatabaseOrJSON()
         reconcileWithFilesystem()
         startWatching()
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
@@ -668,6 +694,7 @@ final class VaultFolderService {
         for diskPath in diskPaths where !indexedPaths.contains(diskPath) {
             let folder = VaultFolder(relativePath: diskPath)
             index[folder.id] = folder
+            persistFolderToDatabase(folder)
             logger.info("Discovered external folder: \(diskPath)")
             changed = true
         }
@@ -676,6 +703,7 @@ final class VaultFolderService {
         for (id, entry) in index {
             if !diskPaths.contains(entry.relativePath) {
                 index.removeValue(forKey: id)
+                deleteFolderFromDatabase(folderID: id)
                 logger.info("Removed missing folder: \(entry.relativePath)")
                 changed = true
             }
@@ -733,9 +761,118 @@ final class VaultFolderService {
         return Self.reservedDirectoryNames.contains(topComponent)
     }
 
-    // MARK: - Private: Index Persistence
+    // MARK: - Database Persistence
 
-    private func loadIndex() {
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    /// Load folders from SQLite, falling back to JSON if the database is unavailable.
+    /// When JSON folders are loaded and the database is available,
+    /// performs a one-time migration of JSON folders into SQLite.
+    private func loadIndexFromDatabaseOrJSON() {
+        if let db = resolvedDatabase {
+            loadFromDatabase(db)
+        } else {
+            loadIndexFromJSON()
+            // One-time migration: if we loaded folders from JSON and the database
+            // is now available, persist them to SQLite so future launches use the DB.
+            if !index.isEmpty, let db = resolvedDatabase {
+                logger.info("Migrating \(self.index.count) folders from JSON to SQLite")
+                for folder in index.values {
+                    persistToDatabase(db, folder: folder)
+                }
+            }
+        }
+    }
+
+    // Internal for testing
+    /// SELECT all folders from the database, ordered by relative_path.
+    func loadFromDatabase(_ db: CiderDatabase) {
+        do {
+            let stmt = try db.prepare("""
+                SELECT id, relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y
+                FROM folders ORDER BY relative_path COLLATE NOCASE;
+                """)
+            var loaded: [UUID: VaultFolder] = [:]
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let folder = VaultFolder(
+                    id: id,
+                    relativePath: stmt.string(at: 1),
+                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                    updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
+                    icon: stmt.optionalString(at: 4),
+                    coverImagePath: stmt.optionalString(at: 5),
+                    coverImageOffsetY: stmt.optionalDouble(at: 6)
+                )
+                loaded[id] = folder
+            }
+            index = loaded
+            rebuildFolders()
+            logger.info("Loaded \(loaded.count) folders from database")
+        } catch {
+            logger.error("Failed to load folders from database: \(error.localizedDescription)")
+            index = [:]
+        }
+    }
+
+    /// Persist a single folder to the resolved database (production wrapper).
+    private func persistFolderToDatabase(_ folder: VaultFolder) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite persist for folder \(folder.id)")
+            return
+        }
+        persistToDatabase(db, folder: folder)
+    }
+
+    // Internal for testing
+    /// INSERT OR REPLACE a single folder into the given database.
+    func persistToDatabase(_ db: CiderDatabase, folder: VaultFolder) {
+        do {
+            let stmt = try db.prepare("""
+                INSERT OR REPLACE INTO folders (id, relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """)
+            stmt.bind(DatabaseHelpers.encode(folder.id), at: 1)
+                .bind(folder.relativePath, at: 2)
+                .bind(DatabaseHelpers.encode(folder.createdAt), at: 3)
+                .bind(DatabaseHelpers.encode(folder.updatedAt), at: 4)
+                .bind(folder.icon, at: 5)
+                .bind(folder.coverImagePath, at: 6)
+                .bind(folder.coverImageOffsetY, at: 7)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to persist folder \(folder.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Delete a single folder from the resolved database (production wrapper).
+    private func deleteFolderFromDatabase(folderID: UUID) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite delete for folder \(folderID)")
+            return
+        }
+        deleteFromDatabase(db, folderID: folderID)
+    }
+
+    // Internal for testing
+    /// DELETE a folder from the given database by ID.
+    func deleteFromDatabase(_ db: CiderDatabase, folderID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM folders WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to delete folder \(folderID) from database: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - JSON Persistence (legacy load + backup)
+
+    /// Load folders from the legacy JSON index file (used when database is unavailable).
+    private func loadIndexFromJSON() {
         guard let data = try? Data(contentsOf: indexFileURL),
               let decoded = try? JSONDecoder().decode([UUID: VaultFolder].self, from: data) else {
             index = [:]
@@ -745,6 +882,7 @@ final class VaultFolderService {
         rebuildFolders()
     }
 
+    /// Write the JSON index file as a backup after every mutation.
     private func saveIndex() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
