@@ -39,7 +39,7 @@ Every item gets a **stable UUID** that survives file moves and renames.
 - `items.relative_path` changes when a file moves. `items.id` does not.
 - File-backed items embed their UUID in the artifact or sidecar:
   - Bookmarks: UUID stored in folder sidecar JSON (already exists)
-  - Notes: UUID stored in note index (already exists)
+  - Notes: **must add UUID persistence.** Current UUIDs live only in the JSON note index. Once that index is removed, notes have no file-level identity. During migration, persist note UUIDs via a per-directory sidecar JSON (matching the bookmark sidecar pattern) so rebuild can recover note identity.
   - Todos/Events: `UID` field in `.ics` file (already exists, use as `items.id`)
   - Contacts: `UID` field in `.vcf` file (already exists, use as `items.id`)
   - Vault files: **must migrate from path-derived IDs to stable UUIDs.** Current `stableID(for: relativePath)` must be replaced. During migration, assign a random UUID and persist it in a sidecar or extended attribute.
@@ -61,12 +61,13 @@ On every launch, after loading the SQLite database into memory, Cider must recon
 3. **Match files to DB rows** — by `relative_path` first, then by embedded UUID/sidecar for moved files
 4. **Adopt orphans** — files on disk with no DB row get new items + detail rows (same as current orphan adoption)
 5. **Update moved files** — files whose path changed get their `relative_path` updated in the DB
-6. **Remove stale rows** — DB rows whose files no longer exist on disk get removed (or marked stale)
-7. **Publish arrays** — push reconciled data to `@Published` arrays for UI
+6. **Detect modified files** — compare file modification time (mtime) against `updated_at` in DB. If the file is newer, re-parse it and update the DB row. This catches external edits to `.md`, `.ics`, `.vcf`, and sidecar files made while Cider was closed.
+7. **Remove stale rows** — DB rows whose files no longer exist on disk get removed (or marked stale)
+8. **Publish arrays** — push reconciled data to `@Published` arrays for UI
 
 This is the same logic the current file watcher and orphan adoption system performs, adapted for SQLite instead of JSON. The reconciliation must run before any UI renders.
 
-**Important:** Reconciliation is not a full re-parse of every file. It is a diff operation: compare known paths/IDs in DB against filesystem state. Only new, moved, or deleted files trigger DB writes.
+**Important:** Reconciliation is primarily a diff operation. Steps 1-5 and 7 compare known paths/IDs against filesystem state. Step 6 (modified file detection) only re-parses files whose mtime is newer than the DB timestamp — not every file on every launch.
 
 ## Schema
 
@@ -218,6 +219,8 @@ CREATE TABLE sessions (
 
 Sessions are non-recoverable if the database is deleted. This is acceptable — they are ephemeral snapshots, not long-lived knowledge artifacts.
 
+**Cross-type query impact:** Because sessions are outside the `items` table, they do not appear in unified cross-type queries (folder contents, label filters). The search service must query the `sessions` table separately and merge results. This is intentional for v1 — sessions are second-class citizens in the unified model. If sessions need full cross-type participation later, they can be promoted to `items`.
+
 ### Shared Tables
 
 #### folders
@@ -317,8 +320,7 @@ CREATE INDEX idx_items_type        ON items(type);
 CREATE INDEX idx_items_folder      ON items(folder_id);
 CREATE INDEX idx_items_created     ON items(created_at);
 CREATE INDEX idx_items_updated     ON items(updated_at);
-CREATE INDEX idx_items_path        ON items(relative_path);
-CREATE UNIQUE INDEX idx_items_path_unique ON items(relative_path) WHERE relative_path IS NOT NULL;
+CREATE UNIQUE INDEX idx_items_path ON items(relative_path) WHERE relative_path IS NOT NULL;
 CREATE INDEX idx_item_labels_label ON item_labels(label_id);
 CREATE INDEX idx_item_tags_tag     ON item_tags(tag_id);
 CREATE INDEX idx_item_links_target ON item_links(target_id);
@@ -364,11 +366,11 @@ Understanding what metadata is already persisted in vault files is critical for 
 
 | File type | Embedded metadata |
 |-----------|------------------|
-| `.webloc` + sidecar JSON | UUID, title, tags, labelIDs, dismissedLabelIDs, notes, aiSummary, ocrText, dominantColors, mediaType, thumbnails, timestamps |
+| `.webloc` + sidecar JSON | UUID, title, tags, labelIDs, **dismissedLabelIDs**, notes, aiSummary, ocrText, dominantColors, mediaType, thumbnails, timestamps |
 | `.md` files | Content (the file itself). Title from filename. Note metadata (labels, pinned, folderID) in note index only. |
 | `.ics` (VTODO) | UID (= item UUID), summary, description, due, priority, status, `X-CIDER-LABEL`, `X-CIDER-LINKED` |
 | `.ics` (VEVENT) | UID (= item UUID), summary, dtstart, dtend, location, rrule, `X-CIDER-LABEL`, `X-CIDER-LINKED` |
-| `.vcf` | UID, FN, EMAIL, TEL, ADR, BDAY, NOTE, `X-CIDER-LABEL`, `X-CIDER-LINKED` |
+| `.vcf` | UID, FN, EMAIL, TEL, ADR, BDAY, NOTE, `X-CIDER-LABEL`, `X-CIDER-LINKED`, `X-CIDER-RELATIONSHIP`, `X-CIDER-HAS-AVATAR` |
 | Vault files (images, PDFs, etc.) | No embedded metadata. Filename only. |
 
 ### Fully recoverable from disk
@@ -400,8 +402,9 @@ Understanding what metadata is already persisted in vault files is critical for 
 | AI enrichment | Must re-enrich (but bookmark sidecars already persist aiSummary, so most is recoverable) |
 | Sessions | DB-only, no file artifact |
 | Trash | Deleted items are gone |
-| Dismissed labels | Lost (low-impact) |
-| Note metadata | Pinned state, note-specific labels (index-only today) |
+| Note metadata | Pinned state, note-specific labels (index-only today, until note sidecar is added) |
+
+Note: Dismissed labels for bookmarks ARE recoverable from sidecars (`dismissedLabelIDs` is persisted).
 
 ### Label backup strategy
 
