@@ -77,10 +77,7 @@ final class NotesStorage: ObservableObject {
         if let db = resolvedDatabase {
             loadNotesFromDatabase(db)
             if !notes.isEmpty {
-                logger.info("Loaded \(self.notes.count) notes from database")
-                Task { @MainActor [weak self] in
-                    self?.loadVaultFolderNotes()
-                }
+                loadVaultFolderNotes()
                 return
             }
         }
@@ -151,6 +148,17 @@ final class NotesStorage: ObservableObject {
         index = [:]
         ensureDirectory()
         startDirectoryWatcher()
+
+        // Try SQLite first (mirrors init pattern). loadNotesFromDatabase
+        // rehydrates both `notes` and `index`.
+        if let db = resolvedDatabase {
+            loadNotesFromDatabase(db)
+            if !notes.isEmpty {
+                loadVaultFolderNotes()
+                return
+            }
+        }
+
         // CH-C15: Load synchronously so callers see notes immediately after return.
         // Unlike init(), updateDirectory is user-triggered (rare) so brief main-thread
         // I/O is acceptable to avoid the async race that broke callers and tests.
@@ -1416,8 +1424,19 @@ final class NotesStorage: ObservableObject {
     }
 
     // Internal for testing
+    /// Number of entries currently in the in-memory UUID→metadata index.
+    /// Used by tests to verify `loadNotesFromDatabase` rehydrates the index.
+    var indexEntryCount: Int { index.count }
+
+    // Internal for testing
+    /// Returns the filename tracked by the index for a given note ID, if any.
+    func indexFilename(for noteID: UUID) -> String? { index[noteID]?.filename }
+
+    // Internal for testing
     /// SELECT all notes from the database (items JOIN notes), loading
-    /// labelIDs from the item_labels join table.
+    /// labelIDs from the item_labels join table. Also rehydrates `self.index`
+    /// so mutation paths (renameNote/togglePin/assignNote/assignLabel/...) can
+    /// find their entries after a DB-first cold launch.
     func loadNotesFromDatabase(_ db: CiderDatabase) {
         do {
             let stmt = try db.prepare("""
@@ -1429,32 +1448,51 @@ final class NotesStorage: ObservableObject {
                 ORDER BY n.is_pinned DESC, i.created_at DESC;
                 """)
             var loaded: [Note] = []
+            var rebuiltIndex: [UUID: NoteIndexEntry] = [:]
             while try stmt.step() {
                 guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
                 let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
+                let relativePath = stmt.optionalString(at: 5) ?? ""
+                let title = stmt.string(at: 1)
+                let isPinned = stmt.bool(at: 7)
+                let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
 
                 var note = Note(
                     id: id,
-                    title: stmt.string(at: 1),
+                    title: title,
                     content: stmt.string(at: 6),
-                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                    createdAt: createdAt,
                     modifiedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
-                    relativePath: stmt.optionalString(at: 5) ?? "",
+                    relativePath: relativePath,
                     labelIDs: [],
                     folderID: folderID,
-                    isPinned: stmt.bool(at: 7)
+                    isPinned: isPinned
                 )
 
                 // Load labels from join table
                 note.labelIDs = try loadLabelIDs(db, itemID: id)
 
+                // Derive filename: last path component of relativePath, or {title}.md fallback.
+                let lastComponent = (relativePath as NSString).lastPathComponent
+                let filename = lastComponent.isEmpty ? "\(title).md" : lastComponent
+
+                rebuiltIndex[id] = NoteIndexEntry(
+                    filename: filename,
+                    folderID: folderID,
+                    labelIDs: note.labelIDs.isEmpty ? nil : note.labelIDs,
+                    createdAt: createdAt,
+                    isPinned: isPinned ? true : nil
+                )
+
                 loaded.append(note)
             }
             notes = loaded
+            index = rebuiltIndex
             logger.info("Loaded \(loaded.count) notes from database")
         } catch {
             logger.error("Failed to load notes from database: \(error.localizedDescription)")
             notes = []
+            index = [:]
         }
     }
 

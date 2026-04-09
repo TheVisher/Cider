@@ -370,6 +370,131 @@ struct NotesSQLiteTests {
 
     // MARK: - Sort Order
 
+    // MARK: - Index Rehydration (Regression: C1)
+
+    @Test("loadNotesFromDatabase rehydrates self.index so mutations don't no-op")
+    func loadRehydratesIndex() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let note = Note(
+            title: "Indexed",
+            content: "Has an index entry",
+            relativePath: "Inbox/Notes/Indexed.md"
+        )
+        service.persistNoteToDatabase(db, note: note)
+
+        // Fresh service loading from DB — index must be non-empty after load.
+        let service2 = makeService(db)
+        service2.loadNotesFromDatabase(db)
+
+        #expect(service2.notes.count == 1)
+        #expect(service2.indexEntryCount == 1)
+        #expect(service2.indexFilename(for: note.id) == "Indexed.md")
+    }
+
+    @Test("togglePin through high-level API persists after DB-first load")
+    func togglePinRoundTripAfterDBLoad() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let initial = makeService(db)
+        let note = Note(
+            title: "PinMe",
+            content: "Body",
+            relativePath: "Inbox/Notes/PinMe.md",
+            isPinned: false
+        )
+        initial.persistNoteToDatabase(db, note: note)
+
+        // Fresh service loads from SQLite (simulates cold launch)
+        let service = makeService(db)
+        service.loadNotesFromDatabase(db)
+        #expect(service.indexEntryCount == 1)
+
+        // Mutate via high-level API. This would silently fail if C1 regressed
+        // (empty index means `if var entry = index[noteID]` never fires, but
+        // DB persistence would still succeed via the notes array path).
+        let toggled = service.togglePin(note.id)
+        #expect(toggled == true)
+
+        // Reload in another fresh service; pin state must have persisted.
+        let verify = makeService(db)
+        verify.loadNotesFromDatabase(db)
+        #expect(verify.notes.count == 1)
+        #expect(verify.notes[0].isPinned == true)
+        #expect(verify.indexEntryCount == 1)
+    }
+
+    @Test("assignLabel through high-level API persists after DB-first load")
+    func assignLabelRoundTripAfterDBLoad() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let labelStorage = CardLabelStorage(database: db)
+        let label = labelStorage.createLabel(name: "AfterLoad", colorHex: "#FF0000")
+
+        let initial = makeService(db)
+        let note = Note(
+            title: "Taggable",
+            content: "Body",
+            relativePath: "Inbox/Notes/Taggable.md"
+        )
+        initial.persistNoteToDatabase(db, note: note)
+
+        // Fresh service loads from SQLite
+        let service = makeService(db)
+        service.loadNotesFromDatabase(db)
+        #expect(service.indexEntryCount == 1)
+
+        let assigned = service.assignLabel(note.id, labelID: label.id)
+        #expect(assigned == true)
+
+        // Reload — label must have persisted to join table.
+        let verify = makeService(db)
+        verify.loadNotesFromDatabase(db)
+        #expect(verify.notes.count == 1)
+        #expect(verify.notes[0].labelIDs == [label.id])
+    }
+
+    // MARK: - Empty relativePath Round-Trip (Regression: I5)
+
+    @Test("Note with empty relativePath round-trips (NULL <-> empty string)")
+    func emptyRelativePathRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let note = Note(
+            title: "NoPath",
+            content: "No relative path",
+            relativePath: ""
+        )
+        service.persistNoteToDatabase(db, note: note)
+
+        // Verify SQL-level: relative_path stored as NULL
+        let stmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(note.id), at: 1)
+        try stmt.step()
+        #expect(stmt.optionalString(at: 0) == nil)
+
+        // Round-trip: loads back as empty string
+        let service2 = makeService(db)
+        service2.loadNotesFromDatabase(db)
+
+        #expect(service2.notes.count == 1)
+        let loaded = service2.notes[0]
+        #expect(loaded.id == note.id)
+        #expect(loaded.relativePath == "")
+        // Index filename should fall back to "{title}.md" when relativePath is empty
+        #expect(service2.indexFilename(for: note.id) == "NoPath.md")
+    }
+
+    // MARK: - Sort Order
+
     @Test("Notes load sorted: pinned first, then by newest created")
     func sortOrder() throws {
         let (db, url) = try makeTestDB()
