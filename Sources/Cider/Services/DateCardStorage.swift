@@ -2,17 +2,11 @@ import Combine
 import Foundation
 import os
 
-/// Legacy format — kept only for migration from the old single-JSON store.
-struct DateCardsSnapshot: Codable {
-    var dateCards: [DateCard]
-}
-
-/// Manages date cards as individual .ics (VEVENT) files on disk with a lightweight JSON index.
+/// Manages date cards as individual .ics (VEVENT) files on disk, mirrored to SQLite.
 ///
 /// File layout:
 /// - Unfiled date cards: `Inbox/Date Cards/{title}.ics`
 /// - Filed date cards: `{UserFolder}/{title}.ics`
-/// - Index: `.cider/date-cards/_cider_date_cards_index.json`
 /// - Trash: `.cider/date-cards/.trash/`
 @MainActor
 final class DateCardStorage: ObservableObject {
@@ -25,7 +19,6 @@ final class DateCardStorage: ObservableObject {
 
     @Published private(set) var dateCards: [DateCard] = []
 
-    private let indexFileName = "_cider_date_cards_index.json"
     private let fileExtension = "ics"
 
     /// Per-date-card metadata persisted in the index file.
@@ -59,10 +52,6 @@ final class DateCardStorage: ObservableObject {
 
     private var vaultRoot: URL {
         StoragePaths.cachedVaultDirectoryURL
-    }
-
-    private var indexURL: URL {
-        metadataDirectoryURL.appendingPathComponent(indexFileName)
     }
 
     private init() {
@@ -454,32 +443,11 @@ final class DateCardStorage: ObservableObject {
 
     // MARK: - Index I/O
 
-    private func loadIndex() {
-        guard let data = try? Data(contentsOf: indexURL) else {
-            index = [:]
-            return
-        }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let decoded = try? decoder.decode([String: IndexEntry].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, value)
-            })
-            return
-        }
-        index = [:]
-    }
-
-    private func saveIndex() {
-        let encoded = Dictionary(uniqueKeysWithValues: index.map { ($0.key.uuidString, $0.value) })
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(encoded) {
-            try? data.write(to: indexURL, options: .atomic)
-        }
-    }
+    // Task 13: JSON index persistence removed. The in-memory `index` dict is
+    // rebuilt on launch from SQLite (`loadEventsFromDatabase`) and from .ics
+    // scan (`scanAndLoad`). Stubs retained so the mutation call sites stay put.
+    private func loadIndex() { /* no-op */ }
+    private func saveIndex() { /* no-op */ }
 
     // MARK: - Scan & Load
 

@@ -34,10 +34,8 @@ final class VaultFolderService {
     // MARK: - Paths
 
     private let metaDirName = ".cider/folders"
-    private let indexFileName = "index.json"
     private let coversDirName = "covers"
     private let trashDirName = ".trash"
-    private let manifestFileName = "_cider_trash_manifest.json"
 
     private var vaultRoot: URL {
         StoragePaths.cachedVaultDirectoryURL
@@ -47,20 +45,12 @@ final class VaultFolderService {
         vaultRoot.appendingPathComponent(metaDirName)
     }
 
-    private var indexFileURL: URL {
-        metaDir.appendingPathComponent(indexFileName)
-    }
-
     private var coversDir: URL {
         metaDir.appendingPathComponent(coversDirName)
     }
 
     private var trashDir: URL {
         metaDir.appendingPathComponent(trashDirName)
-    }
-
-    private var trashManifestURL: URL {
-        trashDir.appendingPathComponent(manifestFileName)
     }
 
     // MARK: - Init
@@ -769,22 +759,10 @@ final class VaultFolderService {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
-    /// Load folders from SQLite, falling back to JSON if the database is unavailable.
-    /// When JSON folders are loaded and the database is available,
-    /// performs a one-time migration of JSON folders into SQLite.
+    /// Load folders from SQLite.
     private func loadIndexFromDatabaseOrJSON() {
         if let db = resolvedDatabase {
             loadFromDatabase(db)
-        } else {
-            loadIndexFromJSON()
-            // One-time migration: if we loaded from JSON and DB is available, persist to SQLite
-            if !index.isEmpty, CiderDatabase.shared.isOpen {
-                let db = CiderDatabase.shared
-                logger.info("Migrating \(self.index.count) folders from JSON to SQLite")
-                for folder in index.values {
-                    persistToDatabase(db, folder: folder)
-                }
-            }
         }
     }
 
@@ -876,79 +854,42 @@ final class VaultFolderService {
         }
     }
 
-    // MARK: - JSON Persistence (legacy load + backup)
-
-    /// Load folders from the legacy JSON index file (used when database is unavailable).
-    private func loadIndexFromJSON() {
-        guard let data = try? Data(contentsOf: indexFileURL),
-              let decoded = try? JSONDecoder().decode([UUID: VaultFolder].self, from: data) else {
-            index = [:]
-            return
-        }
-        index = decoded
-        rebuildFolders()
-    }
-
-    /// Write the JSON index file as a backup after every mutation.
-    private func saveIndex() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(index) else { return }
-        try? data.write(to: indexFileURL, options: .atomic)
-    }
+    // Task 13: JSON index persistence removed. SQLite is the primary store;
+    // the in-memory `index` is rebuilt on launch by `loadFromDatabase`.
+    private func saveIndex() { /* no-op */ }
 
     private func rebuildFolders() {
         folders = index.values.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
     }
 
-    // MARK: - Private: Trash Manifest
+    // MARK: - Private: Trash (SQLite-backed)
 
     private func addToTrashManifest(_ item: TrashItem) {
-        var manifest = loadTrashManifest()
-        manifest.insert(item, at: 0)
-        saveTrashManifest(manifest)
-        // Mirror into the SQLite trash table so vault folder deletions show up
-        // alongside other trashed items.
         TrashStorage.shared.persistTrashItemToDatabase(item)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
     private func removeFromTrashManifest(_ itemID: UUID) {
-        var manifest = loadTrashManifest()
-        manifest.removeAll { $0.id == itemID }
-        saveTrashManifest(manifest)
-        // Keep the SQLite mirror in sync when restoring or permanently deleting.
         TrashStorage.shared.deleteTrashItemFromDatabase(itemID)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
-    private func loadTrashManifest() -> [TrashItem] {
-        guard let data = try? Data(contentsOf: trashManifestURL) else { return [] }
-        return (try? JSONDecoder().decode([TrashItem].self, from: data)) ?? []
-    }
-
-    private func saveTrashManifest(_ items: [TrashItem]) {
-        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: trashManifestURL, options: .atomic)
-    }
-
     /// Returns all trashed vault folders (for Settings → Trash display).
     func trashedFolders() -> [TrashItem] {
-        loadTrashManifest()
+        TrashStorage.shared.allTrashItems().filter { $0.itemType == .vaultFolder }
     }
 
     /// Permanently deletes all trashed vault folders.
     func emptyFolderTrash() {
-        let items = loadTrashManifest()
+        let items = trashedFolders()
         let fm = FileManager.default
         for item in items {
             if let payload = item.vaultFolderPayload {
                 let trashFolderURL = trashDir.appendingPathComponent(payload.folder.id.uuidString)
                 try? fm.removeItem(at: trashFolderURL)
             }
+            TrashStorage.shared.deleteTrashItemFromDatabase(item.id)
         }
-        saveTrashManifest([])
     }
 
     // MARK: - Private: Helpers

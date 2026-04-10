@@ -195,39 +195,12 @@ final class NotesStorage: ObservableObject {
         directoryURL.appendingPathComponent(indexFileName)
     }
 
-    private func loadIndex() {
-        guard let data = try? Data(contentsOf: indexURL) else {
-            index = [:]
-            return
-        }
-
-        // Try new format first: [String: NoteIndexEntry]
-        if let decoded = try? JSONDecoder().decode([String: NoteIndexEntry].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, value)
-            })
-            return
-        }
-
-        // Fallback: legacy format [String: String] (UUID → filename)
-        if let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, NoteIndexEntry(filename: value, folderID: nil))
-            })
-            return
-        }
-
-        index = [:]
-    }
-
-    private func saveIndex() {
-        let encoded = Dictionary(uniqueKeysWithValues: index.map { ($0.key.uuidString, $0.value) })
-        if let data = try? JSONEncoder().encode(encoded) {
-            try? data.write(to: indexURL, options: .atomic)
-        }
-    }
+    // Task 13: JSON index persistence removed. The in-memory `index` dict is
+    // rebuilt on launch from SQLite (`loadNotesFromDatabase`) and from .md
+    // scan (`scanNotes`/`loadAndScan`). Note identity is persisted in per-note
+    // `.cider-meta.json` sidecars for recoverability. Stubs retained so the
+    // mutation call sites stay put.
+    private func saveIndex() { /* no-op */ }
 
     // MARK: - Scanning
 
@@ -589,30 +562,15 @@ final class NotesStorage: ObservableObject {
 
     // MARK: - Background Load & Scan
 
-    /// Combines loadIndex + scanNotes into a pure, background-safe function.
-    /// Returns the rebuilt index, scanned notes, and whether the index needs saving.
+    /// Pure, background-safe scan of .md files on disk. Identity recovery
+    /// happens on the main actor via `reconcileUUIDsWithSidecars` after this
+    /// returns.
     private nonisolated static func loadAndScan(
         directoryURL: URL,
         indexURL: URL,
         indexFileName: String
     ) -> (index: [UUID: NoteIndexEntry], notes: [Note], needsSave: Bool) {
-        // Load index
-        var loadedIndex: [UUID: NoteIndexEntry] = [:]
-        if let data = try? Data(contentsOf: indexURL) {
-            // Try new format first: [String: NoteIndexEntry]
-            if let decoded = try? JSONDecoder().decode([String: NoteIndexEntry].self, from: data) {
-                loadedIndex = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                    guard let uuid = UUID(uuidString: key) else { return nil }
-                    return (uuid, value)
-                })
-            } else if let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
-                // Fallback: legacy format [String: String] (UUID → filename)
-                loadedIndex = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                    guard let uuid = UUID(uuidString: key) else { return nil }
-                    return (uuid, NoteIndexEntry(filename: value, folderID: nil, createdAt: nil))
-                })
-            }
-        }
+        let loadedIndex: [UUID: NoteIndexEntry] = [:]
 
         // Scan both .cider/notes/ (legacy) and Inbox/Notes/ for unfiled notes
         let fm = FileManager.default

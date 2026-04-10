@@ -1,10 +1,6 @@
 import Foundation
 import os
 
-private struct SessionsSnapshot: Codable {
-    var sessions: [BrowserSession]
-}
-
 @MainActor
 final class BrowserSessionStorage: ObservableObject {
     static let shared = BrowserSessionStorage()
@@ -12,13 +8,6 @@ final class BrowserSessionStorage: ObservableObject {
     private static let logger = Logger(subsystem: "com.cider", category: "BrowserSessionStorage")
 
     @Published private(set) var sessions: [BrowserSession] = []
-
-    private let indexFileName = "_cider_sessions.json"
-    private var indexFileURL: URL {
-        let dir = StoragePaths.directoryURL(for: .sessions)
-        StoragePaths.ensureDirectory(dir)
-        return StoragePaths.jsonFileURL(fileName: indexFileName, in: dir)
-    }
 
     // MARK: - Database
 
@@ -31,33 +20,12 @@ final class BrowserSessionStorage: ObservableObject {
     }
 
     private init() {
-        // Try SQLite first — if it returns any rows, that's the source of truth.
         if let db = resolvedDatabase {
             loadSessionsFromDatabase(db)
-            if !sessions.isEmpty {
-                return
-            }
-        }
-
-        // Fall back to the legacy JSON index. If we loaded anything, run a
-        // one-time migration into SQLite so the next launch reads from DB.
-        loadFromJSON()
-        if !sessions.isEmpty, let db = resolvedDatabase {
-            Self.logger.info("Migrating \(self.sessions.count) sessions from JSON to SQLite")
-            do {
-                try db.withTransaction {
-                    for session in sessions {
-                        try persistSessionToDatabaseInner(db, session: session)
-                    }
-                }
-            } catch {
-                Self.logger.error("Failed to migrate JSON sessions to SQLite: \(error.localizedDescription)")
-            }
         }
     }
 
     /// Testing-only initializer with an explicit database.
-    /// Does NOT read the legacy JSON index.
     init(database: CiderDatabase) {
         self.database = database
     }
@@ -65,8 +33,6 @@ final class BrowserSessionStorage: ObservableObject {
     func reload() {
         if let db = resolvedDatabase {
             loadSessionsFromDatabase(db)
-        } else {
-            loadFromJSON()
         }
     }
 
@@ -79,7 +45,6 @@ final class BrowserSessionStorage: ObservableObject {
         } else {
             sessions.append(session)
         }
-        persistJSON()
         persistSessionToDatabase(session)
         return session
     }
@@ -90,7 +55,6 @@ final class BrowserSessionStorage: ObservableObject {
         guard !trimmed.isEmpty else { return }
         sessions[idx].name = trimmed
         sessions[idx].updatedAt = Date()
-        persistJSON()
         persistSessionToDatabase(sessions[idx])
     }
 
@@ -100,7 +64,6 @@ final class BrowserSessionStorage: ObservableObject {
         let sessionsDir = StoragePaths.directoryURL(for: .sessions)
         let trashItem = TrashStorage.shared.trashSession(session, sessionsDir: sessionsDir)
         sessions.removeAll { $0.id == id }
-        persistJSON()
         deleteSessionFromDatabase(id)
         return trashItem
     }
@@ -109,47 +72,13 @@ final class BrowserSessionStorage: ObservableObject {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].folderID = folderID
         sessions[idx].updatedAt = Date()
-        persistJSON()
         persistSessionToDatabase(sessions[idx])
     }
 
     func restoreFromTrash(_ session: BrowserSession) {
         guard !sessions.contains(where: { $0.id == session.id }) else { return }
         sessions.append(session)
-        persistJSON()
         persistSessionToDatabase(session)
-    }
-
-    // MARK: - JSON Persistence (legacy load + mirror write)
-
-    private func loadFromJSON() {
-        guard FileManager.default.fileExists(atPath: indexFileURL.path) else { return }
-        do {
-            let data = try Data(contentsOf: indexFileURL)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let snapshot = try decoder.decode(SessionsSnapshot.self, from: data)
-            sessions = snapshot.sessions
-        } catch {
-            Self.logger.error("Failed to decode sessions index: \(error)")
-            sessions = []
-        }
-    }
-
-    /// Writes the in-memory sessions list back to the legacy JSON index.
-    /// Retained so the one-time SQLite migration path remains reversible until
-    /// Task 13 removes the JSON fallback entirely.
-    private func persistJSON() {
-        let snapshot = SessionsSnapshot(sessions: sessions)
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(snapshot)
-            try data.write(to: indexFileURL, options: .atomic)
-        } catch {
-            Self.logger.error("Failed to persist sessions index: \(error)")
-        }
     }
 
     // MARK: - Database Persistence

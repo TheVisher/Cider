@@ -1,6 +1,22 @@
 import Foundation
 import os
 
+// Legacy single-file snapshot formats — retained file-privately so the one-time
+// pre-SQLite migrations below can still decode old vaults if they exist. These
+// used to live in the corresponding storage services (ContactsSnapshot etc.)
+// but were removed as part of the Task 13 JSON index cleanup.
+private struct LegacyContactsSnapshot: Codable {
+    var contacts: [ContactCard]
+}
+
+private struct LegacyTodoCardsSnapshot: Codable {
+    var todoCards: [TodoCard]
+}
+
+private struct LegacyDateCardsSnapshot: Codable {
+    var dateCards: [DateCard]
+}
+
 /// One-time migration that moves all app-internal directories from the vault root
 /// into the hidden `.cider/` subdirectory. After migration, the vault root contains
 /// only user-visible folders (plus CLAUDE.md and Unsorted/).
@@ -215,7 +231,7 @@ enum VaultStructureMigration {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(ContactsSnapshot.self, from: data) else {
+        guard let snapshot = try? decoder.decode(LegacyContactsSnapshot.self, from: data) else {
             logger.error("Failed to decode old contacts JSON")
             config.didMigrateContactsToPerFile = true
             config.save()
@@ -318,7 +334,7 @@ enum VaultStructureMigration {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(TodoCardsSnapshot.self, from: data) else {
+        guard let snapshot = try? decoder.decode(LegacyTodoCardsSnapshot.self, from: data) else {
             logger.error("Failed to decode old todos JSON")
             config.didMigrateTodosToPerFile = true
             config.save()
@@ -417,7 +433,7 @@ enum VaultStructureMigration {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(DateCardsSnapshot.self, from: data) else {
+        guard let snapshot = try? decoder.decode(LegacyDateCardsSnapshot.self, from: data) else {
             logger.error("Failed to decode old date cards JSON")
             config.didMigrateDateCardsToPerFile = true
             config.save()

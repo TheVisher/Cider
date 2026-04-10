@@ -4,9 +4,7 @@ import os
 /// Persists metadata overlay for VaultFiles (title, notes, labels, OCR, colors).
 /// VaultFileService owns file discovery (scanning); this service owns the metadata layer.
 ///
-/// Primary storage (as of Task 9): SQLite — `items` + `vault_files` tables.
-/// Legacy storage (kept only for the one-time migration path):
-/// `.cider/vault-files/_cider_vault_files_index.json`
+/// Primary storage: SQLite — `items` + `vault_files` tables.
 ///
 /// The in-memory `metadata` dictionary is the working cache; it mirrors SQLite
 /// and is keyed by VaultFile ID (stable UUID resolved through
@@ -20,7 +18,6 @@ final class VaultFileStorage: ObservableObject {
         category: "VaultFileStorage"
     )
 
-    private let indexFileName = "_cider_vault_files_index.json"
     private var metadata: [UUID: VaultFileMetadata] = [:]
 
     private var database: CiderDatabase?
@@ -36,60 +33,20 @@ final class VaultFileStorage: ObservableObject {
             .appendingPathComponent("vault-files")
     }
 
-    private var indexFileURL: URL {
-        storageDir.appendingPathComponent(indexFileName)
-    }
-
     private init() {
         ensureDirectory()
-
-        // Try SQLite first (mirrors ContactStorage/TodoCardStorage pattern).
         if let db = resolvedDatabase {
             loadVaultFilesFromDatabase(db)
-            if !metadata.isEmpty {
-                return
-            }
         }
-
-        // Fall back to the legacy JSON index. This is the one-time migration
-        // source — entries will be re-persisted to SQLite on the next write.
-        loadLegacyIndex()
     }
 
-    /// Testing-only initializer with an explicit database. Does NOT read the
-    /// legacy JSON index.
+    /// Testing-only initializer with an explicit database.
     init(database: CiderDatabase) {
         self.database = database
     }
 
-    // MARK: - Load / Save (legacy JSON index)
-
     private func ensureDirectory() {
         try? FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
-    }
-
-    private func loadLegacyIndex() {
-        guard let data = try? Data(contentsOf: indexFileURL) else { return }
-        do {
-            metadata = try JSONDecoder().decode([UUID: VaultFileMetadata].self, from: data)
-            logger.info("Loaded vault file metadata (legacy JSON): \(self.metadata.count) entries")
-        } catch {
-            logger.warning("Failed to decode vault file metadata: \(error.localizedDescription)")
-        }
-    }
-
-    /// Writes the in-memory metadata dictionary back to the legacy JSON index.
-    /// Retained so the one-time SQLite migration path remains reversible until
-    /// Task 13 removes the JSON fallback entirely.
-    private func saveLegacyIndex() {
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let data = try encoder.encode(metadata)
-            try data.write(to: indexFileURL, options: .atomic)
-        } catch {
-            logger.error("Failed to save vault file metadata: \(error.localizedDescription)")
-        }
     }
 
     // MARK: - Merge with Scanned Files
@@ -120,14 +77,12 @@ final class VaultFileStorage: ObservableObject {
         // it even when it happens to match the filename stem.
         let hasTitle = (title?.isEmpty == false)
         metadata[file.id]?.titleManuallySet = hasTitle
-        saveLegacyIndex()
         persistVaultFileToDatabase(file)
     }
 
     func updateNotes(_ file: VaultFile, notes: String) {
         ensureEntry(file.id)
         metadata[file.id]?.notes = notes
-        saveLegacyIndex()
         persistVaultFileToDatabase(file)
     }
 
@@ -135,7 +90,6 @@ final class VaultFileStorage: ObservableObject {
         ensureEntry(file.id)
         if metadata[file.id]?.labelIDs.contains(labelID) == false {
             metadata[file.id]?.labelIDs.append(labelID)
-            saveLegacyIndex()
             persistVaultFileToDatabase(file)
         }
     }
@@ -143,7 +97,6 @@ final class VaultFileStorage: ObservableObject {
     func removeLabel(_ file: VaultFile, labelID: UUID) {
         guard metadata[file.id] != nil else { return }
         metadata[file.id]?.labelIDs.removeAll { $0 == labelID }
-        saveLegacyIndex()
         persistVaultFileToDatabase(file)
     }
 
@@ -163,7 +116,6 @@ final class VaultFileStorage: ObservableObject {
             metadata[file.id]?.title = title; changed = true
         }
         if changed {
-            saveLegacyIndex()
             persistVaultFileToDatabase(file)
         }
     }
@@ -177,7 +129,6 @@ final class VaultFileStorage: ObservableObject {
     func migrateMetadata(from oldID: UUID, to newID: UUID) {
         guard let existing = metadata.removeValue(forKey: oldID) else { return }
         metadata[newID] = existing
-        saveLegacyIndex()
     }
 
     /// Removes metadata for a file (e.g., when permanently deleted).
@@ -187,7 +138,6 @@ final class VaultFileStorage: ObservableObject {
             deleteVaultFileFromDatabase(fileID)
             return
         }
-        saveLegacyIndex()
         deleteVaultFileFromDatabase(fileID)
     }
 
@@ -209,7 +159,6 @@ final class VaultFileStorage: ObservableObject {
         meta.ocrText = file.ocrText
         meta.dominantColors = file.dominantColors
         metadata[file.id] = meta
-        saveLegacyIndex()
         persistVaultFileToDatabase(file)
     }
 

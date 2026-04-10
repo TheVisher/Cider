@@ -2,17 +2,11 @@ import Combine
 import Foundation
 import os
 
-/// Legacy format — kept only for migration from the old single-JSON store.
-struct TodoCardsSnapshot: Codable {
-    var todoCards: [TodoCard]
-}
-
-/// Manages todos as individual .ics (VTODO) files on disk with a lightweight JSON index.
+/// Manages todos as individual .ics (VTODO) files on disk, mirrored to SQLite.
 ///
 /// File layout:
 /// - Unfiled todos: `Inbox/Todos/{title}.ics`
 /// - Filed todos: `{UserFolder}/{title}.ics`
-/// - Index: `.cider/todos/_cider_todos_index.json`
 /// - Trash: `.cider/todos/.trash/`
 @MainActor
 final class TodoCardStorage: ObservableObject {
@@ -25,7 +19,6 @@ final class TodoCardStorage: ObservableObject {
 
     @Published private(set) var todoCards: [TodoCard] = []
 
-    private let indexFileName = "_cider_todos_index.json"
     private let fileExtension = "ics"
 
     /// Per-todo metadata persisted in the index file.
@@ -60,10 +53,6 @@ final class TodoCardStorage: ObservableObject {
 
     private var vaultRoot: URL {
         StoragePaths.cachedVaultDirectoryURL
-    }
-
-    private var indexURL: URL {
-        metadataDirectoryURL.appendingPathComponent(indexFileName)
     }
 
     private init() {
@@ -532,32 +521,12 @@ final class TodoCardStorage: ObservableObject {
 
     // MARK: - Index I/O
 
-    private func loadIndex() {
-        guard let data = try? Data(contentsOf: indexURL) else {
-            index = [:]
-            return
-        }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let decoded = try? decoder.decode([String: IndexEntry].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, value)
-            })
-            return
-        }
-        index = [:]
-    }
-
-    private func saveIndex() {
-        let encoded = Dictionary(uniqueKeysWithValues: index.map { ($0.key.uuidString, $0.value) })
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(encoded) {
-            try? data.write(to: indexURL, options: .atomic)
-        }
-    }
+    // Task 13: JSON index persistence removed. The in-memory `index` dict is
+    // rebuilt on launch from SQLite (`loadTodosFromDatabase`) and from .ics
+    // scan (`scanAndLoad`). The stubs below are retained only so the numerous
+    // mutation call sites remain unchanged.
+    private func loadIndex() { /* no-op */ }
+    private func saveIndex() { /* no-op */ }
 
     // MARK: - Scan & Load
 

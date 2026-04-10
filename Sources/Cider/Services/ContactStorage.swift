@@ -3,17 +3,11 @@ import Combine
 import Foundation
 import os
 
-/// Legacy format — kept only for migration from the old single-JSON store.
-struct ContactsSnapshot: Codable {
-    var contacts: [ContactCard]
-}
-
-/// Manages contacts as individual .vcf files on disk with a lightweight JSON index.
+/// Manages contacts as individual .vcf files on disk, mirrored to SQLite.
 ///
 /// File layout:
 /// - Unfiled contacts: `Inbox/Contacts/{name}.vcf`
 /// - Filed contacts: `{UserFolder}/{name}.vcf`
-/// - Index: `.cider/contacts/_cider_contacts_index.json`
 /// - Avatars: `.cider/contacts/.contact-avatars/{uuid}.jpg`
 /// - Trash: `.cider/contacts/.trash/`
 @MainActor
@@ -27,7 +21,6 @@ final class ContactStorage: ObservableObject {
         category: "ContactStorage"
     )
 
-    private let indexFileName = "_cider_contacts_index.json"
     private let fileExtension = "vcf"
 
     /// Per-contact metadata persisted in the index file.
@@ -59,10 +52,6 @@ final class ContactStorage: ObservableObject {
     /// The vault root directory.
     private var vaultRoot: URL {
         StoragePaths.cachedVaultDirectoryURL
-    }
-
-    private var indexURL: URL {
-        metadataDirectoryURL.appendingPathComponent(indexFileName)
     }
 
     private var inboxWatcher: FSEventsWatcher?
@@ -509,32 +498,11 @@ final class ContactStorage: ObservableObject {
 
     // MARK: - Index I/O
 
-    private func loadIndex() {
-        guard let data = try? Data(contentsOf: indexURL) else {
-            index = [:]
-            return
-        }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let decoded = try? decoder.decode([String: IndexEntry].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, value)
-            })
-            return
-        }
-        index = [:]
-    }
-
-    private func saveIndex() {
-        let encoded = Dictionary(uniqueKeysWithValues: index.map { ($0.key.uuidString, $0.value) })
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(encoded) {
-            try? data.write(to: indexURL, options: .atomic)
-        }
-    }
+    // Task 13: JSON index persistence removed. The in-memory `index` dict is
+    // rebuilt on launch from SQLite (`loadContactsFromDatabase`) and from .vcf
+    // scan (`scanAndLoad`). Stubs retained so the mutation call sites stay put.
+    private func loadIndex() { /* no-op */ }
+    private func saveIndex() { /* no-op */ }
 
     // MARK: - Scan & Load
 

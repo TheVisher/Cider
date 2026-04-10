@@ -15,13 +15,7 @@ final class CardLabelStorage: ObservableObject {
     private let logger = Logger(subsystem: "com.cider.app", category: "CardLabelStorage")
     private let database: CiderDatabase?
 
-    private let fileName = "_cider_labels.json"
     private let backupFileName = "_cider_labels-backup.json"
-    private var fileURL: URL {
-        let dir = StoragePaths.directoryURL(for: .labels)
-        StoragePaths.ensureDirectory(dir)
-        return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
-    }
     private var backupFileURL: URL {
         let dir = StoragePaths.vaultDirectoryURL()
             .appendingPathComponent(StoragePaths.ciderInternalDir)
@@ -189,22 +183,13 @@ final class CardLabelStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
-    /// Load labels from SQLite, falling back to JSON if the database is unavailable.
-    /// When JSON labels are loaded and the database later becomes available,
-    /// this also performs a one-time migration of JSON labels into SQLite.
+    /// Load labels from SQLite. If SQLite is unavailable AND a label backup
+    /// JSON exists, restore labels from it (recoverability path).
     private func loadFromDatabaseOrJSON() {
         if let db = resolvedDatabase {
             loadFromDatabase(db)
         } else {
-            loadFromJSON()
-            // One-time migration: if we loaded from JSON and DB is available, persist to SQLite
-            if !labels.isEmpty, CiderDatabase.shared.isOpen {
-                let db = CiderDatabase.shared
-                logger.info("Migrating \(self.labels.count) labels from JSON to SQLite")
-                for label in labels {
-                    persistToDatabase(db, label: label)
-                }
-            }
+            restoreFromBackupJSON()
         }
     }
 
@@ -294,20 +279,21 @@ final class CardLabelStorage: ObservableObject {
         }
     }
 
-    // MARK: - JSON Persistence (legacy load + backup)
+    // MARK: - Backup JSON (recoverability)
 
-    /// Load labels from the legacy JSON file (used when database is unavailable).
-    private func loadFromJSON() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    /// Restore labels from the `.cider/_cider_labels-backup.json` file when
+    /// SQLite is unavailable. This is a recoverability-only fallback.
+    private func restoreFromBackupJSON() {
+        guard FileManager.default.fileExists(atPath: backupFileURL.path) else { return }
         do {
-            let data = try Data(contentsOf: fileURL)
+            let data = try Data(contentsOf: backupFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let snapshot = try decoder.decode(CardLabelsSnapshot.self, from: data)
             labels = snapshot.labels
             sortLabels()
         } catch {
-            logger.error("Failed to load labels from JSON: \(error.localizedDescription)")
+            logger.error("Failed to restore labels from backup JSON: \(error.localizedDescription)")
             labels = []
         }
     }

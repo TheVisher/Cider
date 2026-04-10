@@ -11,7 +11,6 @@ final class TrashStorage {
     private static let logger = Logger(subsystem: "com.cider", category: "TrashStorage")
 
     private let trashDirName = ".trash"
-    private let manifestFileName = "_cider_trash_manifest.json"
     private let thumbnailsDirName = "thumbnails"
     private let originalsDirName = "originals"
 
@@ -25,12 +24,9 @@ final class TrashStorage {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
-    private init() {
-        performOneTimeMigrationIfNeeded()
-    }
+    private init() {}
 
     /// Testing-only initializer with an explicit database.
-    /// Does NOT read the legacy JSON manifests or run the migration.
     init(database: CiderDatabase) {
         self.database = database
     }
@@ -105,14 +101,16 @@ final class TrashStorage {
             targetDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
         }
 
-        // Resolve trash dir: check Inbox first, then legacy .cider/bookmarks/
+        // Resolve trash dir: probe the filesystem — whichever .trash/ dir still
+        // contains this bookmark's asset files is the one it was moved into.
         let inboxTrashDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
         let legacyTrashDir = StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
 
         let trashDir: URL
-        if fm.fileExists(atPath: inboxTrashDir.appendingPathComponent(manifestFileName).path) {
-            let manifest = loadManifest(trashDir: inboxTrashDir)
-            trashDir = manifest.contains(where: { $0.id == trashItem.id }) ? inboxTrashDir : legacyTrashDir
+        let probeRelPath = payload.trashThumbnailRelativePath ?? payload.trashOriginalRelativePath
+        if let rel = probeRelPath,
+           fm.fileExists(atPath: inboxTrashDir.appendingPathComponent(rel).path) {
+            trashDir = inboxTrashDir
         } else {
             trashDir = legacyTrashDir
         }
@@ -238,14 +236,7 @@ final class TrashStorage {
             return
         }
 
-        // Remove from whichever manifest actually contains this item
-        let resolvedTrashDir: URL
-        if loadManifest(trashDir: trashDir).contains(where: { $0.id == trashItem.id }) {
-            resolvedTrashDir = trashDir
-        } else {
-            resolvedTrashDir = legacyTrashDir
-        }
-        removeFromManifest(trashItem.id, trashDir: resolvedTrashDir)
+        removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
     // MARK: - Date Card Trash
@@ -710,37 +701,8 @@ final class TrashStorage {
     // MARK: - All Items
 
     func allTrashItems() -> [TrashItem] {
-        let bookmarksDir = StoragePaths.directoryURL(for: .bookmarks)
-        let notesDir = StoragePaths.directoryURL(for: .notes)
-        let dateCardsDir = StoragePaths.directoryURL(for: .dateCards)
-        let contactsDir = StoragePaths.directoryURL(for: .contacts)
-        let todosDir = StoragePaths.directoryURL(for: .todos)
-        let whiteboardsDir = StoragePaths.directoryURL(for: .whiteboards)
-        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
-        let kanbanDir = StoragePaths.directoryURL(for: .kanbanBoards)
-        var items: [TrashItem] = []
-        items += loadManifest(trashDir: bookmarksDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: notesDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: dateCardsDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: contactsDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: todosDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: whiteboardsDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: sessionsDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: kanbanDir.appendingPathComponent(trashDirName))
-        // Also check Inbox trash locations
-        let inboxBookmarksDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
-        let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
-        items += loadManifest(trashDir: inboxBookmarksDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: inboxNotesDir.appendingPathComponent(trashDirName))
-        items += loadManifest(trashDir: vaultFilesTrashDir)
-        // Scan trash inside every vault folder (bookmarks in user folders trash to {folder}/.trash/)
-        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
-        for folder in VaultFolderService.shared.folders {
-            let folderTrashDir = vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
-            items += loadManifest(trashDir: folderTrashDir)
-        }
-        items += VaultFolderService.shared.trashedFolders()
-        return items.sorted { $0.deletedAt > $1.deletedAt }
+        guard let db = resolvedDatabase else { return [] }
+        return loadTrashItemsFromDatabase(db)
     }
 
     // MARK: - Purge
@@ -748,47 +710,44 @@ final class TrashStorage {
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .kanbanBoards, .whiteboards]
-        for type in trashTypes {
-            purgeExpired(
-                olderThan: cutoff,
-                in: StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
-            )
+        let expired = allTrashItems().filter { $0.deletedAt < cutoff }
+        guard !expired.isEmpty else { return }
+
+        for item in expired {
+            let trashDir = resolveTrashDir(for: item)
+            deleteFilesForItem(item, trashDir: trashDir)
         }
-        // Also purge from Inbox trash locations
-        for type in [StorageType.bookmarks, .notes] {
-            purgeExpired(
-                olderThan: cutoff,
-                in: StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
-            )
+
+        if let db = resolvedDatabase {
+            do {
+                try db.withTransaction {
+                    for item in expired {
+                        deleteTrashItemFromDatabase(db, trashItemID: item.id)
+                    }
+                }
+            } catch {
+                Self.logger.error("purgeExpired: SQLite batch delete failed: \(error.localizedDescription)")
+            }
         }
-        // Purge vault file trash
-        purgeExpired(olderThan: cutoff, in: vaultFilesTrashDir)
-        // Purge trash inside vault folders
-        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
-        for folder in VaultFolderService.shared.folders {
-            purgeExpired(
-                olderThan: cutoff,
-                in: vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
-            )
-        }
+
+        NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
     // Internal for testing
-    /// Purges expired trash items from a single `.trash/` directory's JSON manifest,
-    /// deletes their files, and mirrors the removal into the SQLite trash table so
-    /// stale rows don't accumulate. Safe to call with directories that don't exist.
+    /// Purges expired trash items older than `cutoff` from SQLite and removes
+    /// their files. `trashDir` is retained on the signature for test
+    /// compatibility but is no longer used to scope the purge — SQLite is the
+    /// source of truth.
     func purgeExpired(olderThan cutoff: Date, in trashDir: URL) {
-        var manifest = loadManifest(trashDir: trashDir)
-        let expired = manifest.filter { $0.deletedAt < cutoff }
+        let all = allTrashItems()
+        let expired = all.filter { $0.deletedAt < cutoff }
         guard !expired.isEmpty else { return }
-        for item in expired {
-            deleteFilesForItem(item, trashDir: trashDir)
-            manifest.removeAll { $0.id == item.id }
-        }
-        saveManifest(manifest, trashDir: trashDir)
 
-        // Batch SQLite deletes in a single transaction to avoid per-row overhead.
+        for item in expired {
+            let dir = resolveTrashDir(for: item)
+            deleteFilesForItem(item, trashDir: dir)
+        }
+
         if let db = resolvedDatabase {
             do {
                 try db.withTransaction {
@@ -809,11 +768,11 @@ final class TrashStorage {
     func permanentlyDelete(_ trashItem: TrashItem) {
         switch trashItem.itemType {
         case .bookmark:
-            let trashDir = resolveTrashDir(for: .bookmarks, itemID: trashItem.id)
+            let trashDir = resolveTrashDir(for: trashItem)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .note:
-            let trashDir = resolveTrashDir(for: .notes, itemID: trashItem.id)
+            let trashDir = resolveTrashDir(for: trashItem)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
         case .folder:
@@ -839,8 +798,7 @@ final class TrashStorage {
             deleteFilesForItem(trashItem, trashDir: trashDir)
             // Permanently delete cascaded date cards
             if let payload = trashItem.contactPayload {
-                let dateCardsTrashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
-                let manifest = loadManifest(trashDir: dateCardsTrashDir)
+                let manifest = allTrashItems()
                 for cascadedID in payload.cascadedDateCardTrashIDs {
                     if let cascadedItem = manifest.first(where: { $0.id == cascadedID }) {
                         permanentlyDelete(cascadedItem)
@@ -872,34 +830,14 @@ final class TrashStorage {
     }
 
     func emptyTrash() {
-        let trashTypes: [StorageType] = [.bookmarks, .notes, .dateCards, .todos, .contacts, .sessions, .whiteboards, .kanbanBoards]
-        for type in trashTypes {
-            let trashDir = StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
-            let items = loadManifest(trashDir: trashDir)
-            for item in items { deleteFilesForItem(item, trashDir: trashDir) }
-            saveManifest([], trashDir: trashDir)
+        // Delete every staged file referenced by a current trash row, then
+        // wipe the SQLite trash table.
+        let items = allTrashItems()
+        for item in items {
+            let dir = resolveTrashDir(for: item)
+            deleteFilesForItem(item, trashDir: dir)
         }
-        // Also empty Inbox trash locations
-        for type in [StorageType.bookmarks, .notes] {
-            let trashDir = StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
-            let items = loadManifest(trashDir: trashDir)
-            for item in items { deleteFilesForItem(item, trashDir: trashDir) }
-            saveManifest([], trashDir: trashDir)
-        }
-        // Empty vault file trash
-        let vfTrashDir = vaultFilesTrashDir
-        let vfItems = loadManifest(trashDir: vfTrashDir)
-        for item in vfItems { deleteFilesForItem(item, trashDir: vfTrashDir) }
-        saveManifest([], trashDir: vfTrashDir)
-        // Empty trash inside vault folders
-        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
-        for folder in VaultFolderService.shared.folders {
-            let folderTrashDir = vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
-            let folderItems = loadManifest(trashDir: folderTrashDir)
-            for item in folderItems { deleteFilesForItem(item, trashDir: folderTrashDir) }
-            saveManifest([], trashDir: folderTrashDir)
-        }
-        // Empty vault folder trash
+        // Also run vault folder trash cleanup (owns its own `.trash/` directory).
         VaultFolderService.shared.emptyFolderTrash()
         // Clear the SQLite trash table in one shot
         deleteAllTrashItemsFromDatabase()
@@ -909,21 +847,59 @@ final class TrashStorage {
 
     // MARK: - Private Helpers
 
-    /// Finds the correct trash directory for an item — checks Inbox, .cider/, and vault folders.
-    private func resolveTrashDir(for type: StorageType, itemID: UUID) -> URL {
-        let inboxTrashDir = StoragePaths.cachedInboxSubdirectoryURL(for: type).appendingPathComponent(trashDirName)
-        if loadManifest(trashDir: inboxTrashDir).contains(where: { $0.id == itemID }) {
-            return inboxTrashDir
-        }
-        // Check vault folder trash directories
+    /// Returns the `.trash/` directory associated with a trash item, derived
+    /// from its type and (where relevant) its original folder. Used by
+    /// permanent-delete / purge flows to locate the physical file bytes.
+    private func resolveTrashDir(for item: TrashItem) -> URL {
         let vaultRoot = StoragePaths.cachedVaultDirectoryURL
-        for folder in VaultFolderService.shared.folders {
-            let folderTrashDir = vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
-            if loadManifest(trashDir: folderTrashDir).contains(where: { $0.id == itemID }) {
-                return folderTrashDir
+        let fm = FileManager.default
+
+        switch item.itemType {
+        case .bookmark:
+            // Bookmarks in a user folder trash into `{folder}/.trash/`.
+            if let folderID = item.originalFolderID,
+               let folder = VaultFolderService.shared.folder(for: folderID) {
+                return vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
             }
+            // Otherwise probe inbox first, then legacy `.cider/bookmarks/.trash/`.
+            let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
+            if let payload = item.bookmarkPayload {
+                let probe = payload.trashThumbnailRelativePath ?? payload.trashOriginalRelativePath
+                if let rel = probe, fm.fileExists(atPath: inbox.appendingPathComponent(rel).path) {
+                    return inbox
+                }
+            }
+            return StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
+        case .note:
+            if let folderID = item.originalFolderID,
+               let folder = VaultFolderService.shared.folder(for: folderID) {
+                return vaultRoot.appendingPathComponent(folder.relativePath).appendingPathComponent(trashDirName)
+            }
+            let inbox = StoragePaths.cachedInboxSubdirectoryURL(for: .notes).appendingPathComponent(trashDirName)
+            if let filename = item.notePayload?.noteFilename,
+               fm.fileExists(atPath: inbox.appendingPathComponent(filename).path) {
+                return inbox
+            }
+            return StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName)
+        case .dateCard:
+            return StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
+        case .todo:
+            return StoragePaths.directoryURL(for: .todos).appendingPathComponent(trashDirName)
+        case .contact:
+            return StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
+        case .session:
+            return StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName)
+        case .whiteboard:
+            return StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
+        case .kanbanBoard:
+            return StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
+        case .vaultFile:
+            return vaultFilesTrashDir
+        case .vaultFolder:
+            return vaultRoot.appendingPathComponent(".cider/folders/.trash")
+        case .folder:
+            return StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
         }
-        return StoragePaths.directoryURL(for: type).appendingPathComponent(trashDirName)
     }
 
     private func deleteFilesForItem(_ trashItem: TrashItem, trashDir: URL) {
@@ -981,32 +957,18 @@ final class TrashStorage {
         }
     }
 
-    private func loadManifest(trashDir: URL) -> [TrashItem] {
-        let manifestURL = trashDir.appendingPathComponent(manifestFileName)
-        guard let data = try? Data(contentsOf: manifestURL) else { return [] }
-        return (try? JSONDecoder().decode([TrashItem].self, from: data)) ?? []
-    }
-
-    private func saveManifest(_ items: [TrashItem], trashDir: URL) {
-        let manifestURL = trashDir.appendingPathComponent(manifestFileName)
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: manifestURL, options: .atomic)
-    }
+    // Task 13: Per-directory JSON trash manifests removed. SQLite `trash` table
+    // is now the single source of truth. The `.trash/` directories themselves
+    // are kept — they still hold the physical bytes moved aside during delete.
+    // `trashDir:` parameters are retained on the signatures below for
+    // compatibility with the large number of existing call sites.
 
     private func addToManifest(_ item: TrashItem, trashDir: URL) {
-        var manifest = loadManifest(trashDir: trashDir)
-        // Prevent duplicate entries for the same item
-        manifest.removeAll { $0.id == item.id }
-        manifest.insert(item, at: 0)
-        saveManifest(manifest, trashDir: trashDir)
         persistTrashItemToDatabase(item)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
     private func removeFromManifest(_ itemID: UUID, trashDir: URL) {
-        var manifest = loadManifest(trashDir: trashDir)
-        manifest.removeAll { $0.id == itemID }
-        saveManifest(manifest, trashDir: trashDir)
         deleteTrashItemFromDatabase(itemID)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
@@ -1129,35 +1091,4 @@ final class TrashStorage {
         }
     }
 
-    // MARK: - One-Time Migration
-
-    /// If the SQLite trash table is empty but the JSON manifests contain items,
-    /// copy every item over in a single transaction. Runs once on startup.
-    private func performOneTimeMigrationIfNeeded() {
-        guard let db = resolvedDatabase else { return }
-
-        // Bail if the table already has rows — we don't want to clobber SQLite.
-        do {
-            let countStmt = try db.prepare("SELECT count(*) FROM trash;")
-            try countStmt.step()
-            if countStmt.int(at: 0) > 0 { return }
-        } catch {
-            Self.logger.error("Failed to count trash rows: \(error.localizedDescription)")
-            return
-        }
-
-        let legacyItems = allTrashItems()
-        guard !legacyItems.isEmpty else { return }
-
-        Self.logger.info("Migrating \(legacyItems.count) trash items from JSON to SQLite")
-        do {
-            try db.withTransaction {
-                for item in legacyItems {
-                    try persistTrashItemToDatabaseInner(db, item: item)
-                }
-            }
-        } catch {
-            Self.logger.error("Failed to migrate trash items to SQLite: \(error.localizedDescription)")
-        }
-    }
 }
