@@ -111,6 +111,7 @@ final class VaultBookmarkService: ObservableObject {
         if let db = resolvedDatabase {
             loadBookmarksFromDatabase(db)
             if !bookmarks.isEmpty {
+                pruneMissingBookmarksFromDisk(db)
                 logger.info("Loaded \(self.bookmarks.count) bookmarks from database")
                 Task { @MainActor [weak self] in
                     self?.adoptOrphanedVaultFiles()
@@ -303,6 +304,33 @@ final class VaultBookmarkService: ObservableObject {
         // Sort by creation date descending (newest first)
         result.sort { $0.createdAt > $1.createdAt }
         return result
+    }
+
+    private func pruneMissingBookmarksFromDisk(_ db: CiderDatabase) {
+        var removedIDs: [UUID] = []
+        bookmarks.removeAll { bookmark in
+            guard let relativePath = bookmark.relativePath else { return false }
+            let fileURL = vaultRoot.appendingPathComponent(relativePath)
+            guard !FileManager.default.fileExists(atPath: fileURL.path) else { return false }
+            removedIDs.append(bookmark.id)
+            return true
+        }
+        guard !removedIDs.isEmpty else { return }
+
+        do {
+            try db.withTransaction {
+                let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                for removedID in removedIDs {
+                    stmt.reset()
+                    stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
+                    try stmt.step()
+                }
+            }
+            writeIndexCache()
+            logger.info("Pruned \(removedIDs.count) bookmarks missing their .webloc files from disk")
+        } catch {
+            logger.error("Failed to prune bookmarks missing .webloc files: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Persist

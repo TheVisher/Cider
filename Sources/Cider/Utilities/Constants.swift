@@ -87,6 +87,7 @@ extension Notification.Name {
     static let dismissClipboardPanel = Notification.Name("cider.dismissClipboardPanel")
     static let toggleClipboardPanelWidth = Notification.Name("cider.toggleClipboardPanelWidth")
     static let vaultFoldersChanged = Notification.Name("cider.vaultFoldersChanged")
+    static let vaultFilesystemDidChange = Notification.Name("cider.vaultFilesystemDidChange")
     static let pinSessionToAIPanel = Notification.Name("cider.pinSessionToAIPanel")
     static let toggleAIAssistantPanel = Notification.Name("cider.toggleAIAssistantPanel")
     static let showAIAssistantPanel = Notification.Name("cider.showAIAssistantPanel")

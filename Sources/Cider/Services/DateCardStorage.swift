@@ -33,6 +33,7 @@ final class DateCardStorage: ObservableObject {
 
     private var index: [UUID: IndexEntry] = [:]
     private var inboxWatcher: FSEventsWatcher?
+    private var vaultFilesystemObserver: NSObjectProtocol?
     private var isScanning = false
     private var pendingRescan = false
     private var database: CiderDatabase?
@@ -75,12 +76,14 @@ final class DateCardStorage: ObservableObject {
             loadEventsFromDatabase(db)
             if !dateCards.isEmpty {
                 startWatching()
+                startVaultFilesystemObservation()
                 return
             }
         }
 
         scanAndLoad()
         startWatching()
+        startVaultFilesystemObservation()
 
         // One-time migration: persist JSON-sourced date cards to SQLite.
         // `persistEventToDatabaseInner` scrubs dangling folder_id references
@@ -148,6 +151,7 @@ final class DateCardStorage: ObservableObject {
     func rescan() {
         guard !isScanning else { pendingRescan = true; return }
         isScanning = true
+        let previousIDs = Set(dateCards.map(\.id))
         defer {
             isScanning = false
             if pendingRescan {
@@ -156,12 +160,25 @@ final class DateCardStorage: ObservableObject {
             }
         }
         scanAndLoad()
+        syncScanToDatabase(previousIDs: previousIDs)
     }
 
     private func ensureDirectories() {
         let fm = FileManager.default
         try? fm.createDirectory(at: metadataDirectoryURL, withIntermediateDirectories: true)
         try? fm.createDirectory(at: inboxDirectoryURL, withIntermediateDirectories: true)
+    }
+
+    private func startVaultFilesystemObservation() {
+        vaultFilesystemObserver = NotificationCenter.default.addObserver(
+            forName: .vaultFilesystemDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rescan()
+            }
+        }
     }
 
     // MARK: - CRUD
@@ -355,15 +372,25 @@ final class DateCardStorage: ObservableObject {
         guard !dateCards.contains(where: { $0.id == dateCard.id }) else { return }
 
         let dirURL = resolveDirectoryURL(folderID: dateCard.folderID)
-        let filename = uniqueFilename(for: dateCard.title, in: dirURL)
-
-        // Try to find the .ics in trash
         let trashDir = metadataDirectoryURL.appendingPathComponent(".trash")
         let fm = FileManager.default
         let trashFiles = (try? fm.contentsOfDirectory(at: trashDir, includingPropertiesForKeys: nil)) ?? []
+        var filename = uniqueFilename(for: dateCard.title, in: dirURL)
         var restored = false
 
+        if let liveFiles = try? fm.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) {
+            for file in liveFiles where file.pathExtension == fileExtension {
+                if let parsed = ICalendarSerializer.parseDateCard((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
+                   parsed.id == dateCard.id {
+                    filename = file.lastPathComponent
+                    restored = true
+                    break
+                }
+            }
+        }
+
         for file in trashFiles where file.pathExtension == fileExtension {
+            guard !restored else { break }
             if let parsed = ICalendarSerializer.parseDateCard((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
                parsed.id == dateCard.id {
                 let destURL = dirURL.appendingPathComponent(filename)
@@ -551,6 +578,27 @@ final class DateCardStorage: ObservableObject {
             } catch {
                 logger.error("Failed to persist adopted date cards: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func syncScanToDatabase(previousIDs: Set<UUID>) {
+        guard let db = resolvedDatabase else { return }
+        let currentIDs = Set(dateCards.map(\.id))
+        let removedIDs = previousIDs.subtracting(currentIDs)
+        do {
+            try db.withTransaction {
+                for dateCard in self.dateCards {
+                    try self.persistEventToDatabaseInner(db, dateCard: dateCard)
+                }
+                for removedID in removedIDs {
+                    let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                    stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
+                    try stmt.step()
+                }
+            }
+            logger.info("Rescan synced \(self.dateCards.count) date cards to SQLite (removed \(removedIDs.count))")
+        } catch {
+            logger.error("Failed to sync date card rescan to SQLite: \(error.localizedDescription)")
         }
     }
 

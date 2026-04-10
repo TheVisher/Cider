@@ -34,6 +34,7 @@ final class TodoCardStorage: ObservableObject {
 
     private var index: [UUID: IndexEntry] = [:]
     private var inboxWatcher: FSEventsWatcher?
+    private var vaultFilesystemObserver: NSObjectProtocol?
     private var isScanning = false
     private var pendingRescan = false
     private var database: CiderDatabase?
@@ -76,12 +77,14 @@ final class TodoCardStorage: ObservableObject {
             loadTodosFromDatabase(db)
             if !todoCards.isEmpty {
                 startWatching()
+                startVaultFilesystemObservation()
                 return
             }
         }
 
         scanAndLoad()
         startWatching()
+        startVaultFilesystemObservation()
 
         // One-time migration: persist JSON-sourced todos to SQLite.
         // `persistTodoToDatabaseInner` scrubs dangling folder_id references
@@ -172,6 +175,7 @@ final class TodoCardStorage: ObservableObject {
     func rescan() {
         guard !isScanning else { pendingRescan = true; return }
         isScanning = true
+        let previousIDs = Set(todoCards.map(\.id))
         defer {
             isScanning = false
             if pendingRescan {
@@ -180,12 +184,25 @@ final class TodoCardStorage: ObservableObject {
             }
         }
         scanAndLoad()
+        syncScanToDatabase(previousIDs: previousIDs)
     }
 
     private func ensureDirectories() {
         let fm = FileManager.default
         try? fm.createDirectory(at: metadataDirectoryURL, withIntermediateDirectories: true)
         try? fm.createDirectory(at: inboxDirectoryURL, withIntermediateDirectories: true)
+    }
+
+    private func startVaultFilesystemObservation() {
+        vaultFilesystemObserver = NotificationCenter.default.addObserver(
+            forName: .vaultFilesystemDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rescan()
+            }
+        }
     }
 
     // MARK: - CRUD
@@ -432,15 +449,25 @@ final class TodoCardStorage: ObservableObject {
         guard !todoCards.contains(where: { $0.id == todoCard.id }) else { return }
 
         let dirURL = resolveDirectoryURL(folderID: todoCard.folderID)
-        let filename = uniqueFilename(for: todoCard.title, in: dirURL)
-
-        // Try to find the .ics in trash
         let trashDir = metadataDirectoryURL.appendingPathComponent(".trash")
         let fm = FileManager.default
         let trashFiles = (try? fm.contentsOfDirectory(at: trashDir, includingPropertiesForKeys: nil)) ?? []
+        var filename = uniqueFilename(for: todoCard.title, in: dirURL)
         var restored = false
 
+        if let liveFiles = try? fm.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) {
+            for file in liveFiles where file.pathExtension == fileExtension {
+                if let parsed = ICalendarSerializer.parseTodo((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
+                   parsed.id == todoCard.id {
+                    filename = file.lastPathComponent
+                    restored = true
+                    break
+                }
+            }
+        }
+
         for file in trashFiles where file.pathExtension == fileExtension {
+            guard !restored else { break }
             if let parsed = ICalendarSerializer.parseTodo((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
                parsed.id == todoCard.id {
                 let destURL = dirURL.appendingPathComponent(filename)
@@ -630,6 +657,27 @@ final class TodoCardStorage: ObservableObject {
             } catch {
                 logger.error("Failed to persist adopted todos: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func syncScanToDatabase(previousIDs: Set<UUID>) {
+        guard let db = resolvedDatabase else { return }
+        let currentIDs = Set(todoCards.map(\.id))
+        let removedIDs = previousIDs.subtracting(currentIDs)
+        do {
+            try db.withTransaction {
+                for todo in self.todoCards {
+                    try self.persistTodoToDatabaseInner(db, todo: todo)
+                }
+                for removedID in removedIDs {
+                    let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                    stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
+                    try stmt.step()
+                }
+            }
+            logger.info("Rescan synced \(self.todoCards.count) todos to SQLite (removed \(removedIDs.count))")
+        } catch {
+            logger.error("Failed to sync todo rescan to SQLite: \(error.localizedDescription)")
         }
     }
 

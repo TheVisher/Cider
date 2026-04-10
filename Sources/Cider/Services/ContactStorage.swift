@@ -67,6 +67,7 @@ final class ContactStorage: ObservableObject {
     }
 
     private var inboxWatcher: FSEventsWatcher?
+    private var vaultFilesystemObserver: NSObjectProtocol?
     private var isScanning = false
     private var pendingRescan = false
 
@@ -79,12 +80,14 @@ final class ContactStorage: ObservableObject {
             loadContactsFromDatabase(db)
             if !contacts.isEmpty {
                 startWatching()
+                startVaultFilesystemObservation()
                 return
             }
         }
 
         scanAndLoad()
         startWatching()
+        startVaultFilesystemObservation()
 
         // One-time migration: persist JSON/.vcf-sourced contacts to SQLite.
         // `persistContactToDatabaseInner` scrubs dangling folder_id references
@@ -150,6 +153,7 @@ final class ContactStorage: ObservableObject {
     func rescan() {
         guard !isScanning else { pendingRescan = true; return }
         isScanning = true
+        let previousIDs = Set(contacts.map(\.id))
         defer {
             isScanning = false
             if pendingRescan {
@@ -158,6 +162,7 @@ final class ContactStorage: ObservableObject {
             }
         }
         scanAndLoad()
+        syncScanToDatabase(previousIDs: previousIDs)
     }
 
     // MARK: - Directory Setup
@@ -166,6 +171,18 @@ final class ContactStorage: ObservableObject {
         let fm = FileManager.default
         try? fm.createDirectory(at: metadataDirectoryURL, withIntermediateDirectories: true)
         try? fm.createDirectory(at: inboxDirectoryURL, withIntermediateDirectories: true)
+    }
+
+    private func startVaultFilesystemObservation() {
+        vaultFilesystemObserver = NotificationCenter.default.addObserver(
+            forName: .vaultFilesystemDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rescan()
+            }
+        }
     }
 
     // MARK: - CRUD
@@ -612,6 +629,27 @@ final class ContactStorage: ObservableObject {
             } catch {
                 logger.error("Failed to persist adopted contacts: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func syncScanToDatabase(previousIDs: Set<UUID>) {
+        guard let db = resolvedDatabase else { return }
+        let currentIDs = Set(contacts.map(\.id))
+        let removedIDs = previousIDs.subtracting(currentIDs)
+        do {
+            try db.withTransaction {
+                for contact in self.contacts {
+                    try self.persistContactToDatabaseInner(db, contact: contact)
+                }
+                for removedID in removedIDs {
+                    let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                    stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
+                    try stmt.step()
+                }
+            }
+            logger.info("Rescan synced \(self.contacts.count) contacts to SQLite (removed \(removedIDs.count))")
+        } catch {
+            logger.error("Failed to sync contact rescan to SQLite: \(error.localizedDescription)")
         }
     }
 

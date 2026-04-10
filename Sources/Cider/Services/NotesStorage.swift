@@ -29,6 +29,7 @@ final class NotesStorage: ObservableObject {
     private var inboxDirectorySource: DispatchSourceFileSystemObject?
     private var saveWorkItem: DispatchWorkItem?
     private var attachmentCleanupWorkItem: DispatchWorkItem?
+    private var vaultFilesystemObserver: NSObjectProtocol?
     private let indexFileName = "_cider_notes_index.json"
     private let snapshotsDirectoryName = ".history"
     private let attachmentsDirectoryName = ".attachments"
@@ -72,6 +73,7 @@ final class NotesStorage: ObservableObject {
         self.directoryURL = StoragePaths.directoryURL(for: .notes)
         ensureDirectory()
         startDirectoryWatcher()
+        startVaultFilesystemObservation()
 
         // Try SQLite first
         if let db = resolvedDatabase {
@@ -1321,7 +1323,7 @@ final class NotesStorage: ObservableObject {
         )
         source.setEventHandler { [weak self] in
             Task { @MainActor [weak self] in
-                self?.scanNotes()
+                self?.rescan()
             }
         }
         source.setCancelHandler {
@@ -1347,7 +1349,7 @@ final class NotesStorage: ObservableObject {
         )
         inboxSource.setEventHandler { [weak self] in
             Task { @MainActor [weak self] in
-                self?.scanNotes()
+                self?.rescan()
             }
         }
         inboxSource.setCancelHandler {
@@ -1364,6 +1366,18 @@ final class NotesStorage: ObservableObject {
         inboxDirectorySource?.cancel()
         inboxDirectorySource = nil
         inboxFileDescriptor = -1
+    }
+
+    private func startVaultFilesystemObservation() {
+        vaultFilesystemObserver = NotificationCenter.default.addObserver(
+            forName: .vaultFilesystemDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rescan()
+            }
+        }
     }
 
     // MARK: - Image Storage

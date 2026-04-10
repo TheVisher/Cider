@@ -81,6 +81,25 @@ final class BrowserSessionStorage: ObservableObject {
         persistSessionToDatabase(session)
     }
 
+    func removeLabelsFromAll(labelID: UUID) {
+        var modified: [BrowserSession] = []
+        for index in sessions.indices where sessions[index].labelIDs.contains(labelID) {
+            sessions[index].labelIDs.removeAll { $0 == labelID }
+            sessions[index].updatedAt = Date()
+            modified.append(sessions[index])
+        }
+        guard !modified.isEmpty, let db = resolvedDatabase else { return }
+        do {
+            try db.withTransaction {
+                for session in modified {
+                    try self.persistSessionToDatabaseInner(db, session: session)
+                }
+            }
+        } catch {
+            Self.logger.error("Failed to batch-persist sessions after label removal: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Database Persistence
 
     // Internal for testing
@@ -173,7 +192,7 @@ final class BrowserSessionStorage: ObservableObject {
         // with other services (VaultFileStorage dominant_colors, etc.).
         let tabsJSON: String? = session.tabs.isEmpty ? nil : DatabaseHelpers.encodeJSON(session.tabs)
         let labelIDsJSON: String? = session.labelIDs.isEmpty ? nil : DatabaseHelpers.encode(session.labelIDs)
-        let folderIDText: String? = session.folderID.map { DatabaseHelpers.encode($0) }
+        let folderIDText = resolveSafeFolderID(db, folderID: session.folderID)
 
         stmt.bind(DatabaseHelpers.encode(session.id), at: 1)
             .bind(session.name, at: 2)
@@ -185,6 +204,21 @@ final class BrowserSessionStorage: ObservableObject {
             .bind(DatabaseHelpers.encode(session.createdAt), at: 8)
             .bind(DatabaseHelpers.encode(session.updatedAt), at: 9)
         try stmt.step()
+    }
+
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) -> String? {
+        guard let folderID else { return nil }
+        do {
+            let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
+            if try stmt.step() {
+                return DatabaseHelpers.encode(folderID)
+            }
+            Self.logger.warning("Clearing stale folder reference for session folder \(folderID)")
+        } catch {
+            Self.logger.error("Failed to validate session folder \(folderID): \(error.localizedDescription)")
+        }
+        return nil
     }
 
     /// DELETE a session from the database by ID (public wrapper).

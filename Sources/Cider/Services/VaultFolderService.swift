@@ -570,6 +570,40 @@ final class VaultFolderService {
         isMutating = true
         defer { isMutating = false }
 
+        // Unassign items before removing the folder directory so their files move
+        // back to Inbox instead of being deleted with the folder tree.
+        let deletedIDs: Set<UUID> = {
+            var ids: Set<UUID> = [folderID]
+            let prefix = folder.relativePath + "/"
+            for (id, entry) in index where entry.relativePath.hasPrefix(prefix) {
+                ids.insert(id)
+            }
+            return ids
+        }()
+        for id in deletedIDs {
+            for note in NotesStorage.shared.notes where note.folderID == id {
+                NotesStorage.shared.assignNote(note.id, toFolder: nil)
+            }
+            for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.folderID == id {
+                VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
+            }
+            for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
+                TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
+            }
+            for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
+                DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
+            }
+            for contact in ContactStorage.shared.contacts where contact.folderID == id {
+                ContactStorage.shared.assignContact(contact.id, toFolder: nil)
+            }
+            for session in BrowserSessionStorage.shared.sessions where session.folderID == id {
+                BrowserSessionStorage.shared.assignSession(session.id, toFolder: nil)
+            }
+            for file in VaultFileService.shared.files where file.folderID == id {
+                VaultFileService.shared.assignFile(file.id, toFolder: nil)
+            }
+        }
+
         // Remove all descendants from index and database
         let prefix = folder.relativePath + "/"
         let descendantIDs = index.filter { $0.value.relativePath.hasPrefix(prefix) }.map(\.key)
@@ -636,6 +670,7 @@ final class VaultFolderService {
         // Reload sidecar metadata and rescan vault files
         SidecarService.shared.loadAll()
         VaultFileService.shared.scan()
+        NotificationCenter.default.post(name: .vaultFilesystemDidChange, object: nil)
         // Debounced adoption: wait for FSEvents to settle, then scan once
         adoptionDebounceTask?.cancel()
         adoptionDebounceTask = Task { @MainActor in
@@ -698,8 +733,8 @@ final class VaultFolderService {
         // a transient state. Empty folders remain safe to remove.
         for (id, entry) in index {
             if !diskPaths.contains(entry.relativePath) {
-                if folderHasItemsInDatabase(folderID: id) {
-                    logger.warning("Skipping removal of missing folder \(entry.relativePath) — still has items in database (transient FS state?)")
+                if folderHasItemsInDatabase(id) {
+                    logger.warning("Skipping removal of missing folder \(entry.relativePath) — still has items or sessions in database (transient FS state?)")
                     continue
                 }
                 index.removeValue(forKey: id)
@@ -713,6 +748,25 @@ final class VaultFolderService {
             saveIndex()
             rebuildFolders()
             NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+        }
+    }
+
+    private func folderHasItemsInDatabase(_ folderID: UUID) -> Bool {
+        guard let db = resolvedDatabase else { return false }
+        let encodedFolderID = DatabaseHelpers.encode(folderID)
+        do {
+            let itemStmt = try db.prepare("SELECT COUNT(*) FROM items WHERE folder_id = ?;")
+            itemStmt.bind(encodedFolderID, at: 1)
+            let itemCount = try itemStmt.step() ? itemStmt.int64(at: 0) : 0
+
+            let sessionStmt = try db.prepare("SELECT COUNT(*) FROM sessions WHERE folder_id = ?;")
+            sessionStmt.bind(encodedFolderID, at: 1)
+            let sessionCount = try sessionStmt.step() ? sessionStmt.int64(at: 0) : 0
+
+            return itemCount > 0 || sessionCount > 0
+        } catch {
+            logger.error("Failed to check folder references for \(folderID): \(error.localizedDescription)")
+            return true
         }
     }
 
@@ -861,23 +915,6 @@ final class VaultFolderService {
             try stmt.step()
         } catch {
             logger.error("Failed to delete folder \(folderID) from database: \(error.localizedDescription)")
-        }
-    }
-
-    /// Returns true if any items reference this folder in SQLite. Used as a
-    /// safety guard by the FSEvents reconciliation path so transient
-    /// filesystem states don't orphan user items.
-    private func folderHasItemsInDatabase(folderID: UUID) -> Bool {
-        guard let db = resolvedDatabase else { return false }
-        do {
-            let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE folder_id = ?;")
-            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
-            guard try stmt.step() else { return false }
-            return stmt.int(at: 0) > 0
-        } catch {
-            logger.error("folderHasItemsInDatabase failed for \(folderID): \(error.localizedDescription)")
-            // Be conservative on error — assume items exist, skip delete
-            return true
         }
     }
 

@@ -32,9 +32,13 @@ enum DatabaseMigrations {
         logger.info("Migrating to schema version 2...")
 
         try withTransaction(db) {
-            // Idempotent ALTER: only add the column if it's not already present.
-            if !(try columnExists(db, table: "vault_files", column: "title_manually_set")) {
-                try runOnDB(db, "ALTER TABLE vault_files ADD COLUMN title_manually_set INTEGER NOT NULL DEFAULT 0;")
+            if try tableExists(db, table: "vault_files") {
+                // Idempotent ALTER: only add the column if it's not already present.
+                if !(try columnExists(db, table: "vault_files", column: "title_manually_set")) {
+                    try runOnDB(db, "ALTER TABLE vault_files ADD COLUMN title_manually_set INTEGER NOT NULL DEFAULT 0;")
+                }
+            } else {
+                logger.warning("Schema version 1 is missing vault_files; skipping v2 ALTER TABLE")
             }
             // Ensure the named-migration ledger exists (harmless if already created by v1 fresh installs).
             try runOnDB(db, CiderSchema.createSchemaMigrations)
@@ -43,6 +47,26 @@ enum DatabaseMigrations {
         }
 
         logger.info("Migration to v2 complete")
+    }
+
+    private static func tableExists(_ db: OpaquePointer, table: String) throws -> Bool {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        let escapedTable = table.replacingOccurrences(of: "'", with: "''")
+        let sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '\(escapedTable)' LIMIT 1;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw CiderDatabaseError.prepare(String(cString: sqlite3_errmsg(db)))
+        }
+
+        let step = sqlite3_step(stmt)
+        if step == SQLITE_ROW {
+            return true
+        }
+        if step == SQLITE_DONE {
+            return false
+        }
+        throw CiderDatabaseError.step(String(cString: sqlite3_errmsg(db)))
     }
 
     /// Returns true if `column` exists on `table` (queries PRAGMA table_info).
