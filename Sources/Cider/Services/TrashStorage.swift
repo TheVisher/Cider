@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Manages `.trash/` staging areas inside bookmark and notes directories.
 /// Deleted items are moved here before permanent removal, enabling undo and
@@ -7,12 +8,32 @@ import Foundation
 final class TrashStorage {
     static let shared = TrashStorage()
 
+    private static let logger = Logger(subsystem: "com.cider", category: "TrashStorage")
+
     private let trashDirName = ".trash"
     private let manifestFileName = "_cider_trash_manifest.json"
     private let thumbnailsDirName = "thumbnails"
     private let originalsDirName = "originals"
 
-    private init() {}
+    // MARK: - Database
+
+    /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
+    private var database: CiderDatabase?
+
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    private init() {
+        performOneTimeMigrationIfNeeded()
+    }
+
+    /// Testing-only initializer with an explicit database.
+    /// Does NOT read the legacy JSON manifests or run the migration.
+    init(database: CiderDatabase) {
+        self.database = database
+    }
 
     // MARK: - Bookmark Trash
 
@@ -862,6 +883,8 @@ final class TrashStorage {
         }
         // Empty vault folder trash
         VaultFolderService.shared.emptyFolderTrash()
+        // Clear the SQLite trash table in one shot
+        deleteAllTrashItemsFromDatabase()
         // Clear any pending undo action that references trashed items — prevents ghost restores
         CiderUndoManager.shared.discard()
     }
@@ -958,6 +981,7 @@ final class TrashStorage {
         manifest.removeAll { $0.id == item.id }
         manifest.insert(item, at: 0)
         saveManifest(manifest, trashDir: trashDir)
+        persistTrashItemToDatabase(item)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
@@ -965,6 +989,157 @@ final class TrashStorage {
         var manifest = loadManifest(trashDir: trashDir)
         manifest.removeAll { $0.id == itemID }
         saveManifest(manifest, trashDir: trashDir)
+        deleteTrashItemFromDatabase(itemID)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
+    }
+
+    // MARK: - Database Persistence
+
+    // Internal for testing
+    /// SELECT all trash items from the database, decoding each payload back into a `TrashItem`.
+    func loadTrashItemsFromDatabase(_ db: CiderDatabase) -> [TrashItem] {
+        do {
+            let stmt = try db.prepare("""
+                SELECT payload FROM trash
+                ORDER BY deleted_at DESC;
+                """)
+            var items: [TrashItem] = []
+            let decoder = JSONDecoder()
+            while try stmt.step() {
+                guard let payload = stmt.optionalString(at: 0),
+                      let data = payload.data(using: .utf8) else { continue }
+                do {
+                    let item = try decoder.decode(TrashItem.self, from: data)
+                    items.append(item)
+                } catch {
+                    Self.logger.error("Failed to decode trash payload: \(error.localizedDescription)")
+                }
+            }
+            return items
+        } catch {
+            Self.logger.error("Failed to load trash items from database: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// UPSERT a single trash item into the database (public wrapper).
+    func persistTrashItemToDatabase(_ item: TrashItem) {
+        guard let db = resolvedDatabase else {
+            Self.logger.warning("No database available, skipping SQLite persist for trash item \(item.id)")
+            return
+        }
+        persistTrashItemToDatabase(db, item: item)
+    }
+
+    // Internal for testing
+    /// UPSERT a single trash item into the given database inside its own transaction.
+    func persistTrashItemToDatabase(_ db: CiderDatabase, item: TrashItem) {
+        do {
+            try db.withTransaction {
+                try persistTrashItemToDatabaseInner(db, item: item)
+            }
+        } catch {
+            Self.logger.error("Failed to persist trash item \(item.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    // Internal for testing
+    /// Core persist logic — must be called inside a transaction.
+    func persistTrashItemToDatabaseInner(_ db: CiderDatabase, item: TrashItem) throws {
+        let encoder = JSONEncoder()
+        let payloadData = try encoder.encode(item)
+        guard let payloadJSON = String(data: payloadData, encoding: .utf8) else {
+            throw CiderDatabaseError.runExec("Failed to encode trash payload as UTF-8")
+        }
+
+        let stmt = try db.prepare("""
+            INSERT INTO trash (
+                id, item_id, item_type, title, original_folder_id, deleted_at, payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                item_id = excluded.item_id,
+                item_type = excluded.item_type,
+                title = excluded.title,
+                original_folder_id = excluded.original_folder_id,
+                deleted_at = excluded.deleted_at,
+                payload = excluded.payload;
+            """)
+
+        let originalFolderIDText: String? = item.originalFolderID.map { DatabaseHelpers.encode($0) }
+
+        stmt.bind(DatabaseHelpers.encode(item.id), at: 1)
+            .bind(DatabaseHelpers.encode(item.itemID), at: 2)
+            .bind(item.itemType.rawValue, at: 3)
+            .bind(item.title, at: 4)
+            .bind(originalFolderIDText, at: 5)
+            .bind(DatabaseHelpers.encode(item.deletedAt), at: 6)
+            .bind(payloadJSON, at: 7)
+        try stmt.step()
+    }
+
+    /// DELETE a trash item from the database by ID (public wrapper).
+    func deleteTrashItemFromDatabase(_ id: UUID) {
+        guard let db = resolvedDatabase else {
+            Self.logger.warning("No database available, skipping SQLite delete for trash item \(id)")
+            return
+        }
+        deleteTrashItemFromDatabase(db, trashItemID: id)
+    }
+
+    // Internal for testing
+    /// DELETE a trash item from the given database by ID.
+    func deleteTrashItemFromDatabase(_ db: CiderDatabase, trashItemID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM trash WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(trashItemID), at: 1)
+            try stmt.step()
+        } catch {
+            Self.logger.error("Failed to delete trash item \(trashItemID) from database: \(error.localizedDescription)")
+        }
+    }
+
+    /// DELETE every row from the trash table. Used by `emptyTrash()`.
+    // Internal for testing
+    func deleteAllTrashItemsFromDatabase() {
+        guard let db = resolvedDatabase else { return }
+        do {
+            let stmt = try db.prepare("DELETE FROM trash;")
+            try stmt.step()
+        } catch {
+            Self.logger.error("Failed to delete all trash items from database: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - One-Time Migration
+
+    /// If the SQLite trash table is empty but the JSON manifests contain items,
+    /// copy every item over in a single transaction. Runs once on startup.
+    private func performOneTimeMigrationIfNeeded() {
+        guard let db = resolvedDatabase else { return }
+
+        // Bail if the table already has rows — we don't want to clobber SQLite.
+        do {
+            let countStmt = try db.prepare("SELECT count(*) FROM trash;")
+            try countStmt.step()
+            if countStmt.int(at: 0) > 0 { return }
+        } catch {
+            Self.logger.error("Failed to count trash rows: \(error.localizedDescription)")
+            return
+        }
+
+        let legacyItems = allTrashItems()
+        guard !legacyItems.isEmpty else { return }
+
+        Self.logger.info("Migrating \(legacyItems.count) trash items from JSON to SQLite")
+        do {
+            try db.withTransaction {
+                for item in legacyItems {
+                    try persistTrashItemToDatabaseInner(db, item: item)
+                }
+            }
+        } catch {
+            Self.logger.error("Failed to migrate trash items to SQLite: \(error.localizedDescription)")
+        }
     }
 }
