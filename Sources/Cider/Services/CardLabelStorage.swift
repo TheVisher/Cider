@@ -183,11 +183,25 @@ final class CardLabelStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
-    /// Load labels from SQLite. If SQLite is unavailable AND a label backup
-    /// JSON exists, restore labels from it (recoverability path).
+    /// Load labels from SQLite. If SQLite is unavailable OR returns no rows
+    /// and a label backup JSON exists, restore labels from it (recoverability
+    /// path). When SQLite is open-but-empty, the backup is treated as
+    /// authoritative and re-seeded into the database so future launches find
+    /// the labels in SQLite directly.
     private func loadFromDatabaseOrJSON() {
         if let db = resolvedDatabase {
             loadFromDatabase(db)
+            if labels.isEmpty {
+                restoreFromBackupJSON()
+                // Re-seed SQLite from the restored backup so future launches
+                // find the labels in the primary store.
+                if !labels.isEmpty {
+                    logger.info("Restored \(self.labels.count) labels from backup JSON, re-seeding SQLite")
+                    for label in labels {
+                        persistToDatabase(db, label: label)
+                    }
+                }
+            }
         } else {
             restoreFromBackupJSON()
         }
