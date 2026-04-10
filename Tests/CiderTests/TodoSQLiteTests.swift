@@ -590,4 +590,43 @@ struct TodoSQLiteTests {
         #expect(service.writeICSFile(for: todo, to: realURL) == true)
         #expect(FileManager.default.fileExists(atPath: realURL.path) == true)
     }
+
+    // MARK: - Orphan adoption persists to SQLite
+
+    /// Regression test for a Task 12 bug where orphan .ics files discovered
+    /// during rescan were added to memory but never written to SQLite, so the
+    /// next DB-first cold launch wouldn't see them. The fix persists adopted
+    /// orphans inside the scanAndLoad transaction.
+    @Test("Adopted orphan todo is persisted to SQLite")
+    func orphanAdoptionPersistsToDatabase() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        // Write a valid VTODO .ics file to a temp location (standing in for
+        // an externally-dropped file in Inbox/Todos/).
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-todo-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Create the source todo on a disposable service, serialize to .ics,
+        // then have a fresh service adopt it as an orphan.
+        let seed = TodoCard(title: "Orphan from external drop", details: "Dropped by agent")
+        let writer = makeService(db)
+        let fileURL = tmpDir.appendingPathComponent("orphan-\(seed.id.uuidString).ics")
+        #expect(writer.writeICSFile(for: seed, to: fileURL) == true)
+
+        // Fresh service (no in-memory state) adopts the orphan.
+        let adopter = makeService(db)
+        let adopted = adopter._adoptOrphanForTesting(at: fileURL, folderID: nil)
+        #expect(adopted?.id == seed.id)
+
+        // A brand-new service that only loads from the database must see the
+        // adopted todo — proving it was persisted, not just held in memory.
+        let reader = makeService(db)
+        reader.loadTodosFromDatabase(db)
+        #expect(reader.todoCards.count == 1)
+        #expect(reader.todoCards.first?.id == seed.id)
+        #expect(reader.todoCards.first?.title == "Orphan from external drop")
+    }
 }

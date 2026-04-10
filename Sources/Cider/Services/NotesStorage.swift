@@ -368,6 +368,126 @@ final class NotesStorage: ObservableObject {
         }
     }
 
+    /// Public rescan entry point for startup reconciliation.
+    ///
+    /// Re-reads all .md files from Notes directories (legacy .cider/notes/,
+    /// Inbox/Notes/, and vault folders) and merges the result with the current
+    /// in-memory state, then syncs the full result to SQLite so external
+    /// filesystem changes made while the app was closed are picked up on
+    /// launch.
+    ///
+    /// Idempotent and safe to call multiple times.
+    func rescan() {
+        let previousIDs = Set(notes.map(\.id))
+
+        // 1. Rebuild Notes/Inbox state from disk. Also preserves already-indexed
+        //    vault-folder notes that still exist on disk.
+        scanNotes()
+
+        // 2. Discover brand-new .md files dropped directly into vault folders
+        //    while the app was closed. `scanNotes` only carries forward vault
+        //    folder entries that were already in the index; it doesn't scan
+        //    vault folder contents, so we do that here.
+        discoverVaultFolderNoteFiles()
+
+        // 3. Pick up already-indexed vault folder notes (in case step 2 added
+        //    new index entries).
+        loadVaultFolderNotes()
+
+        // 4. Sync the full in-memory state to SQLite. Upsert everything we
+        //    have now, and delete rows for notes that disappeared.
+        guard let db = resolvedDatabase else { return }
+        let currentIDs = Set(notes.map(\.id))
+        let removedIDs = previousIDs.subtracting(currentIDs)
+        do {
+            try db.withTransaction {
+                for note in self.notes {
+                    try self.persistNoteToDatabaseInner(db, note: note)
+                }
+                for removedID in removedIDs {
+                    let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                    stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
+                    try stmt.step()
+                }
+            }
+            logger.info("Rescan synced \(self.notes.count) notes to SQLite (removed \(removedIDs.count))")
+        } catch {
+            logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription)")
+        }
+    }
+
+    /// Scans every vault folder directory for .md files that aren't yet in the
+    /// index, assigns them stable UUIDs (via sidecar if present, else fresh),
+    /// and adds corresponding entries to `index` and `notes`.
+    private func discoverVaultFolderNoteFiles() {
+        let fm = FileManager.default
+        // Build a fast lookup of filenames already tracked per folder.
+        var knownFolderFiles: Set<String> = []
+        for entry in index.values {
+            guard let fid = entry.folderID else { continue }
+            knownFolderFiles.insert("\(fid.uuidString):\(entry.filename)")
+        }
+
+        var addedAny = false
+        for folder in VaultFolderService.shared.folders {
+            let folderDir = vaultRoot.appendingPathComponent(folder.relativePath)
+            guard let files = try? fm.contentsOfDirectory(
+                at: folderDir,
+                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+            ) else { continue }
+
+            for file in files where file.pathExtension == "md" {
+                let filename = file.lastPathComponent
+                if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
+
+                // Resolve UUID via sidecar if possible for stable identity.
+                let sidecarDir = folder.relativePath
+                let uuid = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: sidecarDir) ?? UUID()
+
+                let attrs = try? fm.attributesOfItem(atPath: file.path)
+                let modDate = attrs?[.modificationDate] as? Date ?? Date()
+                let createDate = attrs?[.creationDate] as? Date ?? Date()
+
+                index[uuid] = NoteIndexEntry(
+                    filename: filename,
+                    folderID: folder.id,
+                    labelIDs: nil,
+                    createdAt: createDate,
+                    isPinned: nil
+                )
+
+                // Persist UUID to sidecar for future identity recovery.
+                var meta = SidecarService.shared.metadata(for: filename, inDirectory: sidecarDir) ?? SidecarItemMetadata()
+                if meta.id != uuid {
+                    meta.id = uuid
+                    SidecarService.shared.setMetadata(meta, for: filename, inDirectory: sidecarDir)
+                }
+
+                notes.append(Note(
+                    id: uuid,
+                    title: String(filename.dropLast(3)),
+                    content: "",
+                    createdAt: createDate,
+                    modifiedAt: modDate,
+                    relativePath: "\(folder.relativePath)/\(filename)",
+                    labelIDs: [],
+                    folderID: folder.id,
+                    isPinned: false
+                ))
+                addedAny = true
+                logger.info("Rescan adopted vault-folder note: \(filename)")
+            }
+        }
+
+        if addedAny {
+            saveIndex()
+            notes.sort { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.createdAt > b.createdAt
+            }
+        }
+    }
+
     /// Loads notes that live in vault folders (not in the Notes/ directory).
     /// Called after the initial scan or background load to pick up folder-based notes
     /// that the Notes/-only scan can't find.

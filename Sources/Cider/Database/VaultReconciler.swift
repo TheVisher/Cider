@@ -52,9 +52,11 @@ enum VaultReconciler {
         // SQLite-aware persist() path.
         VaultBookmarkService.shared.adoptOrphanedVaultFiles()
 
-        // Notes: init already scans on first access. No public rescan needed —
-        // touching the singleton is sufficient for startup reconciliation.
-        _ = NotesStorage.shared
+        // Notes: init short-circuits on any non-empty DB load, so touching
+        // the singleton alone isn't enough — external .md changes made while
+        // the app was closed would be missed. Explicit rescan re-reads the
+        // filesystem (Notes/Inbox + vault folders) and syncs back to SQLite.
+        NotesStorage.shared.rescan()
 
         // Todos / Events / Contacts: per-file .ics / .vcf stores with explicit
         // rescan() entry points that detect added/removed files.

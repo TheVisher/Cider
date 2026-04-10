@@ -128,6 +128,26 @@ final class TodoCardStorage: ObservableObject {
         index[todoID]?.filename
     }
 
+    /// Testing-only: parse an orphan .ics file, add it to the in-memory index
+    /// and `todoCards`, and persist it to SQLite — mirrors the production
+    /// "adopted during scanAndLoad" code path in a form tests can invoke
+    /// without depending on the real vault filesystem.
+    @discardableResult
+    func _adoptOrphanForTesting(at url: URL, folderID: UUID? = nil) -> TodoCard? {
+        guard let todo = adoptOrphanICS(at: url, folderID: folderID) else { return nil }
+        todoCards.append(todo)
+        if let db = resolvedDatabase {
+            do {
+                try db.withTransaction {
+                    try self.persistTodoToDatabaseInner(db, todo: todo)
+                }
+            } catch {
+                logger.error("Failed to persist adopted todo (test): \(error.localizedDescription)")
+            }
+        }
+        return todo
+    }
+
     /// Watches the Inbox/Todos directory for new .ics files dropped externally (e.g. via iMessage agent).
     func startWatching() {
         inboxWatcher?.stop()
@@ -545,6 +565,7 @@ final class TodoCardStorage: ObservableObject {
         let fm = FileManager.default
         var loadedCards: [TodoCard] = []
         var needsSave = false
+        var adoptedCards: [TodoCard] = []
 
         var filenameToUUID: [String: UUID] = [:]
         for (uuid, entry) in index {
@@ -562,6 +583,7 @@ final class TodoCardStorage: ObservableObject {
                 } else {
                     if let todo = adoptOrphanICS(at: file, folderID: nil) {
                         loadedCards.append(todo)
+                        adoptedCards.append(todo)
                         needsSave = true
                     }
                 }
@@ -602,6 +624,7 @@ final class TodoCardStorage: ObservableObject {
                 if let todo = adoptOrphanICS(at: file, folderID: folder.id),
                    !allLoadedIDs.contains(todo.id) {
                     loadedCards.append(todo)
+                    adoptedCards.append(todo)
                     needsSave = true
                 }
             }
@@ -611,6 +634,19 @@ final class TodoCardStorage: ObservableObject {
         sortCards()
         if needsSave { saveIndex() }
         logger.info("Loaded \(self.todoCards.count) todos from .ics files")
+
+        // Persist adopted orphan todos to SQLite so future DB-first cold loads find them.
+        if !adoptedCards.isEmpty, let db = resolvedDatabase {
+            do {
+                try db.withTransaction {
+                    for todo in adoptedCards {
+                        try self.persistTodoToDatabaseInner(db, todo: todo)
+                    }
+                }
+            } catch {
+                logger.error("Failed to persist adopted todos: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func parseICSFile(at url: URL, expectedID: UUID, entry: IndexEntry) -> TodoCard? {

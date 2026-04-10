@@ -45,4 +45,20 @@ struct VaultReconcilerTests {
 
         #expect(CiderDatabase.shared.isOpen == false)
     }
+
+    /// Smoke test for the Task 12 bug fix: `NotesStorage.rescan()` must exist
+    /// as a public entry point so VaultReconciler can force a filesystem
+    /// rescan on startup (init alone short-circuits on any non-empty DB load).
+    ///
+    /// This test only verifies the method is callable and returns without
+    /// crashing — full round-trip coverage lives in manual/integration tests
+    /// because `NotesStorage.rescan()` scans the real vault directory.
+    @Test("NotesStorage.rescan() is callable without crashing")
+    func notesStorageRescanIsCallable() {
+        // Touches the shared singleton (tests do not open CiderDatabase.shared
+        // so the DB-less fallback path is exercised).
+        #expect(CiderDatabase.shared.isOpen == false)
+        NotesStorage.shared.rescan()
+        NotesStorage.shared.rescan() // idempotent
+    }
 }
