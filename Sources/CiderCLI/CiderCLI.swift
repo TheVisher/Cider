@@ -764,12 +764,12 @@ struct CiderCLI {
             if let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
                 var changed = false
                 if let t = parseFlag("--title", from: args) {
-                    VaultFileStorage.shared.updateTitle(file.id, title: t)
+                    VaultFileStorage.shared.updateTitle(file, title: t)
                     print("Title set: '\(t)'")
                     changed = true
                 }
                 if let n = parseFlag("--notes", from: args) {
-                    VaultFileStorage.shared.updateNotes(file.id, notes: n)
+                    VaultFileStorage.shared.updateNotes(file, notes: n)
                     print("Notes set for: \(file.displayTitle)")
                     changed = true
                 }

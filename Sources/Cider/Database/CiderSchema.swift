@@ -127,13 +127,23 @@ enum CiderSchema {
 
     static let createVaultFiles = """
         CREATE TABLE IF NOT EXISTS vault_files (
-            item_id         TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
-            filename        TEXT NOT NULL,
-            file_type       TEXT NOT NULL,
-            file_size       INTEGER NOT NULL,
-            notes           TEXT NOT NULL DEFAULT '',
-            ocr_text        TEXT,
-            dominant_colors TEXT
+            item_id            TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+            filename           TEXT NOT NULL,
+            file_type          TEXT NOT NULL,
+            file_size          INTEGER NOT NULL,
+            notes              TEXT NOT NULL DEFAULT '',
+            ocr_text           TEXT,
+            dominant_colors    TEXT,
+            title_manually_set INTEGER NOT NULL DEFAULT 0
+        );
+        """
+
+    /// Named-migration ledger. Tracks one-off data migrations by name so they
+    /// don't re-run even if sidecar files are lost (e.g. id-map.json deleted).
+    static let createSchemaMigrations = """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            name       TEXT PRIMARY KEY,
+            applied_at REAL NOT NULL
         );
         """
 
@@ -247,5 +257,6 @@ enum CiderSchema {
         createItemTags,
         createItemLinks,
         createTrash,
+        createSchemaMigrations,
     ]
 }

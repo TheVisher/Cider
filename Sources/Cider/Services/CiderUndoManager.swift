@@ -168,7 +168,9 @@ final class CiderUndoManager {
             case .kanbanBoard:
                 break
             case .vaultFile:
-                VaultFileStorage.shared.updateTitle(itemID, title: oldTitle)
+                if let file = VaultFileService.shared.file(for: itemID) {
+                    VaultFileStorage.shared.updateTitle(file, title: oldTitle)
+                }
                 VaultFileService.shared.scan()
             }
         }

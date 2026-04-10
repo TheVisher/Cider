@@ -84,7 +84,7 @@ final class VaultFileEnrichment {
         guard VaultFileService.shared.file(for: file.id) != nil else { return }
 
         VaultFileStorage.shared.applyEnrichment(
-            fileID: file.id,
+            file: file,
             ocrText: ocrText,
             dominantColors: dominantColors,
             title: suggestedTitle

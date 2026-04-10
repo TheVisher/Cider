@@ -118,11 +118,27 @@ final class VaultFileService: ObservableObject {
             }
         }
 
-        // Ensure id-map is loaded (and run one-time migration on first run)
+        // Ensure id-map is loaded (and run one-time migration on first run).
+        //
+        // Migration gate: the path-derived → stable-UUID migration must run at
+        // most ONCE. We track it in SQLite (`schema_migrations` table) so that
+        // losing id-map.json (backup restore, sync conflict, user cleanup)
+        // doesn't cause us to re-mint UUIDs and orphan every label/link.
+        //
+        // Order of precedence on startup:
+        //   1. Load id-map from sidecar if present.
+        //   2. If id-map is empty but SQLite `vault_files` has rows, rebuild
+        //      it from there (recovers lost/corrupted sidecar).
+        //   3. Only run the one-time migration if it's never been recorded
+        //      in `schema_migrations`.
         if !idMapLoaded {
             loadIDMap()
-            if !FileManager.default.fileExists(atPath: idMapFileURL.path) {
+            if idMap.isEmpty {
+                rebuildIDMapFromDatabase()
+            }
+            if !hasRunOneTimeIDMigration() {
                 runOneTimeIDMigration()
+                recordOneTimeIDMigration()
             }
             idMapLoaded = true
         }
@@ -185,13 +201,29 @@ final class VaultFileService: ObservableObject {
             }
         }
 
-        // Prune id-map entries for files that no longer exist on disk.
-        // This keeps the sidecar from growing forever as users delete files.
+        // Prune id-map entries for files that no longer exist on disk, and
+        // delete the corresponding SQLite rows so metadata doesn't leak. This
+        // keeps the sidecar + SQLite in sync when files are deleted externally
+        // (Finder, sync client, `rm` in terminal, etc.).
         let liveRelativePaths = Set(scanned.map(\.relativePath))
         let staleKeys = idMap.keys.filter { !liveRelativePaths.contains($0) }
         if !staleKeys.isEmpty {
+            let orphanedIDs: [UUID] = staleKeys.compactMap { idMap[$0] }
             for key in staleKeys { idMap.removeValue(forKey: key) }
             idMapDirty = true
+
+            // Delete orphaned rows in a single transaction.
+            if !orphanedIDs.isEmpty, let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil {
+                do {
+                    try db.withTransaction {
+                        for uuid in orphanedIDs {
+                            VaultFileStorage.shared.deleteVaultFileFromDatabase(db, fileID: uuid)
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to delete orphaned vault file rows: \(error.localizedDescription)")
+                }
+            }
         }
 
         if idMapDirty {
@@ -322,6 +354,19 @@ final class VaultFileService: ObservableObject {
         }
     }
 
+    /// Reinstates an id-map entry for a restored file. Called by
+    /// `TrashStorage.restoreVaultFile` BEFORE `scan()` so the rescan finds the
+    /// file at its (possibly collision-renamed) path and preserves the original
+    /// UUID instead of minting a fresh one.
+    func reinstateIDMapEntry(relativePath: String, uuid: UUID) {
+        if !idMapLoaded {
+            loadIDMap()
+            idMapLoaded = true
+        }
+        idMap[relativePath] = uuid
+        saveIDMap()
+    }
+
     // MARK: - id-map sidecar
 
     private func loadIDMap() {
@@ -348,6 +393,70 @@ final class VaultFileService: ObservableObject {
             try data.write(to: idMapFileURL, options: .atomic)
         } catch {
             logger.error("Failed to save vault file id-map: \(error.localizedDescription)")
+        }
+    }
+
+    /// Rebuilds the in-memory id-map from SQLite `items` rows when the sidecar
+    /// is missing or empty. Recovers from a lost / corrupted / sync-conflicted
+    /// `id-map.json` without re-running migration (which would mint fresh
+    /// UUIDs and orphan all label/link/trash references).
+    private func rebuildIDMapFromDatabase() {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else { return }
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id, i.relative_path
+                FROM items i
+                JOIN vault_files vf ON vf.item_id = i.id
+                WHERE i.type = 'vaultFile' AND i.relative_path IS NOT NULL;
+                """)
+            var rebuilt: [String: UUID] = [:]
+            while try stmt.step() {
+                guard let uuid = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let path = stmt.optionalString(at: 1) ?? ""
+                guard !path.isEmpty else { continue }
+                rebuilt[path] = uuid
+            }
+            if !rebuilt.isEmpty {
+                idMap = rebuilt
+                saveIDMap()
+                logger.info("Rebuilt vault file id-map from SQLite: \(rebuilt.count) entries")
+            }
+        } catch {
+            logger.error("Failed to rebuild id-map from database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Migration ledger name for the path-derived → stable-UUID migration.
+    private static let uuidStabilizationMigrationName = "vault_file_uuid_stabilization"
+
+    /// Returns true if the one-time UUID stabilization migration has already
+    /// been recorded in `schema_migrations`.
+    private func hasRunOneTimeIDMigration() -> Bool {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else {
+            // No DB available — fall back to the legacy "sidecar existed" test
+            // so we don't run migration over and over in a broken environment.
+            return FileManager.default.fileExists(atPath: idMapFileURL.path)
+        }
+        do {
+            let stmt = try db.prepare("SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1;")
+            stmt.bind(Self.uuidStabilizationMigrationName, at: 1)
+            return try stmt.step()
+        } catch {
+            logger.error("Failed to check schema_migrations: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Records that the one-time UUID stabilization migration has run.
+    private func recordOneTimeIDMigration() {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else { return }
+        do {
+            let stmt = try db.prepare("INSERT OR REPLACE INTO schema_migrations (name, applied_at) VALUES (?, ?);")
+            stmt.bind(Self.uuidStabilizationMigrationName, at: 1)
+                .bind(Date().timeIntervalSince1970, at: 2)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to record schema_migrations row: \(error.localizedDescription)")
         }
     }
 

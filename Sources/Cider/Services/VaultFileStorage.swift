@@ -108,52 +108,63 @@ final class VaultFileStorage: ObservableObject {
     }
 
     // MARK: - Update Metadata
+    //
+    // These methods take a `VaultFile` (not just an ID) so we don't need to
+    // reach back into `VaultFileService.shared` to look one up. Callers already
+    // have a VaultFile in hand — pass it through.
 
-    func updateTitle(_ fileID: UUID, title: String?) {
-        ensureEntry(fileID)
-        metadata[fileID]?.title = title
+    func updateTitle(_ file: VaultFile, title: String?) {
+        ensureEntry(file.id)
+        metadata[file.id]?.title = title
+        // Explicit title from the user: flag as manually set so load() restores
+        // it even when it happens to match the filename stem.
+        let hasTitle = (title?.isEmpty == false)
+        metadata[file.id]?.titleManuallySet = hasTitle
         saveLegacyIndex()
-        persistVaultFileToDatabase(fileID)
+        persistVaultFileToDatabase(file)
     }
 
-    func updateNotes(_ fileID: UUID, notes: String) {
-        ensureEntry(fileID)
-        metadata[fileID]?.notes = notes
+    func updateNotes(_ file: VaultFile, notes: String) {
+        ensureEntry(file.id)
+        metadata[file.id]?.notes = notes
         saveLegacyIndex()
-        persistVaultFileToDatabase(fileID)
+        persistVaultFileToDatabase(file)
     }
 
-    func assignLabel(_ fileID: UUID, labelID: UUID) {
-        ensureEntry(fileID)
-        if metadata[fileID]?.labelIDs.contains(labelID) == false {
-            metadata[fileID]?.labelIDs.append(labelID)
+    func assignLabel(_ file: VaultFile, labelID: UUID) {
+        ensureEntry(file.id)
+        if metadata[file.id]?.labelIDs.contains(labelID) == false {
+            metadata[file.id]?.labelIDs.append(labelID)
             saveLegacyIndex()
-            persistVaultFileToDatabase(fileID)
+            persistVaultFileToDatabase(file)
         }
     }
 
-    func removeLabel(_ fileID: UUID, labelID: UUID) {
-        guard metadata[fileID] != nil else { return }
-        metadata[fileID]?.labelIDs.removeAll { $0 == labelID }
+    func removeLabel(_ file: VaultFile, labelID: UUID) {
+        guard metadata[file.id] != nil else { return }
+        metadata[file.id]?.labelIDs.removeAll { $0 == labelID }
         saveLegacyIndex()
-        persistVaultFileToDatabase(fileID)
+        persistVaultFileToDatabase(file)
     }
 
-    func applyEnrichment(fileID: UUID, ocrText: String, dominantColors: [String]?, title: String?) {
-        ensureEntry(fileID)
+    func applyEnrichment(file: VaultFile, ocrText: String, dominantColors: [String]?, title: String?) {
+        ensureEntry(file.id)
         var changed = false
-        if metadata[fileID]?.ocrText != ocrText {
-            metadata[fileID]?.ocrText = ocrText; changed = true
+        if metadata[file.id]?.ocrText != ocrText {
+            metadata[file.id]?.ocrText = ocrText; changed = true
         }
-        if let dominantColors, metadata[fileID]?.dominantColors != dominantColors {
-            metadata[fileID]?.dominantColors = dominantColors; changed = true
+        if let dominantColors, metadata[file.id]?.dominantColors != dominantColors {
+            metadata[file.id]?.dominantColors = dominantColors; changed = true
         }
-        if let title, !title.isEmpty, metadata[fileID]?.title != title {
-            metadata[fileID]?.title = title; changed = true
+        // Enrichment-suggested titles are NOT considered manually set — the
+        // user didn't explicitly pick them. They fill in a title when there
+        // wasn't one already, but don't flip titleManuallySet.
+        if let title, !title.isEmpty, metadata[file.id]?.title != title {
+            metadata[file.id]?.title = title; changed = true
         }
         if changed {
             saveLegacyIndex()
-            persistVaultFileToDatabase(fileID)
+            persistVaultFileToDatabase(file)
         }
     }
 
@@ -189,6 +200,10 @@ final class VaultFileStorage: ObservableObject {
     func restoreMetadata(from file: VaultFile) {
         var meta = VaultFileMetadata()
         meta.title = file.title
+        // We can't know for certain whether the pre-trash title was user-set
+        // or enrichment-set, but a non-nil title at restore time should survive
+        // round-trip regardless of stem collision, so flag it.
+        meta.titleManuallySet = (file.title?.isEmpty == false)
         meta.notes = file.notes
         meta.labelIDs = file.labelIDs
         meta.ocrText = file.ocrText
@@ -220,7 +235,8 @@ final class VaultFileStorage: ObservableObject {
         do {
             let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
-                       vf.filename, vf.file_type, vf.file_size, vf.notes, vf.ocr_text, vf.dominant_colors
+                       vf.filename, vf.file_type, vf.file_size, vf.notes, vf.ocr_text, vf.dominant_colors,
+                       vf.title_manually_set
                 FROM items i
                 JOIN vault_files vf ON vf.item_id = i.id
                 WHERE i.type = 'vaultFile';
@@ -236,18 +252,25 @@ final class VaultFileStorage: ObservableObject {
                 let ocrText = stmt.optionalString(at: 10)
                 let dominantColorsJSON = stmt.optionalString(at: 11)
                 let dominantColors = dominantColorsJSON.map { DatabaseHelpers.decodeStringArray($0) }
+                let titleManuallySet = stmt.int(at: 12) != 0
                 let labelIDs = (try? loadLabelIDs(db, itemID: id)) ?? []
 
                 // items.title holds whatever the user sees (custom title OR
-                // filename-without-extension). Distinguish "user set a title"
-                // from "fallback" by comparing against the filename derivation:
-                // if the stored title matches the filename-without-extension,
-                // treat it as nil (no custom title).
+                // filename-without-extension). Use the explicit flag to decide
+                // whether to treat the stored title as a custom title — this
+                // prevents losing user intent when a custom title happens to
+                // match the filename stem (e.g. title "sunset" on "sunset.jpg").
                 let filenameStem = (filename as NSString).deletingPathExtension
-                let customTitle: String? = (itemTitle == filenameStem) ? nil : itemTitle
+                let customTitle: String?
+                if titleManuallySet {
+                    customTitle = itemTitle
+                } else {
+                    customTitle = (itemTitle == filenameStem) ? nil : itemTitle
+                }
 
                 var meta = VaultFileMetadata()
                 meta.title = customTitle
+                meta.titleManuallySet = titleManuallySet
                 meta.notes = notes
                 meta.labelIDs = labelIDs
                 meta.ocrText = ocrText
@@ -276,18 +299,6 @@ final class VaultFileStorage: ObservableObject {
             }
         }
         return ids
-    }
-
-    // Internal for testing
-    /// Persist a vault file to the database by looking up the current VaultFile
-    /// from `VaultFileService.shared`. Callers that already hold a VaultFile
-    /// should prefer the overload that takes one directly.
-    func persistVaultFileToDatabase(_ fileID: UUID) {
-        guard let file = VaultFileService.shared.file(for: fileID) else {
-            logger.debug("persistVaultFileToDatabase: no VaultFile found for \(fileID)")
-            return
-        }
-        persistVaultFileToDatabase(file)
     }
 
     // Internal for testing
@@ -320,12 +331,14 @@ final class VaultFileStorage: ObservableObject {
     func persistVaultFileToDatabaseInner(_ db: CiderDatabase, file: VaultFile) throws {
         // Overlay in-memory metadata so scan-time persists preserve user edits.
         var effective = file
+        var effectiveTitleManuallySet = false
         if let meta = metadata[file.id] {
             effective.title = meta.title
             effective.notes = meta.notes
             effective.labelIDs = meta.labelIDs
             effective.ocrText = meta.ocrText
             effective.dominantColors = meta.dominantColors
+            effectiveTitleManuallySet = meta.titleManuallySet
         }
 
         // items.title: what the user sees. Custom title if set, otherwise the
@@ -360,16 +373,17 @@ final class VaultFileStorage: ObservableObject {
         // 2. UPSERT into vault_files.
         let vfStmt = try db.prepare("""
             INSERT INTO vault_files (
-                item_id, filename, file_type, file_size, notes, ocr_text, dominant_colors
+                item_id, filename, file_type, file_size, notes, ocr_text, dominant_colors, title_manually_set
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 filename = excluded.filename,
                 file_type = excluded.file_type,
                 file_size = excluded.file_size,
                 notes = excluded.notes,
                 ocr_text = excluded.ocr_text,
-                dominant_colors = excluded.dominant_colors;
+                dominant_colors = excluded.dominant_colors,
+                title_manually_set = excluded.title_manually_set;
             """)
         // Store nil for empty/nil dominantColors so the column is NULL rather than
         // an empty JSON array.
@@ -384,6 +398,7 @@ final class VaultFileStorage: ObservableObject {
             .bind(effective.notes, at: 5)
             .bind(effective.ocrText, at: 6)
             .bind(dominantColorsJSON, at: 7)
+            .bind(Int64(effectiveTitleManuallySet ? 1 : 0), at: 8)
         try vfStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert current.
@@ -431,6 +446,7 @@ final class VaultFileStorage: ObservableObject {
 
 struct VaultFileMetadata: Codable {
     var title: String?
+    var titleManuallySet: Bool = false
     var notes: String = ""
     var labelIDs: [UUID] = []
     var ocrText: String?
@@ -440,6 +456,7 @@ struct VaultFileMetadata: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         title = try c.decodeIfPresent(String.self, forKey: .title)
+        titleManuallySet = try c.decodeIfPresent(Bool.self, forKey: .titleManuallySet) ?? false
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
         labelIDs = try c.decodeIfPresent([UUID].self, forKey: .labelIDs) ?? []
         ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)

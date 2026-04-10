@@ -600,6 +600,10 @@ final class TrashStorage {
         }
         try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
+        // The effective restored URL (may differ from original if a collision
+        // forces a "Restored" rename). We reinstate the id-map entry for the
+        // ACTUAL path before the rescan so the original UUID is preserved.
+        var restoredURL: URL?
         if let trashFilename = payload.trashFilename {
             let srcURL = trashDir.appendingPathComponent(trashFilename)
             var destURL = targetDir.appendingPathComponent(payload.vaultFile.filename)
@@ -616,9 +620,34 @@ final class TrashStorage {
             }
             do {
                 try fm.moveItem(at: srcURL, to: destURL)
+                restoredURL = destURL
             } catch {
                 return // move failed — leave manifest intact so item remains visible in trash
             }
+        } else {
+            // No file in trash storage (e.g. the original disk file was
+            // missing at trash time). Reinstate the id-map at the original
+            // relative path so a future rescan that finds the file preserves
+            // the UUID.
+            restoredURL = vaultRoot.appendingPathComponent(payload.vaultFile.relativePath)
+        }
+
+        // Reinstate the id-map entry BEFORE the rescan so the file reclaims
+        // its original UUID. Without this, scan() sees the file, finds no
+        // id-map entry, mints a fresh UUID, and all label/link associations
+        // are silently orphaned.
+        if let restoredURL {
+            let vaultRootPath = vaultRoot.path.hasSuffix("/") ? vaultRoot.path : vaultRoot.path + "/"
+            let restoredRelativePath: String
+            if restoredURL.path.hasPrefix(vaultRootPath) {
+                restoredRelativePath = String(restoredURL.path.dropFirst(vaultRootPath.count))
+            } else {
+                restoredRelativePath = payload.vaultFile.relativePath
+            }
+            VaultFileService.shared.reinstateIDMapEntry(
+                relativePath: restoredRelativePath,
+                uuid: payload.vaultFile.id
+            )
         }
 
         removeFromManifest(trashItem.id, trashDir: trashDir)

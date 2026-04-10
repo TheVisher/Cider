@@ -24,7 +24,7 @@ struct CiderDatabaseTests {
 
     // MARK: - Bootstrap
 
-    @Test("Opens database and creates schema at version 1")
+    @Test("Opens database and creates schema at latest version")
     func openCreatesSchema() throws {
         let url = makeTempDBURL()
         defer { cleanup(url) }
@@ -33,11 +33,12 @@ struct CiderDatabaseTests {
         try db.open(at: url)
         defer { db.close() }
 
-        // Verify schema version is 1
-        let stmt = try db.prepare("SELECT version FROM schema_version LIMIT 1;")
+        // Verify schema version is at v2 (latest). schema_version is a
+        // single-row table after migration.
+        let stmt = try db.prepare("SELECT MAX(version) FROM schema_version;")
         let hasRow = try stmt.step()
         #expect(hasRow)
-        #expect(stmt.int(at: 0) == 1)
+        #expect(stmt.int(at: 0) == 2)
     }
 
     @Test("Items table exists after schema creation")
@@ -69,7 +70,7 @@ struct CiderDatabaseTests {
             "folders", "labels", "items", "bookmarks", "notes", "todos",
             "events", "contacts", "vault_files", "sessions",
             "item_labels", "dismissed_labels", "tags", "item_tags",
-            "item_links", "trash", "schema_version",
+            "item_links", "trash", "schema_version", "schema_migrations",
         ]
 
         for table in expectedTables {
@@ -125,9 +126,9 @@ struct CiderDatabaseTests {
         #expect(hasRow)
         #expect(folderStmt.string(at: 0) == "test/path")
 
-        let versionStmt = try db2.prepare("SELECT version FROM schema_version LIMIT 1;")
+        let versionStmt = try db2.prepare("SELECT MAX(version) FROM schema_version;")
         try versionStmt.step()
-        #expect(versionStmt.int(at: 0) == 1)
+        #expect(versionStmt.int(at: 0) == 2)
     }
 
     // MARK: - Transactions
