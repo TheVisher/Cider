@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import os
 
 private struct CardLabelsSnapshot: Codable {
     var labels: [CardLabel]
@@ -11,19 +12,30 @@ final class CardLabelStorage: ObservableObject {
 
     @Published private(set) var labels: [CardLabel] = []
 
-    private let fileName = "_cider_labels.json"
-    private var fileURL: URL {
-        let dir = StoragePaths.directoryURL(for: .labels)
+    private let logger = Logger(subsystem: "com.cider.app", category: "CardLabelStorage")
+    private let database: CiderDatabase?
+
+    private let backupFileName = "_cider_labels-backup.json"
+    private var backupFileURL: URL {
+        let dir = StoragePaths.vaultDirectoryURL()
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
         StoragePaths.ensureDirectory(dir)
-        return StoragePaths.jsonFileURL(fileName: fileName, in: dir)
+        return StoragePaths.jsonFileURL(fileName: backupFileName, in: dir)
     }
 
     private init() {
-        load()
+        self.database = nil
+        loadFromDatabaseOrJSON()
+    }
+
+    /// Testing-only initializer that accepts an explicit database instance.
+    init(database: CiderDatabase) {
+        self.database = database
+        loadFromDatabase(database)
     }
 
     func reload() {
-        load()
+        loadFromDatabaseOrJSON()
     }
 
     @discardableResult
@@ -37,7 +49,8 @@ final class CardLabelStorage: ObservableObject {
         let label = CardLabel(name: finalName, colorHex: colorHex, kind: kind)
         labels.append(label)
         sortLabels()
-        persist()
+        persistToDatabase(label)
+        persistBackupJSON()
         return label
     }
 
@@ -48,7 +61,8 @@ final class CardLabelStorage: ObservableObject {
         copy.updatedAt = Date()
         labels[idx] = copy
         sortLabels()
-        persist()
+        persistToDatabase(copy)
+        persistBackupJSON()
         return true
     }
 
@@ -67,7 +81,8 @@ final class CardLabelStorage: ObservableObject {
         let oldCount = labels.count
         labels.removeAll { $0.id == id }
         guard labels.count != oldCount else { return false }
-        persist()
+        deleteFromDatabase(labelID: id)
+        persistBackupJSON()
         // Cascade: remove this label from all items
         VaultBookmarkService.shared.removeLabelsFromAll(labelID: id)
         NotesStorage.shared.removeLabelsFromAll(labelID: id)
@@ -88,8 +103,9 @@ final class CardLabelStorage: ObservableObject {
         for sourceID in sources {
             reassignLabelOnAllItems(from: sourceID, to: targetID)
             labels.removeAll { $0.id == sourceID }
+            deleteFromDatabase(labelID: sourceID)
         }
-        persist()
+        persistBackupJSON()
     }
 
     /// Color presets for tags.
@@ -160,30 +176,153 @@ final class CardLabelStorage: ObservableObject {
         }
     }
 
-    private func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    // MARK: - Database Persistence
+
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    /// Load labels from SQLite. If SQLite is unavailable OR returns no rows
+    /// and a label backup JSON exists, restore labels from it (recoverability
+    /// path). When SQLite is open-but-empty, the backup is treated as
+    /// authoritative and re-seeded into the database so future launches find
+    /// the labels in SQLite directly.
+    private func loadFromDatabaseOrJSON() {
+        if let db = resolvedDatabase {
+            loadFromDatabase(db)
+            if labels.isEmpty {
+                restoreFromBackupJSON()
+                // Re-seed SQLite from the restored backup so future launches
+                // find the labels in the primary store.
+                if !labels.isEmpty {
+                    logger.info("Restored \(self.labels.count) labels from backup JSON, re-seeding SQLite")
+                    for label in labels {
+                        persistToDatabase(db, label: label)
+                    }
+                }
+            }
+        } else {
+            restoreFromBackupJSON()
+        }
+    }
+
+    // Internal for testing
+    /// SELECT all labels from the database, ordered by name.
+    func loadFromDatabase(_ db: CiderDatabase) {
         do {
-            let data = try Data(contentsOf: fileURL)
+            let stmt = try db.prepare(
+                "SELECT id, name, color_hex, kind, created_at, updated_at FROM labels ORDER BY name COLLATE NOCASE;"
+            )
+            var loaded: [CardLabel] = []
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let kindRaw = stmt.string(at: 3)
+                let kind = CardLabelKind(rawValue: kindRaw) ?? .custom
+                let label = CardLabel(
+                    id: id,
+                    name: stmt.string(at: 1),
+                    colorHex: stmt.string(at: 2),
+                    kind: kind,
+                    createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 4)),
+                    updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 5))
+                )
+                loaded.append(label)
+            }
+            labels = loaded
+            sortLabels()
+            logger.info("Loaded \(loaded.count) labels from database")
+        } catch {
+            logger.error("Failed to load labels from database: \(error.localizedDescription)")
+            labels = []
+        }
+    }
+
+    /// UPSERT a single label into the database.
+    func persistToDatabase(_ label: CardLabel) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite persist for label \(label.id)")
+            return
+        }
+        persistToDatabase(db, label: label)
+    }
+
+    // Internal for testing
+    /// UPSERT a single label into the given database (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE on item_labels/dismissed_labels).
+    func persistToDatabase(_ db: CiderDatabase, label: CardLabel) {
+        do {
+            let stmt = try db.prepare("""
+                INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    color_hex = excluded.color_hex,
+                    kind = excluded.kind,
+                    updated_at = excluded.updated_at;
+                """)
+            stmt.bind(DatabaseHelpers.encode(label.id), at: 1)
+                .bind(label.name, at: 2)
+                .bind(label.colorHex, at: 3)
+                .bind(label.kind.rawValue, at: 4)
+                .bind(DatabaseHelpers.encode(label.createdAt), at: 5)
+                .bind(DatabaseHelpers.encode(label.updatedAt), at: 6)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to persist label \(label.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// DELETE a label from the database by ID.
+    func deleteFromDatabase(labelID: UUID) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite delete for label \(labelID)")
+            return
+        }
+        deleteFromDatabase(db, labelID: labelID)
+    }
+
+    // Internal for testing
+    /// DELETE a label from the given database by ID.
+    func deleteFromDatabase(_ db: CiderDatabase, labelID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM labels WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(labelID), at: 1)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to delete label \(labelID) from database: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Backup JSON (recoverability)
+
+    /// Restore labels from the `.cider/_cider_labels-backup.json` file when
+    /// SQLite is unavailable. This is a recoverability-only fallback.
+    private func restoreFromBackupJSON() {
+        guard FileManager.default.fileExists(atPath: backupFileURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: backupFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let snapshot = try decoder.decode(CardLabelsSnapshot.self, from: data)
             labels = snapshot.labels
             sortLabels()
         } catch {
+            logger.error("Failed to restore labels from backup JSON: \(error.localizedDescription)")
             labels = []
         }
     }
 
-    private func persist() {
+    /// Write a JSON backup after every mutation for rebuild recoverability.
+    private func persistBackupJSON() {
         let snapshot = CardLabelsSnapshot(labels: labels)
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(snapshot)
-            try data.write(to: fileURL, options: .atomic)
+            try data.write(to: backupFileURL, options: .atomic)
         } catch {
-            // Best-effort persistence.
+            logger.error("Failed to write labels backup JSON: \(error.localizedDescription)")
         }
     }
 

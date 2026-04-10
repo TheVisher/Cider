@@ -17,6 +17,11 @@ final class NotesStorage: ObservableObject {
     @Published private(set) var notes: [Note] = []
 
     private let logger = Logger(subsystem: "com.cider.app", category: "NotesStorage")
+
+    // MARK: - Database
+
+    /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
+    private var database: CiderDatabase?
     private var directoryURL: URL
     private var directoryFileDescriptor: Int32 = -1
     private var directorySource: DispatchSourceFileSystemObject?
@@ -67,6 +72,16 @@ final class NotesStorage: ObservableObject {
         self.directoryURL = StoragePaths.directoryURL(for: .notes)
         ensureDirectory()
         startDirectoryWatcher()
+
+        // Try SQLite first
+        if let db = resolvedDatabase {
+            loadNotesFromDatabase(db)
+            if !notes.isEmpty {
+                loadVaultFolderNotes()
+                return
+            }
+        }
+
         let dirURL = directoryURL
         let idxURL = dirURL.appendingPathComponent(indexFileName)
         let idxName = indexFileName
@@ -75,11 +90,38 @@ final class NotesStorage: ObservableObject {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.loadAndScan(directoryURL: dirURL, indexURL: idxURL, indexFileName: idxName)
             }.value
-            self.index = result.index
-            self.notes = result.notes
-            if result.needsSave { self.saveIndex() }
+            var scanIndex = result.index
+            var scanNotes = result.notes
+            // loadAndScan runs off-actor and cannot read sidecars. Reconcile
+            // UUIDs here on the main actor so identity survives loss of the
+            // JSON index.
+            self.reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
+            self.index = scanIndex
+            self.notes = scanNotes
+            if result.needsSave || scanIndex != result.index { self.saveIndex() }
             self.loadVaultFolderNotes()
+
+            // One-time migration: persist JSON notes to SQLite
+            if !self.notes.isEmpty, let db = self.resolvedDatabase {
+                self.logger.info("Migrating \(self.notes.count) notes from JSON to SQLite")
+                do {
+                    try db.withTransaction {
+                        for note in self.notes {
+                            try self.persistNoteToDatabaseInner(db, note: note)
+                        }
+                    }
+                } catch {
+                    self.logger.error("Failed to migrate JSON notes to SQLite: \(error.localizedDescription)")
+                }
+            }
         }
+    }
+
+    /// Testing-only initializer with an explicit database.
+    /// Does NOT call loadNotes() — tests call loadNotesFromDatabase() directly.
+    init(database: CiderDatabase) {
+        self.database = database
+        self.directoryURL = StoragePaths.directoryURL(for: .notes)
     }
 
     /// The base directory URL where notes metadata index is stored (.cider/notes/).
@@ -112,6 +154,17 @@ final class NotesStorage: ObservableObject {
         index = [:]
         ensureDirectory()
         startDirectoryWatcher()
+
+        // Try SQLite first (mirrors init pattern). loadNotesFromDatabase
+        // rehydrates both `notes` and `index`.
+        if let db = resolvedDatabase {
+            loadNotesFromDatabase(db)
+            if !notes.isEmpty {
+                loadVaultFolderNotes()
+                return
+            }
+        }
+
         // CH-C15: Load synchronously so callers see notes immediately after return.
         // Unlike init(), updateDirectory is user-triggered (rare) so brief main-thread
         // I/O is acceptable to avoid the async race that broke callers and tests.
@@ -120,9 +173,12 @@ final class NotesStorage: ObservableObject {
             indexURL: directoryURL.appendingPathComponent(indexFileName),
             indexFileName: indexFileName
         )
-        index = result.index
-        notes = result.notes
-        if result.needsSave { saveIndex() }
+        var scanIndex = result.index
+        var scanNotes = result.notes
+        reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
+        index = scanIndex
+        notes = scanNotes
+        if result.needsSave || scanIndex != result.index { saveIndex() }
         loadVaultFolderNotes()
     }
 
@@ -139,39 +195,12 @@ final class NotesStorage: ObservableObject {
         directoryURL.appendingPathComponent(indexFileName)
     }
 
-    private func loadIndex() {
-        guard let data = try? Data(contentsOf: indexURL) else {
-            index = [:]
-            return
-        }
-
-        // Try new format first: [String: NoteIndexEntry]
-        if let decoded = try? JSONDecoder().decode([String: NoteIndexEntry].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, value)
-            })
-            return
-        }
-
-        // Fallback: legacy format [String: String] (UUID → filename)
-        if let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
-            index = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                guard let uuid = UUID(uuidString: key) else { return nil }
-                return (uuid, NoteIndexEntry(filename: value, folderID: nil))
-            })
-            return
-        }
-
-        index = [:]
-    }
-
-    private func saveIndex() {
-        let encoded = Dictionary(uniqueKeysWithValues: index.map { ($0.key.uuidString, $0.value) })
-        if let data = try? JSONEncoder().encode(encoded) {
-            try? data.write(to: indexURL, options: .atomic)
-        }
-    }
+    // Task 13: JSON index persistence removed. The in-memory `index` dict is
+    // rebuilt on launch from SQLite (`loadNotesFromDatabase`) and from .md
+    // scan (`scanNotes`/`loadAndScan`). Note identity is persisted in per-note
+    // `.cider-meta.json` sidecars for recoverability. Stubs retained so the
+    // mutation call sites stay put.
+    private func saveIndex() { /* no-op */ }
 
     // MARK: - Scanning
 
@@ -206,7 +235,15 @@ final class NotesStorage: ObservableObject {
             guard filename != indexFileName else { continue }
 
             let title = String(filename.dropLast(3)) // Remove .md
-            let uuid = filenameToUUID[filename] ?? UUID()
+
+            // Resolve UUID: (1) JSON index, (2) sidecar `id`, (3) fresh UUID.
+            // Resolving from the sidecar lets us recover stable identity if the
+            // `_cider_notes_index.json` file was ever lost.
+            let sidecarDir: String = relativePrefix ?? "" // "" = scanning legacy .cider/notes/ which has no sidecar
+            let sidecarUUID: UUID? = sidecarDir.isEmpty
+                ? nil
+                : SidecarService.shared.noteUUID(forFilename: filename, inDirectory: sidecarDir)
+            let uuid = filenameToUUID[filename] ?? sidecarUUID ?? UUID()
             let existingEntry = index[uuid]
             let folderID = existingEntry?.folderID
             let labelIDs = existingEntry?.labelIDs ?? []
@@ -231,6 +268,14 @@ final class NotesStorage: ObservableObject {
                 relativePath = "\(prefix)/\(filename)"
             } else {
                 relativePath = filename
+            }
+
+            // Persist the UUID to the sidecar if it isn't there yet, so future
+            // scans can recover identity even if the JSON index is deleted.
+            if !sidecarDir.isEmpty, sidecarUUID != uuid {
+                var meta = SidecarService.shared.metadata(for: filename, inDirectory: sidecarDir) ?? SidecarItemMetadata()
+                meta.id = uuid
+                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: sidecarDir)
             }
 
             // Lazy: don't load content during scan
@@ -296,6 +341,126 @@ final class NotesStorage: ObservableObject {
         }
     }
 
+    /// Public rescan entry point for startup reconciliation.
+    ///
+    /// Re-reads all .md files from Notes directories (legacy .cider/notes/,
+    /// Inbox/Notes/, and vault folders) and merges the result with the current
+    /// in-memory state, then syncs the full result to SQLite so external
+    /// filesystem changes made while the app was closed are picked up on
+    /// launch.
+    ///
+    /// Idempotent and safe to call multiple times.
+    func rescan() {
+        let previousIDs = Set(notes.map(\.id))
+
+        // 1. Rebuild Notes/Inbox state from disk. Also preserves already-indexed
+        //    vault-folder notes that still exist on disk.
+        scanNotes()
+
+        // 2. Discover brand-new .md files dropped directly into vault folders
+        //    while the app was closed. `scanNotes` only carries forward vault
+        //    folder entries that were already in the index; it doesn't scan
+        //    vault folder contents, so we do that here.
+        discoverVaultFolderNoteFiles()
+
+        // 3. Pick up already-indexed vault folder notes (in case step 2 added
+        //    new index entries).
+        loadVaultFolderNotes()
+
+        // 4. Sync the full in-memory state to SQLite. Upsert everything we
+        //    have now, and delete rows for notes that disappeared.
+        guard let db = resolvedDatabase else { return }
+        let currentIDs = Set(notes.map(\.id))
+        let removedIDs = previousIDs.subtracting(currentIDs)
+        do {
+            try db.withTransaction {
+                for note in self.notes {
+                    try self.persistNoteToDatabaseInner(db, note: note)
+                }
+                for removedID in removedIDs {
+                    let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+                    stmt.bind(DatabaseHelpers.encode(removedID), at: 1)
+                    try stmt.step()
+                }
+            }
+            logger.info("Rescan synced \(self.notes.count) notes to SQLite (removed \(removedIDs.count))")
+        } catch {
+            logger.error("Failed to sync rescan to SQLite: \(error.localizedDescription)")
+        }
+    }
+
+    /// Scans every vault folder directory for .md files that aren't yet in the
+    /// index, assigns them stable UUIDs (via sidecar if present, else fresh),
+    /// and adds corresponding entries to `index` and `notes`.
+    private func discoverVaultFolderNoteFiles() {
+        let fm = FileManager.default
+        // Build a fast lookup of filenames already tracked per folder.
+        var knownFolderFiles: Set<String> = []
+        for entry in index.values {
+            guard let fid = entry.folderID else { continue }
+            knownFolderFiles.insert("\(fid.uuidString):\(entry.filename)")
+        }
+
+        var addedAny = false
+        for folder in VaultFolderService.shared.folders {
+            let folderDir = vaultRoot.appendingPathComponent(folder.relativePath)
+            guard let files = try? fm.contentsOfDirectory(
+                at: folderDir,
+                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+            ) else { continue }
+
+            for file in files where file.pathExtension == "md" {
+                let filename = file.lastPathComponent
+                if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
+
+                // Resolve UUID via sidecar if possible for stable identity.
+                let sidecarDir = folder.relativePath
+                let uuid = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: sidecarDir) ?? UUID()
+
+                let attrs = try? fm.attributesOfItem(atPath: file.path)
+                let modDate = attrs?[.modificationDate] as? Date ?? Date()
+                let createDate = attrs?[.creationDate] as? Date ?? Date()
+
+                index[uuid] = NoteIndexEntry(
+                    filename: filename,
+                    folderID: folder.id,
+                    labelIDs: nil,
+                    createdAt: createDate,
+                    isPinned: nil
+                )
+
+                // Persist UUID to sidecar for future identity recovery.
+                var meta = SidecarService.shared.metadata(for: filename, inDirectory: sidecarDir) ?? SidecarItemMetadata()
+                if meta.id != uuid {
+                    meta.id = uuid
+                    SidecarService.shared.setMetadata(meta, for: filename, inDirectory: sidecarDir)
+                }
+
+                notes.append(Note(
+                    id: uuid,
+                    title: String(filename.dropLast(3)),
+                    content: "",
+                    createdAt: createDate,
+                    modifiedAt: modDate,
+                    relativePath: "\(folder.relativePath)/\(filename)",
+                    labelIDs: [],
+                    folderID: folder.id,
+                    isPinned: false
+                ))
+                addedAny = true
+                logger.info("Rescan adopted vault-folder note: \(filename)")
+            }
+        }
+
+        if addedAny {
+            saveIndex()
+            notes.sort { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.createdAt > b.createdAt
+            }
+        }
+    }
+
     /// Loads notes that live in vault folders (not in the Notes/ directory).
     /// Called after the initial scan or background load to pick up folder-based notes
     /// that the Notes/-only scan can't find.
@@ -337,32 +502,75 @@ final class NotesStorage: ObservableObject {
         }
     }
 
+    /// Reconciles UUIDs against per-directory sidecar files after a background
+    /// `loadAndScan`. Because `loadAndScan` is nonisolated and cannot reach the
+    /// main-actor `SidecarService`, any scanned note whose filename was missing
+    /// from the JSON index was assigned a fresh `UUID()`. If a sidecar persisted
+    /// a previous UUID for that file, adopt it here. Afterwards, persist every
+    /// resolved UUID back to the sidecar so future recoveries work.
+    private func reconcileUUIDsWithSidecars(
+        notes: inout [Note],
+        index: inout [UUID: NoteIndexEntry]
+    ) {
+        var idRemaps: [(old: UUID, new: UUID)] = []
+
+        for i in notes.indices {
+            let note = notes[i]
+            let filename = (note.relativePath as NSString).lastPathComponent
+            let dirPath: String
+            if note.relativePath.contains("/") {
+                dirPath = (note.relativePath as NSString).deletingLastPathComponent
+            } else {
+                // Notes without a slash live in legacy .cider/notes/ which has no sidecar.
+                continue
+            }
+
+            // The sidecar is the file-level source of truth for identity.
+            // If it disagrees with what loadAndScan produced, adopt the sidecar ID.
+            if let persistedID = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: dirPath),
+               persistedID != note.id {
+                idRemaps.append((old: note.id, new: persistedID))
+                notes[i] = Note(
+                    id: persistedID,
+                    title: note.title,
+                    content: note.content,
+                    createdAt: note.createdAt,
+                    modifiedAt: note.modifiedAt,
+                    relativePath: note.relativePath,
+                    labelIDs: note.labelIDs,
+                    folderID: note.folderID,
+                    isPinned: note.isPinned
+                )
+            }
+
+            // Persist this note's UUID to the sidecar (idempotent).
+            let resolvedID = notes[i].id
+            var meta = SidecarService.shared.metadata(for: filename, inDirectory: dirPath) ?? SidecarItemMetadata()
+            if meta.id != resolvedID {
+                meta.id = resolvedID
+                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: dirPath)
+            }
+        }
+
+        // Apply ID remaps to the index.
+        for remap in idRemaps {
+            if let entry = index.removeValue(forKey: remap.old) {
+                index[remap.new] = entry
+            }
+        }
+    }
+
     // MARK: - Background Load & Scan
 
-    /// Combines loadIndex + scanNotes into a pure, background-safe function.
-    /// Returns the rebuilt index, scanned notes, and whether the index needs saving.
+    /// Pure, background-safe scan of .md files on disk. Identity recovery
+    /// happens on the main actor via `reconcileUUIDsWithSidecars` after this
+    /// returns.
     private nonisolated static func loadAndScan(
         directoryURL: URL,
         indexURL: URL,
         indexFileName: String
     ) -> (index: [UUID: NoteIndexEntry], notes: [Note], needsSave: Bool) {
-        // Load index
-        var loadedIndex: [UUID: NoteIndexEntry] = [:]
-        if let data = try? Data(contentsOf: indexURL) {
-            // Try new format first: [String: NoteIndexEntry]
-            if let decoded = try? JSONDecoder().decode([String: NoteIndexEntry].self, from: data) {
-                loadedIndex = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                    guard let uuid = UUID(uuidString: key) else { return nil }
-                    return (uuid, value)
-                })
-            } else if let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
-                // Fallback: legacy format [String: String] (UUID → filename)
-                loadedIndex = Dictionary(uniqueKeysWithValues: decoded.compactMap { key, value in
-                    guard let uuid = UUID(uuidString: key) else { return nil }
-                    return (uuid, NoteIndexEntry(filename: value, folderID: nil, createdAt: nil))
-                })
-            }
-        }
+        let loadedIndex: [UUID: NoteIndexEntry] = [:]
 
         // Scan both .cider/notes/ (legacy) and Inbox/Notes/ for unfiled notes
         let fm = FileManager.default
@@ -489,6 +697,8 @@ final class NotesStorage: ObservableObject {
 
         let note = Note(id: uuid, title: title, content: initialContent, createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
+        SidecarService.shared.syncNote(note)
         return note
     }
 
@@ -571,6 +781,8 @@ final class NotesStorage: ObservableObject {
             relativePath: inboxRelativePath
         )
         notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
+        SidecarService.shared.syncNote(note)
         return note
     }
 
@@ -628,6 +840,7 @@ final class NotesStorage: ObservableObject {
         if let idx = notes.firstIndex(where: { $0.id == note.id }) {
             notes[idx].modifiedAt = Date()
             notes[idx].content = note.content
+            persistNoteToDatabase(notes[idx])
         }
     }
 
@@ -689,6 +902,7 @@ final class NotesStorage: ObservableObject {
                 notes[idx].title = sanitized
                 notes[idx].relativePath = newRelativePath
                 notes[idx].modifiedAt = Date()
+                persistNoteToDatabase(notes[idx])
             }
             SyncService.shared.pushAfterLocalChange()
         } catch {
@@ -711,6 +925,9 @@ final class NotesStorage: ObservableObject {
             return a.createdAt > b.createdAt
         }
         saveIndex()
+        if let pinnedNote = notes.first(where: { $0.id == noteID }) {
+            persistNoteToDatabase(pinnedNote)
+        }
         SyncService.shared.pushAfterLocalChange()
         return true
     }
@@ -781,6 +998,7 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        persistNoteToDatabase(notes[idx])
         SyncService.shared.pushAfterLocalChange()
         return true
     }
@@ -795,6 +1013,7 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        persistNoteToDatabase(notes[idx])
         SidecarService.shared.syncNote(notes[idx])
         return true
     }
@@ -808,21 +1027,38 @@ final class NotesStorage: ObservableObject {
             index[noteID] = entry
         }
         saveIndex()
+        persistNoteToDatabase(notes[idx])
         SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
     func removeLabelsFromAll(labelID: UUID) {
         var changed = false
+        var affectedNotes: [Note] = []
         for i in notes.indices where notes[i].labelIDs.contains(labelID) {
             notes[i].labelIDs.removeAll { $0 == labelID }
             if var entry = index[notes[i].id] {
                 entry.labelIDs = notes[i].labelIDs
                 index[notes[i].id] = entry
             }
+            affectedNotes.append(notes[i])
+            SidecarService.shared.syncNote(notes[i])
             changed = true
         }
-        if changed { saveIndex() }
+        if changed {
+            saveIndex()
+            if let db = resolvedDatabase {
+                do {
+                    try db.withTransaction {
+                        for note in affectedNotes {
+                            try persistNoteToDatabaseInner(db, note: note)
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to persist notes after label removal: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     @discardableResult
@@ -861,6 +1097,7 @@ final class NotesStorage: ObservableObject {
         }
         let trashItem = TrashStorage.shared.trashNote(noteForTrash, notesDir: trashNotesDir)
         try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
+        deleteNoteFromDatabase(note.id)
         index.removeValue(forKey: note.id)
         saveIndex()
         notes.removeAll { $0.id == note.id }
@@ -935,6 +1172,8 @@ final class NotesStorage: ObservableObject {
             isPinned: isPinned
         )
         notes.insert(note, at: 0)
+        persistNoteToDatabase(note)
+        SidecarService.shared.syncNote(note)
     }
 
     /// Update an existing note from a sync pull (remote is newer).
@@ -1000,6 +1239,7 @@ final class NotesStorage: ObservableObject {
             isPinned: isPinned ? true : nil
         )
         saveIndex()
+        persistNoteToDatabase(notes[idx])
     }
 
     /// Delete a note from a sync pull (remote deleted it).
@@ -1017,6 +1257,11 @@ final class NotesStorage: ObservableObject {
         // Also load vault-folder notes that scanNotes() can't find
         if folderID != nil {
             loadVaultFolderNotes()
+        }
+        // Persist restored note to database and sidecar
+        if let restoredNote = notes.first(where: { $0.id == noteID }) {
+            persistNoteToDatabase(restoredNote)
+            SidecarService.shared.syncNote(restoredNote)
         }
         // Cancel pending sync deletion and push so the note reappears on web
         SyncService.shared.cancelNoteDeletion(of: noteID)
@@ -1334,6 +1579,194 @@ final class NotesStorage: ObservableObject {
             guard !filename.isEmpty else { return }
 
             referenced.insert(filename)
+        }
+    }
+
+    // MARK: - Database Persistence
+
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
+
+    // Internal for testing
+    /// Number of entries currently in the in-memory UUID→metadata index.
+    /// Used by tests to verify `loadNotesFromDatabase` rehydrates the index.
+    var indexEntryCount: Int { index.count }
+
+    // Internal for testing
+    /// Returns the filename tracked by the index for a given note ID, if any.
+    func indexFilename(for noteID: UUID) -> String? { index[noteID]?.filename }
+
+    // Internal for testing
+    /// SELECT all notes from the database (items JOIN notes), loading
+    /// labelIDs from the item_labels join table. Also rehydrates `self.index`
+    /// so mutation paths (renameNote/togglePin/assignNote/assignLabel/...) can
+    /// find their entries after a DB-first cold launch.
+    func loadNotesFromDatabase(_ db: CiderDatabase) {
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                       n.content, n.is_pinned
+                FROM items i
+                JOIN notes n ON n.item_id = i.id
+                WHERE i.type = 'note'
+                ORDER BY n.is_pinned DESC, i.created_at DESC;
+                """)
+            var loaded: [Note] = []
+            var rebuiltIndex: [UUID: NoteIndexEntry] = [:]
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
+                let relativePath = stmt.optionalString(at: 5) ?? ""
+                let title = stmt.string(at: 1)
+                let isPinned = stmt.bool(at: 7)
+                let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
+
+                var note = Note(
+                    id: id,
+                    title: title,
+                    content: stmt.string(at: 6),
+                    createdAt: createdAt,
+                    modifiedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
+                    relativePath: relativePath,
+                    labelIDs: [],
+                    folderID: folderID,
+                    isPinned: isPinned
+                )
+
+                // Load labels from join table
+                note.labelIDs = try loadLabelIDs(db, itemID: id)
+
+                // Derive filename: last path component of relativePath, or {title}.md fallback.
+                let lastComponent = (relativePath as NSString).lastPathComponent
+                let filename = lastComponent.isEmpty ? "\(title).md" : lastComponent
+
+                rebuiltIndex[id] = NoteIndexEntry(
+                    filename: filename,
+                    folderID: folderID,
+                    labelIDs: note.labelIDs.isEmpty ? nil : note.labelIDs,
+                    createdAt: createdAt,
+                    isPinned: isPinned ? true : nil
+                )
+
+                loaded.append(note)
+            }
+            notes = loaded
+            index = rebuiltIndex
+            logger.info("Loaded \(loaded.count) notes from database")
+        } catch {
+            logger.error("Failed to load notes from database: \(error.localizedDescription)")
+            notes = []
+            index = [:]
+        }
+    }
+
+    /// Load label IDs from the item_labels join table for a given item.
+    private func loadLabelIDs(_ db: CiderDatabase, itemID: UUID) throws -> [UUID] {
+        let stmt = try db.prepare("SELECT label_id FROM item_labels WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var ids: [UUID] = []
+        while try stmt.step() {
+            if let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) {
+                ids.append(id)
+            }
+        }
+        return ids
+    }
+
+    // Internal for testing
+    /// Persist a single note to the database (items + notes + item_labels) in a transaction.
+    func persistNoteToDatabase(_ note: Note) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite persist for note \(note.id)")
+            return
+        }
+        persistNoteToDatabase(db, note: note)
+    }
+
+    // Internal for testing
+    /// Persist a single note to the given database inside its own transaction.
+    func persistNoteToDatabase(_ db: CiderDatabase, note: Note) {
+        do {
+            try db.withTransaction {
+                try persistNoteToDatabaseInner(db, note: note)
+            }
+        } catch {
+            logger.error("Failed to persist note \(note.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Core persist logic for a single note — must be called inside a transaction.
+    private func persistNoteToDatabaseInner(_ db: CiderDatabase, note: Note) throws {
+        // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE)
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'note', ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                updated_at = excluded.updated_at,
+                folder_id = excluded.folder_id,
+                relative_path = excluded.relative_path;
+            """)
+        let itemID = DatabaseHelpers.encode(note.id)
+        let folderIDText: String? = note.folderID.map { DatabaseHelpers.encode($0) }
+        let relPath: String? = note.relativePath.isEmpty ? nil : note.relativePath
+        itemStmt.bind(itemID, at: 1)
+            .bind(note.title, at: 2)
+            .bind(DatabaseHelpers.encode(note.createdAt), at: 3)
+            .bind(DatabaseHelpers.encode(note.modifiedAt), at: 4)
+            .bind(folderIDText, at: 5)
+            .bind(relPath, at: 6)
+        try itemStmt.step()
+
+        // 2. UPSERT into notes
+        let noteStmt = try db.prepare("""
+            INSERT INTO notes (item_id, content, is_pinned)
+            VALUES (?, ?, ?)
+            ON CONFLICT(item_id) DO UPDATE SET
+                content = excluded.content,
+                is_pinned = excluded.is_pinned;
+            """)
+        noteStmt.bind(itemID, at: 1)
+            .bind(note.content, at: 2)
+            .bind(note.isPinned ? Int64(1) : Int64(0), at: 3)
+        try noteStmt.step()
+
+        // 3. Sync item_labels: delete all, re-insert current
+        let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
+        delLabels.bind(itemID, at: 1)
+        try delLabels.step()
+
+        if !note.labelIDs.isEmpty {
+            let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
+            for labelID in note.labelIDs {
+                insLabel.reset()
+                insLabel.bind(itemID, at: 1)
+                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                try insLabel.step()
+            }
+        }
+    }
+
+    /// Delete a note from the database by ID. CASCADE handles detail + join tables.
+    func deleteNoteFromDatabase(_ noteID: UUID) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite delete for note \(noteID)")
+            return
+        }
+        deleteNoteFromDatabase(db, noteID: noteID)
+    }
+
+    // Internal for testing
+    /// DELETE a note from the given database by ID.
+    func deleteNoteFromDatabase(_ db: CiderDatabase, noteID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(noteID), at: 1)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to delete note \(noteID) from database: \(error.localizedDescription)")
         }
     }
 

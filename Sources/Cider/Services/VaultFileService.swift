@@ -18,6 +18,30 @@ final class VaultFileService: ObservableObject {
 
     private var vaultRoot: URL { StoragePaths.cachedVaultDirectoryURL }
 
+    // MARK: - UUID Stabilization (id-map sidecar)
+    //
+    // Prior versions derived `VaultFile.id` from a SHA-256 of the vault-relative
+    // path. That meant moving a file changed its ID and broke every cross-reference
+    // (labels, item_links, trash). We now store a stable UUID per path in
+    // `.cider/vault-files/id-map.json` so that in-app moves preserve the UUID.
+    //
+    // KNOWN LIMITATION: External Finder moves bypass `assignFile` and therefore
+    // orphan the old id-map entry. A fresh UUID is generated on the next scan,
+    // which loses label/link associations. Task 12 (Startup Reconciliation) will
+    // recover these via content-based matching.
+    private var idMap: [String: UUID] = [:]
+    private var idMapLoaded = false
+
+    private var idMapDirectoryURL: URL {
+        vaultRoot
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("vault-files")
+    }
+
+    private var idMapFileURL: URL {
+        idMapDirectoryURL.appendingPathComponent("id-map.json")
+    }
+
     /// File extensions that are Cider-native and handled by other services.
     private static let excludedExtensions: Set<String> = ["md", "json", "webloc", "ics", "vcf"]
 
@@ -40,6 +64,35 @@ final class VaultFileService: ObservableObject {
     private var pendingRescan = false
 
     private init() {}
+
+    // MARK: - Testing Helpers
+
+    /// Testing-only: directly set an id-map entry (no disk I/O).
+    func _setIDMapEntryForTesting(path: String, id: UUID) {
+        idMap[path] = id
+        idMapLoaded = true
+    }
+
+    /// Testing-only: read an id-map entry.
+    func _idMapEntryForTesting(path: String) -> UUID? {
+        idMap[path]
+    }
+
+    /// Testing-only: read the full id-map snapshot.
+    func _idMapSnapshotForTesting() -> [String: UUID] {
+        idMap
+    }
+
+    /// Testing-only: clear the in-memory id-map.
+    func _resetIDMapForTesting() {
+        idMap = [:]
+        idMapLoaded = false
+    }
+
+    /// Testing-only: compute a legacy path-derived ID (used to seed pre-migration state).
+    func _stableIDForTesting(path: String) -> UUID {
+        stableID(for: path)
+    }
 
     // MARK: - Public API
 
@@ -65,9 +118,35 @@ final class VaultFileService: ObservableObject {
             }
         }
 
+        // Ensure id-map is loaded (and run one-time migration on first run).
+        //
+        // Migration gate: the path-derived → stable-UUID migration must run at
+        // most ONCE. We track it in SQLite (`schema_migrations` table) so that
+        // losing id-map.json (backup restore, sync conflict, user cleanup)
+        // doesn't cause us to re-mint UUIDs and orphan every label/link.
+        //
+        // Order of precedence on startup:
+        //   1. Load id-map from sidecar if present.
+        //   2. If id-map is empty but SQLite `vault_files` has rows, rebuild
+        //      it from there (recovers lost/corrupted sidecar).
+        //   3. Only run the one-time migration if it's never been recorded
+        //      in `schema_migrations`.
+        if !idMapLoaded {
+            loadIDMap()
+            if idMap.isEmpty {
+                rebuildIDMapFromDatabase()
+            }
+            if !hasRunOneTimeIDMigration() {
+                runOneTimeIDMigration()
+                recordOneTimeIDMigration()
+            }
+            idMapLoaded = true
+        }
+
         let fm = FileManager.default
         let root = vaultRoot
         var scanned: [VaultFile] = []
+        var idMapDirty = false
 
         // ── 1. Scan user folders (everything except Inbox/ and Unsorted/) ──
         if let enumerator = fm.enumerator(
@@ -92,7 +171,7 @@ final class VaultFileService: ObservableObject {
                     continue
                 }
 
-                if let file = processFile(url: url, relativePath: relativePath) {
+                if let file = processFile(url: url, relativePath: relativePath, idMapDirty: &idMapDirty) {
                     scanned.append(file)
                 }
             }
@@ -115,11 +194,47 @@ final class VaultFileService: ObservableObject {
                 while let url = enumerator.nextObject() as? URL {
                     let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
                 let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
-                    if let file = processFile(url: url, relativePath: relativePath) {
+                    if let file = processFile(url: url, relativePath: relativePath, idMapDirty: &idMapDirty) {
                         scanned.append(file)
                     }
                 }
             }
+        }
+
+        // Prune id-map entries for files that no longer exist on disk, and
+        // delete the corresponding SQLite rows so metadata doesn't leak. This
+        // keeps the sidecar + SQLite in sync when files are deleted externally
+        // (Finder, sync client, `rm` in terminal, etc.).
+        //
+        // Check `FileManager.fileExists` directly instead of comparing against
+        // `scanned`, because scan-time filters (zero-byte, symlinks, excluded
+        // extensions) omit files that still exist on disk. Pruning on "not in
+        // scan results" would wipe SQLite rows for zero-byte in-progress writes.
+        let staleKeys = idMap.keys.filter { relPath in
+            let absPath = root.appendingPathComponent(relPath).path
+            return !fm.fileExists(atPath: absPath)
+        }
+        if !staleKeys.isEmpty {
+            let orphanedIDs: [UUID] = staleKeys.compactMap { idMap[$0] }
+            for key in staleKeys { idMap.removeValue(forKey: key) }
+            idMapDirty = true
+
+            // Delete orphaned rows in a single transaction.
+            if !orphanedIDs.isEmpty, let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil {
+                do {
+                    try db.withTransaction {
+                        for uuid in orphanedIDs {
+                            VaultFileStorage.shared.deleteVaultFileFromDatabase(db, fileID: uuid)
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to delete orphaned vault file rows: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        if idMapDirty {
+            saveIDMap()
         }
 
         // Apply persisted metadata (title, notes, labels, OCR, colors)
@@ -128,8 +243,27 @@ final class VaultFileService: ObservableObject {
         files = scanned.sorted { $0.modifiedAt > $1.modifiedAt }
         logger.info("Scanned vault files: \(scanned.count) items")
 
+        // Persist each scanned file to SQLite in a single transaction. Base fields
+        // (filename/size/type/createdAt/updatedAt) come from the scan; overlay
+        // fields (title/notes/labels/ocr/colors) are applied by applyMetadata above.
+        persistScannedFilesToDatabase(files)
+
         // Schedule enrichment for new un-enriched image files
         VaultFileEnrichment.shared.scheduleAll()
+    }
+
+    /// Persist all scanned vault files to SQLite in one transaction.
+    private func persistScannedFilesToDatabase(_ files: [VaultFile]) {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else { return }
+        do {
+            try db.withTransaction {
+                for file in files {
+                    try VaultFileStorage.shared.persistVaultFileToDatabaseInner(db, file: file)
+                }
+            }
+        } catch {
+            logger.error("Failed to persist scanned vault files to SQLite: \(error.localizedDescription)")
+        }
     }
 
     /// Starts watching the vault root for file changes and auto-rescanning.
@@ -174,7 +308,8 @@ final class VaultFileService: ObservableObject {
     // MARK: - Mutation
 
     /// Moves a vault file to a different folder by physically moving the file.
-    /// Migrates metadata to the new path-derived ID so it isn't orphaned.
+    /// The file's UUID is preserved across the move via the id-map sidecar, so
+    /// labels/links/trash references remain valid.
     func assignFile(_ fileID: UUID, toFolder folderID: UUID?) {
         guard let index = files.firstIndex(where: { $0.id == fileID }) else { return }
         let file = files[index]
@@ -203,25 +338,207 @@ final class VaultFileService: ObservableObject {
             }
         }
 
-        // Capture old ID before move
-        let oldID = file.id
-
         do {
             try fm.moveItem(at: file.absoluteURL, to: destURL)
 
-            // Migrate metadata to new path-derived ID (path changed → ID changed)
+            // Remap id-map: SAME UUID at the new relative path.
+            let oldRelativePath = file.relativePath
             let newRelativePath = destURL.path.replacingOccurrences(
                 of: vaultRoot.path.hasSuffix("/") ? vaultRoot.path : vaultRoot.path + "/",
                 with: ""
             )
-            let newID = stableID(for: newRelativePath)
-            if newID != oldID {
-                VaultFileStorage.shared.migrateMetadata(from: oldID, to: newID)
+            if !idMapLoaded {
+                loadIDMap()
+                idMapLoaded = true
             }
+            idMap.removeValue(forKey: oldRelativePath)
+            idMap[newRelativePath] = file.id
+            saveIDMap()
 
             scan()
         } catch {
             logger.error("Failed to move vault file: \(error.localizedDescription)")
+        }
+    }
+
+    /// Reinstates an id-map entry for a restored file. Called by
+    /// `TrashStorage.restoreVaultFile` BEFORE `scan()` so the rescan finds the
+    /// file at its (possibly collision-renamed) path and preserves the original
+    /// UUID instead of minting a fresh one.
+    func reinstateIDMapEntry(relativePath: String, uuid: UUID) {
+        if !idMapLoaded {
+            loadIDMap()
+            idMapLoaded = true
+        }
+        idMap[relativePath] = uuid
+        saveIDMap()
+    }
+
+    // MARK: - id-map sidecar
+
+    private func loadIDMap() {
+        guard let data = try? Data(contentsOf: idMapFileURL) else {
+            idMap = [:]
+            return
+        }
+        do {
+            idMap = try JSONDecoder().decode([String: UUID].self, from: data)
+            logger.info("Loaded vault file id-map: \(self.idMap.count) entries")
+        } catch {
+            logger.warning("Failed to decode vault file id-map: \(error.localizedDescription)")
+            idMap = [:]
+        }
+    }
+
+    private func saveIDMap() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: idMapDirectoryURL, withIntermediateDirectories: true)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+            let data = try encoder.encode(idMap)
+            try data.write(to: idMapFileURL, options: .atomic)
+        } catch {
+            logger.error("Failed to save vault file id-map: \(error.localizedDescription)")
+        }
+    }
+
+    /// Rebuilds the in-memory id-map from SQLite `items` rows when the sidecar
+    /// is missing or empty. Recovers from a lost / corrupted / sync-conflicted
+    /// `id-map.json` without re-running migration (which would mint fresh
+    /// UUIDs and orphan all label/link/trash references).
+    private func rebuildIDMapFromDatabase() {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else { return }
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id, i.relative_path
+                FROM items i
+                JOIN vault_files vf ON vf.item_id = i.id
+                WHERE i.type = 'vaultFile' AND i.relative_path IS NOT NULL;
+                """)
+            var rebuilt: [String: UUID] = [:]
+            while try stmt.step() {
+                guard let uuid = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let path = stmt.optionalString(at: 1) ?? ""
+                guard !path.isEmpty else { continue }
+                rebuilt[path] = uuid
+            }
+            if !rebuilt.isEmpty {
+                idMap = rebuilt
+                saveIDMap()
+                logger.info("Rebuilt vault file id-map from SQLite: \(rebuilt.count) entries")
+            }
+        } catch {
+            logger.error("Failed to rebuild id-map from database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Migration ledger name for the path-derived → stable-UUID migration.
+    private static let uuidStabilizationMigrationName = "vault_file_uuid_stabilization"
+
+    /// Returns true if the one-time UUID stabilization migration has already
+    /// been recorded in `schema_migrations`.
+    private func hasRunOneTimeIDMigration() -> Bool {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else {
+            // No DB available — fall back to the legacy "sidecar existed" test
+            // so we don't run migration over and over in a broken environment.
+            return FileManager.default.fileExists(atPath: idMapFileURL.path)
+        }
+        do {
+            let stmt = try db.prepare("SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1;")
+            stmt.bind(Self.uuidStabilizationMigrationName, at: 1)
+            return try stmt.step()
+        } catch {
+            logger.error("Failed to check schema_migrations: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Records that the one-time UUID stabilization migration has run.
+    private func recordOneTimeIDMigration() {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else { return }
+        do {
+            let stmt = try db.prepare("INSERT OR REPLACE INTO schema_migrations (name, applied_at) VALUES (?, ?);")
+            stmt.bind(Self.uuidStabilizationMigrationName, at: 1)
+                .bind(Date().timeIntervalSince1970, at: 2)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to record schema_migrations row: \(error.localizedDescription)")
+        }
+    }
+
+    /// One-time migration from path-derived UUIDs to stable UUIDs.
+    ///
+    /// Before this change, `VaultFile.id` was a SHA-256 hash of `relativePath`.
+    /// That meant `VaultFileStorage`'s metadata index (`_cider_vault_files_index.json`)
+    /// was keyed by those path-derived IDs. On the first run with the new code,
+    /// we walk the filesystem, compute the OLD path-derived ID for each file,
+    /// mint a FRESH UUID, update the id-map, and carry the old metadata entry
+    /// over to the new UUID.
+    private func runOneTimeIDMigration() {
+        let fm = FileManager.default
+        let root = vaultRoot
+        var migratedCount = 0
+
+        func migrateFile(at url: URL, relativePath: String) {
+            // Basic filtering mirroring processFile (skip dirs/symlinks/cider-native).
+            let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+            if resourceValues?.isDirectory == true { return }
+            if resourceValues?.isSymbolicLink == true { return }
+            let ext = url.pathExtension.lowercased()
+            if Self.excludedExtensions.contains(ext) || ext.isEmpty { return }
+            let fileSize = Int64(resourceValues?.fileSize ?? 0)
+            guard fileSize > 0 else { return }
+
+            let oldID = stableID(for: relativePath)
+            let newID = UUID()
+            idMap[relativePath] = newID
+            // Carry any metadata keyed by the old path-derived ID over to the new UUID.
+            VaultFileStorage.shared.migrateMetadata(from: oldID, to: newID)
+            migratedCount += 1
+        }
+
+        // 1. User folders
+        if let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            while let url = enumerator.nextObject() as? URL {
+                let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+                let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
+                let components = relativePath.split(separator: "/").map(String.init)
+                if let top = components.first, Self.excludedDirectoryPrefixes.contains(top) {
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                        enumerator.skipDescendants()
+                    }
+                    continue
+                }
+                migrateFile(at: url, relativePath: relativePath)
+            }
+        }
+
+        // 2. Inbox vault-file subdirectories
+        let inboxRoot = root.appendingPathComponent("Inbox")
+        for dirName in [Self.inboxImagesDirName, Self.inboxVideosDirName, Self.inboxFilesDirName] {
+            let dirURL = inboxRoot.appendingPathComponent(dirName)
+            guard fm.fileExists(atPath: dirURL.path) else { continue }
+            if let enumerator = fm.enumerator(
+                at: dirURL,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                while let url = enumerator.nextObject() as? URL {
+                    let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+                    let relativePath = url.path.hasPrefix(rootPrefix) ? String(url.path.dropFirst(rootPrefix.count)) : url.path
+                    migrateFile(at: url, relativePath: relativePath)
+                }
+            }
+        }
+
+        saveIDMap()
+        if migratedCount > 0 {
+            logger.info("Migrated \(migratedCount) vault files from path-derived IDs to stable UUIDs")
         }
     }
 
@@ -248,7 +565,9 @@ final class VaultFileService: ObservableObject {
     }
 
     /// Processes a single URL from the enumerator into a VaultFile, or nil if it should be skipped.
-    private func processFile(url: URL, relativePath: String) -> VaultFile? {
+    /// Resolves the file's stable UUID via the id-map sidecar, generating a fresh one
+    /// if this path isn't yet known and marking `idMapDirty` so the caller saves it.
+    private func processFile(url: URL, relativePath: String, idMapDirty: inout Bool) -> VaultFile? {
         // Skip directories and symlinks
         let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         if resourceValues?.isDirectory == true { return nil }
@@ -269,7 +588,17 @@ final class VaultFileService: ObservableObject {
         guard fileSize > 0 else { return nil } // Skip zero-byte files (in-progress writes, corrupted)
         let createdAt = values?.creationDate ?? Date()
         let modifiedAt = values?.contentModificationDate ?? Date()
-        let id = stableID(for: relativePath)
+
+        // Resolve stable UUID via id-map (NOT path-derived).
+        let id: UUID
+        if let existing = idMap[relativePath] {
+            id = existing
+        } else {
+            let fresh = UUID()
+            idMap[relativePath] = fresh
+            idMapDirty = true
+            id = fresh
+        }
 
         // Determine folder ID from the directory
         let dirPath = (relativePath as NSString).deletingLastPathComponent
@@ -298,7 +627,12 @@ final class VaultFileService: ObservableObject {
         )
     }
 
-    /// Derives a stable UUID from a vault-relative path using SHA-256.
+    /// Derives a deterministic UUID from a vault-relative path using SHA-256.
+    ///
+    /// LEGACY: This is only used by the one-time migration path
+    /// (`runOneTimeIDMigration`) to compute the OLD pre-migration IDs so that
+    /// metadata keyed by them can be carried over to the new stable UUIDs.
+    /// New code paths should resolve IDs via the id-map sidecar, not this function.
     private func stableID(for path: String) -> UUID {
         guard let data = path.data(using: .utf8) else { return UUID() }
         var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))

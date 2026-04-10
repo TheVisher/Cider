@@ -98,10 +98,10 @@ struct VaultFileCardView: View {
                             if isSelected {
                                 onToggleLabelBulk?(label.id)
                             } else if hasTag {
-                                VaultFileStorage.shared.removeLabel(file.id, labelID: label.id)
+                                VaultFileStorage.shared.removeLabel(file, labelID: label.id)
                                 VaultFileService.shared.refreshMetadata()
                             } else {
-                                VaultFileStorage.shared.assignLabel(file.id, labelID: label.id)
+                                VaultFileStorage.shared.assignLabel(file, labelID: label.id)
                                 VaultFileService.shared.refreshMetadata()
                             }
                         } label: {

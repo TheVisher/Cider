@@ -8,6 +8,12 @@ struct SidecarItemMetadata: Codable, Equatable {
     var date: String?
     var people: [String]?
 
+    /// Stable item identity (Note UUID) persisted at the file level so
+    /// identity can be recovered if the JSON/SQLite index is lost.
+    /// Bookmarks use their own sidecar file; notes use this field inside
+    /// the per-directory `.cider-meta.json`.
+    var id: UUID?
+
     /// Any additional key-value pairs the AI tool wrote that Cider doesn't
     /// explicitly model. Preserved on round-trip so Cider doesn't destroy
     /// custom fields added by external tools.
@@ -18,6 +24,7 @@ struct SidecarItemMetadata: Codable, Equatable {
         summary == nil &&
         date == nil &&
         (people ?? []).isEmpty &&
+        id == nil &&
         (extra ?? [:]).isEmpty
     }
 }

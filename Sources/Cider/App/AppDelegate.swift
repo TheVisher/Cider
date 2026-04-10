@@ -88,6 +88,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         VaultStructureMigration.migrateDateCardsToPerFileIfNeeded()
         StoragePaths.ensureVaultStructure()
 
+        // Open SQLite database before any storage service is touched. All services
+        // check CiderDatabase.shared.isOpen on first access and use it as the primary
+        // store when available, falling back to JSON otherwise.
+        do {
+            let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+            let dbPath = vaultRoot.appendingPathComponent(".cider/cider.db")
+            try FileManager.default.createDirectory(
+                at: dbPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try CiderDatabase.shared.open(at: dbPath)
+        } catch {
+            Logger(subsystem: Bundle.main.bundleIdentifier ?? "Cider", category: "Startup")
+                .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
+        }
+
         configureSettings()
         configureNotes()
         configureBookmarks()
@@ -132,7 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Load sidecar metadata and scan vault files
         SidecarService.shared.loadAll()
         VaultFileService.shared.ensureInboxDirectories()
-        VaultFileService.shared.scan()
+        // Reconcile SQLite with filesystem (handles external changes while app was closed).
+        // This triggers VaultFileService.scan() and rescans content services.
+        VaultReconciler.reconcile()
         VaultFileService.shared.startWatching()
 
         // Sync Kanban board YAML files with tab entries and start file watching
