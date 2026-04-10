@@ -104,6 +104,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
         }
 
+        // Force-initialize foundational services in FK dependency order BEFORE any
+        // ViewModel touches VaultBookmarkService / NotesStorage / etc. Item-type
+        // services have `folder_id REFERENCES folders(id)` and `label_id REFERENCES
+        // labels(id)`, so labels and folders must exist in SQLite before any item
+        // migration runs. Without this, the first ViewModel's singleton access
+        // lazy-inits VaultBookmarkService, which tries to migrate 142 bookmarks
+        // with folder_id FKs to an empty folders table — every insert fails.
+        _ = CardLabelStorage.shared   // no FK deps; referenced by item_labels
+        _ = VaultFolderService.shared // no FK deps; referenced by items.folder_id
+
         configureSettings()
         configureNotes()
         configureBookmarks()

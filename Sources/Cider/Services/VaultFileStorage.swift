@@ -27,6 +27,17 @@ final class VaultFileStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Used to defuse items.folder_id FK violations.
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
+        guard let id = folderID else { return nil }
+        let encoded = DatabaseHelpers.encode(id)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        let exists = try stmt.step()
+        return exists ? encoded : nil
+    }
+
     private var storageDir: URL {
         StoragePaths.cachedVaultDirectoryURL
             .appendingPathComponent(StoragePaths.ciderInternalDir)
@@ -300,6 +311,8 @@ final class VaultFileStorage: ObservableObject {
         }
 
         // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT CASCADE).
+        //    Scrub folder_id against target DB to defuse FK failures.
+        let folderIDText = try resolveSafeFolderID(db, folderID: effective.folderID)
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
             VALUES (?, 'vaultFile', ?, ?, ?, ?, ?)
@@ -310,7 +323,6 @@ final class VaultFileStorage: ObservableObject {
                 relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(effective.id)
-        let folderIDText: String? = effective.folderID.map { DatabaseHelpers.encode($0) }
         itemStmt.bind(itemID, at: 1)
             .bind(displayTitle, at: 2)
             .bind(DatabaseHelpers.encode(effective.createdAt), at: 3)

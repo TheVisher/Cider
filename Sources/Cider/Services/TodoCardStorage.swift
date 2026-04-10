@@ -43,6 +43,18 @@ final class TodoCardStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Used to defuse items.folder_id FK violations
+    /// when in-memory state has drifted from SQLite.
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
+        guard let id = folderID else { return nil }
+        let encoded = DatabaseHelpers.encode(id)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        let exists = try stmt.step()
+        return exists ? encoded : nil
+    }
+
     private var metadataDirectoryURL: URL {
         StoragePaths.cachedDirectoryURL(for: .todos)
     }
@@ -72,6 +84,9 @@ final class TodoCardStorage: ObservableObject {
         startWatching()
 
         // One-time migration: persist JSON-sourced todos to SQLite.
+        // `persistTodoToDatabaseInner` scrubs dangling folder_id references
+        // at the lowest level so a single stale reference can't abort the
+        // whole migration.
         if !todoCards.isEmpty, let db = resolvedDatabase {
             logger.info("Migrating \(self.todoCards.count) todos from .ics/JSON to SQLite")
             do {
@@ -867,6 +882,10 @@ final class TodoCardStorage: ObservableObject {
 
     /// Core persist logic for a single todo — must be called inside a transaction.
     private func persistTodoToDatabaseInner(_ db: CiderDatabase, todo: TodoCard) throws {
+        // Scrub folder_id against target DB to defuse FK failures during the
+        // first-run migration (or any drift between in-memory state and DB).
+        let folderIDText = try resolveSafeFolderID(db, folderID: todo.folderID)
+
         // 1. UPSERT into items.
         // `relative_path` stores the vault-relative .ics path so that DB-first cold
         // loads can recover the EXACT on-disk filename (including collision suffixes
@@ -881,7 +900,6 @@ final class TodoCardStorage: ObservableObject {
                 relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(todo.id)
-        let folderIDText: String? = todo.folderID.map { DatabaseHelpers.encode($0) }
         let relativePath: String? = relativePathForPersistence(todo)
         itemStmt.bind(itemID, at: 1)
             .bind(todo.title, at: 2)

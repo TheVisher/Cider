@@ -99,6 +99,13 @@ final class NotesStorage: ObservableObject {
             self.index = scanIndex
             self.notes = scanNotes
             if result.needsSave || scanIndex != result.index { self.saveIndex() }
+            // loadAndScan only walks .cider/notes and Inbox/Notes. Vault-folder
+            // .md files that aren't already in the index (fresh installs,
+            // externally dropped files) need explicit discovery against the
+            // VaultFolderService index, which is guaranteed populated here
+            // because AppDelegate force-inits VaultFolderService before any
+            // content service touches .shared.
+            self.discoverVaultFolderNoteFiles()
             self.loadVaultFolderNotes()
 
             // One-time migration: persist JSON notes to SQLite
@@ -369,6 +376,9 @@ final class NotesStorage: ObservableObject {
 
         // 4. Sync the full in-memory state to SQLite. Upsert everything we
         //    have now, and delete rows for notes that disappeared.
+        //    `persistNoteToDatabaseInner` scrubs dangling folder_id references
+        //    at the lowest level so a single stale reference can't abort the
+        //    whole transaction.
         guard let db = resolvedDatabase else { return }
         let currentIDs = Set(notes.map(\.id))
         let removedIDs = previousIDs.subtracting(currentIDs)
@@ -1589,6 +1599,18 @@ final class NotesStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Used to defuse items.folder_id FK violations
+    /// when in-memory state has drifted from SQLite.
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
+        guard let id = folderID else { return nil }
+        let encoded = DatabaseHelpers.encode(id)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        let exists = try stmt.step()
+        return exists ? encoded : nil
+    }
+
     // Internal for testing
     /// Number of entries currently in the in-memory UUID→metadata index.
     /// Used by tests to verify `loadNotesFromDatabase` rehydrates the index.
@@ -1699,6 +1721,10 @@ final class NotesStorage: ObservableObject {
 
     /// Core persist logic for a single note — must be called inside a transaction.
     private func persistNoteToDatabaseInner(_ db: CiderDatabase, note: Note) throws {
+        // Scrub folder_id against target DB to defuse FK failures during the
+        // first-run migration (or any drift between in-memory state and DB).
+        let folderIDText = try resolveSafeFolderID(db, folderID: note.folderID)
+
         // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE)
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
@@ -1710,7 +1736,6 @@ final class NotesStorage: ObservableObject {
                 relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(note.id)
-        let folderIDText: String? = note.folderID.map { DatabaseHelpers.encode($0) }
         let relPath: String? = note.relativePath.isEmpty ? nil : note.relativePath
         itemStmt.bind(itemID, at: 1)
             .bind(note.title, at: 2)
@@ -1733,17 +1758,23 @@ final class NotesStorage: ObservableObject {
             .bind(note.isPinned ? Int64(1) : Int64(0), at: 3)
         try noteStmt.step()
 
-        // 3. Sync item_labels: delete all, re-insert current
+        // 3. Sync item_labels: delete all, re-insert via EXISTS guard so
+        //    dangling label_ids are silently dropped instead of tripping FK.
         let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
         delLabels.bind(itemID, at: 1)
         try delLabels.step()
 
         if !note.labelIDs.isEmpty {
-            let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
+            let insLabel = try db.prepare("""
+                INSERT INTO item_labels (item_id, label_id)
+                SELECT ?, ? WHERE EXISTS (SELECT 1 FROM labels WHERE id = ?);
+                """)
             for labelID in note.labelIDs {
                 insLabel.reset()
+                let labelText = DatabaseHelpers.encode(labelID)
                 insLabel.bind(itemID, at: 1)
-                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                    .bind(labelText, at: 2)
+                    .bind(labelText, at: 3)
                 try insLabel.step()
             }
         }

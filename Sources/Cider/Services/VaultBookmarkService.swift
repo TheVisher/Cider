@@ -129,7 +129,10 @@ final class VaultBookmarkService: ObservableObject {
             }
             bookmarks = cached
             logger.info("Loaded \(cached.count) bookmarks from index cache")
-            // One-time migration: persist JSON bookmarks to SQLite
+            // One-time migration: persist JSON bookmarks to SQLite.
+            // `persistBookmarkToDatabaseInner` scrubs dangling folder_id /
+            // label_id references at the lowest level, so a single stale
+            // reference can't abort the whole transaction.
             if !cached.isEmpty, let db = resolvedDatabase {
                 logger.info("Migrating \(cached.count) bookmarks from JSON to SQLite")
                 do {
@@ -314,6 +317,10 @@ final class VaultBookmarkService: ObservableObject {
     /// Persist all current bookmarks to the database.
     /// Mirrors the writeIndexCache() approach — full snapshot of current state.
     /// Wraps all writes in a single transaction for performance.
+    ///
+    /// `persistBookmarkToDatabaseInner` scrubs dangling folder_id and label_id
+    /// references at the lowest level, so a single stale reference can't roll
+    /// back the whole transaction and leave every write silently failing.
     private func persistAllBookmarksToDatabase() {
         guard let db = resolvedDatabase else { return }
         do {
@@ -2211,6 +2218,18 @@ final class VaultBookmarkService: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Used to defuse FK violations during persists
+    /// when the in-memory folder reference has drifted from SQLite state.
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
+        guard let id = folderID else { return nil }
+        let encoded = DatabaseHelpers.encode(id)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        let exists = try stmt.step()
+        return exists ? encoded : nil
+    }
+
     // Internal for testing
     /// SELECT all bookmarks from the database (items JOIN bookmarks), loading
     /// labels, dismissed labels, and tags from join tables.
@@ -2350,6 +2369,13 @@ final class VaultBookmarkService: ObservableObject {
     /// Core persist logic for a single bookmark — must be called inside a transaction.
     private func persistBookmarkToDatabaseInner(_ db: CiderDatabase, bookmark: Bookmark) throws {
         // 1. UPSERT into items (ON CONFLICT avoids DELETE+INSERT that triggers CASCADE)
+        //
+        // Scrub folder_id against the target database: if the referenced
+        // folder doesn't exist in SQLite (first-run migration, mid-session
+        // drift, etc.), fall back to NULL so the FK doesn't abort the whole
+        // transaction. The webloc file on disk is the source of truth for
+        // the folder, so downstream reassignment will put it back in place.
+        let folderIDText = try resolveSafeFolderID(db, folderID: bookmark.folderID)
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
             VALUES (?, 'bookmark', ?, ?, ?, ?, ?)
@@ -2360,7 +2386,6 @@ final class VaultBookmarkService: ObservableObject {
                 relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(bookmark.id)
-        let folderIDText: String? = bookmark.folderID.map { DatabaseHelpers.encode($0) }
         itemStmt.bind(itemID, at: 1)
             .bind(bookmark.title, at: 2)
             .bind(DatabaseHelpers.encode(bookmark.createdAt), at: 3)
@@ -2420,32 +2445,47 @@ final class VaultBookmarkService: ObservableObject {
             .bind(bookmark.lastEnrichedAt.map { DatabaseHelpers.encode($0) }, at: 17)
         try bkStmt.step()
 
-        // 3. Sync item_labels: delete all, re-insert current
+        // 3. Sync item_labels: delete all, re-insert current.
+        //    Use an EXISTS subquery so a dangling label_id (label not yet in
+        //    SQLite, mid-migration race, partial backup recovery) is silently
+        //    dropped instead of rolling back the whole bookmark transaction.
+        //    SQLite's OR IGNORE does NOT swallow FK violations — they still
+        //    throw — so we have to pre-check via a subquery.
         let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
         delLabels.bind(itemID, at: 1)
         try delLabels.step()
 
         if !bookmark.labelIDs.isEmpty {
-            let insLabel = try db.prepare("INSERT INTO item_labels (item_id, label_id) VALUES (?, ?);")
+            let insLabel = try db.prepare("""
+                INSERT INTO item_labels (item_id, label_id)
+                SELECT ?, ? WHERE EXISTS (SELECT 1 FROM labels WHERE id = ?);
+                """)
             for labelID in bookmark.labelIDs {
                 insLabel.reset()
+                let labelText = DatabaseHelpers.encode(labelID)
                 insLabel.bind(itemID, at: 1)
-                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                    .bind(labelText, at: 2)
+                    .bind(labelText, at: 3)
                 try insLabel.step()
             }
         }
 
-        // 4. Sync dismissed_labels: delete all, re-insert current
+        // 4. Sync dismissed_labels: same EXISTS guard
         let delDismissed = try db.prepare("DELETE FROM dismissed_labels WHERE item_id = ?;")
         delDismissed.bind(itemID, at: 1)
         try delDismissed.step()
 
         if !bookmark.dismissedLabelIDs.isEmpty {
-            let insDismissed = try db.prepare("INSERT INTO dismissed_labels (item_id, label_id) VALUES (?, ?);")
+            let insDismissed = try db.prepare("""
+                INSERT INTO dismissed_labels (item_id, label_id)
+                SELECT ?, ? WHERE EXISTS (SELECT 1 FROM labels WHERE id = ?);
+                """)
             for labelID in bookmark.dismissedLabelIDs {
                 insDismissed.reset()
+                let labelText = DatabaseHelpers.encode(labelID)
                 insDismissed.bind(itemID, at: 1)
-                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                    .bind(labelText, at: 2)
+                    .bind(labelText, at: 3)
                 try insDismissed.step()
             }
         }

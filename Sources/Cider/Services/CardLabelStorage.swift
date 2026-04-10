@@ -23,6 +23,17 @@ final class CardLabelStorage: ObservableObject {
         return StoragePaths.jsonFileURL(fileName: backupFileName, in: dir)
     }
 
+    /// Legacy index file written by pre-SQLite builds. Still honored as a
+    /// recovery source on the first migration so existing installs don't
+    /// lose labels when SQLite is bootstrapped empty.
+    private let legacyIndexFileName = "_cider_labels.json"
+    private var legacyIndexFileURL: URL {
+        StoragePaths.jsonFileURL(
+            fileName: legacyIndexFileName,
+            in: StoragePaths.directoryURL(for: .labels)
+        )
+    }
+
     private init() {
         self.database = nil
         loadFromDatabaseOrJSON()
@@ -183,27 +194,38 @@ final class CardLabelStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
-    /// Load labels from SQLite. If SQLite is unavailable OR returns no rows
-    /// and a label backup JSON exists, restore labels from it (recoverability
-    /// path). When SQLite is open-but-empty, the backup is treated as
-    /// authoritative and re-seeded into the database so future launches find
-    /// the labels in SQLite directly.
+    /// Load labels from SQLite. Recovery order when the primary store returns
+    /// nothing: (1) backup JSON, then (2) legacy `_cider_labels.json` index.
+    /// This handles both new installs (backup is the authority) and upgrades
+    /// from pre-SQLite builds (legacy index is the only source). Whichever
+    /// source wins gets re-seeded into SQLite AND the backup file so future
+    /// launches find the labels in the primary store.
     private func loadFromDatabaseOrJSON() {
         if let db = resolvedDatabase {
             loadFromDatabase(db)
             if labels.isEmpty {
+                var recoverySource: String?
                 restoreFromBackupJSON()
-                // Re-seed SQLite from the restored backup so future launches
-                // find the labels in the primary store.
                 if !labels.isEmpty {
-                    logger.info("Restored \(self.labels.count) labels from backup JSON, re-seeding SQLite")
+                    recoverySource = "backup JSON"
+                } else {
+                    restoreFromLegacyIndexJSON()
+                    if !labels.isEmpty { recoverySource = "legacy index JSON" }
+                }
+                if let source = recoverySource {
+                    logger.info("Restored \(self.labels.count) labels from \(source), re-seeding SQLite + backup")
                     for label in labels {
                         persistToDatabase(db, label: label)
                     }
+                    // Seed backup from whichever source won so we never drift.
+                    persistBackupJSON()
                 }
             }
         } else {
             restoreFromBackupJSON()
+            if labels.isEmpty {
+                restoreFromLegacyIndexJSON()
+            }
         }
     }
 
@@ -308,6 +330,26 @@ final class CardLabelStorage: ObservableObject {
             sortLabels()
         } catch {
             logger.error("Failed to restore labels from backup JSON: \(error.localizedDescription)")
+            labels = []
+        }
+    }
+
+    /// Restore labels from the pre-SQLite legacy index file at
+    /// `.cider/labels/_cider_labels.json`. This handles upgrades from older
+    /// builds where labels were kept in this file before the backup system
+    /// was added. Only consulted when SQLite AND the backup file are both
+    /// empty — the caller is responsible for re-seeding SQLite afterwards.
+    private func restoreFromLegacyIndexJSON() {
+        guard FileManager.default.fileExists(atPath: legacyIndexFileURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: legacyIndexFileURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let snapshot = try decoder.decode(CardLabelsSnapshot.self, from: data)
+            labels = snapshot.labels
+            sortLabels()
+        } catch {
+            logger.error("Failed to restore labels from legacy index JSON: \(error.localizedDescription)")
             labels = []
         }
     }

@@ -689,9 +689,19 @@ final class VaultFolderService {
             changed = true
         }
 
-        // Paths in index not on disk → deleted from Finder
+        // Paths in index not on disk → deleted from Finder.
+        //
+        // Safety net: skip the delete if SQLite still has items referencing
+        // this folder. FSEvents can briefly see a folder as "gone" during a
+        // rename or sync operation; we don't want to aggressively wipe a
+        // folder (and trigger the items FK cascade) just because scan caught
+        // a transient state. Empty folders remain safe to remove.
         for (id, entry) in index {
             if !diskPaths.contains(entry.relativePath) {
+                if folderHasItemsInDatabase(folderID: id) {
+                    logger.warning("Skipping removal of missing folder \(entry.relativePath) — still has items in database (transient FS state?)")
+                    continue
+                }
                 index.removeValue(forKey: id)
                 deleteFolderFromDatabase(folderID: id)
                 logger.info("Removed missing folder: \(entry.relativePath)")
@@ -851,6 +861,23 @@ final class VaultFolderService {
             try stmt.step()
         } catch {
             logger.error("Failed to delete folder \(folderID) from database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Returns true if any items reference this folder in SQLite. Used as a
+    /// safety guard by the FSEvents reconciliation path so transient
+    /// filesystem states don't orphan user items.
+    private func folderHasItemsInDatabase(folderID: UUID) -> Bool {
+        guard let db = resolvedDatabase else { return false }
+        do {
+            let stmt = try db.prepare("SELECT COUNT(*) FROM items WHERE folder_id = ?;")
+            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
+            guard try stmt.step() else { return false }
+            return stmt.int(at: 0) > 0
+        } catch {
+            logger.error("folderHasItemsInDatabase failed for \(folderID): \(error.localizedDescription)")
+            // Be conservative on error — assume items exist, skip delete
+            return true
         }
     }
 

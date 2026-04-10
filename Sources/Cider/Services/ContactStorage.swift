@@ -39,6 +39,18 @@ final class ContactStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Used to defuse items.folder_id FK violations
+    /// when in-memory state has drifted from SQLite.
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
+        guard let id = folderID else { return nil }
+        let encoded = DatabaseHelpers.encode(id)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        let exists = try stmt.step()
+        return exists ? encoded : nil
+    }
+
     /// The .cider/contacts/ directory (index + avatars + trash).
     private var metadataDirectoryURL: URL {
         StoragePaths.cachedDirectoryURL(for: .contacts)
@@ -75,6 +87,9 @@ final class ContactStorage: ObservableObject {
         startWatching()
 
         // One-time migration: persist JSON/.vcf-sourced contacts to SQLite.
+        // `persistContactToDatabaseInner` scrubs dangling folder_id references
+        // at the lowest level so a single stale reference can't abort the
+        // whole migration.
         if !contacts.isEmpty, let db = resolvedDatabase {
             logger.info("Migrating \(self.contacts.count) contacts from .vcf/JSON to SQLite")
             do {
@@ -844,6 +859,9 @@ final class ContactStorage: ObservableObject {
     /// `ContactCard.displayName` is stored in `items.title`, NOT in a separate
     /// `contacts.display_name` column (the schema has no such column).
     private func persistContactToDatabaseInner(_ db: CiderDatabase, contact: ContactCard) throws {
+        // Scrub folder_id against target DB to defuse FK failures.
+        let folderIDText = try resolveSafeFolderID(db, folderID: contact.folderID)
+
         // 1. UPSERT into items.
         // `relative_path` stores the vault-relative .vcf path so that DB-first cold
         // loads can recover the EXACT on-disk filename (including collision suffixes
@@ -858,7 +876,6 @@ final class ContactStorage: ObservableObject {
                 relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(contact.id)
-        let folderIDText: String? = contact.folderID.map { DatabaseHelpers.encode($0) }
         let relativePath: String? = relativePathForPersistence(contact)
         itemStmt.bind(itemID, at: 1)
             .bind(contact.displayName, at: 2)

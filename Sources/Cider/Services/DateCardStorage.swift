@@ -42,6 +42,18 @@ final class DateCardStorage: ObservableObject {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Used to defuse items.folder_id FK violations
+    /// when in-memory state has drifted from SQLite.
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
+        guard let id = folderID else { return nil }
+        let encoded = DatabaseHelpers.encode(id)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        let exists = try stmt.step()
+        return exists ? encoded : nil
+    }
+
     private var metadataDirectoryURL: URL {
         StoragePaths.cachedDirectoryURL(for: .dateCards)
     }
@@ -71,6 +83,9 @@ final class DateCardStorage: ObservableObject {
         startWatching()
 
         // One-time migration: persist JSON-sourced date cards to SQLite.
+        // `persistEventToDatabaseInner` scrubs dangling folder_id references
+        // at the lowest level so a single stale reference can't abort the
+        // whole migration.
         if !dateCards.isEmpty, let db = resolvedDatabase {
             logger.info("Migrating \(self.dateCards.count) date cards from .ics/JSON to SQLite")
             do {
@@ -787,6 +802,9 @@ final class DateCardStorage: ObservableObject {
 
     /// Core persist logic for a single date card — must be called inside a transaction.
     private func persistEventToDatabaseInner(_ db: CiderDatabase, dateCard: DateCard) throws {
+        // Scrub folder_id against target DB to defuse FK failures.
+        let folderIDText = try resolveSafeFolderID(db, folderID: dateCard.folderID)
+
         // 1. UPSERT into items.
         // `relative_path` stores the vault-relative .ics path so that DB-first cold
         // loads can recover the EXACT on-disk filename (including collision suffixes
@@ -801,7 +819,6 @@ final class DateCardStorage: ObservableObject {
                 relative_path = excluded.relative_path;
             """)
         let itemID = DatabaseHelpers.encode(dateCard.id)
-        let folderIDText: String? = dateCard.folderID.map { DatabaseHelpers.encode($0) }
         let relativePath: String? = relativePathForPersistence(dateCard)
         itemStmt.bind(itemID, at: 1)
             .bind(dateCard.title, at: 2)
