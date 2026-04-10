@@ -43,6 +43,12 @@ final class TodoCardStorage: ObservableObject {
     private var inboxWatcher: FSEventsWatcher?
     private var isScanning = false
     private var pendingRescan = false
+    private var database: CiderDatabase?
+
+    /// Resolve which database instance to use: explicit (testing) or shared (production).
+    private var resolvedDatabase: CiderDatabase? {
+        database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
+    }
 
     private var metadataDirectoryURL: URL {
         StoragePaths.cachedDirectoryURL(for: .todos)
@@ -63,8 +69,39 @@ final class TodoCardStorage: ObservableObject {
     private init() {
         ensureDirectories()
         loadIndex()
+
+        // Try SQLite first (mirrors NotesStorage/VaultBookmarkService pattern).
+        if let db = resolvedDatabase {
+            loadTodosFromDatabase(db)
+            if !todoCards.isEmpty {
+                startWatching()
+                return
+            }
+        }
+
         scanAndLoad()
         startWatching()
+
+        // One-time migration: persist JSON-sourced todos to SQLite.
+        if !todoCards.isEmpty, let db = resolvedDatabase {
+            logger.info("Migrating \(self.todoCards.count) todos from .ics/JSON to SQLite")
+            do {
+                try db.withTransaction {
+                    for todo in self.todoCards {
+                        try self.persistTodoToDatabaseInner(db, todo: todo)
+                    }
+                }
+            } catch {
+                logger.error("Failed to migrate todos to SQLite: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Testing-only initializer with an explicit database.
+    /// Does NOT scan the file system — tests call loadTodosFromDatabase() directly
+    /// or use the persist/delete helpers.
+    init(database: CiderDatabase) {
+        self.database = database
     }
 
     /// Watches the Inbox/Todos directory for new .ics files dropped externally (e.g. via iMessage agent).
@@ -123,6 +160,7 @@ final class TodoCardStorage: ObservableObject {
 
         todoCards.append(todoCard)
         sortCards()
+        persistTodoToDatabase(todoCard)
         return todoCard
     }
 
@@ -142,6 +180,7 @@ final class TodoCardStorage: ObservableObject {
 
         todoCards.append(card)
         sortCards()
+        persistTodoToDatabase(card)
         return card
     }
 
@@ -180,6 +219,7 @@ final class TodoCardStorage: ObservableObject {
         )
         saveIndex()
         sortCards()
+        persistTodoToDatabase(copy)
         return true
     }
 
@@ -197,6 +237,7 @@ final class TodoCardStorage: ObservableObject {
         todoCards.removeAll { $0.id == id }
         index.removeValue(forKey: id)
         saveIndex()
+        deleteTodoFromDatabase(id)
         return trashItem
     }
 
@@ -284,6 +325,7 @@ final class TodoCardStorage: ObservableObject {
         updatedEntry.filename = newFilename
         index[id] = updatedEntry
         saveIndex()
+        persistTodoToDatabase(todoCards[idx])
         return true
     }
 
@@ -299,8 +341,21 @@ final class TodoCardStorage: ObservableObject {
             modifiedIDs.insert(todoCards[i].id)
         }
         if !modifiedIDs.isEmpty {
-            for todoCard in todoCards where modifiedIDs.contains(todoCard.id) {
-                writeAndUpdateIndex(for: todoCard)
+            let modified = todoCards.filter { modifiedIDs.contains($0.id) }
+            for todoCard in modified {
+                writeICSAndIndex(for: todoCard)
+            }
+            // Persist all affected todos in a single transaction.
+            if let db = resolvedDatabase {
+                do {
+                    try db.withTransaction {
+                        for todoCard in modified {
+                            try self.persistTodoToDatabaseInner(db, todo: todoCard)
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to batch-persist todos after label removal: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -350,6 +405,7 @@ final class TodoCardStorage: ObservableObject {
 
         todoCards.append(todoCard)
         sortCards()
+        persistTodoToDatabase(todoCard)
     }
 
     // MARK: - File I/O
@@ -361,6 +417,13 @@ final class TodoCardStorage: ObservableObject {
 
     /// Convenience: write file and update index for an already-in-memory todoCard.
     private func writeAndUpdateIndex(for todoCard: TodoCard) {
+        writeICSAndIndex(for: todoCard)
+        persistTodoToDatabase(todoCard)
+    }
+
+    /// Write the .ics file and update the in-memory + on-disk index. Does NOT touch SQLite.
+    /// Used when callers want to batch SQLite writes separately.
+    private func writeICSAndIndex(for todoCard: TodoCard) {
         guard let entry = index[todoCard.id] else { return }
         let dirURL = resolveDirectoryURL(folderID: todoCard.folderID)
         writeICSFile(for: todoCard, to: dirURL.appendingPathComponent(entry.filename))
@@ -560,6 +623,253 @@ final class TodoCardStorage: ObservableObject {
                 break
             }
             return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    // MARK: - Database Persistence
+
+    /// Link types that may be persisted to `item_links`. Links to non-migrated types
+    /// (e.g. `session`, `externalFile`) are silently skipped — their targets don't
+    /// exist as rows in `items` and would violate the foreign key.
+    private static let linkableEntityTypes: Set<String> = [
+        "bookmark", "note", "todo", "dateCard", "contact", "vaultFile"
+    ]
+
+    // Internal for testing
+    /// SELECT all todos from the database (items JOIN todos), loading labelIDs from
+    /// item_labels and linkedEntities from item_links. Also rehydrates `self.index`
+    /// so mutation paths can find their entries after a DB-first cold launch.
+    func loadTodosFromDatabase(_ db: CiderDatabase) {
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id,
+                       t.details, t.due_date, t.priority, t.is_completed, t.completed_at,
+                       t.notes, t.checklist
+                FROM items i
+                JOIN todos t ON t.item_id = i.id
+                WHERE i.type = 'todo';
+                """)
+            var loaded: [TodoCard] = []
+            var rebuiltIndex: [UUID: IndexEntry] = [:]
+            while try stmt.step() {
+                guard let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+                let title = stmt.string(at: 1)
+                let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
+                let updatedAt = DatabaseHelpers.decodeDate(stmt.double(at: 3))
+                let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
+                let details = stmt.string(at: 5)
+                let dueDate = stmt.optionalDouble(at: 6).map(DatabaseHelpers.decodeDate)
+                let priority = stmt.optionalString(at: 7).flatMap { TodoPriority(rawValue: $0) }
+                let isCompleted = stmt.bool(at: 8)
+                let completedAt = stmt.optionalDouble(at: 9).map(DatabaseHelpers.decodeDate)
+                let notes = stmt.string(at: 10)
+                let checklistJSON = stmt.optionalString(at: 11)
+                let checklist: [TodoChecklistItem] =
+                    DatabaseHelpers.decodeJSON([TodoChecklistItem].self, from: checklistJSON) ?? []
+
+                let labelIDs = (try? loadLabelIDs(db, itemID: id)) ?? []
+                let linkedEntities = (try? loadLinkedEntities(db, sourceID: id)) ?? []
+
+                let todo = TodoCard(
+                    id: id,
+                    title: title,
+                    details: details,
+                    checklist: checklist,
+                    dueDate: dueDate,
+                    priority: priority,
+                    isCompleted: isCompleted,
+                    completedAt: completedAt,
+                    labelIDs: labelIDs,
+                    notes: notes,
+                    linkedEntities: linkedEntities,
+                    folderID: folderID,
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+                loaded.append(todo)
+
+                // Rehydrate the in-memory index so mutation paths work after cold load.
+                // We don't know the real filename here; fall back to `{title}.ics`.
+                let filename = sanitizedFilename(title) + ".\(fileExtension)"
+                rebuiltIndex[id] = IndexEntry(
+                    filename: filename,
+                    folderID: folderID,
+                    labelIDs: labelIDs.isEmpty ? nil : labelIDs,
+                    createdAt: createdAt,
+                    isCompleted: isCompleted,
+                    dueDate: dueDate,
+                    priority: priority
+                )
+            }
+            todoCards = loaded
+            index = rebuiltIndex
+            sortCards()
+            logger.info("Loaded \(loaded.count) todos from database")
+        } catch {
+            logger.error("Failed to load todos from database: \(error.localizedDescription)")
+            todoCards = []
+            index = [:]
+        }
+    }
+
+    /// Load label IDs from the item_labels join table for a given item.
+    private func loadLabelIDs(_ db: CiderDatabase, itemID: UUID) throws -> [UUID] {
+        let stmt = try db.prepare("SELECT label_id FROM item_labels WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var ids: [UUID] = []
+        while try stmt.step() {
+            if let id = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) {
+                ids.append(id)
+            }
+        }
+        return ids
+    }
+
+    /// Load linked entities from the item_links join table (link_type = 'linked').
+    /// Infers the entity type from the target item's `items.type` column.
+    private func loadLinkedEntities(_ db: CiderDatabase, sourceID: UUID) throws -> [LibraryEntityRef] {
+        let stmt = try db.prepare("""
+            SELECT l.target_id, i.type
+            FROM item_links l
+            JOIN items i ON i.id = l.target_id
+            WHERE l.source_id = ? AND l.link_type = 'linked';
+            """)
+        stmt.bind(DatabaseHelpers.encode(sourceID), at: 1)
+        var refs: [LibraryEntityRef] = []
+        while try stmt.step() {
+            guard let targetID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)),
+                  let type = LibraryEntityType(rawValue: stmt.string(at: 1)) else { continue }
+            refs.append(LibraryEntityRef(type: type, entityID: targetID))
+        }
+        return refs
+    }
+
+    // Internal for testing
+    /// Persist a single todo to the database (items + todos + item_labels + item_links)
+    /// using the resolved (shared or explicit) database inside a transaction.
+    func persistTodoToDatabase(_ todo: TodoCard) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite persist for todo \(todo.id)")
+            return
+        }
+        persistTodoToDatabase(db, todo: todo)
+    }
+
+    // Internal for testing
+    /// Persist a single todo to the given database inside its own transaction.
+    func persistTodoToDatabase(_ db: CiderDatabase, todo: TodoCard) {
+        do {
+            try db.withTransaction {
+                try persistTodoToDatabaseInner(db, todo: todo)
+            }
+        } catch {
+            logger.error("Failed to persist todo \(todo.id) to database: \(error.localizedDescription)")
+        }
+    }
+
+    /// Core persist logic for a single todo — must be called inside a transaction.
+    private func persistTodoToDatabaseInner(_ db: CiderDatabase, todo: TodoCard) throws {
+        // 1. UPSERT into items
+        let itemStmt = try db.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'todo', ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                updated_at = excluded.updated_at,
+                folder_id = excluded.folder_id,
+                relative_path = excluded.relative_path;
+            """)
+        let itemID = DatabaseHelpers.encode(todo.id)
+        let folderIDText: String? = todo.folderID.map { DatabaseHelpers.encode($0) }
+        itemStmt.bind(itemID, at: 1)
+            .bind(todo.title, at: 2)
+            .bind(DatabaseHelpers.encode(todo.createdAt), at: 3)
+            .bind(DatabaseHelpers.encode(todo.updatedAt), at: 4)
+            .bind(folderIDText, at: 5)
+        try itemStmt.step()
+
+        // 2. UPSERT into todos
+        let todoStmt = try db.prepare("""
+            INSERT INTO todos (item_id, details, due_date, priority, is_completed, completed_at, notes, checklist)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(item_id) DO UPDATE SET
+                details = excluded.details,
+                due_date = excluded.due_date,
+                priority = excluded.priority,
+                is_completed = excluded.is_completed,
+                completed_at = excluded.completed_at,
+                notes = excluded.notes,
+                checklist = excluded.checklist;
+            """)
+        let checklistJSON: String? = todo.checklist.isEmpty
+            ? nil
+            : DatabaseHelpers.encodeJSON(todo.checklist)
+        todoStmt.bind(itemID, at: 1)
+            .bind(todo.details, at: 2)
+            .bind(todo.dueDate.map(DatabaseHelpers.encode), at: 3)
+            .bind(todo.priority?.rawValue, at: 4)
+            .bind(todo.isCompleted ? Int64(1) : Int64(0), at: 5)
+            .bind(todo.completedAt.map(DatabaseHelpers.encode), at: 6)
+            .bind(todo.notes, at: 7)
+            .bind(checklistJSON, at: 8)
+        try todoStmt.step()
+
+        // 3. Sync item_labels: delete all, re-insert current.
+        let delLabels = try db.prepare("DELETE FROM item_labels WHERE item_id = ?;")
+        delLabels.bind(itemID, at: 1)
+        try delLabels.step()
+
+        if !todo.labelIDs.isEmpty {
+            let insLabel = try db.prepare("INSERT OR IGNORE INTO item_labels (item_id, label_id) VALUES (?, ?);")
+            for labelID in todo.labelIDs {
+                insLabel.reset()
+                insLabel.bind(itemID, at: 1)
+                    .bind(DatabaseHelpers.encode(labelID), at: 2)
+                try insLabel.step()
+            }
+        }
+
+        // 4. Sync item_links: delete all 'linked' rows from this source, re-insert current.
+        // Non-migrated types and links whose target row doesn't exist are silently dropped.
+        let delLinks = try db.prepare("DELETE FROM item_links WHERE source_id = ? AND link_type = 'linked';")
+        delLinks.bind(itemID, at: 1)
+        try delLinks.step()
+
+        let now = DatabaseHelpers.encode(Date())
+        let insLink = try db.prepare("""
+            INSERT OR IGNORE INTO item_links (source_id, target_id, link_type, created_at)
+            SELECT ?, ?, 'linked', ?
+            WHERE EXISTS (SELECT 1 FROM items WHERE id = ?);
+            """)
+        for ref in todo.linkedEntities where Self.linkableEntityTypes.contains(ref.type.rawValue) {
+            let target = DatabaseHelpers.encode(ref.entityID)
+            insLink.reset()
+            insLink.bind(itemID, at: 1)
+                .bind(target, at: 2)
+                .bind(now, at: 3)
+                .bind(target, at: 4)
+            try insLink.step()
+        }
+    }
+
+    /// Delete a todo from the database by ID. CASCADE handles detail + join tables.
+    func deleteTodoFromDatabase(_ todoID: UUID) {
+        guard let db = resolvedDatabase else {
+            logger.warning("No database available, skipping SQLite delete for todo \(todoID)")
+            return
+        }
+        deleteTodoFromDatabase(db, todoID: todoID)
+    }
+
+    // Internal for testing
+    /// DELETE a todo from the given database by ID.
+    func deleteTodoFromDatabase(_ db: CiderDatabase, todoID: UUID) {
+        do {
+            let stmt = try db.prepare("DELETE FROM items WHERE id = ?;")
+            stmt.bind(DatabaseHelpers.encode(todoID), at: 1)
+            try stmt.step()
+        } catch {
+            logger.error("Failed to delete todo \(todoID) from database: \(error.localizedDescription)")
         }
     }
 }
