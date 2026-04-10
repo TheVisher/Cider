@@ -90,9 +90,15 @@ final class NotesStorage: ObservableObject {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.loadAndScan(directoryURL: dirURL, indexURL: idxURL, indexFileName: idxName)
             }.value
-            self.index = result.index
-            self.notes = result.notes
-            if result.needsSave { self.saveIndex() }
+            var scanIndex = result.index
+            var scanNotes = result.notes
+            // loadAndScan runs off-actor and cannot read sidecars. Reconcile
+            // UUIDs here on the main actor so identity survives loss of the
+            // JSON index.
+            self.reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
+            self.index = scanIndex
+            self.notes = scanNotes
+            if result.needsSave || scanIndex != result.index { self.saveIndex() }
             self.loadVaultFolderNotes()
 
             // One-time migration: persist JSON notes to SQLite
@@ -167,9 +173,12 @@ final class NotesStorage: ObservableObject {
             indexURL: directoryURL.appendingPathComponent(indexFileName),
             indexFileName: indexFileName
         )
-        index = result.index
-        notes = result.notes
-        if result.needsSave { saveIndex() }
+        var scanIndex = result.index
+        var scanNotes = result.notes
+        reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
+        index = scanIndex
+        notes = scanNotes
+        if result.needsSave || scanIndex != result.index { saveIndex() }
         loadVaultFolderNotes()
     }
 
@@ -253,7 +262,15 @@ final class NotesStorage: ObservableObject {
             guard filename != indexFileName else { continue }
 
             let title = String(filename.dropLast(3)) // Remove .md
-            let uuid = filenameToUUID[filename] ?? UUID()
+
+            // Resolve UUID: (1) JSON index, (2) sidecar `id`, (3) fresh UUID.
+            // Resolving from the sidecar lets us recover stable identity if the
+            // `_cider_notes_index.json` file was ever lost.
+            let sidecarDir: String = relativePrefix ?? "" // "" = scanning legacy .cider/notes/ which has no sidecar
+            let sidecarUUID: UUID? = sidecarDir.isEmpty
+                ? nil
+                : SidecarService.shared.noteUUID(forFilename: filename, inDirectory: sidecarDir)
+            let uuid = filenameToUUID[filename] ?? sidecarUUID ?? UUID()
             let existingEntry = index[uuid]
             let folderID = existingEntry?.folderID
             let labelIDs = existingEntry?.labelIDs ?? []
@@ -278,6 +295,14 @@ final class NotesStorage: ObservableObject {
                 relativePath = "\(prefix)/\(filename)"
             } else {
                 relativePath = filename
+            }
+
+            // Persist the UUID to the sidecar if it isn't there yet, so future
+            // scans can recover identity even if the JSON index is deleted.
+            if !sidecarDir.isEmpty, sidecarUUID != uuid {
+                var meta = SidecarService.shared.metadata(for: filename, inDirectory: sidecarDir) ?? SidecarItemMetadata()
+                meta.id = uuid
+                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: sidecarDir)
             }
 
             // Lazy: don't load content during scan
@@ -380,6 +405,64 @@ final class NotesStorage: ObservableObject {
             notes.sort { a, b in
                 if a.isPinned != b.isPinned { return a.isPinned }
                 return a.createdAt > b.createdAt
+            }
+        }
+    }
+
+    /// Reconciles UUIDs against per-directory sidecar files after a background
+    /// `loadAndScan`. Because `loadAndScan` is nonisolated and cannot reach the
+    /// main-actor `SidecarService`, any scanned note whose filename was missing
+    /// from the JSON index was assigned a fresh `UUID()`. If a sidecar persisted
+    /// a previous UUID for that file, adopt it here. Afterwards, persist every
+    /// resolved UUID back to the sidecar so future recoveries work.
+    private func reconcileUUIDsWithSidecars(
+        notes: inout [Note],
+        index: inout [UUID: NoteIndexEntry]
+    ) {
+        var idRemaps: [(old: UUID, new: UUID)] = []
+
+        for i in notes.indices {
+            let note = notes[i]
+            let filename = (note.relativePath as NSString).lastPathComponent
+            let dirPath: String
+            if note.relativePath.contains("/") {
+                dirPath = (note.relativePath as NSString).deletingLastPathComponent
+            } else {
+                // Notes without a slash live in legacy .cider/notes/ which has no sidecar.
+                continue
+            }
+
+            // The sidecar is the file-level source of truth for identity.
+            // If it disagrees with what loadAndScan produced, adopt the sidecar ID.
+            if let persistedID = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: dirPath),
+               persistedID != note.id {
+                idRemaps.append((old: note.id, new: persistedID))
+                notes[i] = Note(
+                    id: persistedID,
+                    title: note.title,
+                    content: note.content,
+                    createdAt: note.createdAt,
+                    modifiedAt: note.modifiedAt,
+                    relativePath: note.relativePath,
+                    labelIDs: note.labelIDs,
+                    folderID: note.folderID,
+                    isPinned: note.isPinned
+                )
+            }
+
+            // Persist this note's UUID to the sidecar (idempotent).
+            let resolvedID = notes[i].id
+            var meta = SidecarService.shared.metadata(for: filename, inDirectory: dirPath) ?? SidecarItemMetadata()
+            if meta.id != resolvedID {
+                meta.id = resolvedID
+                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: dirPath)
+            }
+        }
+
+        // Apply ID remaps to the index.
+        for remap in idRemaps {
+            if let entry = index.removeValue(forKey: remap.old) {
+                index[remap.new] = entry
             }
         }
     }
@@ -537,6 +620,7 @@ final class NotesStorage: ObservableObject {
         let note = Note(id: uuid, title: title, content: initialContent, createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
+        SidecarService.shared.syncNote(note)
         return note
     }
 
@@ -620,6 +704,7 @@ final class NotesStorage: ObservableObject {
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
+        SidecarService.shared.syncNote(note)
         return note
     }
 
@@ -879,6 +964,7 @@ final class NotesStorage: ObservableObject {
                 index[notes[i].id] = entry
             }
             affectedNotes.append(notes[i])
+            SidecarService.shared.syncNote(notes[i])
             changed = true
         }
         if changed {
@@ -1009,6 +1095,7 @@ final class NotesStorage: ObservableObject {
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
+        SidecarService.shared.syncNote(note)
     }
 
     /// Update an existing note from a sync pull (remote is newer).
@@ -1093,9 +1180,10 @@ final class NotesStorage: ObservableObject {
         if folderID != nil {
             loadVaultFolderNotes()
         }
-        // Persist restored note to database
+        // Persist restored note to database and sidecar
         if let restoredNote = notes.first(where: { $0.id == noteID }) {
             persistNoteToDatabase(restoredNote)
+            SidecarService.shared.syncNote(restoredNote)
         }
         // Cancel pending sync deletion and push so the note reappears on web
         SyncService.shared.cancelNoteDeletion(of: noteID)

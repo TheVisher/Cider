@@ -168,6 +168,7 @@ final class SidecarService: ObservableObject {
 
     /// Syncs sidecar metadata for a note based on its current Cider labels.
     /// Converts label IDs to human-readable names and writes to the sidecar file.
+    /// Also persists the note's UUID so identity can be recovered if the index is lost.
     func syncNote(_ note: Note) {
         let filename = (note.relativePath as NSString).lastPathComponent
         let dirPath: String
@@ -183,11 +184,21 @@ final class SidecarService: ObservableObject {
         let labelNames = note.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
         meta.tags = labelNames.isEmpty ? nil : labelNames.sorted()
 
+        // Persist the note's stable identity. Once `id` is set the sidecar entry
+        // is considered non-empty even if tags are cleared, so the UUID survives.
+        meta.id = note.id
+
         if meta.isEmpty {
             removeMetadata(for: filename, inDirectory: dirPath)
         } else {
             setMetadata(meta, for: filename, inDirectory: dirPath)
         }
+    }
+
+    /// Reads the persisted note UUID from the per-directory sidecar file, if any.
+    /// Used by NotesStorage to recover note identity when the JSON index is missing.
+    func noteUUID(forFilename filename: String, inDirectory directoryRelativePath: String) -> UUID? {
+        metadata(for: filename, inDirectory: directoryRelativePath)?.id
     }
 
     // MARK: - Private
