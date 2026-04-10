@@ -307,13 +307,13 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private func pruneMissingBookmarksFromDisk(_ db: CiderDatabase) {
-        var removedIDs: [UUID] = []
-        bookmarks.removeAll { bookmark in
-            guard let relativePath = bookmark.relativePath else { return false }
+        // Identify stale bookmarks WITHOUT mutating the in-memory array — if the
+        // DB delete fails, we want memory and SQLite to stay consistent. Only
+        // prune the array after the transaction commits successfully.
+        let removedIDs: [UUID] = bookmarks.compactMap { bookmark in
+            guard let relativePath = bookmark.relativePath else { return nil }
             let fileURL = vaultRoot.appendingPathComponent(relativePath)
-            guard !FileManager.default.fileExists(atPath: fileURL.path) else { return false }
-            removedIDs.append(bookmark.id)
-            return true
+            return FileManager.default.fileExists(atPath: fileURL.path) ? nil : bookmark.id
         }
         guard !removedIDs.isEmpty else { return }
 
@@ -326,6 +326,10 @@ final class VaultBookmarkService: ObservableObject {
                     try stmt.step()
                 }
             }
+            // Transaction committed — now it's safe to drop the stale rows from
+            // the published array.
+            let removedSet = Set(removedIDs)
+            bookmarks.removeAll { removedSet.contains($0.id) }
             writeIndexCache()
             logger.info("Pruned \(removedIDs.count) bookmarks missing their .webloc files from disk")
         } catch {

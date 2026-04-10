@@ -192,7 +192,7 @@ final class BrowserSessionStorage: ObservableObject {
         // with other services (VaultFileStorage dominant_colors, etc.).
         let tabsJSON: String? = session.tabs.isEmpty ? nil : DatabaseHelpers.encodeJSON(session.tabs)
         let labelIDsJSON: String? = session.labelIDs.isEmpty ? nil : DatabaseHelpers.encode(session.labelIDs)
-        let folderIDText = resolveSafeFolderID(db, folderID: session.folderID)
+        let folderIDText = try resolveSafeFolderID(db, folderID: session.folderID)
 
         stmt.bind(DatabaseHelpers.encode(session.id), at: 1)
             .bind(session.name, at: 2)
@@ -206,18 +206,19 @@ final class BrowserSessionStorage: ObservableObject {
         try stmt.step()
     }
 
-    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) -> String? {
+    /// Returns the encoded folder_id TEXT if the folder exists in the target
+    /// database, otherwise nil. Throws on real DB errors (matches the pattern
+    /// used by other storage services — a transient query failure should
+    /// abort the transaction, not silently clear the user's folder reference).
+    private func resolveSafeFolderID(_ db: CiderDatabase, folderID: UUID?) throws -> String? {
         guard let folderID else { return nil }
-        do {
-            let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
-            stmt.bind(DatabaseHelpers.encode(folderID), at: 1)
-            if try stmt.step() {
-                return DatabaseHelpers.encode(folderID)
-            }
-            Self.logger.warning("Clearing stale folder reference for session folder \(folderID)")
-        } catch {
-            Self.logger.error("Failed to validate session folder \(folderID): \(error.localizedDescription)")
+        let encoded = DatabaseHelpers.encode(folderID)
+        let stmt = try db.prepare("SELECT 1 FROM folders WHERE id = ? LIMIT 1;")
+        stmt.bind(encoded, at: 1)
+        if try stmt.step() {
+            return encoded
         }
+        Self.logger.warning("Clearing stale folder reference for session folder \(folderID)")
         return nil
     }
 
