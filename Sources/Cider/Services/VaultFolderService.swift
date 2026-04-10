@@ -634,7 +634,13 @@ final class VaultFolderService {
 
     func startWatching() {
         stopWatching()
-        watcher = FSEventsWatcher(path: vaultRoot.path) { [weak self] _ in
+        watcher = FSEventsWatcher(path: vaultRoot.path) { [weak self] paths in
+            // Filter out writes inside `.cider/` — those are our own bookkeeping
+            // (cider.db, cider.db-wal, id-map.json, sidecars, etc.) and if we
+            // re-triggered scan on them, every SQLite write would feed back as
+            // an FSEvents burst → rescan → more SQLite writes → infinite loop.
+            let hasUserFileChange = paths.contains { !$0.contains("/.cider/") }
+            guard hasUserFileChange else { return }
             // FSEventsWatcher delivers on main queue
             MainActor.assumeIsolated {
                 self?.handleFSEvent()
