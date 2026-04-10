@@ -499,7 +499,39 @@ struct TodoSQLiteTests {
         #expect(service2.todoCards[0].linkedEntities.isEmpty)
     }
 
-    @Test("Updating linkedEntities replaces old link rows")
+    // MARK: - Filename / relative_path round-trip
+
+    @Test("Uniquified filename round-trips through items.relative_path")
+    func uniquifiedFilenameRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        // Simulate the real creation path producing a collision-suffixed filename.
+        let todo = TodoCard(title: "Buy groceries")
+        service._setIndexEntryForTesting(todoID: todo.id, filename: "Buy groceries (2).ics")
+
+        service.persistTodoToDatabase(db, todo: todo)
+
+        // Verify relative_path was persisted to the items table.
+        let stmt = try db.prepare("SELECT relative_path FROM items WHERE id = ?;")
+        stmt.bind(DatabaseHelpers.encode(todo.id), at: 1)
+        try stmt.step()
+        let relPath = stmt.optionalString(at: 0)
+        #expect(relPath == "Inbox/Todos/Buy groceries (2).ics")
+
+        // Reload in a fresh service and verify the filename is recovered EXACTLY —
+        // not the sanitized guess "Buy groceries.ics" that would orphan the real file.
+        let service2 = makeService(db)
+        service2.loadTodosFromDatabase(db)
+
+        #expect(service2.todoCards.count == 1)
+        let recovered = service2._indexFilenameForTesting(todoID: todo.id)
+        #expect(recovered == "Buy groceries (2).ics")
+    }
+
+@Test("Updating linkedEntities replaces old link rows")
     func linkedEntitiesUpdate() throws {
         let (db, url) = try makeTestDB()
         defer { db.close(); cleanup(url) }

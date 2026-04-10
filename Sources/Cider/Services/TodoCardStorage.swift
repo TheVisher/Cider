@@ -104,6 +104,30 @@ final class TodoCardStorage: ObservableObject {
         self.database = database
     }
 
+    /// Testing-only: seed the in-memory index so that `persistTodoToDatabase`
+    /// picks up a specific filename (used to verify that uniquified filenames
+    /// like "Title (2).ics" round-trip through items.relative_path).
+    func _setIndexEntryForTesting(
+        todoID: UUID,
+        filename: String,
+        folderID: UUID? = nil
+    ) {
+        index[todoID] = IndexEntry(
+            filename: filename,
+            folderID: folderID,
+            labelIDs: nil,
+            createdAt: Date(),
+            isCompleted: false,
+            dueDate: nil,
+            priority: nil
+        )
+    }
+
+    /// Testing-only: read the filename currently tracked in the index for a todo.
+    func _indexFilenameForTesting(todoID: UUID) -> String? {
+        index[todoID]?.filename
+    }
+
     /// Watches the Inbox/Todos directory for new .ics files dropped externally (e.g. via iMessage agent).
     func startWatching() {
         inboxWatcher?.stop()
@@ -342,14 +366,18 @@ final class TodoCardStorage: ObservableObject {
         }
         if !modifiedIDs.isEmpty {
             let modified = todoCards.filter { modifiedIDs.contains($0.id) }
+            // Only persist to SQLite for todos whose on-disk write actually happened.
+            var persistable: [TodoCard] = []
             for todoCard in modified {
-                writeICSAndIndex(for: todoCard)
+                if writeICSAndIndex(for: todoCard) {
+                    persistable.append(todoCard)
+                }
             }
             // Persist all affected todos in a single transaction.
-            if let db = resolvedDatabase {
+            if !persistable.isEmpty, let db = resolvedDatabase {
                 do {
                     try db.withTransaction {
-                        for todoCard in modified {
+                        for todoCard in persistable {
                             try self.persistTodoToDatabaseInner(db, todo: todoCard)
                         }
                     }
@@ -416,15 +444,23 @@ final class TodoCardStorage: ObservableObject {
     }
 
     /// Convenience: write file and update index for an already-in-memory todoCard.
+    /// Only persists to SQLite when the on-disk write actually happened — otherwise
+    /// DB and disk would diverge, violating "files are source of truth".
     private func writeAndUpdateIndex(for todoCard: TodoCard) {
-        writeICSAndIndex(for: todoCard)
+        guard writeICSAndIndex(for: todoCard) else { return }
         persistTodoToDatabase(todoCard)
     }
 
     /// Write the .ics file and update the in-memory + on-disk index. Does NOT touch SQLite.
     /// Used when callers want to batch SQLite writes separately.
-    private func writeICSAndIndex(for todoCard: TodoCard) {
-        guard let entry = index[todoCard.id] else { return }
+    /// Returns `true` if the write and index update happened, `false` if the index
+    /// entry was missing (caller should NOT proceed to persist the DB mirror).
+    @discardableResult
+    private func writeICSAndIndex(for todoCard: TodoCard) -> Bool {
+        guard let entry = index[todoCard.id] else {
+            logger.warning("writeICSAndIndex skipped for todo \(todoCard.id): missing index entry — neither disk nor DB will be updated")
+            return false
+        }
         let dirURL = resolveDirectoryURL(folderID: todoCard.folderID)
         writeICSFile(for: todoCard, to: dirURL.appendingPathComponent(entry.filename))
         var updated = entry
@@ -434,6 +470,7 @@ final class TodoCardStorage: ObservableObject {
         updated.labelIDs = todoCard.labelIDs.isEmpty ? nil : todoCard.labelIDs
         index[todoCard.id] = updated
         saveIndex()
+        return true
     }
 
     func resolveFileURL(for todoID: UUID) -> URL? {
@@ -642,7 +679,7 @@ final class TodoCardStorage: ObservableObject {
     func loadTodosFromDatabase(_ db: CiderDatabase) {
         do {
             let stmt = try db.prepare("""
-                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id,
+                SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
                        t.details, t.due_date, t.priority, t.is_completed, t.completed_at,
                        t.notes, t.checklist
                 FROM items i
@@ -657,13 +694,14 @@ final class TodoCardStorage: ObservableObject {
                 let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
                 let updatedAt = DatabaseHelpers.decodeDate(stmt.double(at: 3))
                 let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
-                let details = stmt.string(at: 5)
-                let dueDate = stmt.optionalDouble(at: 6).map(DatabaseHelpers.decodeDate)
-                let priority = stmt.optionalString(at: 7).flatMap { TodoPriority(rawValue: $0) }
-                let isCompleted = stmt.bool(at: 8)
-                let completedAt = stmt.optionalDouble(at: 9).map(DatabaseHelpers.decodeDate)
-                let notes = stmt.string(at: 10)
-                let checklistJSON = stmt.optionalString(at: 11)
+                let relativePath = stmt.optionalString(at: 5)
+                let details = stmt.string(at: 6)
+                let dueDate = stmt.optionalDouble(at: 7).map(DatabaseHelpers.decodeDate)
+                let priority = stmt.optionalString(at: 8).flatMap { TodoPriority(rawValue: $0) }
+                let isCompleted = stmt.bool(at: 9)
+                let completedAt = stmt.optionalDouble(at: 10).map(DatabaseHelpers.decodeDate)
+                let notes = stmt.string(at: 11)
+                let checklistJSON = stmt.optionalString(at: 12)
                 let checklist: [TodoChecklistItem] =
                     DatabaseHelpers.decodeJSON([TodoChecklistItem].self, from: checklistJSON) ?? []
 
@@ -689,8 +727,17 @@ final class TodoCardStorage: ObservableObject {
                 loaded.append(todo)
 
                 // Rehydrate the in-memory index so mutation paths work after cold load.
-                // We don't know the real filename here; fall back to `{title}.ics`.
-                let filename = sanitizedFilename(title) + ".\(fileExtension)"
+                // Derive the filename from `items.relative_path` (persisted on write)
+                // so collision suffixes like "Title (2).ics" are recovered exactly.
+                // Fall back to a sanitized guess only if the column is missing (pre-fix
+                // rows), which is still better than corrupting later writes.
+                let filename: String = {
+                    if let rel = relativePath, !rel.isEmpty {
+                        let last = (rel as NSString).lastPathComponent
+                        if !last.isEmpty { return last }
+                    }
+                    return "\(sanitizedFilename(title)).\(fileExtension)"
+                }()
                 rebuiltIndex[id] = IndexEntry(
                     filename: filename,
                     folderID: folderID,
@@ -767,12 +814,34 @@ final class TodoCardStorage: ObservableObject {
         }
     }
 
+    /// Compute the vault-relative path for a todo, preferring the real filename tracked
+    /// in the in-memory index. Falls back to the sanitized title when the index hasn't
+    /// been populated yet (e.g. initial one-time JSON migration inside `init`).
+    private func relativePathForPersistence(_ todo: TodoCard) -> String? {
+        let filename: String
+        if let entryFilename = index[todo.id]?.filename {
+            filename = entryFilename
+        } else {
+            filename = "\(sanitizedFilename(todo.title)).\(fileExtension)"
+        }
+
+        if let folderID = todo.folderID,
+           let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            return "\(vaultFolder.relativePath)/\(filename)"
+        }
+        // Inbox todos live under `Inbox/Todos/{filename}`.
+        return "Inbox/Todos/\(filename)"
+    }
+
     /// Core persist logic for a single todo — must be called inside a transaction.
     private func persistTodoToDatabaseInner(_ db: CiderDatabase, todo: TodoCard) throws {
-        // 1. UPSERT into items
+        // 1. UPSERT into items.
+        // `relative_path` stores the vault-relative .ics path so that DB-first cold
+        // loads can recover the EXACT on-disk filename (including collision suffixes
+        // like "Title (2).ics"). Guessing from the title would orphan real files.
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
-            VALUES (?, 'todo', ?, ?, ?, ?, NULL)
+            VALUES (?, 'todo', ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 updated_at = excluded.updated_at,
@@ -781,11 +850,13 @@ final class TodoCardStorage: ObservableObject {
             """)
         let itemID = DatabaseHelpers.encode(todo.id)
         let folderIDText: String? = todo.folderID.map { DatabaseHelpers.encode($0) }
+        let relativePath: String? = relativePathForPersistence(todo)
         itemStmt.bind(itemID, at: 1)
             .bind(todo.title, at: 2)
             .bind(DatabaseHelpers.encode(todo.createdAt), at: 3)
             .bind(DatabaseHelpers.encode(todo.updatedAt), at: 4)
             .bind(folderIDText, at: 5)
+            .bind(relativePath, at: 6)
         try itemStmt.step()
 
         // 2. UPSERT into todos
@@ -831,6 +902,20 @@ final class TodoCardStorage: ObservableObject {
 
         // 4. Sync item_links: delete all 'linked' rows from this source, re-insert current.
         // Non-migrated types and links whose target row doesn't exist are silently dropped.
+        //
+        // KNOWN LIMITATION — first-run JSON→SQLite migration:
+        // When TodoCardStorage runs its one-time migration loop in `init`, other
+        // services (bookmarks, notes, contacts, etc.) may not have migrated yet, so
+        // their target rows in `items` don't exist. The `WHERE EXISTS` guard below
+        // therefore silently drops any cross-type links for those not-yet-migrated
+        // targets. This is acceptable because:
+        //   1. `todo.linkedEntities` remains authoritative in memory and inside the
+        //      .ics file — nothing is lost on disk.
+        //   2. Any subsequent user edit to the todo re-runs this persist path, by
+        //      which point all services have finished migrating and the targets do
+        //      exist — so the links will be correctly re-persisted.
+        //   3. Task 12 (Startup Reconciliation) will add a post-migration pass that
+        //      backfills any links dropped during the first run.
         let delLinks = try db.prepare("DELETE FROM item_links WHERE source_id = ? AND link_type = 'linked';")
         delLinks.bind(itemID, at: 1)
         try delLinks.step()
