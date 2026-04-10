@@ -174,6 +174,12 @@ final class BookmarksViewModel: ObservableObject {
             for contact in ContactStorage.shared.contacts where contact.folderID == id {
                 ContactStorage.shared.assignContact(contact.id, toFolder: nil)
             }
+            for session in BrowserSessionStorage.shared.sessions where session.folderID == id {
+                BrowserSessionStorage.shared.assignSession(session.id, toFolder: nil)
+            }
+            for file in VaultFileService.shared.files where file.folderID == id {
+                VaultFileService.shared.assignFile(file.id, toFolder: nil)
+            }
         }
 
         guard let trashItem = VaultFolderService.shared.deleteFolder(folderID) else {
