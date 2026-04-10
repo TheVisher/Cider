@@ -228,6 +228,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
     var relativePath: String?         // vault-relative path, e.g. "Entertainment/YouTube - Some Video.webloc"
     var titleManuallySet: Bool = false // true when title was explicitly changed by user or external agent — enrichment won't overwrite
     var notesManuallySet: Bool = false // true when notes were explicitly changed — oEmbed/enrichment won't overwrite
+    var enrichmentStatus: String?      // "none", "partial", or "complete" — tracks AI enrichment state
+    var lastEnrichedAt: Date?          // timestamp of last AI enrichment pass
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -254,6 +256,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         case relativePath
         case titleManuallySet
         case notesManuallySet
+        case enrichmentStatus
+        case lastEnrichedAt
     }
 
     init(
@@ -281,7 +285,9 @@ struct Bookmark: Identifiable, Hashable, Codable {
         preferredHeroMode: String? = nil,
         relativePath: String? = nil,
         titleManuallySet: Bool = false,
-        notesManuallySet: Bool = false
+        notesManuallySet: Bool = false,
+        enrichmentStatus: String? = nil,
+        lastEnrichedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -308,6 +314,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         self.relativePath = relativePath
         self.titleManuallySet = titleManuallySet
         self.notesManuallySet = notesManuallySet
+        self.enrichmentStatus = enrichmentStatus
+        self.lastEnrichedAt = lastEnrichedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -336,6 +344,8 @@ struct Bookmark: Identifiable, Hashable, Codable {
         relativePath = try container.decodeIfPresent(String.self, forKey: .relativePath)
         titleManuallySet = try container.decodeIfPresent(Bool.self, forKey: .titleManuallySet) ?? false
         notesManuallySet = try container.decodeIfPresent(Bool.self, forKey: .notesManuallySet) ?? false
+        enrichmentStatus = try container.decodeIfPresent(String.self, forKey: .enrichmentStatus)
+        lastEnrichedAt = try container.decodeIfPresent(Date.self, forKey: .lastEnrichedAt)
     }
 
     var url: URL? {

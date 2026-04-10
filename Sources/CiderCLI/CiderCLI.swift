@@ -231,13 +231,15 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <title>] [--notes <notes>] [--url <url>]")
+                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <title>] [--notes <notes>] [--url <url>] [--ai-summary <text>] [--enrichment-status none|partial|complete]")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
                 let newTitle = parseFlag("--title", from: args) ?? bm.title
                 let newNotes = parseFlag("--notes", from: args) ?? bm.notes
                 let newURL = parseFlag("--url", from: args)
+                let newAISummary = parseFlag("--ai-summary", from: args)
+                let newEnrichmentStatus = parseFlag("--enrichment-status", from: args)
                 let updated = service.updateDetails(
                     for: bm.id,
                     title: newTitle,
@@ -245,7 +247,13 @@ struct CiderCLI {
                     tags: bm.tags,
                     urlString: newURL
                 )
-                if updated {
+                // Update AI-owned enrichment fields separately
+                let enriched = service.updateEnrichment(
+                    for: bm.id,
+                    aiSummary: newAISummary,
+                    enrichmentStatus: newEnrichmentStatus
+                )
+                if updated || enriched {
                     print("Updated: \(newTitle) (\(bm.id.uuidString.prefix(8)))")
                 } else {
                     print("No changes to apply")

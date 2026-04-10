@@ -34,6 +34,8 @@ func outputJSON(_ value: Any) {
     if let ocr = bm.ocrText { d["ocrText"] = ocr }
     if let colors = bm.dominantColors { d["dominantColors"] = colors }
     if let summary = bm.aiSummary { d["aiSummary"] = summary }
+    if let status = bm.enrichmentStatus { d["enrichmentStatus"] = status }
+    if let enrichedAt = bm.lastEnrichedAt { d["lastEnrichedAt"] = ISO8601DateFormatter().string(from: enrichedAt) }
     if let thumb = bm.thumbnailRelativePath { d["thumbnailPath"] = thumb }
     if let media = bm.mediaType { d["mediaType"] = media.rawValue }
     return d

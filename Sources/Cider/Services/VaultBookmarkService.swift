@@ -511,6 +511,33 @@ final class VaultBookmarkService: ObservableObject {
         return true
     }
 
+    /// Updates AI-owned enrichment fields without touching user-owned notes.
+    @discardableResult
+    func updateEnrichment(
+        for bookmarkID: UUID,
+        aiSummary: String? = nil,
+        enrichmentStatus: String? = nil
+    ) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+
+        var changed = false
+        if let aiSummary, bookmarks[index].aiSummary != aiSummary {
+            bookmarks[index].aiSummary = aiSummary
+            changed = true
+        }
+        if let enrichmentStatus, bookmarks[index].enrichmentStatus != enrichmentStatus {
+            bookmarks[index].enrichmentStatus = enrichmentStatus
+            changed = true
+        }
+        if changed {
+            bookmarks[index].lastEnrichedAt = Date()
+            bookmarks[index].updatedAt = Date()
+            persistSidecar(for: bookmarks[index])
+            persist()
+        }
+        return changed
+    }
+
     func previewNormalizedURLString(from rawValue: String) -> String? {
         normalizedURL(from: rawValue)?.absoluteString
     }
