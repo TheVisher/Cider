@@ -173,7 +173,10 @@ final class TodoCardStorage: ObservableObject {
         let todoCard = TodoCard(title: finalTitle, dueDate: dueDate, priority: priority)
 
         let filename = uniqueFilename(for: finalTitle, in: inboxDirectoryURL)
-        writeICSFile(for: todoCard, to: inboxDirectoryURL.appendingPathComponent(filename))
+        guard writeICSFile(for: todoCard, to: inboxDirectoryURL.appendingPathComponent(filename)) else {
+            logger.error("createTodoCard aborted for \(todoCard.id): initial .ics write failed")
+            return todoCard
+        }
 
         index[todoCard.id] = IndexEntry(
             filename: filename, folderID: nil, labelIDs: nil,
@@ -192,7 +195,10 @@ final class TodoCardStorage: ObservableObject {
     func addTodoCard(_ card: TodoCard) -> TodoCard {
         let dirURL = resolveDirectoryURL(folderID: card.folderID)
         let filename = uniqueFilename(for: card.title, in: dirURL)
-        writeICSFile(for: card, to: dirURL.appendingPathComponent(filename))
+        guard writeICSFile(for: card, to: dirURL.appendingPathComponent(filename)) else {
+            logger.error("addTodoCard aborted for \(card.id): .ics write failed")
+            return card
+        }
 
         index[card.id] = IndexEntry(
             filename: filename, folderID: card.folderID,
@@ -231,7 +237,10 @@ final class TodoCardStorage: ObservableObject {
             }
         }
 
-        writeICSFile(for: copy, to: dirURL.appendingPathComponent(filename))
+        guard writeICSFile(for: copy, to: dirURL.appendingPathComponent(filename)) else {
+            logger.error("updateTodoCard aborted for \(updated.id): .ics write failed")
+            return false
+        }
 
         todoCards[idx] = copy
         index[updated.id] = IndexEntry(
@@ -420,7 +429,10 @@ final class TodoCardStorage: ObservableObject {
 
         if !restored {
             try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
-            writeICSFile(for: todoCard, to: dirURL.appendingPathComponent(filename))
+            guard writeICSFile(for: todoCard, to: dirURL.appendingPathComponent(filename)) else {
+                logger.error("restoreFromTrash aborted for todo \(todoCard.id): .ics write failed")
+                return
+            }
         }
 
         index[todoCard.id] = IndexEntry(
@@ -438,9 +450,19 @@ final class TodoCardStorage: ObservableObject {
 
     // MARK: - File I/O
 
-    private func writeICSFile(for todoCard: TodoCard, to url: URL) {
+    /// Writes a todo to disk as a .ics file. Returns `true` on success,
+    /// `false` on failure (error is logged). Callers MUST check the result
+    /// before mirroring to SQLite — a failed disk write must not be mirrored.
+    @discardableResult
+    func writeICSFile(for todoCard: TodoCard, to url: URL) -> Bool {
         let icsString = ICalendarSerializer.serializeTodo(todoCard)
-        try? icsString.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try icsString.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            logger.error("Failed to write .ics for todo \(todoCard.id) at \(url.path): \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Convenience: write file and update index for an already-in-memory todoCard.
@@ -462,7 +484,9 @@ final class TodoCardStorage: ObservableObject {
             return false
         }
         let dirURL = resolveDirectoryURL(folderID: todoCard.folderID)
-        writeICSFile(for: todoCard, to: dirURL.appendingPathComponent(entry.filename))
+        guard writeICSFile(for: todoCard, to: dirURL.appendingPathComponent(entry.filename)) else {
+            return false
+        }
         var updated = entry
         updated.isCompleted = todoCard.isCompleted
         updated.dueDate = todoCard.dueDate

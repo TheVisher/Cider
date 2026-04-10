@@ -181,7 +181,10 @@ final class DateCardStorage: ObservableObject {
         )
 
         let filename = uniqueFilename(for: finalTitle, in: inboxDirectoryURL)
-        writeICSFile(for: dateCard, to: inboxDirectoryURL.appendingPathComponent(filename))
+        guard writeICSFile(for: dateCard, to: inboxDirectoryURL.appendingPathComponent(filename)) else {
+            logger.error("createDateCard aborted for \(dateCard.id): initial .ics write failed")
+            return dateCard
+        }
 
         index[dateCard.id] = IndexEntry(
             filename: filename, folderID: nil, labelIDs: nil,
@@ -219,7 +222,10 @@ final class DateCardStorage: ObservableObject {
             }
         }
 
-        writeICSFile(for: copy, to: dirURL.appendingPathComponent(filename))
+        guard writeICSFile(for: copy, to: dirURL.appendingPathComponent(filename)) else {
+            logger.error("updateDateCard aborted for \(updated.id): .ics write failed")
+            return false
+        }
 
         dateCards[idx] = copy
         index[updated.id] = IndexEntry(
@@ -366,7 +372,10 @@ final class DateCardStorage: ObservableObject {
 
         if !restored {
             try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
-            writeICSFile(for: dateCard, to: dirURL.appendingPathComponent(filename))
+            guard writeICSFile(for: dateCard, to: dirURL.appendingPathComponent(filename)) else {
+                logger.error("restoreFromTrash aborted for date card \(dateCard.id): .ics write failed")
+                return
+            }
         }
 
         index[dateCard.id] = IndexEntry(
@@ -384,9 +393,19 @@ final class DateCardStorage: ObservableObject {
 
     // MARK: - File I/O
 
-    private func writeICSFile(for dateCard: DateCard, to url: URL) {
+    /// Writes a date card to disk as a .ics file. Returns `true` on success,
+    /// `false` on failure (error is logged). Callers MUST check the result
+    /// before mirroring to SQLite — a failed disk write must not be mirrored.
+    @discardableResult
+    func writeICSFile(for dateCard: DateCard, to url: URL) -> Bool {
         let icsString = ICalendarSerializer.serializeDateCard(dateCard)
-        try? icsString.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try icsString.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            logger.error("Failed to write .ics for date card \(dateCard.id) at \(url.path): \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Convenience: write file and update index for an already-in-memory dateCard.
@@ -408,7 +427,9 @@ final class DateCardStorage: ObservableObject {
             return false
         }
         let dirURL = resolveDirectoryURL(folderID: dateCard.folderID)
-        writeICSFile(for: dateCard, to: dirURL.appendingPathComponent(entry.filename))
+        guard writeICSFile(for: dateCard, to: dirURL.appendingPathComponent(entry.filename)) else {
+            return false
+        }
         var updated = entry
         updated.isCompleted = dateCard.isCompleted
         updated.startAt = dateCard.startAt

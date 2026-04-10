@@ -525,4 +525,69 @@ struct ContactSQLiteTests {
         #expect(loaded.labelIDs.isEmpty)
         #expect(loaded.linkedEntities.isEmpty)
     }
+
+    // MARK: - Disk write failure gates SQLite persistence
+
+    @Test("writeVCardFile returns false when the target directory does not exist")
+    func writeVCardFileReturnsFalseOnDiskError() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        // Target a path whose parent directory does not exist → file write must fail.
+        let bogusDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-nonexistent-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("deeper", isDirectory: true)
+        let bogusURL = bogusDir.appendingPathComponent("contact.vcf")
+
+        let contact = ContactCard(displayName: "Should not persist")
+        let ok = service.writeVCardFile(for: contact, to: bogusURL)
+        #expect(ok == false)
+        #expect(FileManager.default.fileExists(atPath: bogusURL.path) == false)
+
+        // And a sanity check: writing to a real path returns true.
+        let realDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-contact-write-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: realDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: realDir) }
+        let realURL = realDir.appendingPathComponent("contact.vcf")
+        #expect(service.writeVCardFile(for: contact, to: realURL) == true)
+        #expect(FileManager.default.fileExists(atPath: realURL.path) == true)
+    }
+
+    @Test("hasAvatar flag round-trips through SQLite when mutated via persist path")
+    func hasAvatarFlagPersists() throws {
+        // Validates that a direct persist call (as saveAvatar/deleteAvatar would do
+        // after a successful .vcf write) reflects the hasAvatar change in SQLite.
+        // We bypass the filesystem-dependent saveAvatar/deleteAvatar entrypoints here
+        // because they depend on the real vault StoragePaths, but the end result is
+        // the same: a mutated in-memory contact is written to the DB only after the
+        // on-disk write has succeeded.
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        var contact = ContactCard(displayName: "Avatar Tester", hasAvatar: false)
+        service.persistContactToDatabase(db, contact: contact)
+
+        // Flip hasAvatar on (simulating a successful saveAvatar disk write)
+        contact.hasAvatar = true
+        service.persistContactToDatabase(db, contact: contact)
+
+        let stmt1 = try db.prepare("SELECT has_avatar FROM contacts WHERE item_id = ?;")
+        stmt1.bind(DatabaseHelpers.encode(contact.id), at: 1)
+        try stmt1.step()
+        #expect(stmt1.int(at: 0) == 1)
+
+        // Flip hasAvatar off (simulating a deleteAvatar that updates state regardless
+        // of whether the JPEG removal actually found a file — by design).
+        contact.hasAvatar = false
+        service.persistContactToDatabase(db, contact: contact)
+
+        let stmt2 = try db.prepare("SELECT has_avatar FROM contacts WHERE item_id = ?;")
+        stmt2.bind(DatabaseHelpers.encode(contact.id), at: 1)
+        try stmt2.step()
+        #expect(stmt2.int(at: 0) == 0)
+    }
 }

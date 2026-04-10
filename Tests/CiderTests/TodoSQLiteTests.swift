@@ -560,4 +560,34 @@ struct TodoSQLiteTests {
         #expect(loaded?.linkedEntities.count == 1)
         #expect(loaded?.linkedEntities.first?.entityID == b.id)
     }
+
+    // MARK: - Disk write failure gates SQLite persistence
+
+    @Test("writeICSFile returns false when the target directory does not exist")
+    func writeICSFileReturnsFalseOnDiskError() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        // Target a path whose parent directory does not exist → file write must fail.
+        let bogusDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-nonexistent-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("deeper", isDirectory: true)
+        let bogusURL = bogusDir.appendingPathComponent("todo.ics")
+
+        let todo = TodoCard(title: "Should not persist")
+        let ok = service.writeICSFile(for: todo, to: bogusURL)
+        #expect(ok == false)
+        #expect(FileManager.default.fileExists(atPath: bogusURL.path) == false)
+
+        // And a sanity check: writing to a real path returns true.
+        let realDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-todo-write-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: realDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: realDir) }
+        let realURL = realDir.appendingPathComponent("todo.ics")
+        #expect(service.writeICSFile(for: todo, to: realURL) == true)
+        #expect(FileManager.default.fileExists(atPath: realURL.path) == true)
+    }
 }

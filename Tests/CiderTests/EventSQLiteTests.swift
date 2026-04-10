@@ -609,4 +609,34 @@ struct EventSQLiteTests {
         let recovered = service2._indexFilenameForTesting(dateCardID: card.id)
         #expect(recovered == "Team Meeting (2).ics")
     }
+
+    // MARK: - Disk write failure gates SQLite persistence
+
+    @Test("writeICSFile returns false when the target directory does not exist")
+    func writeICSFileReturnsFalseOnDiskError() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        // Target a path whose parent directory does not exist → file write must fail.
+        let bogusDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-nonexistent-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("deeper", isDirectory: true)
+        let bogusURL = bogusDir.appendingPathComponent("event.ics")
+
+        let card = DateCard(title: "Should not persist", startAt: Date())
+        let ok = service.writeICSFile(for: card, to: bogusURL)
+        #expect(ok == false)
+        #expect(FileManager.default.fileExists(atPath: bogusURL.path) == false)
+
+        // And a sanity check: writing to a real path returns true.
+        let realDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-event-write-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: realDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: realDir) }
+        let realURL = realDir.appendingPathComponent("event.ics")
+        #expect(service.writeICSFile(for: card, to: realURL) == true)
+        #expect(FileManager.default.fileExists(atPath: realURL.path) == true)
+    }
 }

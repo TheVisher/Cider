@@ -173,7 +173,13 @@ final class ContactStorage: ObservableObject {
         let contact = ContactCard(id: id, displayName: finalName)
 
         let filename = uniqueFilename(for: finalName, in: inboxDirectoryURL)
-        writeVCardFile(for: contact, to: inboxDirectoryURL.appendingPathComponent(filename))
+        guard writeVCardFile(for: contact, to: inboxDirectoryURL.appendingPathComponent(filename)) else {
+            // Disk write failed — do NOT add to in-memory array or SQLite, so the UI
+            // doesn't render a phantom card that isn't on disk. Return the struct so
+            // the non-optional signature holds; caller will find it missing on reload.
+            logger.error("createContact aborted for \(contact.id): initial .vcf write failed")
+            return contact
+        }
 
         index[contact.id] = IndexEntry(
             filename: filename,
@@ -213,7 +219,11 @@ final class ContactStorage: ObservableObject {
             }
         }
 
-        writeVCardFile(for: copy, to: dirURL.appendingPathComponent(filename))
+        guard writeVCardFile(for: copy, to: dirURL.appendingPathComponent(filename)) else {
+            // Disk write failed — leave in-memory state, index, and SQLite untouched.
+            logger.error("updateContact aborted for \(updated.id): .vcf write failed")
+            return false
+        }
 
         contacts[idx] = copy
         index[updated.id] = IndexEntry(
@@ -357,7 +367,10 @@ final class ContactStorage: ObservableObject {
         // If no trashed file found, write a fresh .vcf from the payload
         if !restored {
             try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
-            writeVCardFile(for: contact, to: dirURL.appendingPathComponent(filename))
+            guard writeVCardFile(for: contact, to: dirURL.appendingPathComponent(filename)) else {
+                logger.error("restoreFromTrash aborted for contact \(contact.id): .vcf write failed")
+                return
+            }
         }
 
         index[contact.id] = IndexEntry(
@@ -435,10 +448,19 @@ final class ContactStorage: ObservableObject {
 
     // MARK: - File I/O
 
-    /// Writes a contact to disk as a .vcf file.
-    private func writeVCardFile(for contact: ContactCard, to url: URL) {
+    /// Writes a contact to disk as a .vcf file. Returns `true` on success,
+    /// `false` on failure (error is logged). Callers MUST check the result
+    /// before mirroring to SQLite — a failed disk write must not be mirrored.
+    @discardableResult
+    func writeVCardFile(for contact: ContactCard, to url: URL) -> Bool {
         let vcardString = VCardSerializer.serialize(contact)
-        try? vcardString.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try vcardString.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            logger.error("Failed to write .vcf for contact \(contact.id) at \(url.path): \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Convenience: write file and update index for an already-in-memory contact.
@@ -461,7 +483,9 @@ final class ContactStorage: ObservableObject {
             return false
         }
         let dirURL = resolveDirectoryURL(folderID: contact.folderID)
-        writeVCardFile(for: contact, to: dirURL.appendingPathComponent(entry.filename))
+        guard writeVCardFile(for: contact, to: dirURL.appendingPathComponent(entry.filename)) else {
+            return false
+        }
         var updated = entry
         updated.labelIDs = contact.labelIDs.isEmpty ? nil : contact.labelIDs
         index[contact.id] = updated
