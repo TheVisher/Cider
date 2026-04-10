@@ -907,6 +907,9 @@ final class VaultFolderService {
         var manifest = loadTrashManifest()
         manifest.insert(item, at: 0)
         saveTrashManifest(manifest)
+        // Mirror into the SQLite trash table so vault folder deletions show up
+        // alongside other trashed items.
+        TrashStorage.shared.persistTrashItemToDatabase(item)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
@@ -914,6 +917,8 @@ final class VaultFolderService {
         var manifest = loadTrashManifest()
         manifest.removeAll { $0.id == itemID }
         saveTrashManifest(manifest)
+        // Keep the SQLite mirror in sync when restoring or permanently deleting.
+        TrashStorage.shared.deleteTrashItemFromDatabase(itemID)
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 

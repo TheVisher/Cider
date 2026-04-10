@@ -774,7 +774,11 @@ final class TrashStorage {
         }
     }
 
-    private func purgeExpired(olderThan cutoff: Date, in trashDir: URL) {
+    // Internal for testing
+    /// Purges expired trash items from a single `.trash/` directory's JSON manifest,
+    /// deletes their files, and mirrors the removal into the SQLite trash table so
+    /// stale rows don't accumulate. Safe to call with directories that don't exist.
+    func purgeExpired(olderThan cutoff: Date, in trashDir: URL) {
         var manifest = loadManifest(trashDir: trashDir)
         let expired = manifest.filter { $0.deletedAt < cutoff }
         guard !expired.isEmpty else { return }
@@ -783,6 +787,20 @@ final class TrashStorage {
             manifest.removeAll { $0.id == item.id }
         }
         saveManifest(manifest, trashDir: trashDir)
+
+        // Batch SQLite deletes in a single transaction to avoid per-row overhead.
+        if let db = resolvedDatabase {
+            do {
+                try db.withTransaction {
+                    for item in expired {
+                        deleteTrashItemFromDatabase(db, trashItemID: item.id)
+                    }
+                }
+            } catch {
+                Self.logger.error("purgeExpired: SQLite batch delete failed: \(error.localizedDescription)")
+            }
+        }
+
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 

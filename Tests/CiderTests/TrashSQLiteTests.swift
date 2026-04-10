@@ -180,7 +180,51 @@ struct TrashSQLiteTests {
             sessionPayload: BrowserSessionTrashPayload(session: session)
         )
 
-        let items = [bookmark, note, dateCardTrash, todoTrash, whiteboardTrash, kanban, sessionTrash]
+        let contact = ContactCard(displayName: "Alice")
+        let contactTrash = TrashItem(
+            itemID: contact.id,
+            itemType: .contact,
+            title: contact.displayName,
+            originalFolderID: nil,
+            contactPayload: ContactTrashPayload(
+                contact: contact,
+                trashVCFFilename: "alice.vcf",
+                trashAvatarRelativePath: nil,
+                cascadedDateCardTrashIDs: []
+            )
+        )
+
+        let vaultFolder = VaultFolder(relativePath: "Work/Projects")
+        let vaultFolderTrash = TrashItem(
+            itemID: vaultFolder.id,
+            itemType: .vaultFolder,
+            title: vaultFolder.name,
+            originalFolderID: nil,
+            vaultFolderPayload: VaultFolderTrashPayload(folder: vaultFolder)
+        )
+
+        let vaultFile = VaultFile(
+            id: UUID(),
+            filename: "photo.jpg",
+            relativePath: "Work/photo.jpg",
+            fileType: .image,
+            fileSize: 1024,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            folderID: nil
+        )
+        let vaultFileTrash = TrashItem(
+            itemID: vaultFile.id,
+            itemType: .vaultFile,
+            title: vaultFile.displayTitle,
+            originalFolderID: nil,
+            vaultFilePayload: VaultFileTrashPayload(vaultFile: vaultFile, trashFilename: "photo.jpg")
+        )
+
+        let items = [
+            bookmark, note, dateCardTrash, todoTrash, whiteboardTrash, kanban, sessionTrash,
+            contactTrash, vaultFolderTrash, vaultFileTrash
+        ]
         for item in items {
             service.persistTrashItemToDatabase(db, item: item)
         }
@@ -188,8 +232,20 @@ struct TrashSQLiteTests {
         let loaded = service.loadTrashItemsFromDatabase(db)
         #expect(loaded.count == items.count)
         let loadedTypes = Set(loaded.map(\.itemType))
-        let expectedTypes: Set<TrashItemType> = [.bookmark, .note, .dateCard, .todo, .whiteboard, .kanbanBoard, .session]
+        let expectedTypes: Set<TrashItemType> = [
+            .bookmark, .note, .dateCard, .todo, .whiteboard, .kanbanBoard, .session,
+            .contact, .vaultFolder, .vaultFile
+        ]
         #expect(loadedTypes == expectedTypes)
+
+        // Spot-check per-type payloads survived the round-trip.
+        let loadedContact = loaded.first { $0.itemType == .contact }
+        #expect(loadedContact?.contactPayload?.contact.displayName == "Alice")
+        let loadedVaultFolder = loaded.first { $0.itemType == .vaultFolder }
+        #expect(loadedVaultFolder?.vaultFolderPayload?.folder.relativePath == "Work/Projects")
+        let loadedVaultFile = loaded.first { $0.itemType == .vaultFile }
+        #expect(loadedVaultFile?.vaultFilePayload?.vaultFile.filename == "photo.jpg")
+        #expect(loadedVaultFile?.vaultFilePayload?.trashFilename == "photo.jpg")
     }
 
     // MARK: - 3. Nil originalFolderID
@@ -465,9 +521,9 @@ struct TrashSQLiteTests {
         }
         #expect(service.loadTrashItemsFromDatabase(db).count == 3)
 
-        // Use the test db via explicit delete — wipe all
-        let stmt = try db.prepare("DELETE FROM trash;")
-        try stmt.step()
+        // Exercise the real API — not raw SQL — so a regression that skips the
+        // SQLite delete would be caught here.
+        service.deleteAllTrashItemsFromDatabase()
         #expect(service.loadTrashItemsFromDatabase(db).isEmpty)
     }
 
@@ -506,5 +562,99 @@ struct TrashSQLiteTests {
         #expect(decoded.bookmarkPayload?.bookmark.urlString == "https://full.example")
         #expect(decoded.bookmarkPayload?.trashThumbnailRelativePath == "thumbnails/a.png")
         #expect(decoded.bookmarkPayload?.trashOriginalRelativePath == nil)
+    }
+
+    // MARK: - 15. VaultFolder trash mirrors into SQLite
+
+    @Test("Persisting a vault folder TrashItem writes to the SQLite trash table")
+    func vaultFolderTrashMirrored() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let folder = VaultFolder(relativePath: "Work/Deleted")
+        let trashItem = TrashItem(
+            itemID: folder.id,
+            itemType: .vaultFolder,
+            title: folder.name,
+            originalFolderID: nil,
+            vaultFolderPayload: VaultFolderTrashPayload(folder: folder)
+        )
+
+        service.persistTrashItemToDatabase(db, item: trashItem)
+
+        let loaded = service.loadTrashItemsFromDatabase(db)
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.itemType == .vaultFolder)
+        #expect(loaded.first?.vaultFolderPayload?.folder.id == folder.id)
+        #expect(loaded.first?.vaultFolderPayload?.folder.relativePath == "Work/Deleted")
+    }
+
+    // MARK: - 16. VaultFolder restore removes SQLite row
+
+    @Test("Deleting a vault folder TrashItem clears the SQLite row (mirrors restore)")
+    func vaultFolderRestoreRemovesFromSQLite() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let folder = VaultFolder(relativePath: "Archive")
+        let trashItem = TrashItem(
+            itemID: folder.id,
+            itemType: .vaultFolder,
+            title: folder.name,
+            originalFolderID: nil,
+            vaultFolderPayload: VaultFolderTrashPayload(folder: folder)
+        )
+
+        service.persistTrashItemToDatabase(db, item: trashItem)
+        #expect(service.loadTrashItemsFromDatabase(db).count == 1)
+
+        service.deleteTrashItemFromDatabase(db, trashItemID: trashItem.id)
+        #expect(service.loadTrashItemsFromDatabase(db).isEmpty)
+    }
+
+    // MARK: - 17. purgeExpired clears SQLite rows
+
+    @Test("purgeExpired removes stale rows from the SQLite trash table")
+    func purgeExpiredClearsSQLite() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        // Build a temp trash dir with a manifest containing one expired + one fresh item.
+        let tmpTrashDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-trash-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpTrashDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpTrashDir) }
+
+        let expiredItem = makeBookmarkTrashItem(
+            bookmark: makeBookmark(title: "Expired"),
+            deletedAt: Date(timeIntervalSince1970: 1_600_000_000) // very old
+        )
+        let freshItem = makeBookmarkTrashItem(
+            bookmark: makeBookmark(title: "Fresh"),
+            deletedAt: Date() // now
+        )
+
+        // Persist both to SQLite.
+        service.persistTrashItemToDatabase(db, item: expiredItem)
+        service.persistTrashItemToDatabase(db, item: freshItem)
+        #expect(service.loadTrashItemsFromDatabase(db).count == 2)
+
+        // Write both into the JSON manifest that purgeExpired scans.
+        let manifestURL = tmpTrashDir.appendingPathComponent("_cider_trash_manifest.json")
+        let encoder = JSONEncoder()
+        let manifestData = try encoder.encode([expiredItem, freshItem])
+        try manifestData.write(to: manifestURL, options: .atomic)
+
+        // Cutoff: anything before "now - 1 day" is expired — matches expiredItem only.
+        let cutoff = Date(timeIntervalSince1970: 1_650_000_000)
+        service.purgeExpired(olderThan: cutoff, in: tmpTrashDir)
+
+        let remaining = service.loadTrashItemsFromDatabase(db)
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.title == "Fresh")
     }
 }
