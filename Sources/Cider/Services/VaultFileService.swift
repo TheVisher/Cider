@@ -205,8 +205,15 @@ final class VaultFileService: ObservableObject {
         // delete the corresponding SQLite rows so metadata doesn't leak. This
         // keeps the sidecar + SQLite in sync when files are deleted externally
         // (Finder, sync client, `rm` in terminal, etc.).
-        let liveRelativePaths = Set(scanned.map(\.relativePath))
-        let staleKeys = idMap.keys.filter { !liveRelativePaths.contains($0) }
+        //
+        // Check `FileManager.fileExists` directly instead of comparing against
+        // `scanned`, because scan-time filters (zero-byte, symlinks, excluded
+        // extensions) omit files that still exist on disk. Pruning on "not in
+        // scan results" would wipe SQLite rows for zero-byte in-progress writes.
+        let staleKeys = idMap.keys.filter { relPath in
+            let absPath = root.appendingPathComponent(relPath).path
+            return !fm.fileExists(atPath: absPath)
+        }
         if !staleKeys.isEmpty {
             let orphanedIDs: [UUID] = staleKeys.compactMap { idMap[$0] }
             for key in staleKeys { idMap.removeValue(forKey: key) }
