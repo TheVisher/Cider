@@ -784,8 +784,11 @@ final class TodoCardStorage: ObservableObject {
         stmt.bind(DatabaseHelpers.encode(sourceID), at: 1)
         var refs: [LibraryEntityRef] = []
         while try stmt.step() {
-            guard let targetID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)),
-                  let type = LibraryEntityType(rawValue: stmt.string(at: 1)) else { continue }
+            guard let targetID = DatabaseHelpers.decodeUUID(stmt.string(at: 0)) else { continue }
+            let rawType = stmt.string(at: 1)
+            // items.type uses 'event' but LibraryEntityType uses 'dateCard'.
+            let resolvedRaw = (rawType == "event") ? "dateCard" : rawType
+            guard let type = LibraryEntityType(rawValue: resolvedRaw) else { continue }
             refs.append(LibraryEntityRef(type: type, entityID: targetID))
         }
         return refs
