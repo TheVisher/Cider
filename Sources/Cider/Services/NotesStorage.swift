@@ -1044,6 +1044,37 @@ final class NotesStorage: ObservableObject {
         return true
     }
 
+    /// Add a free-text tag to a note. Returns true if added (or already
+    /// present), false if the note isn't found.
+    @discardableResult
+    func addTag(_ noteID: UUID, tag: String) -> Bool {
+        let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        if notes[idx].tags.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return true
+        }
+        notes[idx].tags.append(trimmed)
+        notes[idx].modifiedAt = Date()
+        persistNoteToDatabase(notes[idx])
+        SidecarService.shared.syncNote(notes[idx])
+        return true
+    }
+
+    /// Remove a free-text tag from a note (case-insensitive match). Returns
+    /// true if removed, false if the note isn't found or the tag wasn't set.
+    @discardableResult
+    func removeTag(_ noteID: UUID, tag: String) -> Bool {
+        guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        let before = notes[idx].tags.count
+        notes[idx].tags.removeAll { $0.caseInsensitiveCompare(tag) == .orderedSame }
+        guard notes[idx].tags.count != before else { return false }
+        notes[idx].modifiedAt = Date()
+        persistNoteToDatabase(notes[idx])
+        SidecarService.shared.syncNote(notes[idx])
+        return true
+    }
+
     func removeLabelsFromAll(labelID: UUID) {
         var changed = false
         var affectedNotes: [Note] = []
@@ -1671,8 +1702,9 @@ final class NotesStorage: ObservableObject {
                     isPinned: isPinned
                 )
 
-                // Load labels from join table
+                // Load labels and free-text tags from join tables
                 note.labelIDs = try loadLabelIDs(db, itemID: id)
+                note.tags = try loadTags(db, itemID: id)
 
                 // Derive filename: last path component of relativePath, or {title}.md fallback.
                 let lastComponent = (relativePath as NSString).lastPathComponent
@@ -1709,6 +1741,21 @@ final class NotesStorage: ObservableObject {
             }
         }
         return ids
+    }
+
+    /// Load tag names from item_tags JOIN tags for a given item.
+    private func loadTags(_ db: CiderDatabase, itemID: UUID) throws -> [String] {
+        let stmt = try db.prepare("""
+            SELECT t.name FROM item_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.item_id = ?;
+            """)
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var names: [String] = []
+        while try stmt.step() {
+            names.append(stmt.string(at: 0))
+        }
+        return names
     }
 
     // Internal for testing
@@ -1790,6 +1837,36 @@ final class NotesStorage: ObservableObject {
                     .bind(labelText, at: 2)
                     .bind(labelText, at: 3)
                 try insLabel.step()
+            }
+        }
+
+        // 4. Sync item_tags: find-or-create tags by name, delete all, re-insert.
+        //    Same pattern bookmarks use (VaultBookmarkService.persistBookmarkToDatabaseInner).
+        let delTags = try db.prepare("DELETE FROM item_tags WHERE item_id = ?;")
+        delTags.bind(itemID, at: 1)
+        try delTags.step()
+
+        if !note.tags.isEmpty {
+            let findTag = try db.prepare("SELECT id FROM tags WHERE name = ?;")
+            let createTag = try db.prepare("INSERT INTO tags (id, name) VALUES (?, ?);")
+            let insItemTag = try db.prepare("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?);")
+
+            for tagName in note.tags {
+                findTag.reset()
+                findTag.bind(tagName, at: 1)
+                let tagID: String
+                if try findTag.step() {
+                    tagID = findTag.string(at: 0)
+                } else {
+                    tagID = DatabaseHelpers.encode(UUID())
+                    createTag.reset()
+                    createTag.bind(tagID, at: 1).bind(tagName, at: 2)
+                    try createTag.step()
+                }
+
+                insItemTag.reset()
+                insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
+                try insItemTag.step()
             }
         }
     }

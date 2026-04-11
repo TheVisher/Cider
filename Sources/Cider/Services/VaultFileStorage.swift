@@ -70,6 +70,7 @@ final class VaultFileStorage: ObservableObject {
             files[i].title = meta.title
             files[i].notes = meta.notes
             files[i].labelIDs = meta.labelIDs
+            files[i].tags = meta.tags
             files[i].ocrText = meta.ocrText
             files[i].dominantColors = meta.dominantColors
         }
@@ -109,6 +110,33 @@ final class VaultFileStorage: ObservableObject {
         guard metadata[file.id] != nil else { return }
         metadata[file.id]?.labelIDs.removeAll { $0 == labelID }
         persistVaultFileToDatabase(file)
+    }
+
+    /// Add a free-text tag to the file (case-insensitive dedup).
+    /// Returns true on add (or already-present), false if the tag is blank.
+    @discardableResult
+    func addTag(_ file: VaultFile, tag: String) -> Bool {
+        let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        ensureEntry(file.id)
+        let already = metadata[file.id]?.tags.contains { $0.caseInsensitiveCompare(trimmed) == .orderedSame } ?? false
+        if !already {
+            metadata[file.id]?.tags.append(trimmed)
+            persistVaultFileToDatabase(file)
+        }
+        return true
+    }
+
+    /// Remove a free-text tag from the file (case-insensitive match).
+    @discardableResult
+    func removeTag(_ file: VaultFile, tag: String) -> Bool {
+        guard metadata[file.id] != nil else { return false }
+        let before = metadata[file.id]?.tags.count ?? 0
+        metadata[file.id]?.tags.removeAll { $0.caseInsensitiveCompare(tag) == .orderedSame }
+        let after = metadata[file.id]?.tags.count ?? 0
+        guard before != after else { return false }
+        persistVaultFileToDatabase(file)
+        return true
     }
 
     func applyEnrichment(file: VaultFile, ocrText: String, dominantColors: [String]?, title: String?) {
@@ -167,6 +195,7 @@ final class VaultFileStorage: ObservableObject {
         meta.titleManuallySet = (file.title?.isEmpty == false)
         meta.notes = file.notes
         meta.labelIDs = file.labelIDs
+        meta.tags = file.tags
         meta.ocrText = file.ocrText
         meta.dominantColors = file.dominantColors
         metadata[file.id] = meta
@@ -214,6 +243,7 @@ final class VaultFileStorage: ObservableObject {
                 let dominantColors = dominantColorsJSON.map { DatabaseHelpers.decodeStringArray($0) }
                 let titleManuallySet = stmt.int(at: 12) != 0
                 let labelIDs = (try? loadLabelIDs(db, itemID: id)) ?? []
+                let tags = (try? loadTags(db, itemID: id)) ?? []
 
                 // items.title holds whatever the user sees (custom title OR
                 // filename-without-extension). Use the explicit flag to decide
@@ -233,6 +263,7 @@ final class VaultFileStorage: ObservableObject {
                 meta.titleManuallySet = titleManuallySet
                 meta.notes = notes
                 meta.labelIDs = labelIDs
+                meta.tags = tags
                 meta.ocrText = ocrText
                 meta.dominantColors = dominantColors
                 rebuilt[id] = meta
@@ -259,6 +290,21 @@ final class VaultFileStorage: ObservableObject {
             }
         }
         return ids
+    }
+
+    /// Load free-text tags from the item_tags join table for a given item.
+    private func loadTags(_ db: CiderDatabase, itemID: UUID) throws -> [String] {
+        let stmt = try db.prepare("""
+            SELECT t.name FROM item_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.item_id = ?;
+            """)
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var names: [String] = []
+        while try stmt.step() {
+            names.append(stmt.string(at: 0))
+        }
+        return names
     }
 
     // Internal for testing
@@ -296,6 +342,7 @@ final class VaultFileStorage: ObservableObject {
             effective.title = meta.title
             effective.notes = meta.notes
             effective.labelIDs = meta.labelIDs
+            effective.tags = meta.tags
             effective.ocrText = meta.ocrText
             effective.dominantColors = meta.dominantColors
             effectiveTitleManuallySet = meta.titleManuallySet
@@ -377,6 +424,35 @@ final class VaultFileStorage: ObservableObject {
             }
         }
 
+        // 4. Sync item_tags: find-or-create tags by name, delete all, re-insert.
+        let delTags = try db.prepare("DELETE FROM item_tags WHERE item_id = ?;")
+        delTags.bind(itemID, at: 1)
+        try delTags.step()
+
+        if !effective.tags.isEmpty {
+            let findTag = try db.prepare("SELECT id FROM tags WHERE name = ?;")
+            let createTag = try db.prepare("INSERT INTO tags (id, name) VALUES (?, ?);")
+            let insItemTag = try db.prepare("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?);")
+
+            for tagName in effective.tags {
+                findTag.reset()
+                findTag.bind(tagName, at: 1)
+                let tagID: String
+                if try findTag.step() {
+                    tagID = findTag.string(at: 0)
+                } else {
+                    tagID = DatabaseHelpers.encode(UUID())
+                    createTag.reset()
+                    createTag.bind(tagID, at: 1).bind(tagName, at: 2)
+                    try createTag.step()
+                }
+
+                insItemTag.reset()
+                insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
+                try insItemTag.step()
+            }
+        }
+
         // Vault files do NOT have linkedEntities — skip item_links entirely.
     }
 
@@ -410,6 +486,7 @@ struct VaultFileMetadata: Codable {
     var titleManuallySet: Bool = false
     var notes: String = ""
     var labelIDs: [UUID] = []
+    var tags: [String] = []
     var ocrText: String?
     var dominantColors: [String]?
 
@@ -420,6 +497,7 @@ struct VaultFileMetadata: Codable {
         titleManuallySet = try c.decodeIfPresent(Bool.self, forKey: .titleManuallySet) ?? false
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
         labelIDs = try c.decodeIfPresent([UUID].self, forKey: .labelIDs) ?? []
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)
         dominantColors = try c.decodeIfPresent([String].self, forKey: .dominantColors)
     }

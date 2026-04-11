@@ -16,7 +16,8 @@ struct VaultFile: Identifiable, Hashable, Codable {
 
     var title: String?              // User-set or AI-suggested title (nil = use filename)
     var notes: String = ""          // User or AI notes
-    var labelIDs: [UUID] = []       // Tag labels
+    var labelIDs: [UUID] = []       // Colored taxonomy labels
+    var tags: [String] = []         // Free-text tags
     var ocrText: String?            // OCR-extracted text for search
     var dominantColors: [String]?   // Hex color strings
 
@@ -35,7 +36,7 @@ struct VaultFile: Identifiable, Hashable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, filename, relativePath, fileType, fileSize
         case createdAt, modifiedAt, folderID
-        case title, notes, labelIDs, ocrText, dominantColors
+        case title, notes, labelIDs, tags, ocrText, dominantColors
     }
 
     init(
@@ -50,6 +51,7 @@ struct VaultFile: Identifiable, Hashable, Codable {
         title: String? = nil,
         notes: String = "",
         labelIDs: [UUID] = [],
+        tags: [String] = [],
         ocrText: String? = nil,
         dominantColors: [String]? = nil
     ) {
@@ -64,6 +66,7 @@ struct VaultFile: Identifiable, Hashable, Codable {
         self.title = title
         self.notes = notes
         self.labelIDs = labelIDs
+        self.tags = tags
         self.ocrText = ocrText
         self.dominantColors = dominantColors
     }
@@ -81,6 +84,7 @@ struct VaultFile: Identifiable, Hashable, Codable {
         title = try c.decodeIfPresent(String.self, forKey: .title)
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
         labelIDs = try c.decodeIfPresent([UUID].self, forKey: .labelIDs) ?? []
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)
         dominantColors = try c.decodeIfPresent([String].self, forKey: .dominantColors)
     }

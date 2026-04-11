@@ -184,6 +184,128 @@ final class VaultFolderService {
         return true
     }
 
+    /// Moves a folder (and every descendant folder + every item inside the
+    /// subtree) to a new parent. Pass `newParentID: nil` to move to the root.
+    ///
+    /// This is the folder-level analogue of `assignBookmark`: disk move +
+    /// folder rows + `items.relative_path` all updated in one shot so the
+    /// filesystem, the index, and SQLite stay consistent without waiting
+    /// for a scan.
+    @discardableResult
+    func moveFolder(_ folderID: UUID, toParentID newParentID: UUID?) -> Bool {
+        guard let folder = index[folderID] else { return false }
+
+        // Resolve new parent path, with guards against moving into self / a descendant.
+        let newParentPath: String?
+        if let newParentID {
+            guard let newParent = index[newParentID] else {
+                logger.warning("moveFolder: target parent \(newParentID) not found")
+                return false
+            }
+            if newParent.id == folder.id {
+                logger.warning("moveFolder: cannot move folder into itself")
+                return false
+            }
+            let folderPrefix = folder.relativePath + "/"
+            if newParent.relativePath == folder.relativePath ||
+               newParent.relativePath.hasPrefix(folderPrefix) {
+                logger.warning("moveFolder: cannot move '\(folder.relativePath)' into its own descendant '\(newParent.relativePath)'")
+                return false
+            }
+            newParentPath = newParent.relativePath
+        } else {
+            newParentPath = nil
+        }
+
+        // Already at the target parent — no-op success.
+        if newParentPath == folder.parentRelativePath {
+            return true
+        }
+
+        let resolvedName = uniqueName(
+            baseName: folder.name,
+            parentPath: newParentPath,
+            excludingID: folderID
+        )
+
+        let oldRelativePath = folder.relativePath
+        let newRelativePath = newParentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
+        let oldURL = vaultRoot.appendingPathComponent(oldRelativePath)
+        let newURL = vaultRoot.appendingPathComponent(newRelativePath)
+
+        isMutating = true
+        defer { isMutating = false }
+
+        // Ensure the destination parent directory actually exists on disk.
+        // Normal flow uses a registered parent (guaranteed to exist) but we
+        // also accept root moves, so this is a cheap safety net.
+        if let newParentPath {
+            let parentURL = vaultRoot.appendingPathComponent(newParentPath)
+            try? FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        }
+
+        do {
+            try FileManager.default.moveItem(at: oldURL, to: newURL)
+        } catch {
+            logger.error("moveFolder: failed to move directory: \(error.localizedDescription)")
+            return false
+        }
+
+        // Update this folder and all descendants in the index + folders table.
+        let oldPrefix = oldRelativePath + "/"
+        for (id, var entry) in index {
+            if id == folderID {
+                entry.relativePath = newRelativePath
+                entry.updatedAt = Date()
+                index[id] = entry
+                persistFolderToDatabase(entry)
+            } else if entry.relativePath.hasPrefix(oldPrefix) {
+                entry.relativePath = newRelativePath + "/" + entry.relativePath.dropFirst(oldPrefix.count)
+                entry.updatedAt = Date()
+                index[id] = entry
+                persistFolderToDatabase(entry)
+            }
+        }
+
+        // Rewrite items.relative_path for every item in the moved subtree so
+        // the items table doesn't point at stale paths until the next scan.
+        rewriteItemPathsAfterMove(oldPrefix: oldRelativePath, newPrefix: newRelativePath)
+
+        saveIndex()
+        rebuildFolders()
+
+        logger.info("Moved folder '\(folder.name)' from \(oldRelativePath) → \(newRelativePath)")
+        NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+        SyncService.shared.pushAfterLocalChange()
+        return true
+    }
+
+    /// UPDATE items.relative_path for every item whose path sits inside the
+    /// moved folder. Uses LIKE with a trailing `/` so siblings with a shared
+    /// prefix (e.g. "Tech" vs "Technology") don't get swept up. Folder names
+    /// are sanitized so literal `%`/`_` in paths aren't a concern.
+    private func rewriteItemPathsAfterMove(oldPrefix: String, newPrefix: String) {
+        guard let db = resolvedDatabase else { return }
+        do {
+            let likePattern = oldPrefix + "/%"
+            let newReplacementPrefix = newPrefix + "/"
+            // substr is 1-indexed; start one past "oldPrefix/" so we keep the
+            // descendant portion unchanged.
+            let substrStart = Int64(oldPrefix.count + 2)
+            let stmt = try db.prepare("""
+                UPDATE items
+                SET relative_path = ? || substr(relative_path, ?)
+                WHERE relative_path LIKE ?;
+                """)
+            stmt.bind(newReplacementPrefix, at: 1)
+                .bind(substrStart, at: 2)
+                .bind(likePattern, at: 3)
+            try stmt.step()
+        } catch {
+            logger.error("moveFolder: failed to rewrite item paths: \(error.localizedDescription)")
+        }
+    }
+
     /// Deletes a folder by moving its directory to the vault trash.
     /// Returns the TrashItem for undo support.
     @discardableResult

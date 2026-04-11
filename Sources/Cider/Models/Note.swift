@@ -12,8 +12,9 @@ struct Note: Identifiable, Hashable {
     var labelIDs: [UUID]
     var folderID: UUID?
     var isPinned: Bool
+    var tags: [String]
 
-    init(id: UUID = UUID(), title: String, content: String = "", createdAt: Date = Date(), modifiedAt: Date = Date(), relativePath: String = "", labelIDs: [UUID] = [], folderID: UUID? = nil, isPinned: Bool = false) {
+    init(id: UUID = UUID(), title: String, content: String = "", createdAt: Date = Date(), modifiedAt: Date = Date(), relativePath: String = "", labelIDs: [UUID] = [], folderID: UUID? = nil, isPinned: Bool = false, tags: [String] = []) {
         self.id = id
         self.title = title
         self.content = content
@@ -23,6 +24,7 @@ struct Note: Identifiable, Hashable {
         self.labelIDs = labelIDs
         self.folderID = folderID
         self.isPinned = isPinned
+        self.tags = tags
     }
 
     // MARK: - Computed Properties for Card Display

@@ -411,9 +411,45 @@ struct CiderCLI {
                 }
             }
 
+        case "tag":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli note tag <id> --tag <name> [--tag <name> ...]")
+                return
+            }
+            guard let note = findNote(idPrefix, in: storage) else { return }
+            let tagNames = parseFlagAll("--tag", from: args)
+            if tagNames.isEmpty {
+                print("Error: At least one --tag <name> is required")
+                return
+            }
+            var added = 0
+            for name in tagNames where storage.addTag(note.id, tag: name) {
+                added += 1
+            }
+            let current = storage.notes.first(where: { $0.id == note.id })?.tags ?? []
+            print("Tagged '\(note.title)' with \(tagNames.joined(separator: ", ")) — now: [\(current.joined(separator: ", "))]")
+
+        case "untag":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli note untag <id> --tag <name> [--tag <name> ...]")
+                return
+            }
+            guard let note = findNote(idPrefix, in: storage) else { return }
+            let tagNames = parseFlagAll("--tag", from: args)
+            if tagNames.isEmpty {
+                print("Error: At least one --tag <name> is required")
+                return
+            }
+            var removed = 0
+            for name in tagNames where storage.removeTag(note.id, tag: name) {
+                removed += 1
+            }
+            let current = storage.notes.first(where: { $0.id == note.id })?.tags ?? []
+            print("Removed \(removed) tag(s) from '\(note.title)' — now: [\(current.joined(separator: ", "))]")
+
         default:
             print("Unknown note command: \(subcommand ?? "nil")")
-            print("Commands: list, create, get, pin, move, delete, update")
+            print("Commands: list, create, get, pin, move, delete, update, tag, untag")
         }
     }
 
@@ -807,9 +843,48 @@ struct CiderCLI {
                 print("Error: No file found with ID prefix: \(idPrefix)")
             }
 
+        case "tag":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli file tag <id> --tag <name> [--tag <name> ...]")
+                return
+            }
+            guard let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No file found with ID prefix: \(idPrefix)")
+                return
+            }
+            let tagNames = parseFlagAll("--tag", from: args)
+            if tagNames.isEmpty {
+                print("Error: At least one --tag <name> is required")
+                return
+            }
+            for name in tagNames { VaultFileStorage.shared.addTag(file, tag: name) }
+            let current = VaultFileStorage.shared.metadata(for: file.id)?.tags ?? []
+            print("Tagged '\(file.displayTitle)' with \(tagNames.joined(separator: ", ")) — now: [\(current.joined(separator: ", "))]")
+
+        case "untag":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli file untag <id> --tag <name> [--tag <name> ...]")
+                return
+            }
+            guard let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No file found with ID prefix: \(idPrefix)")
+                return
+            }
+            let tagNames = parseFlagAll("--tag", from: args)
+            if tagNames.isEmpty {
+                print("Error: At least one --tag <name> is required")
+                return
+            }
+            var removed = 0
+            for name in tagNames where VaultFileStorage.shared.removeTag(file, tag: name) {
+                removed += 1
+            }
+            let current = VaultFileStorage.shared.metadata(for: file.id)?.tags ?? []
+            print("Removed \(removed) tag(s) from '\(file.displayTitle)' — now: [\(current.joined(separator: ", "))]")
+
         default:
             print("Unknown file command: \(subcommand ?? "nil")")
-            print("Commands: list, get, move, delete, update")
+            print("Commands: list, get, move, delete, update, tag, untag")
         }
     }
 
@@ -852,6 +927,47 @@ struct CiderCLI {
                 print(success ? "Renamed: \(oldName) → \(newName)" : "Error: Could not rename folder")
             }
 
+        case "move", "mv":
+            guard let nameOrID = args.first else {
+                print("Error: Usage: cider-cli folder move <name|id-prefix> --to <parent-path>")
+                print("  Use --to \"\" or --to / to move to the vault root.")
+                return
+            }
+            guard let toPath = parseFlag("--to", from: args) else {
+                print("Error: Missing --to <parent-path>. Use --to \"\" to move to the root.")
+                return
+            }
+            guard let folder = findFolder(named: nameOrID) else {
+                print("Error: No folder found matching '\(nameOrID)'")
+                return
+            }
+
+            // Resolve the destination parent. Empty string or "/" means root;
+            // any other value is a vault-relative path that will be auto-created
+            // if it doesn't exist yet.
+            let trimmedPath = toPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+            let newParentID: UUID?
+            if trimmedPath.isEmpty {
+                newParentID = nil
+            } else {
+                guard let parent = findOrCreateFolderByPath(trimmedPath) else {
+                    print("Error: Could not resolve or create destination parent '\(toPath)'")
+                    return
+                }
+                newParentID = parent.id
+            }
+
+            let success = VaultFolderService.shared.moveFolder(folder.id, toParentID: newParentID)
+            if success {
+                if let updated = VaultFolderService.shared.folder(for: folder.id) {
+                    print("Moved folder: \(folder.name) → \(updated.relativePath)")
+                } else {
+                    print("Moved folder: \(folder.name)")
+                }
+            } else {
+                print("Error: Could not move folder '\(folder.name)' to '\(toPath)'")
+            }
+
         case "delete", "rm":
             guard let name = args.first else {
                 print("Error: Folder name required.")
@@ -864,7 +980,7 @@ struct CiderCLI {
 
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, delete")
+            print("Commands: list, create, rename, move, delete")
         }
     }
 
@@ -1687,6 +1803,22 @@ struct CiderCLI {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    /// Parse every occurrence of `--flag <value>` in `args`. Used for
+    /// subcommands that accept repeated flags (e.g. `--tag a --tag b`).
+    static func parseFlagAll(_ flag: String, from args: [String]) -> [String] {
+        var values: [String] = []
+        var i = 0
+        while i < args.count {
+            if args[i] == flag, i + 1 < args.count {
+                values.append(args[i + 1])
+                i += 2
+            } else {
+                i += 1
+            }
+        }
+        return values
     }
 
     static func findFolder(named name: String) -> VaultFolder? {
