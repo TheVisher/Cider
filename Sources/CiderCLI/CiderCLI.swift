@@ -229,6 +229,11 @@ struct CiderCLI {
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
+                let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                print("About to delete bookmark:")
+                print("  \(bm.title)")
+                print("  URL: \(bm.urlString)")
+                print("  Folder: \(folder)  Tags: [\(bm.tags.joined(separator: ", "))]  Labels: \(bm.labelIDs.count)")
                 let items = service.removeAll([bm])
                 if let item = items.first {
                     CiderUndoManager.shared.record(.deletedToTrash(itemType: .bookmark, trashItem: item))
@@ -392,6 +397,11 @@ struct CiderCLI {
                 return
             }
             if let note = findNote(idPrefix, in: storage) {
+                let folder = note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                print("About to delete note:")
+                print("  \(note.title)")
+                print("  Path: \(note.relativePath)")
+                print("  Folder: \(folder)  Tags: [\(note.tags.joined(separator: ", "))]  Labels: \(note.labelIDs.count)")
                 let trashItem = storage.delete(note: note)
                 CiderUndoManager.shared.record(.deletedToTrash(itemType: .note, trashItem: trashItem))
                 print("Deleted: \(note.title) (moved to trash)")
@@ -829,6 +839,12 @@ struct CiderCLI {
                 return
             }
             if let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                let folder = file.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                let size = ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
+                print("About to delete file:")
+                print("  \(file.displayTitle)")
+                print("  Path: \(file.relativePath)  Type: \(file.fileType.displayName)  Size: \(size)")
+                print("  Folder: \(folder)  Tags: [\(file.tags.joined(separator: ", "))]  Labels: \(file.labelIDs.count)")
                 let trashItem = TrashStorage.shared.trashVaultFile(file)
                 CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
                 print("Deleted: \(file.displayTitle) (moved to trash)")
@@ -990,10 +1006,43 @@ struct CiderCLI {
                 print("Error: Folder name required.")
                 return
             }
-            if let folder = findFolder(named: name) {
-                VaultFolderService.shared.deleteFolder(folder.id)
-                print("Deleted folder: \(name) (moved to trash)")
+            guard let folder = findFolder(named: name) else {
+                print("Error: No folder found matching '\(name)'")
+                return
             }
+
+            // Receipt: enumerate descendants + items that are about to be
+            // affected BEFORE executing the delete, so the agent (or user)
+            // gets a clear record of the blast radius.
+            let allFolders = VaultFolderService.shared.folders
+            let prefix = folder.relativePath + "/"
+            let descendants = allFolders.filter { $0.relativePath.hasPrefix(prefix) }
+            let affectedFolderIDs = Set([folder.id] + descendants.map(\.id))
+            let affectedBookmarks = VaultBookmarkService.shared.bookmarks.filter {
+                $0.folderID.map { affectedFolderIDs.contains($0) } ?? false
+            }
+            let affectedNotes = NotesStorage.shared.notes.filter {
+                $0.folderID.map { affectedFolderIDs.contains($0) } ?? false
+            }
+            let affectedFiles = VaultFileService.shared.files.filter {
+                $0.folderID.map { affectedFolderIDs.contains($0) } ?? false
+            }
+
+            print("About to delete folder: \(folder.relativePath)")
+            if !descendants.isEmpty {
+                print("  Subfolders (\(descendants.count)):")
+                for sub in descendants {
+                    print("    - \(sub.relativePath)")
+                }
+            }
+            let totalItems = affectedBookmarks.count + affectedNotes.count + affectedFiles.count
+            if totalItems > 0 {
+                print("  Items (\(totalItems), will move to Inbox):")
+                print("    bookmarks: \(affectedBookmarks.count), notes: \(affectedNotes.count), files: \(affectedFiles.count)")
+            }
+
+            VaultFolderService.shared.deleteFolder(folder.id)
+            print("Deleted folder: \(folder.relativePath) (moved to trash)")
 
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
