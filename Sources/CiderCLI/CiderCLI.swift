@@ -1023,15 +1023,20 @@ struct CiderCLI {
             }
 
         case "delete", "rm":
-            guard let name = args.first else {
-                print("Error: Label name required.")
+            guard let identifier = args.first else {
+                print("Error: Usage: cider-cli label delete <id-prefix|name>")
                 return
             }
-            if let label = storage.labels.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+            // Try ID prefix first (consistent with other delete subcommands),
+            // then fall back to case-insensitive name match.
+            let lower = identifier.lowercased()
+            let label = storage.labels.first(where: { $0.id.uuidString.lowercased().hasPrefix(lower) })
+                ?? storage.labels.first(where: { $0.name.localizedCaseInsensitiveCompare(identifier) == .orderedSame })
+            if let label {
                 storage.deleteLabel(label.id)
-                print("Deleted label: \(name)")
+                print("Deleted label: \(label.name) (\(label.id.uuidString.prefix(8)))")
             } else {
-                print("Error: Label '\(name)' not found")
+                print("Error: No label found matching '\(identifier)'")
             }
 
         default:
@@ -1829,7 +1834,7 @@ struct CiderCLI {
           cider-cli label list
           cider-cli label create <name> [--color <hex>]
           cider-cli label rename <name> --to <new-name>
-          cider-cli label delete <name>
+          cider-cli label delete <id-prefix|name>
 
         SEARCH
           cider-cli search <query>
