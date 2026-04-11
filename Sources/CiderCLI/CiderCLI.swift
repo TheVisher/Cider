@@ -42,6 +42,16 @@ struct CiderCLI {
         vaultFileService.ensureInboxDirectories()
         vaultFileService.scan()
 
+        // Force-init the remaining folder-aware singletons so that
+        // `folder delete` (and any other command that iterates these
+        // collections) sees live in-memory state loaded from SQLite.
+        // Without this, the three lazy-loading services below would
+        // appear empty to an early-invoked `folder delete`, which would
+        // silently drag their items along with the folder into trash.
+        _ = DateCardStorage.shared
+        _ = ContactStorage.shared
+        _ = BrowserSessionStorage.shared
+
         // Wait for async storage initialization — poll until notes are loaded
         // (NotesStorage uses Task { @MainActor } in init which needs actor time)
         for _ in 0..<20 {
