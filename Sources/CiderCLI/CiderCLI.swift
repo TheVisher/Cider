@@ -1,5 +1,6 @@
 @testable import Cider
 import Foundation
+import OSLog
 
 /// CiderCLI — Full command-line interface to Cider's storage layer.
 /// Anything you can do in Cider, you can do here.
@@ -16,6 +17,24 @@ struct CiderCLI {
 
         // Initialize storage services
         _ = StoragePaths.ensureVaultStructure()
+
+        // Open SQLite before any storage service is touched — services check
+        // CiderDatabase.shared.isOpen and use it as the primary store when available.
+        // Without this, CLI writes skip the SQLite persist path and only hit the
+        // filesystem, leaving the DB out of sync with the app.
+        do {
+            let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+            let dbPath = vaultRoot.appendingPathComponent(".cider/cider.db")
+            try FileManager.default.createDirectory(
+                at: dbPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try CiderDatabase.shared.open(at: dbPath)
+        } catch {
+            Logger(subsystem: "Cider", category: "CLI")
+                .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
+        }
+
         let bookmarkService = VaultBookmarkService.shared
         let notesStorage = NotesStorage.shared
         let todoStorage = TodoCardStorage.shared
