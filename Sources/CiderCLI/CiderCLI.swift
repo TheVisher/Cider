@@ -988,17 +988,18 @@ struct CiderCLI {
 
         case "rename":
             guard let oldName = args.first, let newName = parseFlag("--to", from: args) else {
-                print("Error: Usage: cider-cli folder rename <name> --to <new-name>")
+                print("Error: Usage: cider-cli folder rename <name|path> --to <new-name>")
                 return
             }
-            if let folder = findFolder(named: oldName) {
-                let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)
-                print(success ? "Renamed: \(oldName) → \(newName)" : "Error: Could not rename folder")
-            }
+            // Strict lookup: path-match first, ambiguity-errors on bare names.
+            // Prevents renaming the wrong folder when two share a leaf name.
+            guard let folder = findFolderStrict(oldName) else { return }
+            let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)
+            print(success ? "Renamed: \(folder.relativePath) → \(newName)" : "Error: Could not rename folder")
 
         case "move", "mv":
             guard let nameOrID = args.first else {
-                print("Error: Usage: cider-cli folder move <name|id-prefix> --to <parent-path>")
+                print("Error: Usage: cider-cli folder move <name|path|id-prefix> --to <parent-path>")
                 print("  Use --to \"\" or --to / to move to the vault root.")
                 return
             }
@@ -1006,10 +1007,8 @@ struct CiderCLI {
                 print("Error: Missing --to <parent-path>. Use --to \"\" to move to the root.")
                 return
             }
-            guard let folder = findFolder(named: nameOrID) else {
-                print("Error: No folder found matching '\(nameOrID)'")
-                return
-            }
+            // Strict lookup: path-match first, ambiguity-errors on bare names.
+            guard let folder = findFolderStrict(nameOrID) else { return }
 
             // Resolve the destination parent. Empty string or "/" means root;
             // any other value is a vault-relative path that will be auto-created
@@ -1042,27 +1041,32 @@ struct CiderCLI {
                 print("Error: Folder name required.")
                 return
             }
-            guard let folder = findFolder(named: name) else {
-                print("Error: No folder found matching '\(name)'")
-                return
-            }
+            // Strict lookup: path-match first, ambiguity-errors on bare names.
+            // Prevents deleting the wrong folder when two share a leaf name.
+            guard let folder = findFolderStrict(name) else { return }
 
             // Receipt: enumerate descendants + items that are about to be
             // affected BEFORE executing the delete, so the agent (or user)
-            // gets a clear record of the blast radius.
+            // gets a clear record of the blast radius. Covers ALL seven
+            // folder-aware item types (not just bookmarks/notes/files —
+            // the earlier version under-reported todos/events/contacts/
+            // sessions and the user couldn't see them in the receipt).
             let allFolders = VaultFolderService.shared.folders
             let prefix = folder.relativePath + "/"
             let descendants = allFolders.filter { $0.relativePath.hasPrefix(prefix) }
             let affectedFolderIDs = Set([folder.id] + descendants.map(\.id))
-            let affectedBookmarks = VaultBookmarkService.shared.bookmarks.filter {
-                $0.folderID.map { affectedFolderIDs.contains($0) } ?? false
+
+            func isInAffected(_ fid: UUID?, _ set: Set<UUID>) -> Bool {
+                guard let fid else { return false }
+                return set.contains(fid)
             }
-            let affectedNotes = NotesStorage.shared.notes.filter {
-                $0.folderID.map { affectedFolderIDs.contains($0) } ?? false
-            }
-            let affectedFiles = VaultFileService.shared.files.filter {
-                $0.folderID.map { affectedFolderIDs.contains($0) } ?? false
-            }
+            let affectedBookmarks = VaultBookmarkService.shared.bookmarks.filter { isInAffected($0.folderID, affectedFolderIDs) }
+            let affectedNotes = NotesStorage.shared.notes.filter { isInAffected($0.folderID, affectedFolderIDs) }
+            let affectedFiles = VaultFileService.shared.files.filter { isInAffected($0.folderID, affectedFolderIDs) }
+            let affectedTodos = TodoCardStorage.shared.todoCards.filter { isInAffected($0.folderID, affectedFolderIDs) }
+            let affectedEvents = DateCardStorage.shared.dateCards.filter { isInAffected($0.folderID, affectedFolderIDs) }
+            let affectedContacts = ContactStorage.shared.contacts.filter { isInAffected($0.folderID, affectedFolderIDs) }
+            let affectedSessions = BrowserSessionStorage.shared.sessions.filter { isInAffected($0.folderID, affectedFolderIDs) }
 
             print("About to delete folder: \(folder.relativePath)")
             if !descendants.isEmpty {
@@ -1072,13 +1076,23 @@ struct CiderCLI {
                 }
             }
             let totalItems = affectedBookmarks.count + affectedNotes.count + affectedFiles.count
+                + affectedTodos.count + affectedEvents.count + affectedContacts.count + affectedSessions.count
             if totalItems > 0 {
-                print("  Items (\(totalItems), will move to Inbox):")
-                print("    bookmarks: \(affectedBookmarks.count), notes: \(affectedNotes.count), files: \(affectedFiles.count)")
+                print("  Items (\(totalItems), will relocate to Inbox):")
+                print("    bookmarks: \(affectedBookmarks.count), notes: \(affectedNotes.count), files: \(affectedFiles.count),")
+                print("    todos: \(affectedTodos.count), events: \(affectedEvents.count), contacts: \(affectedContacts.count), sessions: \(affectedSessions.count)")
             }
 
-            VaultFolderService.shared.deleteFolder(folder.id)
-            print("Deleted folder: \(folder.relativePath) (moved to trash)")
+            if let result = VaultFolderService.shared.deleteFolder(folder.id) {
+                _ = result
+                print("Deleted folder: \(folder.relativePath) (moved to trash)")
+            } else {
+                // deleteFolder returns nil on abort (failed drain, failed trash
+                // move, or missing index entry). The service logs the specific
+                // cause via os.Logger at .error level — the agent should check
+                // Console.app or `log show` for details.
+                print("Error: deleteFolder aborted — check os log for details. Folder and items preserved.")
+            }
 
         case "restore":
             guard let pathArg = args.first else {
@@ -1096,7 +1110,11 @@ struct CiderCLI {
 
             var restored = 0
             var misses: [VaultFolderService.BreadcrumbItem] = []
-            // Unique destination paths to recreate
+            var skippedRefiled: [VaultFolderService.BreadcrumbItem] = []
+
+            // Unique destination paths to recreate. findOrCreateFolderByPath
+            // walks the components and reuses existing folders so we don't
+            // collide with siblings that happen to share a name.
             let targetPaths = Set(breadcrumb.items.map(\.previousFolderPath))
             for path in targetPaths {
                 _ = findOrCreateFolderByPath(path)
@@ -1111,35 +1129,89 @@ struct CiderCLI {
                 }
                 switch item.itemType {
                 case "note":
-                    if let note = NotesStorage.shared.notes.first(where: { $0.id == item.itemID }) {
-                        _ = NotesStorage.shared.assignNote(note.id, toFolder: targetFolder.id)
-                        print("  ↺ note: \(item.title) → \(item.previousFolderPath)")
-                        restored += 1
-                    } else {
-                        misses.append(item)
+                    guard let note = NotesStorage.shared.notes.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
                     }
+                    // Staleness check: if the user/agent manually re-filed
+                    // this item after the delete, don't yank it back.
+                    if note.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    _ = NotesStorage.shared.assignNote(note.id, toFolder: targetFolder.id)
+                    print("  ↺ note: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
                 case "bookmark":
-                    if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == item.itemID }) {
-                        _ = VaultBookmarkService.shared.assignBookmark(bm.id, toFolder: targetFolder.id)
-                        print("  ↺ bookmark: \(item.title) → \(item.previousFolderPath)")
-                        restored += 1
-                    } else {
-                        misses.append(item)
+                    guard let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
                     }
+                    if bm.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    _ = VaultBookmarkService.shared.assignBookmark(bm.id, toFolder: targetFolder.id)
+                    print("  ↺ bookmark: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
                 case "vaultFile":
-                    if let file = VaultFileService.shared.files.first(where: { $0.id == item.itemID }) {
-                        VaultFileService.shared.assignFile(file.id, toFolder: targetFolder.id)
-                        print("  ↺ file: \(item.title) → \(item.previousFolderPath)")
-                        restored += 1
-                    } else {
-                        misses.append(item)
+                    guard let file = VaultFileService.shared.files.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
                     }
+                    if file.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    VaultFileService.shared.assignFile(file.id, toFolder: targetFolder.id)
+                    print("  ↺ file: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
+                case "todo":
+                    guard let todo = TodoCardStorage.shared.todoCards.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
+                    }
+                    if todo.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    _ = TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: targetFolder.id)
+                    print("  ↺ todo: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
+                case "event":
+                    guard let dc = DateCardStorage.shared.dateCards.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
+                    }
+                    if dc.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    _ = DateCardStorage.shared.assignDateCard(dc.id, toFolder: targetFolder.id)
+                    print("  ↺ event: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
+                case "contact":
+                    guard let contact = ContactStorage.shared.contacts.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
+                    }
+                    if contact.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    _ = ContactStorage.shared.assignContact(contact.id, toFolder: targetFolder.id)
+                    print("  ↺ contact: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
+                case "session":
+                    guard let session = BrowserSessionStorage.shared.sessions.first(where: { $0.id == item.itemID }) else {
+                        misses.append(item); continue
+                    }
+                    if session.folderID != nil {
+                        skippedRefiled.append(item); continue
+                    }
+                    BrowserSessionStorage.shared.assignSession(session.id, toFolder: targetFolder.id)
+                    print("  ↺ session: \(item.title) → \(item.previousFolderPath)")
+                    restored += 1
                 default:
                     misses.append(item)
                 }
             }
 
             print("Restored \(restored)/\(breadcrumb.items.count) item(s) to \(targetPaths.count) folder(s)")
+            if !skippedRefiled.isEmpty {
+                print("Skipped \(skippedRefiled.count) item(s) already re-filed to a different folder:")
+                for s in skippedRefiled {
+                    print("  - \(s.itemType) \(s.itemID.uuidString.prefix(8)) '\(s.title)'")
+                }
+            }
             if !misses.isEmpty {
                 print("Could not restore \(misses.count) item(s) — likely deleted separately or trashed:")
                 for m in misses {
@@ -2030,6 +2102,63 @@ struct CiderCLI {
                 }
             }
         }
+        return nil
+    }
+
+    /// Strict folder lookup for destructive operations (delete/move/rename).
+    /// Resolution order:
+    ///   1. If the input contains '/', match by `relativePath` exact
+    ///      (case-insensitive) — unique by schema
+    ///   2. Else try leaf-name match. If multiple folders share the name,
+    ///      return nil and print the ambiguity so the caller can retry with
+    ///      a full path
+    ///   3. Else fall back to id-prefix match
+    /// Never creates folders, never touches disk.
+    static func findFolderStrict(_ nameOrPath: String) -> VaultFolder? {
+        let folders = VaultFolderService.shared.folders
+
+        // 1. Path match (unambiguous — relative_path is UNIQUE in schema)
+        if nameOrPath.contains("/") {
+            if let exact = folders.first(where: {
+                $0.relativePath.localizedCaseInsensitiveCompare(nameOrPath) == .orderedSame
+            }) {
+                return exact
+            }
+            print("Error: No folder found at path '\(nameOrPath)'")
+            return nil
+        }
+
+        // 2. Name match with ambiguity check
+        let nameMatches = folders.filter {
+            $0.name.localizedCaseInsensitiveCompare(nameOrPath) == .orderedSame
+        }
+        if nameMatches.count == 1 {
+            return nameMatches[0]
+        }
+        if nameMatches.count > 1 {
+            print("Error: Name '\(nameOrPath)' is ambiguous — matches \(nameMatches.count) folders:")
+            for f in nameMatches {
+                print("  - \(f.relativePath)")
+            }
+            print("Pass the full vault-relative path to disambiguate (e.g. 'Food/Restaurants').")
+            return nil
+        }
+
+        // 3. Fall back to id-prefix match
+        let lower = nameOrPath.lowercased()
+        let prefixMatches = folders.filter { $0.id.uuidString.lowercased().hasPrefix(lower) }
+        if prefixMatches.count == 1 {
+            return prefixMatches[0]
+        }
+        if prefixMatches.count > 1 {
+            print("Error: ID prefix '\(nameOrPath)' is ambiguous — matches \(prefixMatches.count) folders:")
+            for f in prefixMatches {
+                print("  - [\(f.id.uuidString.prefix(8))] \(f.relativePath)")
+            }
+            return nil
+        }
+
+        print("Error: No folder found matching '\(nameOrPath)'")
         return nil
     }
 

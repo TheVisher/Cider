@@ -297,6 +297,24 @@ final class VaultFolderService {
         }
     }
 
+    /// Sets `sessions.folder_id = NULL` for every browser session referencing
+    /// any of the given folder IDs. Sessions live in their own table with
+    /// a separate FK from the items table, so the items-table cleanup
+    /// doesn't cover them.
+    private func unassignSessionsFromFolders(_ folderIDs: [UUID]) {
+        guard let db = resolvedDatabase, !folderIDs.isEmpty else { return }
+        do {
+            let stmt = try db.prepare("UPDATE sessions SET folder_id = NULL WHERE folder_id = ?;")
+            for id in folderIDs {
+                stmt.reset()
+                stmt.bind(DatabaseHelpers.encode(id), at: 1)
+                try stmt.step()
+            }
+        } catch {
+            logger.error("unassignSessionsFromFolders: failed to clear folder_id: \(error.localizedDescription)")
+        }
+    }
+
     /// UPDATE items.relative_path for every item whose path sits inside the
     /// moved folder. Uses LIKE with a trailing `/` so siblings with a shared
     /// prefix (e.g. "Tech" vs "Technology") don't get swept up. Folder names
@@ -323,23 +341,38 @@ final class VaultFolderService {
         }
     }
 
-    /// Deletes a folder by relocating every item inside to Inbox FIRST,
-    /// then moving the (now-empty) directory to the vault trash.
-    ///
-    /// The item-relocation step is load-bearing: if we skip it and just
-    /// trash the directory, every .webloc / .md / vault file inside
-    /// physically rides along into the trash, and the next scan prunes
-    /// the corresponding DB rows because `pruneMissingBookmarksFromDisk`
-    /// can no longer find the files at their recorded relative_path.
-    /// That's a silent data-loss path the earlier implementation papered
-    /// over by setting `items.folder_id = NULL` at the SQL level — a fix
-    /// that kept the DB rows alive but left the physical files in trash,
-    /// causing the same prune on the next launch.
-    ///
-    /// Before the physical move runs, we record each item's pre-delete
-    /// folder path into a breadcrumb file (`.cider/folders/.trash/
-    /// <folderID>-breadcrumbs.json`) so `folder restore` can put items
-    /// back where they were if the delete was a mistake.
+    /// Result of a folder-delete drain step — one entry per item that was
+    /// supposed to be relocated out of the deleted subtree. Used to detect
+    /// partial-drain failures BEFORE we trash the folder directory.
+    struct DeleteFolderFailure {
+        let itemType: String
+        let itemID: UUID
+        let title: String
+    }
+
+    /// Deletes a folder safely:
+    ///   1. Enumerate EVERY folder-aware item in the subtree (all 7 types:
+    ///      notes, bookmarks, vault files, todos, date cards, contacts,
+    ///      browser sessions).
+    ///   2. Write a breadcrumb file that records each item's pre-delete
+    ///      folder path so `folder restore` can undo the delete.
+    ///   3. Relocate every item out via the item services' own
+    ///      `assign(..., toFolder: nil)` paths — these physically move
+    ///      files on disk AND update SQLite atomically. Verify each
+    ///      relocation succeeded by re-checking the in-memory folderID.
+    ///   4. If ANY relocation fails, ABORT the delete: do not trash the
+    ///      folder, do not delete folder rows, return nil. Already-moved
+    ///      items stay in Inbox but no data is lost and the user can
+    ///      investigate via the logs. Earlier versions would silently
+    ///      cascade the failure, leaving split-brain state.
+    ///   5. Scrub DB-only dangling references via SQL (items.folder_id
+    ///      and sessions.folder_id) as a defensive fallback.
+    ///   6. Move the now-empty folder directory to trash. If the trash
+    ///      move fails, STOP — do NOT delete folder rows, because a
+    ///      directory-still-on-disk + DB-row-gone combo causes the
+    ///      "discovered external folder" reconcile branch to resurrect
+    ///      the folder with a fresh UUID on the next FSEvent.
+    ///   7. Delete folder rows, update index, notify sync.
     @discardableResult
     func deleteFolder(_ folderID: UUID) -> TrashItem? {
         guard let folder = index[folderID] else { return nil }
@@ -351,7 +384,7 @@ final class VaultFolderService {
         isMutating = true
         defer { isMutating = false }
 
-        // Collect this folder and all descendants FIRST so we know the
+        // 1. Collect this folder and all descendants FIRST so we know the
         // complete subtree before we start mutating anything.
         let deletedPrefix = folder.relativePath + "/"
         var deletedFolders: [VaultFolder] = [folder]
@@ -360,32 +393,93 @@ final class VaultFolderService {
         }
         let deletedFolderIDs = Set(deletedFolders.map(\.id))
 
-        // Write breadcrumbs BEFORE unassigning so we record where each item
-        // lived right up to the moment of the delete.
+        // 2. Write breadcrumbs BEFORE unassigning so we record where each
+        // item lived right up to the moment of the delete.
         writeDeleteBreadcrumbs(rootFolder: folder, affectedFolderIDs: deletedFolderIDs)
 
-        // Physically relocate every item out of the subtree via the item
-        // services' own assign(..., toFolder: nil) paths. These move the
-        // underlying files on disk and update SQLite in one atomic step
-        // per item. Mirrors `deleteFolderFromSync` (which has always done
-        // this correctly).
+        // 3. Drain items. Track failures — if any relocation fails,
+        // we abort the folder delete entirely so we never trash a
+        // directory with live content still inside.
+        var failures: [DeleteFolderFailure] = []
+
         for id in deletedFolderIDs {
+            // Notes — assignNote returns Bool AND moves .md on disk
             for note in NotesStorage.shared.notes where note.folderID == id {
-                _ = NotesStorage.shared.assignNote(note.id, toFolder: nil)
+                let ok = NotesStorage.shared.assignNote(note.id, toFolder: nil)
+                let nowUnfiled = NotesStorage.shared.notes.first(where: { $0.id == note.id })?.folderID == nil
+                if !ok || !nowUnfiled {
+                    failures.append(.init(itemType: "note", itemID: note.id, title: note.title))
+                }
             }
+            // Bookmarks — assignBookmark returns Bool AND moves .webloc on disk
             for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.folderID == id {
-                _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
+                let ok = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
+                let nowUnfiled = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmark.id })?.folderID == nil
+                if !ok || !nowUnfiled {
+                    failures.append(.init(itemType: "bookmark", itemID: bookmark.id, title: bookmark.title))
+                }
             }
+            // Vault files — assignFile is Void AND moves the file on disk;
+            // verify via post-check of the in-memory state.
             for file in VaultFileService.shared.files where file.folderID == id {
                 VaultFileService.shared.assignFile(file.id, toFolder: nil)
+                let nowUnfiled = VaultFileService.shared.files.first(where: { $0.id == file.id })?.folderID == nil
+                if !nowUnfiled {
+                    failures.append(.init(itemType: "vaultFile", itemID: file.id, title: file.displayTitle))
+                }
+            }
+            // Todos — assignTodoCard returns Bool AND moves the .ics file on disk
+            for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
+                let ok = TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
+                let nowUnfiled = TodoCardStorage.shared.todoCards.first(where: { $0.id == todo.id })?.folderID == nil
+                if !ok || !nowUnfiled {
+                    failures.append(.init(itemType: "todo", itemID: todo.id, title: todo.title))
+                }
+            }
+            // Date cards (events) — assignDateCard returns Bool AND moves the .ics file on disk
+            for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
+                let ok = DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
+                let nowUnfiled = DateCardStorage.shared.dateCards.first(where: { $0.id == dc.id })?.folderID == nil
+                if !ok || !nowUnfiled {
+                    failures.append(.init(itemType: "event", itemID: dc.id, title: dc.title))
+                }
+            }
+            // Contacts — assignContact returns Bool AND moves the .vcf file on disk
+            for contact in ContactStorage.shared.contacts where contact.folderID == id {
+                let ok = ContactStorage.shared.assignContact(contact.id, toFolder: nil)
+                let nowUnfiled = ContactStorage.shared.contacts.first(where: { $0.id == contact.id })?.folderID == nil
+                if !ok || !nowUnfiled {
+                    failures.append(.init(itemType: "contact", itemID: contact.id, title: contact.displayName))
+                }
+            }
+            // Browser sessions — data-only, separate sessions table with its
+            // own folder_id FK (not in the items table).
+            for session in BrowserSessionStorage.shared.sessions where session.folderID == id {
+                BrowserSessionStorage.shared.assignSession(session.id, toFolder: nil)
+                let nowUnfiled = BrowserSessionStorage.shared.sessions.first(where: { $0.id == session.id })?.folderID == nil
+                if !nowUnfiled {
+                    failures.append(.init(itemType: "session", itemID: session.id, title: session.name))
+                }
             }
         }
 
-        // Defensive fallback: scrub any DB-only references that still
-        // point at these folder IDs (items whose in-memory service entry
-        // is out of sync with SQLite). Otherwise the FK would block the
-        // folder row delete.
+        // 4. Abort on any failure — do NOT trash the folder, do NOT delete
+        // rows. Items that relocated successfully stay in Inbox; the user
+        // can see the partial state in the logs and retry.
+        if !failures.isEmpty {
+            logger.error("deleteFolder ABORTED: \(failures.count) item(s) failed to relocate out of '\(folder.relativePath)' — folder preserved, DB rows preserved")
+            for f in failures {
+                logger.error("  failed: \(f.itemType) \(f.itemID.uuidString.prefix(8)) '\(f.title)'")
+            }
+            return nil
+        }
+
+        // 5. Defensive SQL fallback: scrub any dangling folder_id
+        // references in `items` AND `sessions` tables. Usually a no-op
+        // since the in-memory paths above already cleared them, but
+        // catches rows where in-memory service state and DB disagree.
         unassignItemsFromFolders(deletedFolders.map(\.id))
+        unassignSessionsFromFolders(deletedFolders.map(\.id))
 
         // Ensure trash dir exists, and if something with the same ID is
         // already there (rare — duplicate UUID collision), nuke it.
@@ -394,18 +488,20 @@ final class VaultFolderService {
             try? fm.removeItem(at: trashDestURL)
         }
 
-        // Move the now-empty folder directory to trash. If the move fails
-        // (permissions, partial I/O), we've already relocated items to
-        // safety so the user doesn't lose data — the folder row just
-        // won't go away.
+        // 6. Move the now-empty folder directory to trash. If this fails
+        // we must NOT continue — leaving the directory on disk while the
+        // folder row is gone from SQLite would let the reconcile's
+        // "discovered external folder" branch resurrect it with a fresh
+        // UUID on the next FSEvent. Keep both disk and DB consistent.
         do {
             try fm.moveItem(at: sourceURL, to: trashDestURL)
         } catch {
-            logger.error("deleteFolder: failed to move empty folder to trash: \(error.localizedDescription)")
-            // Continue anyway — items are safe and DB cleanup still needs to run.
+            logger.error("deleteFolder: failed to move empty folder to trash: \(error.localizedDescription) — ABORTING row cleanup to avoid ghost resurrection. Items have been relocated to Inbox; folder '\(folder.relativePath)' is empty on disk.")
+            NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
+            return nil
         }
 
-        // Remove from index and database
+        // 7. Remove from index and database
         for deleted in deletedFolders {
             index.removeValue(forKey: deleted.id)
             deleteFolderFromDatabase(folderID: deleted.id)
@@ -476,6 +572,30 @@ final class VaultFolderService {
             guard let fid = f.folderID, let path = folderPathByID[fid] else { continue }
             items.append(BreadcrumbItem(
                 itemID: f.id, itemType: "vaultFile", title: f.displayTitle, previousFolderPath: path
+            ))
+        }
+        for todo in TodoCardStorage.shared.todoCards {
+            guard let fid = todo.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: todo.id, itemType: "todo", title: todo.title, previousFolderPath: path
+            ))
+        }
+        for dc in DateCardStorage.shared.dateCards {
+            guard let fid = dc.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: dc.id, itemType: "event", title: dc.title, previousFolderPath: path
+            ))
+        }
+        for contact in ContactStorage.shared.contacts {
+            guard let fid = contact.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: contact.id, itemType: "contact", title: contact.displayName, previousFolderPath: path
+            ))
+        }
+        for session in BrowserSessionStorage.shared.sessions {
+            guard let fid = session.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: session.id, itemType: "session", title: session.name, previousFolderPath: path
             ))
         }
 
@@ -952,7 +1072,16 @@ final class VaultFolderService {
         // running app's index is a frozen snapshot of startup state, and the
         // reconciler's "discovered external folder" branch will keep
         // resurrecting folders that the CLI just deleted (with fresh UUIDs).
-        loadIndexFromDatabaseOrJSON()
+        //
+        // If the reload FAILS (transient DB lock, corruption, etc.), we must
+        // NOT run reconcile — stale in-memory state against fresh disk state
+        // would let the discovery branch stamp new UUIDs over folders that
+        // really do still exist but whose in-memory records are outdated.
+        // Skip this event and wait for the next one to retry.
+        guard loadIndexFromDatabaseOrJSON() else {
+            logger.warning("handleFSEvent: skipping reconcile — DB reload failed, will retry on next event")
+            return
+        }
         reconcileWithFilesystem()
         // Reload sidecar metadata and rescan vault files
         SidecarService.shared.loadAll()
@@ -1110,22 +1239,28 @@ final class VaultFolderService {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
-    /// Load folders from SQLite.
-    private func loadIndexFromDatabaseOrJSON() {
-        if let db = resolvedDatabase {
-            loadFromDatabase(db)
-        }
+    /// Load folders from SQLite. Returns true if the reload succeeded (or
+    /// there was no DB to read from — nothing to do). Returns false only
+    /// if a DB read error occurred, in which case callers should skip
+    /// reconcile so stale in-memory state doesn't get treated as truth.
+    @discardableResult
+    private func loadIndexFromDatabaseOrJSON() -> Bool {
+        guard let db = resolvedDatabase else { return true }
+        return loadFromDatabase(db)
     }
 
     // Internal for testing
     /// SELECT all folders from the database, ordered by relative_path.
+    /// Returns true on success, false on any read error.
     ///
     /// On a DB read error, the in-memory `index` is left ALONE — a
     /// transient SQLite failure must NOT wipe the folder model, because the
     /// next reconcile would then treat every directory on disk as an
     /// "external discovery" and stamp fresh UUIDs over your entire vault.
-    /// Keep the stale state, log the error, and wait for the next attempt.
-    func loadFromDatabase(_ db: CiderDatabase) {
+    /// Keep the stale state, log the error, and signal failure so callers
+    /// can skip reconcile until a clean reload succeeds.
+    @discardableResult
+    func loadFromDatabase(_ db: CiderDatabase) -> Bool {
         do {
             let stmt = try db.prepare("""
                 SELECT id, relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y
@@ -1148,9 +1283,11 @@ final class VaultFolderService {
             index = loaded
             rebuildFolders()
             logger.info("Loaded \(loaded.count) folders from database")
+            return true
         } catch {
             logger.error("Failed to load folders from database — keeping stale in-memory state: \(error.localizedDescription)")
             // Intentionally NOT clearing `index` here — see doc comment above.
+            return false
         }
     }
 
