@@ -2324,7 +2324,6 @@ final class VaultBookmarkService: ObservableObject {
                 loaded.append(bookmark)
             }
             bookmarks = loaded
-            logger.info("Loaded \(loaded.count) bookmarks from database")
         } catch {
             logger.error("Failed to load bookmarks from database: \(error.localizedDescription)")
             bookmarks = []
