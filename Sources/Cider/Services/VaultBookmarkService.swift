@@ -929,9 +929,11 @@ final class VaultBookmarkService: ObservableObject {
 
         var adopted: [Bookmark] = []
         var reassigned = 0
-        // URLs already claimed by a folder — first folder wins, later copies are stale
+        // URLs already claimed by a folder — first folder wins, later copies are kept as-is.
+        // We intentionally do NOT delete duplicate .webloc files here: enrichment and file
+        // moves can briefly leave two files with the same URL on disk, and a previous version
+        // of this function hard-deleted the "loser" with no trash, causing silent data loss.
         var claimedURLs = Set<String>()
-        var staleDuplicateFiles: [URL] = []
 
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
             guard fm.fileExists(atPath: dirURL.path) else { return }
@@ -963,12 +965,11 @@ final class VaultBookmarkService: ObservableObject {
                     continue
                 }
 
-                // Duplicate cleanup: if this URL was already claimed by another folder
-                // (vault or Inbox), this copy is stale. Delete it.
+                // Duplicate URL detected: skip adopting this copy so it doesn't overwrite
+                // the already-claimed bookmark's folder assignment, but leave the file on
+                // disk. Hard-deleting duplicates here previously caused silent data loss.
                 if claimedURLs.contains(url) {
-                    if let rp = bookmark.relativePath {
-                        staleDuplicateFiles.append(vaultRoot.appendingPathComponent(rp))
-                    }
+                    logger.warning("Duplicate URL at \(bookmark.relativePath ?? "?"); leaving file in place")
                     continue
                 }
                 claimedURLs.insert(url)
@@ -994,14 +995,9 @@ final class VaultBookmarkService: ObservableObject {
             processDirectory(dirURL: dirURL, dirRelativePath: folder.relativePath, folderID: folder.id)
         }
 
-        // Scan Inbox/Bookmarks — duplicates of vault-folder bookmarks are cleaned up
+        // Scan Inbox/Bookmarks — files whose URL is already claimed by a vault folder
+        // are skipped (not deleted) so the user never loses data silently.
         processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
-
-        // Delete stale duplicate .webloc files (same URL in multiple folders)
-        for fileURL in staleDuplicateFiles {
-            fileService.delete(filename: fileURL.lastPathComponent, from: fileURL.deletingLastPathComponent())
-            logger.info("Cleaned up stale duplicate: \(fileURL.lastPathComponent)")
-        }
 
         if !adopted.isEmpty || reassigned > 0 {
             if !adopted.isEmpty {
