@@ -184,16 +184,30 @@ struct CiderCLI {
             }
 
         case "move":
-            guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark move <id> --path <vault-relative-path> | --folder <name>")
+            guard let firstArg = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli bookmark move <id>[,id,...] --path <vault-relative-path> | --folder <name>")
                 return
             }
-            if let bm = findBookmark(idPrefix, in: service) {
-                let folder = resolveFolder(from: args)
+            let prefixes = splitIDs(firstArg)
+            let folder = resolveFolder(from: args)
+            let newFolderName = folder?.name ?? "Inbox"
+            var moved = 0
+            var misses: [String] = []
+            for prefix in prefixes {
+                guard let bm = service.bookmarks.first(where: { $0.id.uuidString.lowercased().hasPrefix(prefix.lowercased()) }) else {
+                    misses.append(prefix)
+                    continue
+                }
                 let oldFolder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
                 _ = service.assignBookmark(bm.id, toFolder: folder?.id)
-                let newFolder = folder?.name ?? "Inbox"
-                print("Moved '\(bm.title)' from \(oldFolder) → \(newFolder)")
+                print("Moved '\(bm.title)' from \(oldFolder) → \(newFolderName)")
+                moved += 1
+            }
+            if prefixes.count > 1 {
+                print("Total moved: \(moved)/\(prefixes.count)")
+            }
+            for miss in misses {
+                print("Error: No bookmark found with ID prefix: \(miss)")
             }
 
         case "tag":
@@ -371,24 +385,29 @@ struct CiderCLI {
             }
 
         case "move":
-            guard let idPrefix = args.first else {
-                print("Error: ID prefix required.")
+            guard let firstArg = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli note move <id>[,id,...] [--path <path> | --folder <name>]")
                 return
             }
-            let folderName = parseFlag("--folder", from: args)
-            if let note = findNote(idPrefix, in: storage) {
-                let folderID: UUID?
-                if let name = folderName {
-                    guard let folder = findFolder(named: name) else {
-                        print("Error: No folder found named '\(name)'")
-                        return
-                    }
-                    folderID = folder.id
-                } else {
-                    folderID = nil
+            let prefixes = splitIDs(firstArg)
+            let targetFolder = resolveFolder(from: args)
+            let targetName = targetFolder?.name ?? "Inbox"
+            var moved = 0
+            var misses: [String] = []
+            for prefix in prefixes {
+                guard let note = storage.notes.first(where: { $0.id.uuidString.lowercased().hasPrefix(prefix.lowercased()) }) else {
+                    misses.append(prefix)
+                    continue
                 }
-                _ = storage.assignNote(note.id, toFolder: folderID)
-                print("Moved '\(note.title)' → \(folderName ?? "Inbox")")
+                _ = storage.assignNote(note.id, toFolder: targetFolder?.id)
+                print("Moved '\(note.title)' → \(targetName)")
+                moved += 1
+            }
+            if prefixes.count > 1 {
+                print("Total moved: \(moved)/\(prefixes.count)")
+            }
+            for miss in misses {
+                print("Error: No note found with ID prefix: \(miss)")
             }
 
         case "delete", "rm":
@@ -811,26 +830,29 @@ struct CiderCLI {
             }
 
         case "move":
-            guard let idPrefix = args.first else {
-                print("Error: ID prefix required.")
+            guard let firstArg = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli file move <id>[,id,...] [--path <path> | --folder <name>]")
                 return
             }
-            let folderName = parseFlag("--folder", from: args)
-            if let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
-                let folderID: UUID?
-                if let name = folderName {
-                    guard let folder = findFolder(named: name) else {
-                        print("Error: No folder found named '\(name)'")
-                        return
-                    }
-                    folderID = folder.id
-                } else {
-                    folderID = nil
+            let prefixes = splitIDs(firstArg)
+            let targetFolder = resolveFolder(from: args)
+            let targetName = targetFolder?.name ?? "Inbox"
+            var moved = 0
+            var misses: [String] = []
+            for prefix in prefixes {
+                guard let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(prefix.lowercased()) }) else {
+                    misses.append(prefix)
+                    continue
                 }
-                service.assignFile(file.id, toFolder: folderID)
-                print("Moved '\(file.displayTitle)' → \(folderName ?? "Inbox")")
-            } else {
-                print("Error: No file found with ID prefix: \(idPrefix)")
+                service.assignFile(file.id, toFolder: targetFolder?.id)
+                print("Moved '\(file.displayTitle)' → \(targetName)")
+                moved += 1
+            }
+            if prefixes.count > 1 {
+                print("Total moved: \(moved)/\(prefixes.count)")
+            }
+            for miss in misses {
+                print("Error: No file found with ID prefix: \(miss)")
             }
 
         case "delete", "rm":
@@ -943,9 +965,23 @@ struct CiderCLI {
         case "create":
             let name = args.first ?? "New Folder"
             let parentName = parseFlag("--parent", from: args)
+
+            // If the name contains a slash, treat it as a vault-relative path
+            // and auto-create every missing intermediate folder along the way.
+            // `Food/Restaurants/Tacoma` → creates Food, Food/Restaurants,
+            // Food/Restaurants/Tacoma as needed and returns the leaf.
+            if name.contains("/") && parentName == nil {
+                if let folder = findOrCreateFolderByPath(name) {
+                    print("Created folder: \(folder.relativePath) (\(folder.id.uuidString.prefix(8)))")
+                } else {
+                    print("Error: Could not create nested folder path '\(name)'")
+                }
+                return
+            }
+
             let parentID = parentName.flatMap { findFolder(named: $0)?.id }
             if let folder = VaultFolderService.shared.createFolder(name: name, parentID: parentID) {
-                print("Created folder: \(folder.name) (\(folder.id.uuidString.prefix(8)))")
+                print("Created folder: \(folder.relativePath) (\(folder.id.uuidString.prefix(8)))")
             } else {
                 print("Error: Could not create folder: \(name)")
             }
@@ -1869,6 +1905,15 @@ struct CiderCLI {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    /// Split a CSV argument into individual ID prefixes, trimming whitespace
+    /// and skipping empties. Returns an array even for a single value.
+    /// Used by bulk move / tag commands: `cider-cli bookmark move a,b,c ...`.
+    static func splitIDs(_ arg: String) -> [String] {
+        arg.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     /// Parse every occurrence of `--flag <value>` in `args`. Used for
