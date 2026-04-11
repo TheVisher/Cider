@@ -1027,12 +1027,37 @@ struct CiderCLI {
                 print("Error: Usage: cider-cli label delete <id-prefix|name>")
                 return
             }
-            // Try ID prefix first (consistent with other delete subcommands),
-            // then fall back to case-insensitive name match.
+            // Resolve 0/1/many for both the id-prefix and exact-name paths so
+            // an ambiguous prefix (or duplicate name) never silently deletes
+            // the wrong label.
             let lower = identifier.lowercased()
-            let label = storage.labels.first(where: { $0.id.uuidString.lowercased().hasPrefix(lower) })
-                ?? storage.labels.first(where: { $0.name.localizedCaseInsensitiveCompare(identifier) == .orderedSame })
-            if let label {
+            let prefixMatches = storage.labels.filter { $0.id.uuidString.lowercased().hasPrefix(lower) }
+            let nameMatches = storage.labels.filter { $0.name.localizedCaseInsensitiveCompare(identifier) == .orderedSame }
+
+            let resolved: CardLabel?
+            if prefixMatches.count == 1 {
+                resolved = prefixMatches[0]
+            } else if prefixMatches.count > 1 {
+                print("Error: ID prefix '\(identifier)' is ambiguous — matches \(prefixMatches.count) labels:")
+                for label in prefixMatches {
+                    print("  [\(label.id.uuidString.prefix(8))] \(label.name)")
+                }
+                print("Use a longer id prefix to disambiguate.")
+                return
+            } else if nameMatches.count == 1 {
+                resolved = nameMatches[0]
+            } else if nameMatches.count > 1 {
+                print("Error: Name '\(identifier)' is ambiguous — matches \(nameMatches.count) labels:")
+                for label in nameMatches {
+                    print("  [\(label.id.uuidString.prefix(8))] \(label.name)")
+                }
+                print("Use the id prefix to disambiguate.")
+                return
+            } else {
+                resolved = nil
+            }
+
+            if let label = resolved {
                 storage.deleteLabel(label.id)
                 print("Deleted label: \(label.name) (\(label.id.uuidString.prefix(8)))")
             } else {

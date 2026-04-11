@@ -23,6 +23,12 @@ final class CiderDatabase {
     /// and runs pending schema migrations.
     func open(at url: URL) throws {
         let path = url.path
+        // Refuse double-open — a second call would leak the prior handle and
+        // potentially point at a different file. Callers must close() first if
+        // they really want to reopen.
+        if db != nil {
+            throw CiderDatabaseError.alreadyOpen(path)
+        }
         logger.info("Opening database at \(path)")
 
         var handle: OpaquePointer?

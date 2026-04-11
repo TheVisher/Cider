@@ -33,12 +33,12 @@ struct CiderDatabaseTests {
         try db.open(at: url)
         defer { db.close() }
 
-        // Verify schema version is at v2 (latest). schema_version is a
+        // Verify schema version is at the latest. schema_version is a
         // single-row table after migration.
         let stmt = try db.prepare("SELECT MAX(version) FROM schema_version;")
         let hasRow = try stmt.step()
         #expect(hasRow)
-        #expect(stmt.int(at: 0) == 2)
+        #expect(stmt.int(at: 0) == DatabaseMigrations.latestVersion)
     }
 
     @Test("Items table exists after schema creation")
@@ -115,7 +115,7 @@ struct CiderDatabaseTests {
         try insertFolder.step()
         db1.close()
 
-        // Second open: verify data persists and version is still 1
+        // Second open: verify data persists and version is still at the latest
         let db2 = CiderDatabase()
         try db2.open(at: url)
         defer { db2.close() }
@@ -128,7 +128,59 @@ struct CiderDatabaseTests {
 
         let versionStmt = try db2.prepare("SELECT MAX(version) FROM schema_version;")
         try versionStmt.step()
-        #expect(versionStmt.int(at: 0) == 2)
+        #expect(versionStmt.int(at: 0) == DatabaseMigrations.latestVersion)
+    }
+
+    // MARK: - Double-open guard
+
+    @Test("open() throws when the database is already open")
+    func openThrowsWhenAlreadyOpen() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        #expect(throws: CiderDatabaseError.self) {
+            try db.open(at: url)
+        }
+    }
+
+    @Test("open() succeeds again after close()")
+    func openSucceedsAfterClose() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        db.close()
+        try db.open(at: url)
+        db.close()
+    }
+
+    // MARK: - Schema version guard
+
+    @Test("open() throws when schema_version is newer than supported")
+    func openThrowsOnFutureSchema() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        // First create a valid database at the current version, then bump
+        // schema_version to simulate a DB written by a newer build.
+        do {
+            let db = CiderDatabase()
+            try db.open(at: url)
+            let future = DatabaseMigrations.latestVersion + 1
+            try db.runSQL("DELETE FROM schema_version;")
+            try db.runSQL("INSERT INTO schema_version (version) VALUES (\(future));")
+            db.close()
+        }
+
+        let db2 = CiderDatabase()
+        #expect(throws: CiderDatabaseError.self) {
+            try db2.open(at: url)
+        }
     }
 
     // MARK: - Transactions

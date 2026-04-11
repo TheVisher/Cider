@@ -8,6 +8,10 @@ enum DatabaseMigrations {
 
     private static let logger = Logger(subsystem: "com.cider.app", category: "DatabaseMigrations")
 
+    /// Highest schema version this build knows how to run against.
+    /// Bump together with any new `migrateToVN` function.
+    static let latestVersion: Int = 3
+
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
     static func runMigrations(on db: OpaquePointer) throws {
@@ -16,6 +20,14 @@ enum DatabaseMigrations {
 
         var currentVersion = try readVersion(db)
         logger.info("Current schema version: \(currentVersion)")
+
+        // Fail fast on a DB from a newer build. Silently running forward-only
+        // migrations would leave an unknown schema in place and crash downstream
+        // when columns/tables disagree.
+        if currentVersion > latestVersion {
+            logger.error("Schema version \(currentVersion) is newer than supported (\(latestVersion))")
+            throw CiderDatabaseError.schemaTooNew(current: currentVersion, supported: latestVersion)
+        }
 
         if currentVersion < 1 {
             try migrateToV1(db)
