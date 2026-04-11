@@ -992,6 +992,12 @@ final class VaultFolderService {
 
     // Internal for testing
     /// SELECT all folders from the database, ordered by relative_path.
+    ///
+    /// On a DB read error, the in-memory `index` is left ALONE — a
+    /// transient SQLite failure must NOT wipe the folder model, because the
+    /// next reconcile would then treat every directory on disk as an
+    /// "external discovery" and stamp fresh UUIDs over your entire vault.
+    /// Keep the stale state, log the error, and wait for the next attempt.
     func loadFromDatabase(_ db: CiderDatabase) {
         do {
             let stmt = try db.prepare("""
@@ -1016,8 +1022,8 @@ final class VaultFolderService {
             rebuildFolders()
             logger.info("Loaded \(loaded.count) folders from database")
         } catch {
-            logger.error("Failed to load folders from database: \(error.localizedDescription)")
-            index = [:]
+            logger.error("Failed to load folders from database — keeping stale in-memory state: \(error.localizedDescription)")
+            // Intentionally NOT clearing `index` here — see doc comment above.
         }
     }
 
