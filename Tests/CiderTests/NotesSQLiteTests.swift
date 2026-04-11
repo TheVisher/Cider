@@ -37,6 +37,84 @@ struct NotesSQLiteTests {
 
     // MARK: - Basic Round-Trip
 
+    @Test("addTag via service persists to item_tags (CLI flow)")
+    func addTagViaServicePersists() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let note = Note(
+            title: "CLI-flow Note",
+            content: "body",
+            relativePath: "Inbox/Notes/CLI-flow Note.md"
+        )
+        // Seed via persist path (mimics post-load state with empty tags).
+        service.persistNoteToDatabase(db, note: note)
+
+        // Fresh service reads notes from DB.
+        let service2 = makeService(db)
+        service2.loadNotesFromDatabase(db)
+        #expect(service2.notes.count == 1)
+        #expect(service2.notes[0].tags.isEmpty)
+
+        // This is the exact path the CLI takes.
+        let ok = service2.addTag(note.id, tag: "architecture")
+        #expect(ok)
+        let ok2 = service2.addTag(note.id, tag: "cider")
+        #expect(ok2)
+
+        // Inspect item_tags directly.
+        let stmt = try db.prepare("""
+            SELECT t.name FROM item_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.item_id = ?
+            ORDER BY t.name;
+            """)
+        stmt.bind(DatabaseHelpers.encode(note.id), at: 1)
+        var names: [String] = []
+        while try stmt.step() {
+            names.append(stmt.string(at: 0))
+        }
+        #expect(names == ["architecture", "cider"])
+    }
+
+    @Test("Note tags round-trip through item_tags join table")
+    func noteTagsRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        var note = Note(
+            title: "Tagged Note",
+            content: "body",
+            relativePath: "Inbox/Notes/Tagged Note.md"
+        )
+        note.tags = ["architecture", "cider"]
+
+        service.persistNoteToDatabase(db, note: note)
+
+        // Verify item_tags rows landed
+        let stmt = try db.prepare("""
+            SELECT t.name FROM item_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.item_id = ?
+            ORDER BY t.name;
+            """)
+        stmt.bind(DatabaseHelpers.encode(note.id), at: 1)
+        var names: [String] = []
+        while try stmt.step() {
+            names.append(stmt.string(at: 0))
+        }
+        #expect(names == ["architecture", "cider"])
+
+        // And that load rehydrates them
+        let service2 = makeService(db)
+        service2.loadNotesFromDatabase(db)
+        let loaded = service2.notes.first { $0.id == note.id }
+        #expect(loaded?.tags.sorted() == ["architecture", "cider"])
+    }
+
     @Test("Note round-trips through SQLite: persist and load")
     func noteRoundTrip() throws {
         let (db, url) = try makeTestDB()

@@ -381,10 +381,24 @@ final class NotesStorage: ObservableObject {
         //    `persistNoteToDatabaseInner` scrubs dangling folder_id references
         //    at the lowest level so a single stale reference can't abort the
         //    whole transaction.
+        //
+        //    IMPORTANT: the disk scan (scanNotes/discoverVaultFolderNoteFiles)
+        //    has no way to read DB-only state like `tags` (stored in item_tags,
+        //    not in the sidecar or filename). Re-persisting the scanned notes
+        //    as-is would blow away every tag. Preload tags from the DB and
+        //    merge them onto the in-memory notes before the upsert so disk
+        //    scans can't wipe DB-only fields.
         guard let db = resolvedDatabase else { return }
         let currentIDs = Set(notes.map(\.id))
         let removedIDs = previousIDs.subtracting(currentIDs)
         do {
+            // Preserve DB-only tags through the rescan round-trip.
+            for i in notes.indices {
+                if let existingTags = try? loadTags(db, itemID: notes[i].id), !existingTags.isEmpty {
+                    notes[i].tags = existingTags
+                }
+            }
+
             try db.withTransaction {
                 for note in self.notes {
                     try self.persistNoteToDatabaseInner(db, note: note)
