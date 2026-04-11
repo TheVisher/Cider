@@ -23,7 +23,86 @@ enum DatabaseMigrations {
         }
         if currentVersion < 2 {
             try migrateToV2(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 3 {
+            try migrateToV3(db)
+        }
+    }
+
+    // MARK: - V2 -> V3: Clean up ghost storage-type folder rows
+    //
+    // Older code paths wrote folder rows for paths under reserved top-level
+    // directories (Inbox/Bookmarks, Unsorted/..., etc.). These aren't real
+    // user folders — they're storage-type subtrees that the reconciler
+    // correctly excludes from disk scans. The stale rows linger in the
+    // `folders` table with live items attached, causing every reconcile to
+    // log "Skipping removal of missing folder …" and blocking cleanup.
+    //
+    // This migration:
+    //   1. Identifies folder rows whose path starts with a reserved top
+    //      component.
+    //   2. Re-parents any items and sessions pointing at them to NULL
+    //      (semantically "unfiled", which puts them back in the Inbox view).
+    //   3. Deletes the ghost folder rows.
+    private static func migrateToV3(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 3...")
+
+        // Top-level reserved directory names. Kept in sync with
+        // VaultFolderService.reservedDirectoryNames — duplicated here so the
+        // migration stays self-contained (no service-layer imports into the
+        // DB layer).
+        let reservedTopComponents: [String] = [
+            "Inbox", "Unsorted",
+            "Bookmarks", "Contacts", "DateCards", "Labels", "Notes",
+            "SavedViews", "Sources", "Stacks", "Tags",
+        ]
+
+        try withTransaction(db) {
+            var ghostIDs: [String] = []
+            for top in reservedTopComponents {
+                let escaped = top.replacingOccurrences(of: "'", with: "''")
+                // Match "<reserved>" exactly OR "<reserved>/…". Don't match
+                // "Inboxed" or similar unrelated prefixes.
+                let pattern1 = "\(escaped)"
+                let pattern2 = "\(escaped)/%"
+                let sql = """
+                    SELECT id FROM folders
+                    WHERE relative_path = '\(pattern1)'
+                       OR relative_path LIKE '\(pattern2)';
+                    """
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                    sqlite3_finalize(stmt)
+                    throw CiderDatabaseError.prepare(String(cString: sqlite3_errmsg(db)))
+                }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    if let cID = sqlite3_column_text(stmt, 0) {
+                        ghostIDs.append(String(cString: cID))
+                    }
+                }
+                sqlite3_finalize(stmt)
+            }
+
+            if ghostIDs.isEmpty {
+                logger.info("No ghost storage-type folders to clean up")
+            } else {
+                logger.info("Cleaning up \(ghostIDs.count) ghost storage-type folder(s)")
+                for ghostID in ghostIDs {
+                    let escaped = ghostID.replacingOccurrences(of: "'", with: "''")
+                    // Re-parent dependents to NULL before deleting the row so
+                    // the FK constraint doesn't reject the delete.
+                    try runOnDB(db, "UPDATE items SET folder_id = NULL WHERE folder_id = '\(escaped)';")
+                    try runOnDB(db, "UPDATE sessions SET folder_id = NULL WHERE folder_id = '\(escaped)';")
+                    try runOnDB(db, "DELETE FROM folders WHERE id = '\(escaped)';")
+                }
+            }
+
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (3);")
+        }
+
+        logger.info("Migration to v3 complete")
     }
 
     // MARK: - V1 -> V2: vault_files.title_manually_set + schema_migrations table

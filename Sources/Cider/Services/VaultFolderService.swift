@@ -879,6 +879,15 @@ final class VaultFolderService {
     // Internal for testing
     /// UPSERT a single folder into the given database (ON CONFLICT avoids DELETE+INSERT; consistent with items/labels pattern).
     func persistToDatabase(_ db: CiderDatabase, folder: VaultFolder) {
+        // Defensive guard: refuse to persist folder rows for reserved
+        // storage-type paths. These aren't real user folders — they're
+        // subtrees the reconciler excludes from disk scans, and letting
+        // them into the folders table produces ghost rows that block
+        // reconciliation forever. See migrateToV3.
+        if isStorageTypeDirectory(folder.relativePath) {
+            logger.warning("Refusing to persist reserved-path folder \(folder.relativePath) (id: \(folder.id))")
+            return
+        }
         do {
             let stmt = try db.prepare("""
                 INSERT INTO folders (id, relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y)
