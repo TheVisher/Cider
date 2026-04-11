@@ -433,6 +433,28 @@ final class VaultFileService: ObservableObject {
         }
     }
 
+    /// Looks up an existing vault-file UUID in SQLite by its relative path.
+    /// Used to heal id-map drift: if the sidecar lost an entry but SQLite
+    /// still has the row, adopt the existing UUID instead of minting a new
+    /// one that would trip the items.relative_path UNIQUE constraint.
+    private func lookupExistingVaultFileID(relativePath: String) -> UUID? {
+        guard let db = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil else { return nil }
+        do {
+            let stmt = try db.prepare("""
+                SELECT i.id FROM items i
+                JOIN vault_files vf ON vf.item_id = i.id
+                WHERE i.type = 'vaultFile' AND i.relative_path = ?
+                LIMIT 1;
+                """)
+            stmt.bind(relativePath, at: 1)
+            guard try stmt.step() else { return nil }
+            return DatabaseHelpers.decodeUUID(stmt.string(at: 0))
+        } catch {
+            logger.error("Failed to look up existing vault file ID for path: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Migration ledger name for the path-derived → stable-UUID migration.
     private static let uuidStabilizationMigrationName = "vault_file_uuid_stabilization"
 
@@ -589,9 +611,25 @@ final class VaultFileService: ObservableObject {
         let createdAt = values?.creationDate ?? Date()
         let modifiedAt = values?.contentModificationDate ?? Date()
 
-        // Resolve stable UUID via id-map (NOT path-derived).
+        // Resolve stable UUID. SQLite is the source of truth because the
+        // items.relative_path UNIQUE constraint enforces it — if the id-map
+        // disagrees with SQLite, SQLite wins and we heal the id-map in place.
+        // This covers three drift modes:
+        //   1. id-map miss but SQLite has a row  → adopt SQLite's id
+        //   2. id-map hit that matches SQLite    → use it (fast path)
+        //   3. id-map hit that disagrees with SQLite → adopt SQLite's id
+        // Without this, a stale id-map entry causes every rescan to try to
+        // INSERT a new row at an existing relative_path and trip UNIQUE
+        // indefinitely.
         let id: UUID
-        if let existing = idMap[relativePath] {
+        if let dbID = lookupExistingVaultFileID(relativePath: relativePath) {
+            id = dbID
+            if idMap[relativePath] != dbID {
+                idMap[relativePath] = dbID
+                idMapDirty = true
+            }
+        } else if let existing = idMap[relativePath] {
+            // No SQLite row yet — first persist for a newly-scanned file.
             id = existing
         } else {
             let fresh = UUID()
