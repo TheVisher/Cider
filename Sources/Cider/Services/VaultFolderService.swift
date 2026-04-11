@@ -323,8 +323,23 @@ final class VaultFolderService {
         }
     }
 
-    /// Deletes a folder by moving its directory to the vault trash.
-    /// Returns the TrashItem for undo support.
+    /// Deletes a folder by relocating every item inside to Inbox FIRST,
+    /// then moving the (now-empty) directory to the vault trash.
+    ///
+    /// The item-relocation step is load-bearing: if we skip it and just
+    /// trash the directory, every .webloc / .md / vault file inside
+    /// physically rides along into the trash, and the next scan prunes
+    /// the corresponding DB rows because `pruneMissingBookmarksFromDisk`
+    /// can no longer find the files at their recorded relative_path.
+    /// That's a silent data-loss path the earlier implementation papered
+    /// over by setting `items.folder_id = NULL` at the SQL level — a fix
+    /// that kept the DB rows alive but left the physical files in trash,
+    /// causing the same prune on the next launch.
+    ///
+    /// Before the physical move runs, we record each item's pre-delete
+    /// folder path into a breadcrumb file (`.cider/folders/.trash/
+    /// <folderID>-breadcrumbs.json`) so `folder restore` can put items
+    /// back where they were if the delete was a mistake.
     @discardableResult
     func deleteFolder(_ folderID: UUID) -> TrashItem? {
         guard let folder = index[folderID] else { return nil }
@@ -336,35 +351,59 @@ final class VaultFolderService {
         isMutating = true
         defer { isMutating = false }
 
-        // Ensure trash dir exists
-        try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
-
-        // If something with same name already in trash, remove it
-        if fm.fileExists(atPath: trashDestURL.path) {
-            try? fm.removeItem(at: trashDestURL)
-        }
-
-        do {
-            try fm.moveItem(at: sourceURL, to: trashDestURL)
-        } catch {
-            logger.error("deleteFolder: failed to move to trash: \(error.localizedDescription)")
-            return nil
-        }
-
-        // Collect this folder and all descendants
+        // Collect this folder and all descendants FIRST so we know the
+        // complete subtree before we start mutating anything.
         let deletedPrefix = folder.relativePath + "/"
         var deletedFolders: [VaultFolder] = [folder]
         for (_, entry) in index where entry.relativePath.hasPrefix(deletedPrefix) {
             deletedFolders.append(entry)
         }
+        let deletedFolderIDs = Set(deletedFolders.map(\.id))
 
-        // Unfile any items referencing these folders at the SQL level before
-        // deleting the folder rows. Without this, the FK on items.folder_id
-        // (no ON DELETE clause in schema) makes `DELETE FROM folders` silently
-        // fail via SQLite FK enforcement, leaving the folder row in place.
-        // Setting folder_id = NULL mirrors `deleteFolderFromSync`'s semantic:
-        // items survive a folder deletion and reappear in the Inbox view.
+        // Write breadcrumbs BEFORE unassigning so we record where each item
+        // lived right up to the moment of the delete.
+        writeDeleteBreadcrumbs(rootFolder: folder, affectedFolderIDs: deletedFolderIDs)
+
+        // Physically relocate every item out of the subtree via the item
+        // services' own assign(..., toFolder: nil) paths. These move the
+        // underlying files on disk and update SQLite in one atomic step
+        // per item. Mirrors `deleteFolderFromSync` (which has always done
+        // this correctly).
+        for id in deletedFolderIDs {
+            for note in NotesStorage.shared.notes where note.folderID == id {
+                _ = NotesStorage.shared.assignNote(note.id, toFolder: nil)
+            }
+            for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.folderID == id {
+                _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
+            }
+            for file in VaultFileService.shared.files where file.folderID == id {
+                VaultFileService.shared.assignFile(file.id, toFolder: nil)
+            }
+        }
+
+        // Defensive fallback: scrub any DB-only references that still
+        // point at these folder IDs (items whose in-memory service entry
+        // is out of sync with SQLite). Otherwise the FK would block the
+        // folder row delete.
         unassignItemsFromFolders(deletedFolders.map(\.id))
+
+        // Ensure trash dir exists, and if something with the same ID is
+        // already there (rare — duplicate UUID collision), nuke it.
+        try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
+        if fm.fileExists(atPath: trashDestURL.path) {
+            try? fm.removeItem(at: trashDestURL)
+        }
+
+        // Move the now-empty folder directory to trash. If the move fails
+        // (permissions, partial I/O), we've already relocated items to
+        // safety so the user doesn't lose data — the folder row just
+        // won't go away.
+        do {
+            try fm.moveItem(at: sourceURL, to: trashDestURL)
+        } catch {
+            logger.error("deleteFolder: failed to move empty folder to trash: \(error.localizedDescription)")
+            // Continue anyway — items are safe and DB cleanup still needs to run.
+        }
 
         // Remove from index and database
         for deleted in deletedFolders {
@@ -395,6 +434,94 @@ final class VaultFolderService {
         logger.info("Trashed folder '\(folder.name)' and \(deletedFolders.count - 1) subfolder(s)")
         NotificationCenter.default.post(name: .vaultFoldersChanged, object: nil)
         return trashItem
+    }
+
+    // MARK: - Delete Breadcrumbs
+
+    /// One breadcrumb entry per relocated item, written to a JSON file before
+    /// the delete runs. Used by `restoreFromDeleteBreadcrumbs` (CLI: `folder restore`).
+    struct DeleteBreadcrumb: Codable {
+        let folderPath: String      // root folder at time of delete, e.g. "Food/Restaurants/Lynnwood"
+        let deletedAt: Date
+        let items: [BreadcrumbItem]
+    }
+
+    struct BreadcrumbItem: Codable {
+        let itemID: UUID
+        let itemType: String        // "bookmark" / "note" / "vaultFile"
+        let title: String
+        let previousFolderPath: String
+    }
+
+    private func writeDeleteBreadcrumbs(rootFolder: VaultFolder, affectedFolderIDs: Set<UUID>) {
+        var items: [BreadcrumbItem] = []
+        let folderPathByID: [UUID: String] = Dictionary(
+            uniqueKeysWithValues: index.compactMap { (id, f) in
+                affectedFolderIDs.contains(id) ? (id, f.relativePath) : nil
+            }
+        )
+        for note in NotesStorage.shared.notes {
+            guard let fid = note.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: note.id, itemType: "note", title: note.title, previousFolderPath: path
+            ))
+        }
+        for bm in VaultBookmarkService.shared.bookmarks {
+            guard let fid = bm.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: bm.id, itemType: "bookmark", title: bm.title, previousFolderPath: path
+            ))
+        }
+        for f in VaultFileService.shared.files {
+            guard let fid = f.folderID, let path = folderPathByID[fid] else { continue }
+            items.append(BreadcrumbItem(
+                itemID: f.id, itemType: "vaultFile", title: f.displayTitle, previousFolderPath: path
+            ))
+        }
+
+        guard !items.isEmpty else { return }
+
+        let breadcrumb = DeleteBreadcrumb(
+            folderPath: rootFolder.relativePath,
+            deletedAt: Date(),
+            items: items
+        )
+
+        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
+        let fileURL = trashDir.appendingPathComponent("\(rootFolder.id.uuidString)-breadcrumbs.json")
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(breadcrumb)
+            try data.write(to: fileURL, options: .atomic)
+            logger.info("Wrote delete breadcrumbs for '\(rootFolder.name)' (\(items.count) items) to \(fileURL.lastPathComponent)")
+        } catch {
+            logger.error("Failed to write delete breadcrumbs: \(error.localizedDescription)")
+        }
+    }
+
+    /// Reads the most recent breadcrumb file matching the given folder path
+    /// and returns the parsed `DeleteBreadcrumb`. Used by `folder restore`.
+    func readLatestDeleteBreadcrumb(forFolderPath folderPath: String) -> DeleteBreadcrumb? {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: trashDir,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return nil }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        var candidates: [(Date, DeleteBreadcrumb)] = []
+        for url in entries where url.lastPathComponent.hasSuffix("-breadcrumbs.json") {
+            guard let data = try? Data(contentsOf: url),
+                  let parsed = try? decoder.decode(DeleteBreadcrumb.self, from: data),
+                  parsed.folderPath == folderPath else { continue }
+            candidates.append((parsed.deletedAt, parsed))
+        }
+
+        return candidates.max(by: { $0.0 < $1.0 })?.1
     }
 
     /// Restores a trashed vault folder by moving it back from trash.

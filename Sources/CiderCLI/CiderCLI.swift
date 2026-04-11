@@ -1080,9 +1080,76 @@ struct CiderCLI {
             VaultFolderService.shared.deleteFolder(folder.id)
             print("Deleted folder: \(folder.relativePath) (moved to trash)")
 
+        case "restore":
+            guard let pathArg = args.first else {
+                print("Error: Usage: cider-cli folder restore <vault-relative-path>")
+                print("  e.g. cider-cli folder restore Food/Restaurants/Lynnwood")
+                return
+            }
+            guard let breadcrumb = VaultFolderService.shared.readLatestDeleteBreadcrumb(forFolderPath: pathArg) else {
+                print("Error: No delete breadcrumb found for '\(pathArg)'")
+                print("  Breadcrumbs are written by `folder delete` and live in .cider/folders/.trash/")
+                return
+            }
+            print("Restoring '\(breadcrumb.folderPath)' (deleted \(breadcrumb.deletedAt.formatted())):")
+            print("  Items to restore: \(breadcrumb.items.count)")
+
+            var restored = 0
+            var misses: [VaultFolderService.BreadcrumbItem] = []
+            // Unique destination paths to recreate
+            let targetPaths = Set(breadcrumb.items.map(\.previousFolderPath))
+            for path in targetPaths {
+                _ = findOrCreateFolderByPath(path)
+            }
+
+            for item in breadcrumb.items {
+                guard let targetFolder = VaultFolderService.shared.folders.first(where: {
+                    $0.relativePath == item.previousFolderPath
+                }) else {
+                    misses.append(item)
+                    continue
+                }
+                switch item.itemType {
+                case "note":
+                    if let note = NotesStorage.shared.notes.first(where: { $0.id == item.itemID }) {
+                        _ = NotesStorage.shared.assignNote(note.id, toFolder: targetFolder.id)
+                        print("  ↺ note: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
+                case "bookmark":
+                    if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == item.itemID }) {
+                        _ = VaultBookmarkService.shared.assignBookmark(bm.id, toFolder: targetFolder.id)
+                        print("  ↺ bookmark: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
+                case "vaultFile":
+                    if let file = VaultFileService.shared.files.first(where: { $0.id == item.itemID }) {
+                        VaultFileService.shared.assignFile(file.id, toFolder: targetFolder.id)
+                        print("  ↺ file: \(item.title) → \(item.previousFolderPath)")
+                        restored += 1
+                    } else {
+                        misses.append(item)
+                    }
+                default:
+                    misses.append(item)
+                }
+            }
+
+            print("Restored \(restored)/\(breadcrumb.items.count) item(s) to \(targetPaths.count) folder(s)")
+            if !misses.isEmpty {
+                print("Could not restore \(misses.count) item(s) — likely deleted separately or trashed:")
+                for m in misses {
+                    print("  - \(m.itemType) \(m.itemID.uuidString.prefix(8)) '\(m.title)'")
+                }
+            }
+
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete")
+            print("Commands: list, create, rename, move, delete, restore")
         }
     }
 
