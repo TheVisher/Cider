@@ -146,18 +146,23 @@ struct CiderCLI {
                 } else {
                     let folder = bm.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
                     print("Bookmark: \(bm.title)")
-                    print("  ID:       \(bm.id.uuidString)")
-                    print("  URL:      \(bm.urlString)")
-                    print("  Folder:   \(folder)")
-                    print("  Tags:     \(bm.tags.joined(separator: ", "))")
-                    print("  Labels:   \(bm.labelIDs.count)")
-                    print("  Notes:    \(bm.notes.isEmpty ? "(none)" : bm.notes)")
-                    print("  Created:  \(bm.createdAt.formatted())")
-                    print("  Updated:  \(bm.updatedAt.formatted())")
-                    print("  Manual:   title=\(bm.titleManuallySet) notes=\(bm.notesManuallySet)")
-                    if let ocr = bm.ocrText { print("  OCR:      \(ocr.prefix(100))") }
-                    if let colors = bm.dominantColors { print("  Colors:   \(colors.joined(separator: ", "))") }
-                    if let summary = bm.aiSummary { print("  Summary:  \(summary.prefix(100))") }
+                    print("  ID:        \(bm.id.uuidString)")
+                    print("  URL:       \(bm.urlString)")
+                    print("  Folder:    \(folder)")
+                    print("  Tags:      \(bm.tags.isEmpty ? "(none)" : bm.tags.joined(separator: ", "))")
+                    print("  Labels:    \(bm.labelIDs.count)")
+                    print("  Notes:     \(bm.notes.isEmpty ? "(none)" : bm.notes)")
+                    print("  Created:   \(bm.createdAt.formatted())")
+                    print("  Updated:   \(bm.updatedAt.formatted())")
+                    print("  Manual:    title=\(bm.titleManuallySet) notes=\(bm.notesManuallySet)")
+                    if let ocr = bm.ocrText, !ocr.isEmpty { print("  OCR:       \(ocr.prefix(200))") }
+                    if let colors = bm.dominantColors { print("  Colors:    \(colors.joined(separator: ", "))") }
+                    if let summary = bm.aiSummary, !summary.isEmpty {
+                        // Show aiSummary in full — this is where the agent writes
+                        // its enrichment output and needs to be able to read it back.
+                        print("  AI Summary:")
+                        print(summary)
+                    }
                 }
             }
 
@@ -329,17 +334,24 @@ struct CiderCLI {
                 return
             }
             if let note = findNote(idPrefix, in: storage) {
-                let folder = note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                let content = storage.loadContent(for: note) ?? "(could not load)"
-                print("Note: \(note.title)")
-                print("  ID:      \(note.id.uuidString)")
-                print("  Folder:  \(folder)")
-                print("  Pinned:  \(note.isPinned)")
-                print("  Labels:  \(note.labelIDs.count)")
-                print("  Created: \(note.createdAt.formatted())")
-                print("  Path:    \(note.relativePath)")
-                print("  Content:")
-                print(content.prefix(500))
+                let content = storage.loadContent(for: note) ?? ""
+                if jsonOutput {
+                    var dict = noteToDict(note)
+                    dict["content"] = content
+                    outputJSON(dict)
+                } else {
+                    let folder = note.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    print("Note: \(note.title)")
+                    print("  ID:      \(note.id.uuidString)")
+                    print("  Folder:  \(folder)")
+                    print("  Pinned:  \(note.isPinned)")
+                    print("  Tags:    \(note.tags.isEmpty ? "(none)" : note.tags.joined(separator: ", "))")
+                    print("  Labels:  \(note.labelIDs.count)")
+                    print("  Created: \(note.createdAt.formatted())")
+                    print("  Path:    \(note.relativePath)")
+                    print("  Content:")
+                    print(content.isEmpty ? "(empty)" : content)
+                }
             }
 
         case "pin":
@@ -766,19 +778,24 @@ struct CiderCLI {
                 return
             }
             if let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
-                let folder = file.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
-                let size = ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
-                print("File: \(file.displayTitle)")
-                print("  ID:       \(file.id.uuidString)")
-                print("  Filename: \(file.filename)")
-                print("  Type:     \(file.fileType.displayName)")
-                print("  Size:     \(size)")
-                print("  Folder:   \(folder)")
-                print("  Path:     \(file.relativePath)")
-                print("  Notes:    \(file.notes.isEmpty ? "(none)" : file.notes)")
-                print("  Labels:   \(file.labelIDs.count)")
-                if let ocr = file.ocrText, !ocr.isEmpty { print("  OCR:      \(ocr.prefix(100))") }
-                if let colors = file.dominantColors { print("  Colors:   \(colors.joined(separator: ", "))") }
+                if jsonOutput {
+                    outputJSON(vaultFileToDict(file))
+                } else {
+                    let folder = file.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                    let size = ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
+                    print("File: \(file.displayTitle)")
+                    print("  ID:       \(file.id.uuidString)")
+                    print("  Filename: \(file.filename)")
+                    print("  Type:     \(file.fileType.displayName)")
+                    print("  Size:     \(size)")
+                    print("  Folder:   \(folder)")
+                    print("  Path:     \(file.relativePath)")
+                    print("  Notes:    \(file.notes.isEmpty ? "(none)" : file.notes)")
+                    print("  Tags:     \(file.tags.isEmpty ? "(none)" : file.tags.joined(separator: ", "))")
+                    print("  Labels:   \(file.labelIDs.count)")
+                    if let ocr = file.ocrText, !ocr.isEmpty { print("  OCR:      \(ocr.prefix(200))") }
+                    if let colors = file.dominantColors { print("  Colors:   \(colors.joined(separator: ", "))") }
+                }
             } else {
                 print("Error: No file found with ID prefix: \(idPrefix)")
             }
