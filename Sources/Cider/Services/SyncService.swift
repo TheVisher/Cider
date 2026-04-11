@@ -285,6 +285,30 @@ final class SyncService: ObservableObject {
         UserDefaults.standard.set(pendingFolderDeletions, forKey: pendingFolderDeletionsKey)
     }
 
+    /// Re-read pending deletion queues from UserDefaults and merge them into
+    /// the in-memory caches. UserDefaults is the cross-process shared store,
+    /// so this picks up tombstones written by a separate CLI process while
+    /// the app was running. Merge (not replace) preserves any in-memory
+    /// entries that haven't been flushed to UserDefaults yet.
+    private func mergePendingDeletionsFromUserDefaults() {
+        let udBookmarks = UserDefaults.standard.stringArray(forKey: pendingDeletionsKey) ?? []
+        let udFolders = UserDefaults.standard.stringArray(forKey: pendingFolderDeletionsKey) ?? []
+        let udNotes = UserDefaults.standard.stringArray(forKey: pendingNoteDeletionsKey) ?? []
+
+        var bookmarkSet = Set(pendingDeletions)
+        for id in udBookmarks where bookmarkSet.insert(id).inserted {
+            pendingDeletions.append(id)
+        }
+        var folderSet = Set(pendingFolderDeletions)
+        for id in udFolders where folderSet.insert(id).inserted {
+            pendingFolderDeletions.append(id)
+        }
+        var noteSet = Set(pendingNoteDeletions)
+        for id in udNotes where noteSet.insert(id).inserted {
+            pendingNoteDeletions.append(id)
+        }
+    }
+
     // MARK: - Manual trigger
 
     func syncNow() {
@@ -330,6 +354,13 @@ final class SyncService: ObservableObject {
             logger.warning("Sync paused after \(self.consecutiveFailures) consecutive failures")
             return
         }
+
+        // Re-read pending deletion queues from UserDefaults. These queues
+        // are persisted there so a CLI invocation (a separate process) can
+        // enqueue a tombstone while the app is running; without this refresh,
+        // the running app would only see its own in-memory cache and the
+        // CLI's deletion would never propagate to the server.
+        mergePendingDeletionsFromUserDefaults()
 
         let storage = VaultBookmarkService.shared
         let notesStorage = NotesStorage.shared

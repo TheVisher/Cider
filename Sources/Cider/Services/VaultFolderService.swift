@@ -280,6 +280,23 @@ final class VaultFolderService {
         return true
     }
 
+    /// Sets `items.folder_id = NULL` for every item referencing any of the
+    /// given folder IDs. Called before deleting folder rows so the FK
+    /// (no ON DELETE clause) doesn't abort the delete.
+    private func unassignItemsFromFolders(_ folderIDs: [UUID]) {
+        guard let db = resolvedDatabase, !folderIDs.isEmpty else { return }
+        do {
+            let stmt = try db.prepare("UPDATE items SET folder_id = NULL WHERE folder_id = ?;")
+            for id in folderIDs {
+                stmt.reset()
+                stmt.bind(DatabaseHelpers.encode(id), at: 1)
+                try stmt.step()
+            }
+        } catch {
+            logger.error("unassignItemsFromFolders: failed to clear folder_id: \(error.localizedDescription)")
+        }
+    }
+
     /// UPDATE items.relative_path for every item whose path sits inside the
     /// moved folder. Uses LIKE with a trailing `/` so siblings with a shared
     /// prefix (e.g. "Tech" vs "Technology") don't get swept up. Folder names
@@ -340,6 +357,14 @@ final class VaultFolderService {
         for (_, entry) in index where entry.relativePath.hasPrefix(deletedPrefix) {
             deletedFolders.append(entry)
         }
+
+        // Unfile any items referencing these folders at the SQL level before
+        // deleting the folder rows. Without this, the FK on items.folder_id
+        // (no ON DELETE clause in schema) makes `DELETE FROM folders` silently
+        // fail via SQLite FK enforcement, leaving the folder row in place.
+        // Setting folder_id = NULL mirrors `deleteFolderFromSync`'s semantic:
+        // items survive a folder deletion and reappear in the Inbox view.
+        unassignItemsFromFolders(deletedFolders.map(\.id))
 
         // Remove from index and database
         for deleted in deletedFolders {
@@ -794,6 +819,13 @@ final class VaultFolderService {
 
     private func handleFSEvent() {
         guard !isMutating else { return }
+        // Re-read the in-memory folder index from SQLite FIRST so that changes
+        // made by another process (e.g. `cider-cli folder move/delete`) are
+        // picked up before we reconcile against disk. Without this, the
+        // running app's index is a frozen snapshot of startup state, and the
+        // reconciler's "discovered external folder" branch will keep
+        // resurrecting folders that the CLI just deleted (with fresh UUIDs).
+        loadIndexFromDatabaseOrJSON()
         reconcileWithFilesystem()
         // Reload sidecar metadata and rescan vault files
         SidecarService.shared.loadAll()
