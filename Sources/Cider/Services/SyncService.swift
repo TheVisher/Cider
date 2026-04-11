@@ -698,7 +698,15 @@ final class SyncService: ObservableObject {
                 ]
                 let result: SyncPullResponse = try await client.action("sync:pull", with: args)
 
-                // Build local inventories
+                // Apply the pull result first — this creates local rows for any
+                // server items that aren't present locally (via addFromSync) and
+                // updates locals that the server has newer. Without this, the
+                // reconciliation loops below would see ghosts and previously
+                // pushed deletion tombstones; now they pull the missing items
+                // back into local state and leave the server authoritative.
+                self.applyPullResult(result)
+
+                // Build local inventories (re-read after applyPullResult added items)
                 let localBookmarks = VaultBookmarkService.shared.bookmarks
                 let localFolders = VaultFolderService.shared.legacyFolders
                 let localNotes = NotesStorage.shared.notes
@@ -724,26 +732,30 @@ final class SyncService: ObservableObject {
                     serverNotes[syncId.lowercased()] = n
                 }
 
-                let nowMs = Date().timeIntervalSince1970 * 1000
                 var corrections: [[String: ConvexEncodable?]] = []
                 var folderCorrections: [[String: ConvexEncodable?]] = []
                 var noteCorrections: [[String: ConvexEncodable?]] = []
 
-                // Server has, Desktop doesn't → push deletion tombstone (ghost cleanup)
+                // Server has, Desktop doesn't → log only, never push deletion tombstones.
+                //
+                // The previous behavior assumed that "missing locally" implied "user
+                // deleted it" and pushed a deletion to the server. But silent local
+                // deletions happen in practice (e.g. a bug in adoptOrphanedVaultFiles
+                // once hard-deleted duplicate .webloc files), and propagating those to
+                // the server is unrecoverable. We now trust the server as the source
+                // of truth in this direction: items only present on the server are
+                // pulled back via applyPullResult's addFromSync path on the next pull.
+                //
+                // Explicit user deletions are still propagated via pendingDeletions,
+                // which is updated by trackDeletion(of:) on the intentional delete path.
                 for (syncId, _) in serverBookmarks where !localBookmarkIDs.contains(syncId) {
-                    guard !self.pendingDeletions.contains(syncId) else { continue }
-                    self.logger.info("Reconcile: ghost bookmark \(syncId) — pushing deletion")
-                    corrections.append(Self.deletionTombstone(syncId: syncId, nowMs: nowMs))
+                    self.logger.warning("Reconcile: bookmark \(syncId) on server, not local — will be re-pulled on next sync (not deleting)")
                 }
                 for (syncId, _) in serverFolders where !localFolderIDs.contains(syncId) {
-                    guard !self.pendingFolderDeletions.contains(syncId) else { continue }
-                    self.logger.info("Reconcile: ghost folder \(syncId) — pushing deletion")
-                    folderCorrections.append(Self.folderDeletionTombstone(syncId: syncId, nowMs: nowMs))
+                    self.logger.warning("Reconcile: folder \(syncId) on server, not local — will be re-pulled on next sync (not deleting)")
                 }
                 for (syncId, _) in serverNotes where !localNoteIDs.contains(syncId) {
-                    guard !self.pendingNoteDeletions.contains(syncId) else { continue }
-                    self.logger.info("Reconcile: ghost note \(syncId) — pushing deletion")
-                    noteCorrections.append(Self.noteDeletionTombstone(syncId: syncId, nowMs: nowMs))
+                    self.logger.warning("Reconcile: note \(syncId) on server, not local — will be re-pulled on next sync (not deleting)")
                 }
 
                 // Desktop has, server doesn't → push full item (missed push recovery)
