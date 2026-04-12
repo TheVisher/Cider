@@ -190,6 +190,19 @@ func outputJSON(_ value: Any) {
     ]
 }
 
+@MainActor func clipboardItemToDict(_ item: ClipboardItem) -> [String: Any] {
+    var d: [String: Any] = [
+        "id": item.id.uuidString,
+        "type": item.type.rawValue,
+        "timestamp": ISO8601DateFormatter().string(from: item.timestamp),
+        "isSaved": item.isSaved,
+    ]
+    if let text = item.textContent { d["textContent"] = text }
+    if let app = item.sourceAppName { d["sourceApp"] = app }
+    if let savedID = item.savedItemID { d["savedItemID"] = savedID.uuidString }
+    return d
+}
+
 @MainActor func trashItemToDict(_ item: TrashItem) -> [String: Any] {
     [
         "id": item.id.uuidString,

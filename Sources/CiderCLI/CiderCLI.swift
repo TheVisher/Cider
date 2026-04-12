@@ -111,6 +111,18 @@ struct CiderCLI {
             await handleQuery(args: Array(args.dropFirst()))
         case "doctor":
             handleFolder(subcommand: "doctor", args: Array(args.dropFirst()))
+        case "clipboard", "cb":
+            handleClipboard(subcommand: subcommand, args: remaining)
+        case "embeddings":
+            if subcommand == "backfill" {
+                let store = EmbeddingStore.shared
+                store.load()
+                let bookmarks = VaultBookmarkService.shared.bookmarks
+                store.backfillMissing(bookmarks: bookmarks)
+                print("Backfilling embeddings for \(bookmarks.count) bookmarks...")
+            } else {
+                print("Usage: cider-cli embeddings backfill")
+            }
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "help", "--help", "-h":
@@ -426,9 +438,38 @@ struct CiderCLI {
                 print("Error: Failed to reorder carousel images")
             }
 
+        case "similar":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli bookmark similar <id> [--limit <n>]")
+                return
+            }
+            guard let bookmark = findBookmark(idPrefix, in: service) else { return }
+            let limitStr = parseFlag("--limit", from: args)
+            let limit = limitStr.flatMap(Int.init) ?? 5
+            let store = EmbeddingStore.shared
+            store.load()
+            guard store.vector(for: bookmark.id) != nil else {
+                print("No embedding found for '\(bookmark.title)'. Run 'bookmark enrich' first.")
+                return
+            }
+            let similarIDs = SimilarItemsService.findSimilar(to: bookmark.id, in: store, limit: limit)
+            if similarIDs.isEmpty {
+                print("No similar items found for '\(bookmark.title)'")
+                return
+            }
+            let similarBookmarks = similarIDs.compactMap { id in service.bookmarks.first(where: { $0.id == id }) }
+            if jsonOutput {
+                outputJSON(similarBookmarks.map(bookmarkToDict))
+            } else {
+                print("Similar to '\(bookmark.title)' (\(similarBookmarks.count)):")
+                for bm in similarBookmarks {
+                    print("  [\(bm.id.uuidString.prefix(8))] \(bm.title)")
+                }
+            }
+
         default:
             print("Unknown bookmark command: \(subcommand ?? "nil")")
-            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, carousel-add, carousel-remove, carousel-reorder")
+            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, similar, carousel-add, carousel-remove, carousel-reorder")
         }
     }
 
@@ -1411,9 +1452,27 @@ struct CiderCLI {
             let current = VaultFileStorage.shared.metadata(for: file.id)?.tags ?? []
             print("Removed \(removed) tag(s) from '\(file.displayTitle)' — now: [\(current.joined(separator: ", "))]")
 
+        case "enrich":
+            let enrichment = VaultFileEnrichment.shared
+            if args.contains("--all") {
+                enrichment.scheduleAll()
+                print("Scheduled enrichment for all un-enriched files")
+            } else {
+                guard let idPrefix = args.first else {
+                    print("Error: ID prefix required. Usage: cider-cli file enrich <id> | --all")
+                    return
+                }
+                guard let file = service.files.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                    print("Error: No file found with ID prefix: \(idPrefix)")
+                    return
+                }
+                enrichment.schedule(for: file)
+                print("Scheduled enrichment for: \(file.displayTitle)")
+            }
+
         default:
             print("Unknown file command: \(subcommand ?? "nil")")
-            print("Commands: list, get, move, delete, update, tag, untag")
+            print("Commands: list, get, move, delete, update, tag, untag, enrich")
         }
     }
 
@@ -2884,6 +2943,94 @@ struct CiderCLI {
                     print("    \(bm.urlString)")
                 }
             }
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Clipboard Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleClipboard(subcommand: String?, args: [String]) {
+        let storage = ClipboardStorage.shared
+
+        switch subcommand {
+        case "list", "ls":
+            let limitStr = parseFlag("--limit", from: args)
+            let limit = limitStr.flatMap(Int.init) ?? 20
+            let items = Array(storage.items.prefix(limit))
+            if jsonOutput {
+                outputJSON(items.map(clipboardItemToDict))
+            } else {
+                print("Clipboard history (\(storage.items.count) total, showing \(items.count)):")
+                for item in items {
+                    let preview = item.textContent?.prefix(60) ?? "(no text)"
+                    let saved = item.isSaved ? " [saved]" : ""
+                    print("  [\(item.id.uuidString.prefix(8))] \(item.type.rawValue) \(item.timestamp.formatted())\(saved)")
+                    print("    \(preview)")
+                }
+            }
+
+        case "get", "show":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required")
+                return
+            }
+            guard let item = storage.items.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No clipboard item found with ID prefix: \(idPrefix)")
+                return
+            }
+            if jsonOutput {
+                outputJSON(clipboardItemToDict(item))
+            } else {
+                print("Clipboard item:")
+                print("  ID:        \(item.id.uuidString)")
+                print("  Type:      \(item.type.rawValue)")
+                print("  Timestamp: \(item.timestamp.formatted())")
+                if let app = item.sourceAppName { print("  Source:    \(app)") }
+                print("  Saved:     \(item.isSaved)")
+                if let text = item.textContent {
+                    print("  Content:")
+                    print(text)
+                }
+            }
+
+        case "dismiss", "rm":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required")
+                return
+            }
+            guard let item = storage.items.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No clipboard item found with ID prefix: \(idPrefix)")
+                return
+            }
+            storage.dismiss(item)
+            let preview = item.textContent.map { String($0.prefix(40)) } ?? item.type.rawValue
+            print("Dismissed: \(preview)")
+
+        case "clear":
+            let count = storage.items.count
+            storage.clearAll()
+            print("Cleared \(count) clipboard items")
+
+        case "stats":
+            let totalBytes = storage.totalStorageBytes()
+            let imageBytes = storage.imageStorageBytes()
+            if jsonOutput {
+                outputJSON([
+                    "totalItems": storage.items.count,
+                    "totalStorageBytes": totalBytes,
+                    "imageStorageBytes": imageBytes,
+                ] as [String: Any])
+            } else {
+                print("Clipboard stats:")
+                print("  Items:         \(storage.items.count)")
+                print("  Total storage: \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))")
+                print("  Image storage: \(ByteCountFormatter.string(fromByteCount: imageBytes, countStyle: .file))")
+            }
+
+        default:
+            print("Unknown clipboard command: \(subcommand ?? "nil")")
+            print("Commands: list, get, dismiss, clear, stats")
         }
     }
 
