@@ -939,6 +939,13 @@ final class VaultBookmarkService: ObservableObject {
             guard fm.fileExists(atPath: dirURL.path) else { return }
             let found = fileService.readAll(from: dirURL, dirRelativePath: dirRelativePath)
             for var bookmark in found {
+                // Fix carousel paths — sidecar strips .originals/ prefix via lastPathComponent
+                if let paths = bookmark.carouselImagePaths {
+                    bookmark.carouselImagePaths = paths.map { filename in
+                        filename.contains("/") ? filename : "\(BookmarkFileService.originalsDir)/\(filename)"
+                    }
+                }
+
                 let url = bookmark.urlString.lowercased()
 
                 // Image-only bookmarks (no URL): match by sidecar UUID
