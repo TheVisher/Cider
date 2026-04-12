@@ -1229,9 +1229,108 @@ struct CiderCLI {
                 }
             }
 
+        case "doctor":
+            // Vault health audit. Default: scan and report findings
+            // (read-only). --fix applies fixes with interactive confirm.
+            // --yes skips confirm (for scripted / agent runs). --json
+            // emits machine-readable output.
+            let shouldFix = args.contains("--fix") || args.contains("--yes")
+            let assumeYes = args.contains("--yes")
+
+            let report = VaultDoctor.shared.scan()
+
+            if jsonOutput {
+                if !shouldFix {
+                    outputJSON(doctorReportToDict(report))
+                    return
+                }
+                // --json + --fix: apply all fixable findings (no prompt
+                // because JSON mode implies non-interactive).
+                var results: [[String: Any]] = []
+                for finding in report.findings where finding.isFixable {
+                    let ok = VaultDoctor.shared.fix(finding)
+                    var entry = doctorFindingToDict(finding)
+                    entry["fixApplied"] = ok
+                    results.append(entry)
+                }
+                outputJSON([
+                    "report": doctorReportToDict(report),
+                    "fixResults": results,
+                ] as [String: Any])
+                return
+            }
+
+            // Human-readable output.
+            let counts = report.counts
+            let errors = counts[.error] ?? 0
+            let warnings = counts[.warning] ?? 0
+            let infos = counts[.info] ?? 0
+            print("Vault doctor — \(report.findings.count) finding(s)")
+            print("  errors: \(errors), warnings: \(warnings), info: \(infos)")
+            print("  fixable: \(report.fixableCount)")
+
+            if report.findings.isEmpty {
+                print("\nVault is healthy. Nothing to report.")
+                return
+            }
+
+            // Print findings grouped by severity, errors first.
+            let ordering: [VaultDoctor.Severity] = [.error, .warning, .info]
+            for sev in ordering {
+                let group = report.findings.filter { $0.severity == sev }
+                if group.isEmpty { continue }
+                let label: String = {
+                    switch sev {
+                    case .error: return "ERRORS"
+                    case .warning: return "WARNINGS"
+                    case .info: return "INFO"
+                    }
+                }()
+                print("\n━━━ \(label) (\(group.count)) ━━━")
+                for finding in group {
+                    let fixTag = finding.isFixable ? " [fixable]" : " [manual]"
+                    print("  • \(finding.summary)\(fixTag)")
+                    print("    \(finding.detail)")
+                    if let label = finding.fixLabel {
+                        print("    → fix: \(label)")
+                    }
+                }
+            }
+
+            // Optional fix pass
+            if shouldFix {
+                print("\n━━━ APPLYING FIXES ━━━")
+                var applied = 0
+                var failed = 0
+                for finding in report.findings where finding.isFixable {
+                    if !assumeYes {
+                        print("Fix '\(finding.summary)'? [y/N] ", terminator: "")
+                        let line = readLine() ?? ""
+                        if line.lowercased() != "y" && line.lowercased() != "yes" {
+                            print("  skipped")
+                            continue
+                        }
+                    }
+                    if VaultDoctor.shared.fix(finding) {
+                        print("  ✓ \(finding.fixLabel ?? finding.summary)")
+                        applied += 1
+                    } else {
+                        print("  ✗ failed: \(finding.summary)")
+                        failed += 1
+                    }
+                }
+                print("\nApplied \(applied) fix(es), \(failed) failure(s).")
+                if report.fixableCount > applied + failed {
+                    let skipped = report.fixableCount - applied - failed
+                    print("Skipped \(skipped) fix(es) declined by the user.")
+                }
+            } else if report.fixableCount > 0 {
+                print("\nRun with --fix to apply fixes interactively, or --yes for scripted mode.")
+            }
+
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete, restore")
+            print("Commands: list, create, rename, move, delete, restore, doctor")
         }
     }
 

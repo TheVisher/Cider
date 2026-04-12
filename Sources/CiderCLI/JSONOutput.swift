@@ -202,6 +202,36 @@ func outputJSON(_ value: Any) {
     return d
 }
 
+@MainActor func doctorReportToDict(_ report: VaultDoctor.Report) -> [String: Any] {
+    let iso = ISO8601DateFormatter()
+    let countsByKey: [String: Int] = Dictionary(uniqueKeysWithValues: report.counts.map { ($0.key.rawValue, $0.value) })
+    return [
+        "startedAt": iso.string(from: report.startedAt),
+        "finishedAt": iso.string(from: report.finishedAt),
+        "counts": countsByKey,
+        "fixableCount": report.fixableCount,
+        "findings": report.findings.map(doctorFindingToDict),
+    ]
+}
+
+@MainActor func doctorFindingToDict(_ f: VaultDoctor.Finding) -> [String: Any] {
+    var d: [String: Any] = [
+        "id": f.id,
+        "kind": f.kind.rawValue,
+        "severity": f.severity.rawValue,
+        "summary": f.summary,
+        "detail": f.detail,
+        "isFixable": f.isFixable,
+    ]
+    if let label = f.fixLabel { d["fixLabel"] = label }
+    if let fid = f.payload.folderID { d["folderID"] = fid.uuidString }
+    if let iid = f.payload.itemID { d["itemID"] = iid.uuidString }
+    if let sid = f.payload.sessionID { d["sessionID"] = sid.uuidString }
+    if let rp = f.payload.relativePath { d["relativePath"] = rp }
+    if let bc = f.payload.breadcrumbFile { d["breadcrumbFile"] = bc }
+    return d
+}
+
 @MainActor func statusToDict() -> [String: Any] {
     [
         "bookmarks": VaultBookmarkService.shared.bookmarks.count,
