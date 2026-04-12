@@ -255,6 +255,39 @@ func outputJSON(_ value: Any) {
     return d
 }
 
+@MainActor func savedViewToDict(_ view: SavedView) -> [String: Any] {
+    var d: [String: Any] = [
+        "id": view.id.uuidString,
+        "name": view.name,
+        "isTabPinned": view.isTabPinned,
+        "createdAt": ISO8601DateFormatter().string(from: view.createdAt),
+        "updatedAt": ISO8601DateFormatter().string(from: view.updatedAt),
+    ]
+    switch view.kind {
+    case .library:
+        d["kind"] = "library"
+    case .kanban(let boardID):
+        d["kind"] = "kanban"
+        d["boardID"] = boardID
+    }
+    // Filter spec
+    var filter: [String: Any] = [:]
+    if !view.filterSpec.entityTypes.isEmpty {
+        filter["entityTypes"] = view.filterSpec.entityTypes.map(\.rawValue)
+    }
+    if !view.filterSpec.labelIDs.isEmpty {
+        filter["labelIDs"] = view.filterSpec.labelIDs.map(\.uuidString)
+    }
+    if let folderID = view.filterSpec.folderID {
+        filter["folderID"] = folderID.uuidString
+    }
+    if view.filterSpec.includeCompleted { filter["includeCompleted"] = true }
+    if !view.filterSpec.textQuery.isEmpty { filter["textQuery"] = view.filterSpec.textQuery }
+    if view.filterSpec.onlyUnassigned { filter["onlyUnassigned"] = true }
+    if !filter.isEmpty { d["filter"] = filter }
+    return d
+}
+
 @MainActor func statusToDict() -> [String: Any] {
     [
         "bookmarks": VaultBookmarkService.shared.bookmarks.count,

@@ -97,6 +97,8 @@ struct CiderCLI {
             handleBoard(subcommand: subcommand, args: remaining)
         case "label", "tag":
             handleLabel(subcommand: subcommand, args: remaining)
+        case "view", "saved-view":
+            handleSavedView(subcommand: subcommand, args: remaining)
         case "search":
             await handleSearch(args: Array(args.dropFirst()))
         case "trash":
@@ -2021,9 +2023,131 @@ struct CiderCLI {
                 print("Error: Failed to remove cover image")
             }
 
+        // ── Folder Kanban ──────────────────────────────────────
+
+        case "kanban":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder kanban <name|path>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            let storage = FolderKanbanStorage.shared
+            let cols = storage.columns(for: folder.id)
+            if jsonOutput {
+                let colDicts = cols.map { col -> [String: Any] in
+                    [
+                        "id": col.id,
+                        "name": col.name,
+                        "itemIDs": col.itemIDs,
+                        "itemCount": col.itemIDs.count,
+                    ]
+                }
+                outputJSON(["folderID": folder.id.uuidString, "folderName": folder.name, "columns": colDicts])
+            } else {
+                if cols.isEmpty {
+                    print("No kanban columns for folder '\(folder.name)'. Use 'folder kanban-add-column' to create one.")
+                } else {
+                    print("Kanban for '\(folder.name)' (\(cols.count) columns):")
+                    for col in cols {
+                        print("  [\(col.id.prefix(8))] \(col.name) (\(col.itemIDs.count) items)")
+                        for itemID in col.itemIDs {
+                            print("    - \(itemID.prefix(8))")
+                        }
+                    }
+                }
+            }
+
+        case "kanban-add-column":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder kanban-add-column <name|path> --name <col-name>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard let colName = parseFlag("--name", from: args) else {
+                print("Error: --name required")
+                return
+            }
+            let col = FolderKanbanStorage.shared.addColumn(folderID: folder.id, name: colName)
+            print("Added kanban column '\(colName)' to '\(folder.name)' (\(col.id.prefix(8)))")
+
+        case "kanban-rename-column":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder kanban-rename-column <name|path> --column <col-id> --to <new-name>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard let colID = parseFlag("--column", from: args) else {
+                print("Error: --column required")
+                return
+            }
+            guard let newName = parseFlag("--to", from: args) else {
+                print("Error: --to required")
+                return
+            }
+            let cols = FolderKanbanStorage.shared.columns(for: folder.id)
+            guard let col = cols.first(where: { $0.id.lowercased().hasPrefix(colID.lowercased()) || $0.name.lowercased() == colID.lowercased() }) else {
+                print("Error: No column found matching '\(colID)'")
+                return
+            }
+            FolderKanbanStorage.shared.renameColumn(folderID: folder.id, columnID: col.id, name: newName)
+            print("Renamed column '\(col.name)' → '\(newName)'")
+
+        case "kanban-delete-column":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder kanban-delete-column <name|path> --column <col-id>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard let colID = parseFlag("--column", from: args) else {
+                print("Error: --column required")
+                return
+            }
+            let cols = FolderKanbanStorage.shared.columns(for: folder.id)
+            guard let col = cols.first(where: { $0.id.lowercased().hasPrefix(colID.lowercased()) || $0.name.lowercased() == colID.lowercased() }) else {
+                print("Error: No column found matching '\(colID)'")
+                return
+            }
+            FolderKanbanStorage.shared.deleteColumn(folderID: folder.id, columnID: col.id)
+            print("Deleted column '\(col.name)' from '\(folder.name)'")
+
+        case "kanban-assign":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder kanban-assign <name|path> --item <item-id> --column <col-id>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard let itemID = parseFlag("--item", from: args) else {
+                print("Error: --item required")
+                return
+            }
+            guard let colID = parseFlag("--column", from: args) else {
+                print("Error: --column required")
+                return
+            }
+            let cols = FolderKanbanStorage.shared.columns(for: folder.id)
+            guard let col = cols.first(where: { $0.id.lowercased().hasPrefix(colID.lowercased()) || $0.name.lowercased() == colID.lowercased() }) else {
+                print("Error: No column found matching '\(colID)'")
+                return
+            }
+            FolderKanbanStorage.shared.assignItem(folderID: folder.id, itemID: itemID, toColumnID: col.id)
+            print("Assigned item \(itemID.prefix(8)) to column '\(col.name)'")
+
+        case "kanban-unassign":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder kanban-unassign <name|path> --item <item-id>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard let itemID = parseFlag("--item", from: args) else {
+                print("Error: --item required")
+                return
+            }
+            FolderKanbanStorage.shared.unassignItem(folderID: folder.id, itemID: itemID)
+            print("Unassigned item \(itemID.prefix(8)) from kanban in '\(folder.name)'")
+
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover")
+            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover, kanban, kanban-add-column, kanban-rename-column, kanban-delete-column, kanban-assign, kanban-unassign")
         }
     }
 
@@ -3298,6 +3422,182 @@ struct CiderCLI {
         return note
     }
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Saved View Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleSavedView(subcommand: String?, args: [String]) {
+        let storage = SavedViewStorage.shared
+
+        switch subcommand {
+        case "list", "ls":
+            let views = storage.tabOrderedViews()
+            if jsonOutput {
+                outputJSON(views.map(savedViewToDict))
+            } else {
+                print("Saved views (\(views.count)):")
+                for (idx, view) in views.enumerated() {
+                    let kind: String
+                    switch view.kind {
+                    case .library: kind = "library"
+                    case .kanban: kind = "kanban"
+                    }
+                    let pinned = view.isTabPinned ? " [pinned]" : ""
+                    print("  [\(idx)] [\(view.id.uuidString.prefix(8))] \(view.name) (\(kind))\(pinned)")
+                }
+            }
+
+        case "get", "show":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix or name required")
+                return
+            }
+            let views = storage.tabOrderedViews()
+            guard let view = views.first(where: {
+                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
+                $0.name.lowercased() == idPrefix.lowercased()
+            }) else {
+                print("Error: No saved view found matching '\(idPrefix)'")
+                return
+            }
+            if jsonOutput {
+                outputJSON(savedViewToDict(view))
+            } else {
+                print("Saved view: \(view.name)")
+                print("  ID:      \(view.id.uuidString)")
+                switch view.kind {
+                case .library: print("  Kind:    library")
+                case .kanban(let bid): print("  Kind:    kanban (board: \(bid))")
+                }
+                print("  Pinned:  \(view.isTabPinned)")
+                if !view.filterSpec.entityTypes.isEmpty {
+                    print("  Types:   \(view.filterSpec.entityTypes.map(\.rawValue).joined(separator: ", "))")
+                }
+                if !view.filterSpec.labelIDs.isEmpty {
+                    print("  Labels:  \(view.filterSpec.labelIDs.count) label filter(s)")
+                }
+                if let fid = view.filterSpec.folderID {
+                    let name = VaultFolderService.shared.folder(for: fid)?.name ?? fid.uuidString
+                    print("  Folder:  \(name)")
+                }
+                if !view.filterSpec.textQuery.isEmpty {
+                    print("  Query:   \(view.filterSpec.textQuery)")
+                }
+                print("  Created: \(view.createdAt.formatted())")
+            }
+
+        case "create":
+            guard let name = args.first else {
+                print("Error: Usage: cider-cli view create <name> [--type <bookmark|note|todo|...>] [--folder <name|path>] [--query <text>]")
+                return
+            }
+            var filterSpec = SavedViewFilterSpec()
+            if let typeStr = parseFlag("--type", from: args) {
+                let types = typeStr.split(separator: ",").compactMap { LibraryEntityType(rawValue: String($0)) }
+                filterSpec.entityTypes = Set(types)
+            }
+            if let folderArg = parseFlag("--folder", from: args) {
+                if let folder = findFolderStrict(folderArg) {
+                    filterSpec.folderID = folder.id
+                } else {
+                    return
+                }
+            }
+            if let query = parseFlag("--query", from: args) {
+                filterSpec.textQuery = query
+            }
+            let view = storage.createSavedView(name: name, filterSpec: filterSpec)
+            print("Created saved view '\(view.name)' (\(view.id.uuidString.prefix(8)))")
+
+        case "create-kanban":
+            guard let name = args.first else {
+                print("Error: Usage: cider-cli view create-kanban <name> --board <board-name-or-id>")
+                return
+            }
+            guard let boardArg = parseFlag("--board", from: args) else {
+                print("Error: --board required")
+                return
+            }
+            let view = storage.createKanbanView(name: name, boardID: boardArg)
+            print("Created kanban view '\(view.name)' (\(view.id.uuidString.prefix(8)))")
+
+        case "rename":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli view rename <id|name> --to <new-name>")
+                return
+            }
+            guard let newName = parseFlag("--to", from: args) else {
+                print("Error: --to required")
+                return
+            }
+            let views = storage.tabOrderedViews()
+            guard let view = views.first(where: {
+                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
+                $0.name.lowercased() == idPrefix.lowercased()
+            }) else {
+                print("Error: No saved view found matching '\(idPrefix)'")
+                return
+            }
+            storage.renameSavedView(view.id, to: newName)
+            print("Renamed '\(view.name)' → '\(newName)'")
+
+        case "delete", "rm":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli view delete <id|name>")
+                return
+            }
+            let views = storage.tabOrderedViews()
+            guard let view = views.first(where: {
+                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
+                $0.name.lowercased() == idPrefix.lowercased()
+            }) else {
+                print("Error: No saved view found matching '\(idPrefix)'")
+                return
+            }
+            if storage.deleteSavedView(view.id) {
+                print("Deleted saved view '\(view.name)'")
+            } else {
+                print("Error: Failed to delete saved view")
+            }
+
+        case "pin":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli view pin <id|name>")
+                return
+            }
+            let views = storage.tabOrderedViews()
+            guard let view = views.first(where: {
+                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
+                $0.name.lowercased() == idPrefix.lowercased()
+            }) else {
+                print("Error: No saved view found matching '\(idPrefix)'")
+                return
+            }
+            storage.addToTabOrder(view.id)
+            print("Pinned '\(view.name)' to tab bar")
+
+        case "unpin":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli view unpin <id|name>")
+                return
+            }
+            let views = storage.tabOrderedViews()
+            guard let view = views.first(where: {
+                $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
+                $0.name.lowercased() == idPrefix.lowercased()
+            }) else {
+                print("Error: No saved view found matching '\(idPrefix)'")
+                return
+            }
+            storage.removeFromTabOrder(view.id)
+            print("Unpinned '\(view.name)' from tab bar")
+
+        default:
+            print("Unknown view command: \(subcommand ?? "nil")")
+            print("Commands: list, get, create, create-kanban, rename, delete, pin, unpin")
+        }
+    }
+
     static func printUsage() {
         print("""
         CiderCLI — Full command-line interface to Cider's vault
@@ -3380,6 +3680,12 @@ struct CiderCLI {
           cider-cli folder set-cover <name|path> <image-path>
           cider-cli folder remove-cover <name|path>
           cider-cli folder doctor [--fix] [--yes]
+          cider-cli folder kanban <name|path>
+          cider-cli folder kanban-add-column <name|path> --name <col-name>
+          cider-cli folder kanban-rename-column <name|path> --column <col-id> --to <new-name>
+          cider-cli folder kanban-delete-column <name|path> --column <col-id>
+          cider-cli folder kanban-assign <name|path> --item <item-id> --column <col-id>
+          cider-cli folder kanban-unassign <name|path> --item <item-id>
 
         FOLDER ARGUMENT FORMS
           --folder accepts a leaf name OR a vault-relative path:
@@ -3408,6 +3714,16 @@ struct CiderCLI {
           cider-cli label rename <name> --to <new-name>
           cider-cli label delete <id-prefix|name>
           cider-cli label merge <source>[,<source>...] --into <target>
+
+        SAVED VIEWS (alias: view, saved-view)
+          cider-cli view list
+          cider-cli view get <id|name>
+          cider-cli view create <name> [--type <types>] [--folder <name|path>] [--query <text>]
+          cider-cli view create-kanban <name> --board <board-name-or-id>
+          cider-cli view rename <id|name> --to <new-name>
+          cider-cli view delete <id|name>
+          cider-cli view pin <id|name>
+          cider-cli view unpin <id|name>
 
         SEARCH
           cider-cli search <query>
