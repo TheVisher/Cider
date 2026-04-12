@@ -94,6 +94,7 @@ final class SavedViewStorage: ObservableObject {
             isOnboarding: isOnboarding
         )
         savedViews.append(savedView)
+        tabOrder.append(savedView.id)
         persist()
         return savedView
     }
@@ -107,6 +108,7 @@ final class SavedViewStorage: ObservableObject {
             kind: .kanban(boardID: boardID)
         )
         savedViews.append(savedView)
+        tabOrder.append(savedView.id)
         persist()
         return savedView
     }

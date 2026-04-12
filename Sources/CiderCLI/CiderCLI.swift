@@ -789,6 +789,10 @@ struct CiderCLI {
                 }
             }()
             var todo = storage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
+            guard storage.todoCards.contains(where: { $0.id == todo.id }) else {
+                print("Error: Failed to create todo (disk write failed)")
+                return
+            }
             if let targetFolder {
                 todo.folderID = targetFolder.id
                 _ = storage.updateTodoCard(todo)
@@ -1051,6 +1055,10 @@ struct CiderCLI {
             let dateString = parseFlag("--date", from: args) ?? dateFormatter.string(from: Date())
             let date = dateFormatter.date(from: dateString) ?? Date()
             var card = storage.createDateCard(title: title, startAt: date)
+            guard storage.dateCards.contains(where: { $0.id == card.id }) else {
+                print("Error: Failed to create event (disk write failed)")
+                return
+            }
             if let targetFolder {
                 card.folderID = targetFolder.id
                 _ = storage.updateDateCard(card)
@@ -1153,6 +1161,10 @@ struct CiderCLI {
             let relationship = parseFlag("--relationship", from: args)
             let birthdayStr = parseFlag("--birthday", from: args)
             var contact = storage.createContact(displayName: name)
+            guard storage.contacts.contains(where: { $0.id == contact.id }) else {
+                print("Error: Failed to create contact (disk write failed)")
+                return
+            }
             var needsUpdate = false
             if let email { contact.email = email; needsUpdate = true }
             if let phone { contact.phone = phone; needsUpdate = true }

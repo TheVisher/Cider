@@ -155,22 +155,6 @@ struct TrashSQLiteTests {
             )
         )
 
-        let session = BrowserSession(
-            name: "Session",
-            tabs: [],
-            sourceBrowserBundleID: nil,
-            sourceBrowserName: nil,
-            folderID: nil,
-            labelIDs: []
-        )
-        let sessionTrash = TrashItem(
-            itemID: session.id,
-            itemType: .session,
-            title: session.name,
-            originalFolderID: nil,
-            sessionPayload: BrowserSessionTrashPayload(session: session)
-        )
-
         let contact = ContactCard(displayName: "Alice")
         let contactTrash = TrashItem(
             itemID: contact.id,
@@ -213,7 +197,7 @@ struct TrashSQLiteTests {
         )
 
         let items = [
-            bookmark, note, dateCardTrash, todoTrash, kanban, sessionTrash,
+            bookmark, note, dateCardTrash, todoTrash, kanban,
             contactTrash, vaultFolderTrash, vaultFileTrash
         ]
         for item in items {
@@ -224,7 +208,7 @@ struct TrashSQLiteTests {
         #expect(loaded.count == items.count)
         let loadedTypes = Set(loaded.map(\.itemType))
         let expectedTypes: Set<TrashItemType> = [
-            .bookmark, .note, .dateCard, .todo, .kanbanBoard, .session,
+            .bookmark, .note, .dateCard, .todo, .kanbanBoard,
             .contact, .vaultFolder, .vaultFile
         ]
         #expect(loadedTypes == expectedTypes)

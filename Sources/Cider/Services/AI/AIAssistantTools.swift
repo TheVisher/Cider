@@ -8,13 +8,13 @@ struct CountItemsTool: Tool {
     let name = "countItems"
     let description = """
     Count the user's items in Cider. Can count bookmarks, notes, events, \
-    todos, contacts, folders, tags, clipboard items, or browser sessions. \
+    todos, contacts, folders, tags, or clipboard items. \
     Use itemType "all" for a summary of everything.
     """
 
     @Generable
     struct Arguments {
-        @Guide(description: "Type of item to count: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, sessions, or all")
+        @Guide(description: "Type of item to count: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, or all")
         var itemType: String
     }
 
