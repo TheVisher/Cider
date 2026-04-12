@@ -125,6 +125,8 @@ struct CiderCLI {
             } else {
                 print("Usage: cider-cli embeddings backfill")
             }
+        case "memory":
+            handleMemory(subcommand: subcommand, args: remaining)
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "help", "--help", "-h":
@@ -3043,6 +3045,196 @@ struct CiderCLI {
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Memory Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleMemory(subcommand: String?, args: [String]) {
+        let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+        let memoryDir = vaultRoot.appendingPathComponent(".cider/memory")
+        let fm = FileManager.default
+
+        switch subcommand {
+        case "show":
+            let target = args.first ?? "core"
+            switch target {
+            case "user":
+                let url = memoryDir.appendingPathComponent("user.md")
+                if jsonOutput {
+                    outputJSON(memoryFileDict(url: url, name: "user"))
+                } else {
+                    printMemoryFile(url: url, label: "user.md")
+                }
+
+            case "agent":
+                let url = memoryDir.appendingPathComponent("agent.md")
+                if jsonOutput {
+                    outputJSON(memoryFileDict(url: url, name: "agent"))
+                } else {
+                    printMemoryFile(url: url, label: "agent.md")
+                }
+
+            case "core":
+                let userURL = memoryDir.appendingPathComponent("user.md")
+                let agentURL = memoryDir.appendingPathComponent("agent.md")
+                if jsonOutput {
+                    outputJSON([
+                        "user": memoryFileDict(url: userURL, name: "user"),
+                        "agent": memoryFileDict(url: agentURL, name: "agent"),
+                    ])
+                } else {
+                    printMemoryFile(url: userURL, label: "user.md")
+                    print("")
+                    printMemoryFile(url: agentURL, label: "agent.md")
+                }
+
+            case "daily":
+                let dateStr = parseFlag("--date", from: args) ?? todayDateString()
+                let url = memoryDir.appendingPathComponent("daily/\(dateStr).md")
+                if jsonOutput {
+                    outputJSON(memoryFileDict(url: url, name: "daily/\(dateStr)"))
+                } else {
+                    printMemoryFile(url: url, label: "daily/\(dateStr).md")
+                }
+
+            case "index":
+                let url = memoryDir.appendingPathComponent("index.md")
+                if jsonOutput {
+                    outputJSON(memoryFileDict(url: url, name: "index"))
+                } else {
+                    printMemoryFile(url: url, label: "index.md")
+                }
+
+            default:
+                print("Unknown target: \(target). Options: user, agent, core, daily, index")
+            }
+
+        case "add-daily":
+            let observation = args.joined(separator: " ")
+            guard !observation.isEmpty else {
+                print("Error: Usage: cider-cli memory add-daily <observation>")
+                return
+            }
+            let dailyDir = memoryDir.appendingPathComponent("daily")
+            try? fm.createDirectory(at: dailyDir, withIntermediateDirectories: true)
+
+            let dateStr = todayDateString()
+            let fileURL = dailyDir.appendingPathComponent("\(dateStr).md")
+
+            if fm.fileExists(atPath: fileURL.path) {
+                // Append to existing daily note
+                guard let handle = try? FileHandle(forWritingTo: fileURL) else {
+                    print("Error: Could not open daily note for writing")
+                    return
+                }
+                handle.seekToEndOfFile()
+                let entry = "\n- \(observation)\n"
+                handle.write(Data(entry.utf8))
+                handle.closeFile()
+            } else {
+                // Create new daily note with frontmatter
+                let content = """
+                ---
+                date: '\(dateStr)'
+                ---
+
+                ## Observations
+
+                - \(observation)
+                """
+                try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+            }
+
+            if jsonOutput {
+                outputJSON([
+                    "date": dateStr,
+                    "observation": observation,
+                    "path": fileURL.path,
+                ] as [String: Any])
+            } else {
+                print("Added to daily/\(dateStr).md: \(observation)")
+            }
+
+        case "list-daily":
+            let dailyDir = memoryDir.appendingPathComponent("daily")
+            guard fm.fileExists(atPath: dailyDir.path) else {
+                if jsonOutput {
+                    outputJSON([] as [Any])
+                } else {
+                    print("No daily notes yet.")
+                }
+                return
+            }
+            let files = (try? fm.contentsOfDirectory(atPath: dailyDir.path))?
+                .filter { $0.hasSuffix(".md") }
+                .sorted()
+                .reversed() ?? []
+
+            let limitStr = parseFlag("--limit", from: args)
+            let limit = limitStr.flatMap(Int.init) ?? 10
+            let listed = Array(files.prefix(limit))
+
+            if jsonOutput {
+                let dicts = listed.map { filename -> [String: Any] in
+                    let date = String(filename.dropLast(3)) // remove .md
+                    let url = dailyDir.appendingPathComponent(filename)
+                    let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                    return ["date": date, "filename": filename, "sizeBytes": size]
+                }
+                outputJSON(dicts)
+            } else {
+                if listed.isEmpty {
+                    print("No daily notes yet.")
+                } else {
+                    print("Daily notes (\(files.count) total, showing \(listed.count)):")
+                    for filename in listed {
+                        let date = String(filename.dropLast(3))
+                        let url = dailyDir.appendingPathComponent(filename)
+                        let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                        print("  \(date)  (\(size) bytes)")
+                    }
+                }
+            }
+
+        default:
+            print("Unknown memory command: \(subcommand ?? "nil")")
+            print("Commands: show [user|agent|core|daily|index], add-daily, list-daily")
+        }
+    }
+
+    private static func todayDateString() -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        return df.string(from: Date())
+    }
+
+    private static func printMemoryFile(url: URL, label: String) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            print("\(label): (not found)")
+            return
+        }
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            print("\(label): (could not read)")
+            return
+        }
+        print("── \(label) ──")
+        print(content)
+    }
+
+    private static func memoryFileDict(url: URL, name: String) -> [String: Any] {
+        let fm = FileManager.default
+        var d: [String: Any] = [
+            "name": name,
+            "path": url.path,
+            "exists": fm.fileExists(atPath: url.path),
+        ]
+        if let content = try? String(contentsOf: url, encoding: .utf8) {
+            d["content"] = content
+            d["sizeBytes"] = content.utf8.count
+        }
+        return d
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Duplicate Check
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -3761,6 +3953,15 @@ struct CiderCLI {
           cider-cli query "notes from yesterday"
           cider-cli query "bookmarks about AI this month"
           Time: today, yesterday, recently, last week, last month, this year, N days ago, N weeks ago
+
+        MEMORY
+          cider-cli memory show user
+          cider-cli memory show agent
+          cider-cli memory show core                 (user + agent together)
+          cider-cli memory show daily [--date yyyy-MM-dd]
+          cider-cli memory show index
+          cider-cli memory add-daily <observation>
+          cider-cli memory list-daily [--limit <n>]
 
         CLIPBOARD (alias: cb)
           cider-cli clipboard list [--limit <n>]
