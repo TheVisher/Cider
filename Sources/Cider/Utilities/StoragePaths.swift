@@ -186,5 +186,86 @@ enum StoragePaths {
                 ensureDirectory(inboxSubdirectoryURL(for: type, config: config))
             }
         }
+        // Create agent memory directories
+        let memoryDir = vaultRoot.appendingPathComponent(ciderInternalDir).appendingPathComponent("memory")
+        ensureDirectory(memoryDir)
+        ensureDirectory(memoryDir.appendingPathComponent("daily"))
+        ensureDirectory(memoryDir.appendingPathComponent("concepts"))
+        seedMemoryTemplates(memoryDir: memoryDir)
+    }
+
+    /// Seeds default memory template files if they don't already exist.
+    private static func seedMemoryTemplates(memoryDir: URL) {
+        let fm = FileManager.default
+
+        let indexURL = memoryDir.appendingPathComponent("index.md")
+        if !fm.fileExists(atPath: indexURL.path) {
+            let content = """
+            ---
+            type: index
+            updated: '\(Self.todayString())'
+            ---
+
+            # Memory Index
+
+            ## Core (loaded every session)
+            - [user.md](user.md) — user preferences, patterns, context
+            - [agent.md](agent.md) — agent conventions, workflows, learnings
+
+            ## Daily Notes
+            - `daily/YYYY-MM-DD.md` — raw observations from interactions
+
+            ## Concepts (load on-demand when relevant)
+            - *(none yet — add when synthesis needs emerge)*
+            """
+            try? content.write(to: indexURL, atomically: true, encoding: .utf8)
+        }
+
+        let userURL = memoryDir.appendingPathComponent("user.md")
+        if !fm.fileExists(atPath: userURL.path) {
+            let content = """
+            ---
+            type: user
+            updated: '\(Self.todayString())'
+            ---
+
+            ## Identity
+
+            - Name:
+            - Location:
+
+            ## Preferences
+
+            *(Agent will fill this in as it learns about you)*
+            """
+            try? content.write(to: userURL, atomically: true, encoding: .utf8)
+        }
+
+        let agentURL = memoryDir.appendingPathComponent("agent.md")
+        if !fm.fileExists(atPath: agentURL.path) {
+            let content = """
+            ---
+            type: agent
+            updated: '\(Self.todayString())'
+            ---
+
+            ## Retrieval Order
+
+            1. Query Cider CLI first for facts
+            2. Consult memory files for personal context or prior conclusions
+            3. Never trust memory over current vault state
+
+            ## Conventions
+
+            *(Agent will fill this in as it learns your workflows)*
+            """
+            try? content.write(to: agentURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private static func todayString() -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        return df.string(from: Date())
     }
 }
