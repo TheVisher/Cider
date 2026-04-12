@@ -511,7 +511,9 @@ struct CiderCLI {
             case .failed: return
             }
             let title = args.first ?? "Untitled"
-            let content = parseFlag("--content", from: args) ?? ""
+            let content = (parseFlag("--content", from: args) ?? "")
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\t", with: "\t")
             let note = storage.createNew(initialContent: content)
             if !title.isEmpty, title != "Untitled" {
                 storage.rename(note: note, to: title)
@@ -617,7 +619,10 @@ struct CiderCLI {
                     print("Renamed: '\(note.title)' → '\(newTitle)'")
                     changed = true
                 }
-                if let newContent = parseFlag("--content", from: args) {
+                if let rawContent = parseFlag("--content", from: args) {
+                    let newContent = rawContent
+                        .replacingOccurrences(of: "\\n", with: "\n")
+                        .replacingOccurrences(of: "\\t", with: "\t")
                     // Get current note (may have been renamed above), update content, save
                     let current = storage.notes.first(where: { $0.id == note.id }) ?? note
                     var updated = current
