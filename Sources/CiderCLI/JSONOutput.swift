@@ -70,11 +70,21 @@ func outputJSON(_ value: Any) {
     if let due = todo.dueDate { d["dueDate"] = ISO8601DateFormatter().string(from: due) }
     if let priority = todo.priority { d["priority"] = priority.rawValue }
     if let completedAt = todo.completedAt { d["completedAt"] = ISO8601DateFormatter().string(from: completedAt) }
-    d["checklist"] = todo.checklist.map { [
-        "id": $0.id.uuidString,
-        "title": $0.title,
-        "completed": $0.isCompleted,
-    ] as [String: Any] }
+    d["checklist"] = todo.checklist.map { item -> [String: Any] in
+        var cd: [String: Any] = [
+            "id": item.id.uuidString,
+            "title": item.title,
+            "completed": item.isCompleted,
+        ]
+        if !item.subtasks.isEmpty {
+            cd["subtasks"] = item.subtasks.map { [
+                "id": $0.id.uuidString,
+                "title": $0.title,
+                "completed": $0.isCompleted,
+            ] as [String: Any] }
+        }
+        return cd
+    }
     return d
 }
 

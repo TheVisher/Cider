@@ -560,9 +560,84 @@ struct CiderCLI {
             let current = storage.notes.first(where: { $0.id == note.id })?.tags ?? []
             print("Removed \(removed) tag(s) from '\(note.title)' — now: [\(current.joined(separator: ", "))]")
 
+        case "snapshots":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli note snapshots <id>")
+                return
+            }
+            guard let note = findNote(idPrefix, in: storage) else { return }
+            let snaps = storage.snapshots(for: note)
+            if jsonOutput {
+                let dicts: [[String: Any]] = snaps.enumerated().map { idx, snap in
+                    [
+                        "index": idx,
+                        "date": ISO8601DateFormatter().string(from: snap.modifiedAt),
+                        "path": snap.url.path,
+                    ]
+                }
+                outputJSON(["noteID": note.id.uuidString, "title": note.title, "snapshots": dicts])
+            } else {
+                if snaps.isEmpty {
+                    print("No snapshots for: \(note.title)")
+                } else {
+                    print("Snapshots for '\(note.title)' (\(snaps.count)):")
+                    for (idx, snap) in snaps.enumerated() {
+                        print("  [\(idx)] \(snap.modifiedAt.formatted())")
+                    }
+                }
+            }
+
+        case "restore-snapshot":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli note restore-snapshot <id> --at <index>")
+                return
+            }
+            guard let note = findNote(idPrefix, in: storage) else { return }
+            guard let atStr = parseFlag("--at", from: args), let idx = Int(atStr) else {
+                print("Error: --at <index> required (use 'note snapshots <id>' to list)")
+                return
+            }
+            let snaps = storage.snapshots(for: note)
+            guard idx >= 0, idx < snaps.count else {
+                print("Error: Index \(idx) out of range (0..\(snaps.count - 1))")
+                return
+            }
+            guard let content = storage.loadSnapshotContent(at: snaps[idx].url) else {
+                print("Error: Could not read snapshot content")
+                return
+            }
+            var updated = note
+            updated.content = content
+            storage.save(note: updated)
+            print("Restored '\(note.title)' to snapshot [\(idx)] from \(snaps[idx].modifiedAt.formatted())")
+
+        case "attach-image":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli note attach-image <id> <image-path>")
+                return
+            }
+            guard let note = findNote(idPrefix, in: storage) else { return }
+            guard args.count > 1 else {
+                print("Error: Image path required. Usage: cider-cli note attach-image <id> <image-path>")
+                return
+            }
+            let imagePath = NSString(string: args[1]).expandingTildeInPath
+            let imageURL = URL(fileURLWithPath: imagePath)
+            guard FileManager.default.fileExists(atPath: imageURL.path) else {
+                print("Error: File not found: \(imageURL.path)")
+                return
+            }
+            guard let data = try? Data(contentsOf: imageURL) else {
+                print("Error: Could not read file: \(imageURL.path)")
+                return
+            }
+            let filename = imageURL.lastPathComponent
+            let savedURL = storage.saveImage(data: data, filename: filename, for: note)
+            print("Attached '\(filename)' to '\(note.title)' → \(savedURL.path)")
+
         default:
             print("Unknown note command: \(subcommand ?? "nil")")
-            print("Commands: list, create, get, pin, move, delete, update, tag, untag")
+            print("Commands: list, create, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
         }
     }
 
@@ -693,9 +768,148 @@ struct CiderCLI {
                 print("Error: No todo found with ID prefix: \(idPrefix)")
             }
 
+        case "checklist":
+            let checklistCmd = args.first
+            let checklistArgs = Array(args.dropFirst())
+            await handleTodoChecklist(subcommand: checklistCmd, args: checklistArgs, storage: storage)
+
         default:
             print("Unknown todo command: \(subcommand ?? "nil")")
-            print("Commands: list, create, complete, delete, update, export")
+            print("Commands: list, create, complete, delete, update, export, checklist")
+        }
+    }
+
+    static func handleTodoChecklist(subcommand: String?, args: [String], storage: TodoCardStorage) async {
+        switch subcommand {
+        case "list", "ls":
+            guard let idPrefix = args.first else {
+                print("Error: Todo ID prefix required. Usage: cider-cli todo checklist list <todo-id>")
+                return
+            }
+            guard let todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+                return
+            }
+            if jsonOutput {
+                let items = todo.checklist.map { item -> [String: Any] in
+                    var d: [String: Any] = [
+                        "id": item.id.uuidString,
+                        "title": item.title,
+                        "completed": item.isCompleted,
+                        "sortOrder": item.sortOrder,
+                    ]
+                    if !item.subtasks.isEmpty {
+                        d["subtasks"] = item.subtasks.map { [
+                            "id": $0.id.uuidString,
+                            "title": $0.title,
+                            "completed": $0.isCompleted,
+                        ] as [String: Any] }
+                    }
+                    return d
+                }
+                outputJSON(["todoID": todo.id.uuidString, "title": todo.title, "checklist": items])
+            } else {
+                if todo.checklist.isEmpty {
+                    print("No checklist items for: \(todo.title)")
+                } else {
+                    print("Checklist for '\(todo.title)' (\(todo.checklist.count) items):")
+                    for item in todo.checklist {
+                        let status = item.isCompleted ? "[x]" : "[ ]"
+                        print("  \(status) [\(item.id.uuidString.prefix(8))] \(item.title)")
+                        for sub in item.subtasks {
+                            let subStatus = sub.isCompleted ? "[x]" : "[ ]"
+                            print("      \(subStatus) [\(sub.id.uuidString.prefix(8))] \(sub.title)")
+                        }
+                    }
+                }
+            }
+
+        case "add":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli todo checklist add <todo-id> --title <title>")
+                return
+            }
+            guard var todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+                return
+            }
+            guard let title = parseFlag("--title", from: args) else {
+                print("Error: --title required")
+                return
+            }
+            let newItem = TodoChecklistItem(
+                title: title,
+                sortOrder: todo.checklist.count
+            )
+            todo.checklist.append(newItem)
+            todo.updatedAt = Date()
+            _ = storage.updateTodoCard(todo)
+            print("Added checklist item '\(title)' to '\(todo.title)' (\(newItem.id.uuidString.prefix(8)))")
+
+        case "toggle":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli todo checklist toggle <todo-id> --item <item-id>")
+                return
+            }
+            guard let todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+                return
+            }
+            guard let itemPrefix = parseFlag("--item", from: args) else {
+                print("Error: --item <checklist-item-id> required")
+                return
+            }
+            if let subtaskPrefix = parseFlag("--subtask", from: args) {
+                guard let item = todo.checklist.first(where: { $0.id.uuidString.lowercased().hasPrefix(itemPrefix.lowercased()) }) else {
+                    print("Error: No checklist item found with ID prefix: \(itemPrefix)")
+                    return
+                }
+                guard let subtask = item.subtasks.first(where: { $0.id.uuidString.lowercased().hasPrefix(subtaskPrefix.lowercased()) }) else {
+                    print("Error: No subtask found with ID prefix: \(subtaskPrefix)")
+                    return
+                }
+                if storage.toggleSubtask(todo.id, checklistItemID: item.id, subtaskID: subtask.id) {
+                    print("Toggled subtask '\(subtask.title)' → \(!subtask.isCompleted ? "done" : "undone")")
+                } else {
+                    print("Error: Failed to toggle subtask")
+                }
+            } else {
+                guard let item = todo.checklist.first(where: { $0.id.uuidString.lowercased().hasPrefix(itemPrefix.lowercased()) }) else {
+                    print("Error: No checklist item found with ID prefix: \(itemPrefix)")
+                    return
+                }
+                if storage.toggleChecklistItem(todo.id, checklistItemID: item.id) {
+                    print("Toggled '\(item.title)' → \(!item.isCompleted ? "done" : "undone")")
+                } else {
+                    print("Error: Failed to toggle checklist item")
+                }
+            }
+
+        case "remove", "rm":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli todo checklist remove <todo-id> --item <item-id>")
+                return
+            }
+            guard var todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+                return
+            }
+            guard let itemPrefix = parseFlag("--item", from: args) else {
+                print("Error: --item <checklist-item-id> required")
+                return
+            }
+            guard let idx = todo.checklist.firstIndex(where: { $0.id.uuidString.lowercased().hasPrefix(itemPrefix.lowercased()) }) else {
+                print("Error: No checklist item found with ID prefix: \(itemPrefix)")
+                return
+            }
+            let removed = todo.checklist.remove(at: idx)
+            todo.updatedAt = Date()
+            _ = storage.updateTodoCard(todo)
+            print("Removed checklist item '\(removed.title)' from '\(todo.title)'")
+
+        default:
+            print("Unknown todo checklist command: \(subcommand ?? "nil")")
+            print("Commands: list, add, toggle, remove")
         }
     }
 
