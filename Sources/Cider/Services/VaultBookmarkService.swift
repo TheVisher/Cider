@@ -489,7 +489,7 @@ final class VaultBookmarkService: ObservableObject {
             recentlyDeletedURLs[bookmark.urlString.lowercased()] = Date()
         }
         let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
-        let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
+        let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
         deleteWeblocFileOnly(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
         deleteBookmarkFromDatabase(bookmark.id)
@@ -507,7 +507,7 @@ final class VaultBookmarkService: ObservableObject {
                 recentlyDeletedURLs[bookmark.urlString.lowercased()] = Date()
             }
             let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
-            let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
+            let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
             deleteWeblocFileOnly(for: bookmark)
             trashItems.append(item)
         }
@@ -845,7 +845,7 @@ final class VaultBookmarkService: ObservableObject {
     func trashFromSync(_ bookmark: Bookmark) {
         cancelEnrichment(for: bookmark.id)
         let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
-        _ = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir)
+        _ = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
         deleteWeblocFile(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
         persist()

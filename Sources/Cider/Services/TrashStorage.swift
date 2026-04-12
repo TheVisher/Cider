@@ -35,11 +35,15 @@ final class TrashStorage {
 
     /// Moves a bookmark's image assets into the bookmarks `.trash/` directory and
     /// records the item in the trash manifest. Returns the created `TrashItem`.
-    func trashBookmark(_ bookmark: Bookmark, bookmarksDir: URL) -> TrashItem {
+    func trashBookmark(_ bookmark: Bookmark, bookmarksDir: URL, bookmarksMetaDir: URL? = nil) -> TrashItem {
         let trashDir = bookmarksDir.appendingPathComponent(trashDirName)
         let trashThumbDir = trashDir.appendingPathComponent(thumbnailsDirName)
         let trashOrigDir = trashDir.appendingPathComponent(originalsDirName)
         let fm = FileManager.default
+        // Asset paths (thumbnails, originals, carousel) are relative to the
+        // meta directory (.cider/bookmarks/), not the vault folder where the
+        // .webloc file lives.
+        let assetBaseDir = bookmarksMetaDir ?? bookmarksDir
 
         try? fm.createDirectory(at: trashThumbDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: trashOrigDir, withIntermediateDirectories: true)
@@ -47,7 +51,7 @@ final class TrashStorage {
         // Move thumbnail
         var trashThumbnailRelPath: String?
         if let relPath = bookmark.thumbnailRelativePath, !relPath.isEmpty {
-            let srcURL = bookmarksDir.appendingPathComponent(relPath)
+            let srcURL = assetBaseDir.appendingPathComponent(relPath)
             let filename = srcURL.lastPathComponent
             let destURL = trashThumbDir.appendingPathComponent(filename)
             if fm.fileExists(atPath: srcURL.path) {
@@ -59,7 +63,7 @@ final class TrashStorage {
         // Move original image
         var trashOriginalRelPath: String?
         if let relPath = bookmark.originalImageRelativePath, !relPath.isEmpty {
-            let srcURL = bookmarksDir.appendingPathComponent(relPath)
+            let srcURL = assetBaseDir.appendingPathComponent(relPath)
             let filename = srcURL.lastPathComponent
             let destURL = trashOrigDir.appendingPathComponent(filename)
             if fm.fileExists(atPath: srcURL.path) {
@@ -73,7 +77,7 @@ final class TrashStorage {
         if let carouselPaths = bookmark.carouselImagePaths, !carouselPaths.isEmpty {
             var movedPaths: [String] = []
             for relPath in carouselPaths {
-                let srcURL = bookmarksDir.appendingPathComponent(relPath)
+                let srcURL = assetBaseDir.appendingPathComponent(relPath)
                 let filename = srcURL.lastPathComponent
                 let destURL = trashOrigDir.appendingPathComponent(filename)
                 if fm.fileExists(atPath: srcURL.path) {
@@ -144,11 +148,15 @@ final class TrashStorage {
         var restoredBookmark = payload.bookmark
         restoredBookmark.isEnriching = false
 
+        // Asset paths (thumbnails, originals, carousel) are relative to the
+        // meta directory (.cider/bookmarks/), not the vault folder.
+        let assetRestoreDir = StoragePaths.cachedDirectoryURL(for: .bookmarks)
+
         // Move thumbnail back
         if let trashRelPath = payload.trashThumbnailRelativePath,
            let originalRelPath = restoredBookmark.thumbnailRelativePath {
             let srcURL = trashDir.appendingPathComponent(trashRelPath)
-            let destURL = targetDir.appendingPathComponent(originalRelPath)
+            let destURL = assetRestoreDir.appendingPathComponent(originalRelPath)
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.createDirectory(
                     at: destURL.deletingLastPathComponent(),
@@ -162,7 +170,7 @@ final class TrashStorage {
         if let trashRelPath = payload.trashOriginalRelativePath,
            let originalRelPath = restoredBookmark.originalImageRelativePath {
             let srcURL = trashDir.appendingPathComponent(trashRelPath)
-            let destURL = targetDir.appendingPathComponent(originalRelPath)
+            let destURL = assetRestoreDir.appendingPathComponent(originalRelPath)
             if fm.fileExists(atPath: srcURL.path) {
                 try? fm.createDirectory(
                     at: destURL.deletingLastPathComponent(),
@@ -177,7 +185,7 @@ final class TrashStorage {
            let originalCarouselPaths = restoredBookmark.carouselImagePaths {
             for (trashRelPath, originalRelPath) in zip(trashCarouselPaths, originalCarouselPaths) {
                 let srcURL = trashDir.appendingPathComponent(trashRelPath)
-                let destURL = targetDir.appendingPathComponent(originalRelPath)
+                let destURL = assetRestoreDir.appendingPathComponent(originalRelPath)
                 if fm.fileExists(atPath: srcURL.path) {
                     try? fm.createDirectory(
                         at: destURL.deletingLastPathComponent(),
