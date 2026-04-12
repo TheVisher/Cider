@@ -99,19 +99,6 @@ final class SavedViewStorage: ObservableObject {
     }
 
     @discardableResult
-    func createWhiteboardView(name: String, canvasID: UUID) -> SavedView {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalName = trimmed.isEmpty ? "Untitled Whiteboard" : trimmed
-        let savedView = SavedView(
-            name: finalName,
-            kind: .whiteboard(canvasID: canvasID)
-        )
-        savedViews.append(savedView)
-        persist()
-        return savedView
-    }
-
-    @discardableResult
     func createKanbanView(name: String, boardID: String) -> SavedView {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? "Untitled Board" : trimmed

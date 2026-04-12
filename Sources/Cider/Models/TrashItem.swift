@@ -7,7 +7,6 @@ enum TrashItemType: String, Codable {
     case dateCard
     case contact
     case todo
-    case whiteboard
     case vaultFolder
     case session
     case kanbanBoard
@@ -67,11 +66,6 @@ struct TodoCardTrashPayload: Codable {
         self.todoCard = todoCard
         self.trashICSFilename = trashICSFilename
     }
-}
-
-/// Payload stored alongside a trashed whiteboard canvas.
-struct WhiteboardTrashPayload: Codable {
-    let canvas: WhiteboardCanvas
 }
 
 /// Payload stored alongside a trashed browser session.
@@ -158,9 +152,6 @@ struct TrashItem: Codable, Identifiable {
     // Contact-specific
     var contactPayload: ContactTrashPayload?
 
-    // Whiteboard-specific
-    var whiteboardPayload: WhiteboardTrashPayload?
-
     // Vault folder-specific
     var vaultFolderPayload: VaultFolderTrashPayload?
 
@@ -186,7 +177,6 @@ struct TrashItem: Codable, Identifiable {
         dateCardPayload: DateCardTrashPayload? = nil,
         todoCardPayload: TodoCardTrashPayload? = nil,
         contactPayload: ContactTrashPayload? = nil,
-        whiteboardPayload: WhiteboardTrashPayload? = nil,
         vaultFolderPayload: VaultFolderTrashPayload? = nil,
         sessionPayload: BrowserSessionTrashPayload? = nil,
         kanbanBoardPayload: KanbanBoardTrashPayload? = nil,
@@ -204,7 +194,6 @@ struct TrashItem: Codable, Identifiable {
         self.dateCardPayload = dateCardPayload
         self.todoCardPayload = todoCardPayload
         self.contactPayload = contactPayload
-        self.whiteboardPayload = whiteboardPayload
         self.vaultFolderPayload = vaultFolderPayload
         self.sessionPayload = sessionPayload
         self.kanbanBoardPayload = kanbanBoardPayload

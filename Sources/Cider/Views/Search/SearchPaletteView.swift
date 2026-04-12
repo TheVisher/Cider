@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Quick Action Model
 
 enum QuickAction: String, CaseIterable, Identifiable {
-    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newWhiteboard, newKanban, saveSession, openSettings
+    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newKanban, saveSession, openSettings
 
     var id: String { rawValue }
 
@@ -17,7 +17,6 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newFolder:    return "New Folder"
         case .newTag:       return "New Tag"
         case .newTab:        return "New Tab"
-        case .newWhiteboard: return "New Whiteboard"
         case .newKanban:    return "New Board"
         case .saveSession:  return "Save Browser Session"
         case .openSettings: return "Open Settings"
@@ -34,7 +33,6 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newFolder:    return "folder.badge.plus"
         case .newTag:       return "tag"
         case .newTab:        return "plus.square.on.square"
-        case .newWhiteboard: return "scribble"
         case .newKanban:    return "square.split.2x1"
         case .saveSession:  return "globe.badge.chevron.backward"
         case .openSettings: return "gearshape"
@@ -51,7 +49,6 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newFolder:    return ["organize", "create", "add"]
         case .newTag:       return ["label", "create", "add"]
         case .newTab:        return ["view", "create", "add"]
-        case .newWhiteboard: return ["draw", "canvas", "sketch", "excalidraw", "create", "add"]
         case .newKanban:    return ["board", "kanban", "project", "columns", "create", "add"]
         case .saveSession:  return ["browser", "tabs", "session", "capture", "save", "chrome", "safari"]
         case .openSettings: return ["preferences", "config", "set"]

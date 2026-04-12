@@ -126,13 +126,6 @@ extension CiderPanelView {
             onCreateTag: { name, colorHex in
                 CardLabelStorage.shared.createLabel(name: name, colorHex: colorHex)
             },
-            onCreateWhiteboard: { [self] name in
-                let canvas = WhiteboardStorage.shared.createCanvas(name: name)
-                let savedView = savedViewStorage.createWhiteboardView(name: name, canvasID: canvas.id)
-                savedViewStorage.addToTabOrder(savedView.id)
-                selectedFolderID = nil
-                selectedTab = .savedView(id: savedView.id, name: savedView.name)
-            },
             onDismiss: { [self] in
                 showNewItemPicker = false
             }

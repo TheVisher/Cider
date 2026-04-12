@@ -75,7 +75,6 @@ struct StorageSettingsView: View {
                     (.dateCard, "Date Cards"),
                     (.contact, "Contacts"),
                     (.todo, "Todos"),
-                    (.whiteboard, "Whiteboards"),
                     (.folder, "Folders"),
                     (.vaultFolder, "Vault Folders"),
                     (.session, "Sessions"),
@@ -137,7 +136,6 @@ private struct TrashItemRow: View {
         case .dateCard: return "calendar"
         case .contact: return "person.crop.circle"
         case .todo: return "checklist"
-        case .whiteboard: return "scribble"
         case .folder: return "folder"
         case .vaultFolder: return "folder"
         case .session: return "globe"

@@ -144,15 +144,6 @@ struct TrashSQLiteTests {
             todoCardPayload: TodoCardTrashPayload(todoCard: todoCard, trashICSFilename: nil)
         )
 
-        let whiteboard = WhiteboardCanvas(name: "Sketch")
-        let whiteboardTrash = TrashItem(
-            itemID: whiteboard.id,
-            itemType: .whiteboard,
-            title: whiteboard.name,
-            originalFolderID: nil,
-            whiteboardPayload: WhiteboardTrashPayload(canvas: whiteboard)
-        )
-
         let kanban = TrashItem(
             itemID: UUID(),
             itemType: .kanbanBoard,
@@ -222,7 +213,7 @@ struct TrashSQLiteTests {
         )
 
         let items = [
-            bookmark, note, dateCardTrash, todoTrash, whiteboardTrash, kanban, sessionTrash,
+            bookmark, note, dateCardTrash, todoTrash, kanban, sessionTrash,
             contactTrash, vaultFolderTrash, vaultFileTrash
         ]
         for item in items {
@@ -233,7 +224,7 @@ struct TrashSQLiteTests {
         #expect(loaded.count == items.count)
         let loadedTypes = Set(loaded.map(\.itemType))
         let expectedTypes: Set<TrashItemType> = [
-            .bookmark, .note, .dateCard, .todo, .whiteboard, .kanbanBoard, .session,
+            .bookmark, .note, .dateCard, .todo, .kanbanBoard, .session,
             .contact, .vaultFolder, .vaultFile
         ]
         #expect(loadedTypes == expectedTypes)

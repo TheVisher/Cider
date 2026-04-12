@@ -238,7 +238,7 @@ struct CiderTabBar: View {
                         showAddTabPopover = false
                     } label: {
                         HStack(spacing: Spacing.sm) {
-                            Image(systemName: { if case .whiteboard = sv.kind { return "scribble" }; if case .kanban = sv.kind { return "square.split.2x1" }; return "square.grid.2x2" }())
+                            Image(systemName: { if case .kanban = sv.kind { return "square.split.2x1" }; return "square.grid.2x2" }())
                                 .font(CiderFont.bodyMedium)
                                 .frame(width: Spacing.lg, alignment: .center)
                             Text(sv.name)

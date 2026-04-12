@@ -6,7 +6,6 @@ struct CiderPanelView: View {
     @ObservedObject var notesViewModel: NotesViewModel
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @StateObject var libraryViewModel = LibraryViewModel()
-    @StateObject var whiteboardViewModel = WhiteboardViewModel()
     @State var selectedTab: CiderTab?
     @State var isCollapsed = false
     @State var selectedFolderID: UUID?
@@ -197,8 +196,6 @@ struct CiderPanelView: View {
             }
         }
         .onChange(of: selectedTab) { _, _ in
-            // Flush any pending whiteboard save before switching
-            whiteboardViewModel.flushSave()
             selectedFolderID = nil
             selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()

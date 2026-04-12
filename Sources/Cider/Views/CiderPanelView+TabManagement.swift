@@ -47,14 +47,6 @@ extension CiderPanelView {
         }
         guard let savedView = savedViewStorage.savedView(for: id) else { return }
 
-        // For whiteboard tabs, flush any pending drawing and send canvas to trash
-        if case .whiteboard(let canvasID) = savedView.kind {
-            whiteboardViewModel.flushSave()
-            if let trashItem = WhiteboardStorage.shared.deleteCanvas(canvasID) {
-                CiderUndoManager.shared.record(.deletedToTrash(itemType: .whiteboard, trashItem: trashItem))
-            }
-        }
-
         // For kanban tabs, trash the board YAML file
         if case .kanban(let boardID) = savedView.kind {
             if let trashItem = KanbanStorage.shared.deleteBoard(id: boardID) {
@@ -70,12 +62,6 @@ extension CiderPanelView {
     }
 
     func deleteClosedTab(_ savedView: SavedView) {
-        if case .whiteboard(let canvasID) = savedView.kind {
-            whiteboardViewModel.flushSave()
-            if let trashItem = WhiteboardStorage.shared.deleteCanvas(canvasID) {
-                CiderUndoManager.shared.record(.deletedToTrash(itemType: .whiteboard, trashItem: trashItem))
-            }
-        }
         if case .kanban(let boardID) = savedView.kind {
             if let trashItem = KanbanStorage.shared.deleteBoard(id: boardID) {
                 CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))

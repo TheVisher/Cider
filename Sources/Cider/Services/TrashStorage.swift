@@ -361,43 +361,6 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
-    // MARK: - Whiteboard Trash
-
-    func trashWhiteboard(_ canvas: WhiteboardCanvas, whiteboardsDir: URL) -> TrashItem {
-        let trashDir = whiteboardsDir.appendingPathComponent(trashDirName)
-        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
-
-        let payload = WhiteboardTrashPayload(canvas: canvas)
-        let trashItem = TrashItem(
-            itemID: canvas.id,
-            itemType: .whiteboard,
-            title: canvas.name,
-            originalFolderID: nil,
-            whiteboardPayload: payload
-        )
-
-        addToManifest(trashItem, trashDir: trashDir)
-        return trashItem
-    }
-
-    func restoreWhiteboard(_ trashItem: TrashItem) {
-        guard let payload = trashItem.whiteboardPayload else { return }
-
-        let whiteboardsDir = StoragePaths.directoryURL(for: .whiteboards)
-        let trashDir = whiteboardsDir.appendingPathComponent(trashDirName)
-
-        WhiteboardStorage.shared.restoreFromTrash(payload.canvas)
-
-        // Recreate the SavedView tab pointing to this canvas so it appears in the tab bar
-        let savedView = SavedViewStorage.shared.createWhiteboardView(
-            name: payload.canvas.name,
-            canvasID: payload.canvas.id
-        )
-        SavedViewStorage.shared.addToTabOrder(savedView.id)
-
-        removeFromManifest(trashItem.id, trashDir: trashDir)
-    }
-
     // MARK: - Kanban Board Trash
 
     func trashKanbanBoard(boardID: String, name: String, yamlContent: String) -> TrashItem {
@@ -683,8 +646,6 @@ final class TrashStorage {
             restoreDateCard(trashItem)
         case .todo:
             restoreTodoCard(trashItem)
-        case .whiteboard:
-            restoreWhiteboard(trashItem)
         case .contact:
             restoreContact(trashItem)
         case .vaultFolder:
@@ -787,12 +748,6 @@ final class TrashStorage {
             let trashDir = StoragePaths.directoryURL(for: .todos).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
-        case .whiteboard:
-            let trashDir = StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
-            // Delete the trashed scene file
-            let trashSceneURL = trashDir.appendingPathComponent("\(trashItem.itemID.uuidString).excalidraw")
-            try? FileManager.default.removeItem(at: trashSceneURL)
-            removeFromManifest(trashItem.id, trashDir: trashDir)
         case .contact:
             let trashDir = StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
@@ -889,8 +844,6 @@ final class TrashStorage {
             return StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
         case .session:
             return StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName)
-        case .whiteboard:
-            return StoragePaths.directoryURL(for: .whiteboards).appendingPathComponent(trashDirName)
         case .kanbanBoard:
             return StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
         case .vaultFile:
@@ -932,9 +885,6 @@ final class TrashStorage {
                let icsFilename = payload.trashICSFilename {
                 try? fm.removeItem(at: trashDir.appendingPathComponent(icsFilename))
             }
-        case .whiteboard:
-            let trashSceneURL = trashDir.appendingPathComponent("\(trashItem.itemID.uuidString).excalidraw")
-            try? fm.removeItem(at: trashSceneURL)
         case .contact:
             if let payload = trashItem.contactPayload {
                 if let vcfFilename = payload.trashVCFFilename {

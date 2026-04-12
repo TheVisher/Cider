@@ -23,12 +23,6 @@ extension CiderPanelView {
             openOrSelectTagTab()
         case .newTab:
             createSavedViewFromCurrentState()
-        case .newWhiteboard:
-            let canvas = WhiteboardStorage.shared.createCanvas(name: "Untitled Whiteboard")
-            let savedView = savedViewStorage.createWhiteboardView(name: canvas.name, canvasID: canvas.id)
-            savedViewStorage.addToTabOrder(savedView.id)
-            selectedFolderID = nil
-            selectedTab = .savedView(id: savedView.id, name: savedView.name)
         case .newKanban:
             let board = KanbanStorage.shared.createBoard(name: "Untitled Board")
             let savedView = savedViewStorage.createKanbanView(name: board.name, boardID: board.id)
