@@ -109,6 +109,8 @@ struct CiderCLI {
             handleSnapshot()
         case "query":
             await handleQuery(args: Array(args.dropFirst()))
+        case "doctor":
+            handleFolder(subcommand: "doctor", args: Array(args.dropFirst()))
         case "duplicate-check", "dupecheck":
             handleDuplicateCheck(args: Array(args.dropFirst()))
         case "help", "--help", "-h":
@@ -295,8 +297,15 @@ struct CiderCLI {
             }
 
         case "enrich":
+            if args.first == "--all" {
+                let count = service.bookmarks.count
+                print("Scheduling AI re-enrichment for \(count) bookmark(s)...")
+                BookmarkAIEnrichment.shared.retagAll()
+                print("Batch enrichment queued (runs in background).")
+                return
+            }
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required.")
+                print("Error: ID prefix or --all required. Usage: cider-cli bookmark enrich <id> | --all")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
@@ -2786,7 +2795,7 @@ struct CiderCLI {
           cider-cli bookmark tag <id-prefix> <label-name>
           cider-cli bookmark untag <id-prefix> <label-name>
           cider-cli bookmark delete <id-prefix>
-          cider-cli bookmark enrich <id-prefix>
+          cider-cli bookmark enrich <id-prefix> | --all
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
 
