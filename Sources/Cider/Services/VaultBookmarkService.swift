@@ -839,6 +839,7 @@ final class VaultBookmarkService: ObservableObject {
         cancelEnrichment(for: bookmark.id)
         deleteWeblocFile(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
+        deleteBookmarkFromDatabase(bookmark.id)
         persist()
     }
 
