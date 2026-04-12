@@ -848,6 +848,7 @@ final class VaultBookmarkService: ObservableObject {
         _ = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
         deleteWeblocFile(for: bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
+        deleteBookmarkFromDatabase(bookmark.id)
         persist()
     }
 
