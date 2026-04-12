@@ -387,7 +387,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ContactStorage.shared.reload()
         DateCardStorage.shared.reload()
         CardLabelStorage.shared.reload()
-        CardStackStorage.shared.reload()
         SavedViewStorage.shared.reload()
         ExternalSourceStorage.shared.reload()
         ClipboardStorage.shared.reload()

@@ -17,7 +17,6 @@ struct SavedViewTabContent: View {
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
     @ObservedObject private var labelStorage = CardLabelStorage.shared
-    @ObservedObject private var stackStorage = CardStackStorage.shared
     var searchText: String = ""
     var onUpdateSavedView: ((SavedView) -> Void)? = nil
     var onDeleteSavedView: ((UUID) -> Void)? = nil
@@ -28,10 +27,6 @@ struct SavedViewTabContent: View {
     @State private var calendarAnchorDate = Date()
     @State private var editorContext: DateCardEditorContext?
     @State private var contactEditorContext: ContactEditorContext?
-    @State private var isStackManagerPresented = false
-    @State private var stackManagerInitialSelectionID: UUID?
-    @State private var selectedStackSurfaceID: StackSurfaceSelection?
-    @State private var selectedStackSurfaceSnapshot: StackSurfaceResult?
     @State private var savedViewConfig = CiderConfig.load()
     @State private var tableColumnConfig: TableColumnConfig = CiderConfig.load().tableColumnConfig
 
@@ -61,18 +56,11 @@ struct SavedViewTabContent: View {
         )
     }
 
-    private var surfacedStacks: [StackSurfaceResult] {
-        libraryViewModel.surfacedStacks(from: filteredItems)
-    }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 headerRow
                 filterChipsRow
-                if !surfacedStacks.isEmpty {
-                    surfacedStacksSection
-                }
 
                 if savedView.layoutSpec.showsCalendarProjection {
                     calendarControlsRow
@@ -147,65 +135,6 @@ struct SavedViewTabContent: View {
                     }
                 }
             )
-        }
-        .sheet(isPresented: $isStackManagerPresented) {
-            StackManagerSheet(
-                availableItems: filteredItems,
-                initialSelectedStackID: stackManagerInitialSelectionID
-            )
-        }
-        .sheet(item: $selectedStackSurfaceID) { selection in
-            if let surface = surfacedStacks.first(where: { $0.id == selection.id }) {
-                StackDetailSheet(
-                    surface: surface,
-                    onOpenBookmark: { bookmark in
-                        onOpenBookmark?(bookmark)
-                    },
-                    onOpenNote: { note in
-                        onOpenNote?(note)
-                    },
-                    onOpenDateCard: { dateCard in
-                        editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
-                    },
-                    onOpenContact: { contact in
-                        contactEditorContext = ContactEditorContext(existingContact: contact)
-                    }
-                )
-                .onAppear {
-                    selectedStackSurfaceSnapshot = surface
-                }
-            } else if let snapshot = selectedStackSurfaceSnapshot, snapshot.id == selection.id {
-                StackDetailSheet(
-                    surface: snapshot,
-                    onOpenBookmark: { bookmark in
-                        onOpenBookmark?(bookmark)
-                    },
-                    onOpenNote: { note in
-                        onOpenNote?(note)
-                    },
-                    onOpenDateCard: { dateCard in
-                        editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
-                    },
-                    onOpenContact: { contact in
-                        contactEditorContext = ContactEditorContext(existingContact: contact)
-                    }
-                )
-            } else {
-                VStack(spacing: Spacing.md) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(CiderFont.emptyStateIcon)
-                        .foregroundColor(CiderColors.tertiary)
-                    Text("Stack no longer surfaced")
-                        .font(CiderFont.subheading)
-                        .foregroundColor(CiderColors.secondary)
-                    Text("Adjust rules or mark an item incomplete to surface it again.")
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.tertiary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(Spacing.lg)
-                .frame(minWidth: 420, minHeight: 280)
-            }
         }
     }
 
@@ -312,17 +241,6 @@ struct SavedViewTabContent: View {
                 .buttonStyle(.plain)
                 .help("Create contact card")
 
-                Button {
-                    stackManagerInitialSelectionID = nil
-                    isStackManagerPresented = true
-                } label: {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .help("Manage stacks")
             }
         }
         .padding(.bottom, Spacing.xs)
@@ -436,36 +354,6 @@ struct SavedViewTabContent: View {
                 displayModeChip(.list, label: "List")
                 displayModeChip(.grid, label: "Grid")
                 displayModeChip(.masonry, label: "Masonry")
-            }
-        }
-        .padding(.bottom, Spacing.sm)
-    }
-
-    private var surfacedStacksSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.tertiary)
-                Text("Surfaced Stacks")
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.tertiary)
-            }
-
-            let columns = [GridItem(.adaptive(minimum: 220), spacing: Spacing.md)]
-            LazyVGrid(columns: columns, spacing: Spacing.md) {
-                ForEach(surfacedStacks) { surface in
-                    StackCardView(surface: surface) {
-                        selectedStackSurfaceID = StackSurfaceSelection(id: surface.id)
-                    } onTogglePinned: { stack in
-                        var updated = stack
-                        updated.isPinned.toggle()
-                        _ = stackStorage.updateStack(updated)
-                    } onManage: { stack in
-                        stackManagerInitialSelectionID = stack.id
-                        isStackManagerPresented = true
-                    }
-                }
             }
         }
         .padding(.bottom, Spacing.sm)
@@ -839,31 +727,9 @@ struct SavedViewTabContent: View {
 
     private func contextMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
         var items: [CardMenuItem] = []
-        items.append(contentsOf: addToStackMenuItems(for: item))
         items.append(contentsOf: linkMenuItems(for: item))
         items.append(contentsOf: linkedItemsMenuItems(for: item))
         return items
-    }
-
-    private func addToStackMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
-        if stackStorage.stacks.isEmpty {
-            return [.action(title: "Create Stack and Add") {
-                let created = stackStorage.createStack(template: .blank, nameOverride: "New Stack")
-                addManualItem(item, to: created)
-            }]
-        } else {
-            let children: [CardMenuItem] = stackStorage.stacks.map { stack in
-                let alreadyIncluded = stack.manualItemRefs.contains(entityRef(for: item))
-                if alreadyIncluded {
-                    return .action(title: "\(stack.name) (Added)") {}
-                } else {
-                    return .action(title: stack.name) {
-                        addManualItem(item, to: stack)
-                    }
-                }
-            }
-            return [.submenu(title: "Add to Stack", children: children)]
-        }
     }
 
     private func linkMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
@@ -1001,14 +867,6 @@ struct SavedViewTabContent: View {
         }
     }
 
-    private func addManualItem(_ item: LibraryItemV2, to stack: CardStack) {
-        var updated = stack
-        let ref = entityRef(for: item)
-        guard !updated.manualItemRefs.contains(ref) else { return }
-        updated.manualItemRefs.append(ref)
-        _ = stackStorage.updateStack(updated)
-    }
-
     private func entityRef(for item: LibraryItemV2) -> LibraryEntityRef {
         switch item {
         case .bookmark(let bookmark):
@@ -1064,10 +922,6 @@ struct SavedViewTabContent: View {
         case .externalFile, .vaultFile, .session: break
         }
     }
-}
-
-private struct StackSurfaceSelection: Identifiable {
-    let id: UUID
 }
 
 private struct GenericLibraryItemCard: View {
