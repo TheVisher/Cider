@@ -1,3 +1,4 @@
+import AppKit
 @testable import Cider
 import Foundation
 import OSLog
@@ -362,9 +363,72 @@ struct CiderCLI {
                 }
             }
 
+        case "carousel-add":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli bookmark carousel-add <id> <image-path>")
+                return
+            }
+            guard let bookmark = findBookmark(idPrefix, in: service) else { return }
+            guard args.count > 1 else {
+                print("Error: Image path required")
+                return
+            }
+            let imagePath = NSString(string: args[1]).expandingTildeInPath
+            let imageURL = URL(fileURLWithPath: imagePath)
+            guard FileManager.default.fileExists(atPath: imageURL.path) else {
+                print("Error: File not found: \(imageURL.path)")
+                return
+            }
+            guard let data = try? Data(contentsOf: imageURL) else {
+                print("Error: Could not read file: \(imageURL.path)")
+                return
+            }
+            let ext = imageURL.pathExtension.isEmpty ? nil : imageURL.pathExtension
+            if service.addCarouselImage(for: bookmark.id, imageData: data, preferredFileExtension: ext) {
+                print("Added carousel image to '\(bookmark.title)' from \(imageURL.lastPathComponent)")
+            } else {
+                print("Error: Failed to add carousel image")
+            }
+
+        case "carousel-remove":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli bookmark carousel-remove <id> --index <n>")
+                return
+            }
+            guard let bookmark = findBookmark(idPrefix, in: service) else { return }
+            guard let idxStr = parseFlag("--index", from: args), let idx = Int(idxStr) else {
+                print("Error: --index <n> required")
+                return
+            }
+            if service.removeCarouselImage(for: bookmark.id, at: idx) {
+                print("Removed carousel image at index \(idx) from '\(bookmark.title)'")
+            } else {
+                print("Error: Failed to remove carousel image (index out of range?)")
+            }
+
+        case "carousel-reorder":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli bookmark carousel-reorder <id> --from <n> --to <n>")
+                return
+            }
+            guard let bookmark = findBookmark(idPrefix, in: service) else { return }
+            guard let fromStr = parseFlag("--from", from: args), let fromIdx = Int(fromStr) else {
+                print("Error: --from <n> required")
+                return
+            }
+            guard let toStr = parseFlag("--to", from: args), let toIdx = Int(toStr) else {
+                print("Error: --to <n> required")
+                return
+            }
+            if service.reorderCarouselImages(for: bookmark.id, fromIndex: fromIdx, toIndex: toIdx) {
+                print("Reordered carousel image \(fromIdx) → \(toIdx) for '\(bookmark.title)'")
+            } else {
+                print("Error: Failed to reorder carousel images")
+            }
+
         default:
             print("Unknown bookmark command: \(subcommand ?? "nil")")
-            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update")
+            print("Commands: list, add, get, search, move, tag, untag, delete, enrich, update, carousel-add, carousel-remove, carousel-reorder")
         }
     }
 
@@ -1131,9 +1195,50 @@ struct CiderCLI {
                 print("Error: No contact found with ID prefix: \(idPrefix)")
             }
 
+        case "set-avatar":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli contact set-avatar <id> <image-path>")
+                return
+            }
+            guard let contact = storage.contacts.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No contact found with ID prefix: \(idPrefix)")
+                return
+            }
+            guard args.count > 1 else {
+                print("Error: Image path required")
+                return
+            }
+            let imagePath = NSString(string: args[1]).expandingTildeInPath
+            let imageURL = URL(fileURLWithPath: imagePath)
+            guard FileManager.default.fileExists(atPath: imageURL.path) else {
+                print("Error: File not found: \(imageURL.path)")
+                return
+            }
+            guard let image = NSImage(contentsOf: imageURL) else {
+                print("Error: Could not load image: \(imageURL.path)")
+                return
+            }
+            if storage.saveAvatar(image, for: contact.id) {
+                print("Set avatar for '\(contact.displayName)' from \(imageURL.lastPathComponent)")
+            } else {
+                print("Error: Failed to save avatar")
+            }
+
+        case "remove-avatar":
+            guard let idPrefix = args.first else {
+                print("Error: Usage: cider-cli contact remove-avatar <id>")
+                return
+            }
+            guard let contact = storage.contacts.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No contact found with ID prefix: \(idPrefix)")
+                return
+            }
+            storage.deleteAvatar(for: contact.id)
+            print("Removed avatar for '\(contact.displayName)'")
+
         default:
             print("Unknown contact command: \(subcommand ?? "nil")")
-            print("Commands: list, create, delete, update, export")
+            print("Commands: list, create, delete, update, export, set-avatar, remove-avatar")
         }
     }
 
@@ -1790,9 +1895,76 @@ struct CiderCLI {
                 }
             }
 
+        case "set-icon":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder set-icon <name|path> <emoji>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard args.count > 1 else {
+                print("Error: Emoji/icon required. Usage: cider-cli folder set-icon <name|path> <emoji>")
+                return
+            }
+            let icon = args[1]
+            if VaultFolderService.shared.setIcon(icon, for: folder.id) {
+                print("Set icon '\(icon)' for folder '\(folder.name)'")
+            } else {
+                print("Error: Failed to set icon")
+            }
+
+        case "remove-icon":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder remove-icon <name|path>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            if VaultFolderService.shared.setIcon(nil, for: folder.id) {
+                print("Removed icon from folder '\(folder.name)'")
+            } else {
+                print("Error: Failed to remove icon")
+            }
+
+        case "set-cover":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder set-cover <name|path> <image-path>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            guard args.count > 1 else {
+                print("Error: Image path required")
+                return
+            }
+            let imagePath = NSString(string: args[1]).expandingTildeInPath
+            let imageURL = URL(fileURLWithPath: imagePath)
+            guard FileManager.default.fileExists(atPath: imageURL.path) else {
+                print("Error: File not found: \(imageURL.path)")
+                return
+            }
+            guard let data = try? Data(contentsOf: imageURL) else {
+                print("Error: Could not read file: \(imageURL.path)")
+                return
+            }
+            if VaultFolderService.shared.setCoverImage(data, for: folder.id) {
+                print("Set cover image for '\(folder.name)' from \(imageURL.lastPathComponent)")
+            } else {
+                print("Error: Failed to set cover image")
+            }
+
+        case "remove-cover":
+            guard let folderArg = args.first else {
+                print("Error: Usage: cider-cli folder remove-cover <name|path>")
+                return
+            }
+            guard let folder = findFolderStrict(folderArg) else { return }
+            if VaultFolderService.shared.removeCoverImage(for: folder.id) {
+                print("Removed cover image from folder '\(folder.name)'")
+            } else {
+                print("Error: Failed to remove cover image")
+            }
+
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors")
+            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors, set-icon, remove-icon, set-cover, remove-cover")
         }
     }
 
