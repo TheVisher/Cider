@@ -3464,8 +3464,7 @@ struct CiderCLI {
                 print("Error: ID prefix or name required")
                 return
             }
-            let views = storage.tabOrderedViews()
-            guard let view = views.first(where: {
+            guard let view = storage.savedViews.first(where: {
                 $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
                 $0.name.lowercased() == idPrefix.lowercased()
             }) else {
@@ -3542,8 +3541,7 @@ struct CiderCLI {
                 print("Error: --to required")
                 return
             }
-            let views = storage.tabOrderedViews()
-            guard let view = views.first(where: {
+            guard let view = storage.savedViews.first(where: {
                 $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
                 $0.name.lowercased() == idPrefix.lowercased()
             }) else {
@@ -3558,8 +3556,7 @@ struct CiderCLI {
                 print("Error: Usage: cider-cli view delete <id|name>")
                 return
             }
-            let views = storage.tabOrderedViews()
-            guard let view = views.first(where: {
+            guard let view = storage.savedViews.first(where: {
                 $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
                 $0.name.lowercased() == idPrefix.lowercased()
             }) else {
@@ -3577,8 +3574,7 @@ struct CiderCLI {
                 print("Error: Usage: cider-cli view pin <id|name>")
                 return
             }
-            let views = storage.tabOrderedViews()
-            guard let view = views.first(where: {
+            guard let view = storage.savedViews.first(where: {
                 $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
                 $0.name.lowercased() == idPrefix.lowercased()
             }) else {
@@ -3593,8 +3589,7 @@ struct CiderCLI {
                 print("Error: Usage: cider-cli view unpin <id|name>")
                 return
             }
-            let views = storage.tabOrderedViews()
-            guard let view = views.first(where: {
+            guard let view = storage.savedViews.first(where: {
                 $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) ||
                 $0.name.lowercased() == idPrefix.lowercased()
             }) else {
