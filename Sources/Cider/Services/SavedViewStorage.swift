@@ -38,6 +38,9 @@ final class SavedViewStorage: ObservableObject {
     func addToTabOrder(_ id: UUID) {
         guard !tabOrder.contains(id) else { return }
         tabOrder.append(id)
+        if let idx = savedViews.firstIndex(where: { $0.id == id }) {
+            savedViews[idx].isTabPinned = true
+        }
         persist()
     }
 
@@ -50,6 +53,9 @@ final class SavedViewStorage: ObservableObject {
 
     func removeFromTabOrder(_ id: UUID) {
         tabOrder.removeAll { $0 == id }
+        if let idx = savedViews.firstIndex(where: { $0.id == id }) {
+            savedViews[idx].isTabPinned = false
+        }
         persist()
     }
 
