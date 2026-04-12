@@ -313,7 +313,7 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <title>] [--notes <notes>] [--url <url>] [--ai-summary <text>] [--enrichment-status none|partial|complete]")
+                print("Error: ID prefix required. Usage: cider-cli bookmark update <id> [--title <t>] [--notes <n>] [--url <u>] [--ai-summary <text>] [--enrichment-status none|partial|complete] [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]")
                 return
             }
             if let bm = findBookmark(idPrefix, in: service) {
@@ -329,13 +329,25 @@ struct CiderCLI {
                     tags: bm.tags,
                     urlString: newURL
                 )
-                // Update AI-owned enrichment fields separately
                 let enriched = service.updateEnrichment(
                     for: bm.id,
                     aiSummary: newAISummary,
                     enrichmentStatus: newEnrichmentStatus
                 )
-                if updated || enriched {
+                if let mt = parseFlag("--media-type", from: args),
+                   let mediaType = BookmarkMediaType(rawValue: mt) {
+                    service.setMediaType(mediaType, for: bm.id)
+                }
+                if let hm = parseFlag("--hero-mode", from: args) {
+                    service.setPreferredHeroMode(hm, for: bm.id)
+                }
+                if let ru = parseFlag("--reader-unavailable", from: args) {
+                    service.setReaderUnavailable(ru.lowercased() == "true", for: bm.id)
+                }
+                if updated || enriched
+                    || parseFlag("--media-type", from: args) != nil
+                    || parseFlag("--hero-mode", from: args) != nil
+                    || parseFlag("--reader-unavailable", from: args) != nil {
                     print("Updated: \(newTitle) (\(bm.id.uuidString.prefix(8)))")
                 } else {
                     print("No changes to apply")
@@ -653,9 +665,29 @@ struct CiderCLI {
                 print("Error: No todo found with ID prefix: \(idPrefix)")
             }
 
+        case "export":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli todo export <id> --to <path>")
+                return
+            }
+            guard let destPath = parseFlag("--to", from: args) else {
+                print("Error: --to <path> required")
+                return
+            }
+            if let todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                let url = URL(fileURLWithPath: NSString(string: destPath).expandingTildeInPath)
+                if storage.writeICSFile(for: todo, to: url) {
+                    print("Exported: \(todo.title) → \(url.path)")
+                } else {
+                    print("Error: Could not write ICS file")
+                }
+            } else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown todo command: \(subcommand ?? "nil")")
-            print("Commands: list, create, complete, delete, update")
+            print("Commands: list, create, complete, delete, update, export")
         }
     }
 
@@ -732,9 +764,29 @@ struct CiderCLI {
                 print("Error: No event found with ID prefix: \(idPrefix)")
             }
 
+        case "export":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli event export <id> --to <path>")
+                return
+            }
+            guard let destPath = parseFlag("--to", from: args) else {
+                print("Error: --to <path> required")
+                return
+            }
+            if let card = storage.dateCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                let url = URL(fileURLWithPath: NSString(string: destPath).expandingTildeInPath)
+                if storage.writeICSFile(for: card, to: url) {
+                    print("Exported: \(card.title) → \(url.path)")
+                } else {
+                    print("Error: Could not write ICS file")
+                }
+            } else {
+                print("Error: No event found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown event command: \(subcommand ?? "nil")")
-            print("Commands: list, create, delete, update")
+            print("Commands: list, create, delete, update, export")
         }
     }
 
@@ -837,9 +889,29 @@ struct CiderCLI {
                 print("Error: No contact found with ID prefix: \(idPrefix)")
             }
 
+        case "export":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required. Usage: cider-cli contact export <id> --to <path>")
+                return
+            }
+            guard let destPath = parseFlag("--to", from: args) else {
+                print("Error: --to <path> required")
+                return
+            }
+            if let contact = storage.contacts.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
+                let url = URL(fileURLWithPath: NSString(string: destPath).expandingTildeInPath)
+                if storage.writeVCardFile(for: contact, to: url) {
+                    print("Exported: \(contact.displayName) → \(url.path)")
+                } else {
+                    print("Error: Could not write vCard file")
+                }
+            } else {
+                print("Error: No contact found with ID prefix: \(idPrefix)")
+            }
+
         default:
             print("Unknown contact command: \(subcommand ?? "nil")")
-            print("Commands: list, create, delete, update")
+            print("Commands: list, create, delete, update, export")
         }
     }
 
@@ -2716,6 +2788,7 @@ struct CiderCLI {
           cider-cli bookmark delete <id-prefix>
           cider-cli bookmark enrich <id-prefix>
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
+                    [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
 
         NOTES
           cider-cli note list [--folder <name|path>]
@@ -2732,18 +2805,21 @@ struct CiderCLI {
           cider-cli todo complete <id-prefix>
           cider-cli todo delete <id-prefix>
           cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--priority <p>]
+          cider-cli todo export <id-prefix> --to <path.ics>
 
         EVENTS
           cider-cli event list
           cider-cli event create <title> [--date yyyy-MM-dd] [--folder <name|path>]
           cider-cli event delete <id-prefix>
           cider-cli event update <id-prefix> [--title <t>] [--date <d>] [--location <l>]
+          cider-cli event export <id-prefix> --to <path.ics>
 
         CONTACTS
           cider-cli contact list
           cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name|path>]
           cider-cli contact delete <id-prefix>
           cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
+          cider-cli contact export <id-prefix> --to <path.vcf>
 
         FILES
           cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name|path>]
