@@ -200,7 +200,6 @@ struct LibraryTableRow: View {
         case .dateCard: "Event"
         case .contact: "Contact"
         case .todo: "Todo"
-        case .externalFile: "File"
         case .vaultFile: "File"
         case .session: "Session"
         }
@@ -247,10 +246,6 @@ struct LibraryTableRow: View {
             Image(systemName: todoCard.isCompleted ? "checkmark.circle.fill" : "circle")
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(todoCard.isCompleted ? CiderColors.success : CiderColors.secondary)
-        case .externalFile:
-            Image(systemName: "doc")
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.secondary)
         case .vaultFile(let file):
             Image(systemName: file.fileType.systemImageName)
                 .font(CiderFont.bodyMedium)

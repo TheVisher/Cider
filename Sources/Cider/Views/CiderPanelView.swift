@@ -5,13 +5,11 @@ struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
-    @ObservedObject var externalSourceStorage = ExternalSourceStorage.shared
     @StateObject var libraryViewModel = LibraryViewModel()
     @StateObject var whiteboardViewModel = WhiteboardViewModel()
     @State var selectedTab: CiderTab?
     @State var isCollapsed = false
     @State var selectedFolderID: UUID?
-    @State var selectedSourceID: UUID?
     @State var selectedItemIDs: Set<String> = []
     @State var expandedFolderIDs: Set<UUID> = []
     @State var isSearchPaletteVisible = false
@@ -58,7 +56,7 @@ struct CiderPanelView: View {
     @State var newContactEditorContext: ContactEditorContext?
     @State var newTodoEditorContext: TodoEditorContext?
     @State var contentAreaWidth: CGFloat = 800
-    @State var enableLinkedSources: Bool = CiderConfig.load().enableLinkedSources
+
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
     @ObservedObject var labelStorage = CardLabelStorage.shared
@@ -69,14 +67,7 @@ struct CiderPanelView: View {
     @State var aiSectionExpanded: Bool = false
 
     var allTabs: [CiderTab] {
-        savedViewTabs + sourceTabs + dynamicTabs
-    }
-
-    private var sourceTabs: [CiderTab] {
-        guard enableLinkedSources else { return [] }
-        return externalSourceStorage.pinnedSources().map {
-            .externalSource(id: $0.id, name: $0.displayName)
-        }
+        savedViewTabs + dynamicTabs
     }
 
     private var savedViewTabs: [CiderTab] {
@@ -209,7 +200,6 @@ struct CiderPanelView: View {
             // Flush any pending whiteboard save before switching
             whiteboardViewModel.flushSave()
             selectedFolderID = nil
-            selectedSourceID = nil
             selectedTagIDs.removeAll()
             selectedItemIDs.removeAll()
             focusedItemID = nil
@@ -287,7 +277,7 @@ struct CiderPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .ciderConfigChanged)) { _ in
             let config = CiderConfig.load()
             textScale = config.textSize.scale
-            enableLinkedSources = config.enableLinkedSources
+
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleNoteEditor)) { notification in
             if isNoteDetailOpen {

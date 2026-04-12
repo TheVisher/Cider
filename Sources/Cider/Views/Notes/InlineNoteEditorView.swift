@@ -24,7 +24,7 @@ struct InlineNoteEditorView: View {
                         .background(CiderColors.separator)
                 }
 
-                if viewModel.selectedNote != nil || viewModel.activeExternalFile != nil {
+                if viewModel.selectedNote != nil {
                     TipTapEditorView(viewModel: viewModel)
                 } else {
                     NotesEditorEmptyState(onCreateNew: { viewModel.createNewNote() })
@@ -128,7 +128,7 @@ struct NotesCompactToolbar: View {
             }
 
         }
-        .disabled(viewModel.selectedNote == nil && viewModel.activeExternalFile == nil)
+        .disabled(viewModel.selectedNote == nil)
     }
 }
 
@@ -526,7 +526,7 @@ struct NotesInfoToggleButton: View {
         }
         .buttonStyle(.plain)
         .help(viewModel.isMetadataPanelVisible ? "Hide Info" : "Show Info")
-        .disabled(viewModel.selectedNote == nil && viewModel.activeExternalFile == nil)
+        .disabled(viewModel.selectedNote == nil)
     }
 }
 

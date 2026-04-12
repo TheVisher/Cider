@@ -78,7 +78,6 @@ struct FolderDetailView: View {
                     case .dateCard:     return scopeTypes.contains(.dateCard)
                     case .contact:      return scopeTypes.contains(.contact)
                     case .todo:         return scopeTypes.contains(.todo)
-                    case .externalFile: return false
                     case .vaultFile:    return false
                     case .session:      return scopeTypes.contains(.session)
                     }
@@ -739,8 +738,6 @@ struct FolderDetailView: View {
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
-        case .externalFile:
-            EmptyView()
         case .vaultFile(let file):
             VaultFileCardView(
                 file: file,
@@ -912,7 +909,6 @@ struct FolderDetailView: View {
         case .dateCard(let dateCard): onOpenDateCard?(dateCard)
         case .contact(let contact): onOpenContact?(contact)
         case .todo(let todoCard): onOpenTodo?(todoCard)
-        case .externalFile: break
         case .vaultFile(let vaultFile): onOpenVaultFile?(vaultFile)
         case .session(let session): onOpenSession?(session)
         }
@@ -1040,7 +1036,7 @@ struct FolderDetailView: View {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
-        case .dateCard, .contact, .todo, .externalFile, .vaultFile, .session: return nil
+        case .dateCard, .contact, .todo, .vaultFile, .session: return nil
         }
     }
 }

@@ -128,7 +128,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startNotesHotkeyDetection()
         startBookmarksHotkeyDetection()
         observeUndoNotifications()
-        observeSourcesNotifications()
         startScreenCaptureHotkeyDetection()
         observeScreenCaptureNotifications()
         startClipboardHotkeyDetection()
@@ -249,41 +248,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - File Open Handler
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            var isDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-
-            if isDirectory.boolValue {
-                // User opened a directory URL — link it as a new source
-                ExternalSourceStorage.shared.addSource(
-                    path: url.path,
-                    displayName: url.lastPathComponent
-                )
-                // Bring Cider panel to front
-                NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
-            } else if url.pathExtension.lowercased() == "md" {
-                // Markdown file — find or create its parent source, then select file
-                let parentPath = url.deletingLastPathComponent().path
-                let existingSource = ExternalSourceStorage.shared.sources.first(where: { $0.path == parentPath })
-                let source: ExternalSource
-                if let existing = existingSource {
-                    source = existing
-                } else {
-                    source = ExternalSourceStorage.shared.addSource(
-                        path: parentPath,
-                        displayName: url.deletingLastPathComponent().lastPathComponent
-                    )
-                }
-                NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
-                NotificationCenter.default.post(
-                    name: .openExternalSourceAndSelectFile,
-                    object: nil,
-                    userInfo: [
-                        "sourceID": source.id,
-                        "fileURL": url
-                    ]
-                )
-            }
+        // Bring Cider panel to front for opened URLs
+        if !urls.isEmpty {
+            NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
         }
     }
 
@@ -388,7 +355,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DateCardStorage.shared.reload()
         CardLabelStorage.shared.reload()
         SavedViewStorage.shared.reload()
-        ExternalSourceStorage.shared.reload()
         ClipboardStorage.shared.reload()
 
         // Toggle automatic bookmark capture from copied URLs/images
@@ -541,7 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func flushNotesDraftIfNeeded() {
-        guard notesViewModel?.selectedNote != nil || notesViewModel?.activeExternalFile != nil else { return }
+        guard notesViewModel?.selectedNote != nil else { return }
         notesViewModel?.flushSave()
     }
 
@@ -589,31 +555,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.showImageClipboardReviewToast()
-            }
-            .store(in: &cancellables)
-    }
-
-    // MARK: - External Sources
-
-    func observeSourcesNotifications() {
-        NotificationCenter.default.publisher(for: .openExternalFile)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                guard let self,
-                      let url = notification.userInfo?["fileURL"] as? URL,
-                      let viewModel = self.notesViewModel else { return }
-                let file = ExternalSourceRegistry.shared.libraryFiles.first(where: { $0.path == url })
-                    ?? ExternalFile(
-                        id: ExternalFile.stableID(for: url.path),
-                        title: url.deletingPathExtension().lastPathComponent,
-                        path: url,
-                        sourceID: UUID(),
-                        sourceName: url.deletingLastPathComponent().lastPathComponent,
-                        createdAt: Date(),
-                        modifiedAt: Date()
-                    )
-                viewModel.openExternalFile(file)
-                self.showCiderPanel()
             }
             .store(in: &cancellables)
     }

@@ -395,11 +395,6 @@ struct FolderKanbanView: View {
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
                 .lineLimit(1)
-        case .externalFile(let file):
-            Text(file.title)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
-                .lineLimit(1)
         }
     }
 }

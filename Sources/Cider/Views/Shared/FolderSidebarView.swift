@@ -17,8 +17,6 @@ struct FolderSidebarView: View {
     var searchText: Binding<String> = .constant("")
     var onTriggerSearch: (() -> Void)?
     var showBackground: Bool = true
-    var enableLinkedSources: Bool = false
-
     // Tags
     var labels: [CardLabel] = []
     var selectedTagIDs: Binding<Set<UUID>> = .constant([])
@@ -26,17 +24,6 @@ struct FolderSidebarView: View {
     var onToggleTag: ((UUID) -> Void)? = nil
     var onClearTags: (() -> Void)? = nil
     var onOpenTagManager: (() -> Void)? = nil
-
-    // Sources (optional — all default to no-ops so existing call sites compile unchanged)
-    var sources: [ExternalSource] = []
-    var selectedSourceID: Binding<UUID?> = .constant(nil)
-    var onAddSource: (() -> Void)? = nil
-    var onSelectSource: ((UUID) -> Void)? = nil
-    var onToggleSourceTab: ((UUID) -> Void)? = nil
-    var onToggleSourceLibrary: ((UUID) -> Void)? = nil
-    var onRemoveSource: ((UUID) -> Void)? = nil
-
-    @ObservedObject private var registry = ExternalSourceRegistry.shared
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -49,9 +36,7 @@ struct FolderSidebarView: View {
     @State private var renamingFolderName = ""
     @State private var tagsExpanded = false
     @State private var foldersCollapsed = false
-    @State private var sourcesCollapsed = false
     @State private var foldersHeaderHovered = false
-    @State private var sourcesHeaderHovered = false
     @State private var tagsHeaderHovered = false
 
     private var topLevelFolders: [Folder] {
@@ -177,11 +162,6 @@ struct FolderSidebarView: View {
                                 .foregroundColor(CiderColors.controlAccent)
                             }
                         }
-                    }
-
-                    // MARK: Sources
-                    if enableLinkedSources && (!sources.isEmpty || onAddSource != nil) {
-                        sourcesSection
                     }
 
                     // MARK: Tags
@@ -313,132 +293,6 @@ struct FolderSidebarView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Sources Section
-
-    private var sourcesSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Divider()
-                .background(CiderColors.separator)
-                .padding(.vertical, Spacing.xs)
-
-            HStack(spacing: Spacing.xs) {
-                ZStack {
-                    Image(systemName: "folder.badge.gear")
-                        .font(CiderFont.bodySemibold)
-                        .foregroundColor(CiderColors.secondary)
-                        .opacity(sourcesHeaderHovered ? 0 : 1)
-
-                    Image(systemName: "chevron.down")
-                        .font(CiderFont.captionBold)
-                        .foregroundColor(CiderColors.secondary)
-                        .rotationEffect(.degrees(sourcesCollapsed ? -90 : 0))
-                        .opacity(sourcesHeaderHovered ? 1 : 0)
-                }
-                .animation(reduceMotion ? .none : .smooth, value: sourcesHeaderHovered)
-
-                Text("Sources")
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.secondary)
-
-                Spacer(minLength: 0)
-
-                if let onAddSource {
-                    Button(action: onAddSource) {
-                        Image(systemName: "plus")
-                            .font(CiderFont.captionSemibold)
-                            .foregroundColor(CiderColors.secondary)
-                            .frame(width: FolderSidebarItemDesign.folderIconSize, height: FolderSidebarItemDesign.folderIconSize)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Add linked source folder")
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(reduceMotion ? .none : .snappy) {
-                    sourcesCollapsed.toggle()
-                }
-            }
-            .hoverState($sourcesHeaderHovered)
-
-            if !sourcesCollapsed {
-                ForEach(sources) { source in
-                    sourceSidebarRow(source)
-                }
-
-                if sources.isEmpty {
-                    Text("No sources linked.")
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.tertiary)
-                        .padding(.horizontal, Spacing.xs)
-                }
-            }
-        }
-    }
-
-    private func sourceSidebarRow(_ source: ExternalSource) -> some View {
-        let isSelected = selectedSourceID.wrappedValue == source.id
-        let fileCount = registry.files(for: source.id).count
-
-        return HStack(spacing: Spacing.xs) {
-            Image(systemName: "folder.badge.gear")
-                .font(CiderFont.bodySemibold)
-                .foregroundColor(isSelected ? CiderColors.controlAccent : CiderColors.secondary)
-
-            Text(source.displayName)
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.primary)
-                .lineLimit(1)
-
-            Spacer(minLength: Spacing.xs)
-
-            if fileCount > 0 {
-                Text("\(fileCount)")
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.tertiary)
-            }
-        }
-        .padding(.horizontal, Spacing.sm)
-        .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(isSelected ? CiderColors.selectedFill : CiderColors.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .stroke(isSelected ? CiderColors.selectedBorder : CiderColors.borderDefault,
-                        lineWidth: CiderBorder.innerStrokeWidth)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelectSource?(source.id)
-        }
-        .modifier(CardContextMenuModifier { [onToggleSourceLibrary, onToggleSourceTab, onRemoveSource] in
-            var items: [CardMenuItem] = []
-            if let onToggleSourceLibrary {
-                items.append(.action(title: source.showInLibrary ? "Remove from Library" : "Show in Library") {
-                    onToggleSourceLibrary(source.id)
-                })
-            }
-            if let onToggleSourceTab {
-                items.append(.action(title: source.isTabPinned ? "Unpin Tab" : "Pin as Tab") {
-                    onToggleSourceTab(source.id)
-                })
-            }
-            items.append(.separator)
-            items.append(.action(title: "Open in Finder") {
-                NSWorkspace.shared.open(URL(fileURLWithPath: source.path))
-            })
-            if let onRemoveSource {
-                items.append(.destructive(title: "Remove Source") {
-                    onRemoveSource(source.id)
-                })
-            }
-            return items
-        })
     }
 
     private func commitFolderRename() {
@@ -646,7 +500,6 @@ struct FolderSidebarView: View {
     private func selectFolder(_ folderID: UUID?) {
         guard selectedFolderID != folderID else { return }
         selectedFolderID = folderID
-        selectedSourceID.wrappedValue = nil
         selectedTagIDs.wrappedValue.removeAll()
         if let folderID {
             expandPath(to: folderID)

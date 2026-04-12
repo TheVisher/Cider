@@ -432,22 +432,6 @@ struct HomeDashboardView: View {
                 onShiftSelect: { handleShiftSelect(item: item) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
-        case .externalFile(let file):
-            SourceCardView(
-                file: file,
-                width: cardMinWidth(for: mode),
-                isSelected: isItemSelected(item),
-                onOpen: {
-                    handleNormalAction {
-                        NotificationCenter.default.post(
-                            name: .openExternalFile,
-                            object: nil,
-                            userInfo: ["fileURL": file.path]
-                        )
-                    }
-                },
-                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
-            )
         case .vaultFile(let vaultFile):
             VaultFileCardView(
                 file: vaultFile,
@@ -659,12 +643,6 @@ struct HomeDashboardView: View {
         case .dateCard(let dateCard): presentDateCardDetail(dateCard)
         case .contact(let contact): presentContactDetail(contact)
         case .todo(let todoCard): presentTodoDetail(todoCard)
-        case .externalFile(let file):
-            NotificationCenter.default.post(
-                name: .openExternalFile,
-                object: nil,
-                userInfo: ["fileURL": file.path]
-            )
         case .vaultFile(let vaultFile):
             onOpenVaultFile(vaultFile)
         case .session(let session):
@@ -676,7 +654,7 @@ struct HomeDashboardView: View {
         switch item {
         case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
         case .note(let note): return noteDragProvider(for: note)
-        case .dateCard, .contact, .todo, .externalFile, .vaultFile, .session: return nil
+        case .dateCard, .contact, .todo, .vaultFile, .session: return nil
         }
     }
 

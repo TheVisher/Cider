@@ -92,7 +92,6 @@ extension CiderPanelView {
         guard isNoteDetailOpen else { return }
         notesViewModel.flushSave()
         selectedNote = nil
-        notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
         AIAssistantViewModel.shared.clearContext()
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)

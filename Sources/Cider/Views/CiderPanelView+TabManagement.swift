@@ -14,14 +14,12 @@ extension CiderPanelView {
         // Check if a .tag tab already exists
         if let existing = allTabs.first(where: { if case .tag = $0 { return true }; return false }) {
             selectedFolderID = nil
-            selectedSourceID = nil
             selectedTagIDs.removeAll()
             selectedTab = existing
         } else {
             let tab = CiderTab.tag(id: UUID())
             dynamicTabs.append(tab)
             selectedFolderID = nil
-            selectedSourceID = nil
             selectedTagIDs.removeAll()
             selectedTab = tab
         }
@@ -32,9 +30,6 @@ extension CiderPanelView {
 
         if case .savedView(let id, _) = tab {
             savedViewStorage.removeFromTabOrder(id)
-        } else if case .externalSource(let id, _) = tab, var source = externalSourceStorage.source(for: id) {
-            source.isTabPinned = false
-            externalSourceStorage.updateSource(source)
         } else {
             dynamicTabs.removeAll { $0 == tab }
         }
@@ -94,7 +89,6 @@ extension CiderPanelView {
         savedViewStorage.addToTabOrder(id)
         withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
             selectedFolderID = nil
-            selectedSourceID = nil
             selectedTab = .savedView(id: savedView.id, name: savedView.name)
         }
     }

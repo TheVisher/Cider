@@ -6,7 +6,6 @@ enum LibraryItemV2: Identifiable, Hashable {
     case dateCard(DateCard)
     case contact(ContactCard)
     case todo(TodoCard)
-    case externalFile(ExternalFile)
     case vaultFile(VaultFile)
     case session(BrowserSession)
 
@@ -22,8 +21,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             "contact-\(contact.id.uuidString)"
         case .todo(let todo):
             "todo-\(todo.id.uuidString)"
-        case .externalFile(let file):
-            "externalfile-\(file.id.uuidString)"
         case .vaultFile(let file):
             "vaultfile-\(file.id.uuidString)"
         case .session(let session):
@@ -43,8 +40,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             .contact
         case .todo:
             .todo
-        case .externalFile:
-            .externalFile
         case .vaultFile:
             .vaultFile
         case .session:
@@ -64,8 +59,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             contact.createdAt
         case .todo(let todo):
             todo.createdAt
-        case .externalFile(let file):
-            file.createdAt
         case .vaultFile(let file):
             file.createdAt
         case .session(let session):
@@ -85,8 +78,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             contact.updatedAt
         case .todo(let todo):
             todo.updatedAt
-        case .externalFile(let file):
-            file.modifiedAt
         case .vaultFile(let file):
             file.modifiedAt
         case .session(let session):
@@ -106,8 +97,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             contact.displayName
         case .todo(let todo):
             todo.title
-        case .externalFile(let file):
-            file.title
         case .vaultFile(let file):
             file.filename
         case .session(let session):
@@ -127,8 +116,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             contact.folderID
         case .todo(let todo):
             todo.folderID
-        case .externalFile:
-            nil
         case .vaultFile(let file):
             file.folderID
         case .session(let session):
@@ -148,8 +135,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             return Set(contact.labelIDs)
         case .todo(let todo):
             return Set(todo.labelIDs)
-        case .externalFile:
-            return []
         case .vaultFile(let file):
             return Set(file.labelIDs)
         case .session(let session):
@@ -165,7 +150,7 @@ enum LibraryItemV2: Identifiable, Hashable {
             return contact.birthday
         case .todo(let todo):
             return todo.earliestApproachingDate
-        case .bookmark, .note, .externalFile, .vaultFile, .session:
+        case .bookmark, .note, .vaultFile, .session:
             return nil
         }
     }
@@ -176,7 +161,7 @@ enum LibraryItemV2: Identifiable, Hashable {
             return dateCard.isCompleted
         case .todo(let todo):
             return todo.isCompleted
-        case .bookmark, .note, .contact, .externalFile, .vaultFile, .session:
+        case .bookmark, .note, .contact, .vaultFile, .session:
             return false
         }
     }

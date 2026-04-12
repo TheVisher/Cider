@@ -4,7 +4,6 @@ struct CiderTabBar: View {
     @Binding var selectedTab: CiderTab?
     let tabs: [CiderTab]
     @Binding var selectedFolderID: UUID?
-    @Binding var selectedSourceID: UUID?
     var onCloseTab: ((CiderTab) -> Void)?
     var onDeleteTab: ((CiderTab) -> Void)?
     var onReorderTab: ((Int, Int) -> Void)?
@@ -14,7 +13,6 @@ struct CiderTabBar: View {
     var onOpenBoard: ((KanbanBoard) -> Void)?
     var onOpenSessionsTab: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var externalSourceRegistry = ExternalSourceRegistry.shared
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
     @ObservedObject private var kanbanStorage = KanbanStorage.shared
@@ -49,14 +47,13 @@ struct CiderTabBar: View {
 
     @ViewBuilder
     private func tabButton(for tab: CiderTab, at index: Int) -> some View {
-        let isSelected = selectedTab == tab && selectedFolderID == nil && selectedSourceID == nil
+        let isSelected = selectedTab == tab && selectedFolderID == nil
         let count = badgeCount(for: tab)
         let isDragging = draggingTabID == tab.id
 
         Button {
             withAnimation(reduceMotion ? .none : CiderAnimation.snappy) {
                 selectedFolderID = nil
-                selectedSourceID = nil
                 selectedTab = tab
             }
         } label: {
@@ -286,7 +283,6 @@ struct CiderTabBar: View {
             guard tabs.first?.savedViewID == id else { return 0 }
             return dateCardStorage.dateCards.filter { $0.urgency() != nil }.count
         case .search: return 0
-        case .externalSource(let id, _): return externalSourceRegistry.files(for: id).count
         case .tag: return 0
         }
     }

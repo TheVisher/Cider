@@ -5,7 +5,7 @@ extension CiderPanelView {
     // MARK: - Content Area
 
     var isEditorActive: Bool {
-        selectedNote != nil || notesViewModel.activeExternalFile != nil
+        selectedNote != nil
     }
 
     var isNoteDetailOpen: Bool { isEditorActive }
@@ -78,13 +78,6 @@ extension CiderPanelView {
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
-            )
-        } else if let sourceID = selectedSourceID,
-           let source = externalSourceStorage.source(for: sourceID) {
-            SourceDetailView(
-                source: source,
-                displayMode: $homeDisplayMode,
-                cardSizeScale: $homeCardSizeScale
             )
         } else if let folderID = selectedFolderID {
             FolderDetailView(
@@ -207,19 +200,6 @@ extension CiderPanelView {
                     scrollToItemID: $scrollToItemID,
                     focusedItemID: focusedItemID
                 )
-            case .externalSource(let id, _):
-                if let source = externalSourceStorage.source(for: id) {
-                    SourceDetailView(
-                        source: source,
-                        displayMode: $homeDisplayMode,
-                        cardSizeScale: $homeCardSizeScale
-                    )
-                } else {
-                    EmptyStateView(
-                        icon: "folder.badge.gear",
-                        title: "Source not found"
-                    )
-                }
             case .tag:
                 TagDetailView(
                     tagIDs: [],

@@ -21,7 +21,6 @@ extension CiderPanelView {
             selectedTab: $selectedTab,
             tabs: allTabs,
             selectedFolderID: $selectedFolderID,
-            selectedSourceID: $selectedSourceID,
             onCloseTab: closeTab,
             onDeleteTab: deleteTab,
             onReorderTab: { from, to in savedViewStorage.moveTab(from: from, to: to) },

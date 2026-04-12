@@ -10,9 +10,6 @@ final class LibraryViewModel: ObservableObject {
     /// Cache for filteredItems — avoids re-filtering+sorting on unrelated body evaluations.
     private var filteredItemsCache: (filter: SavedViewFilterSpec, sort: SavedViewSortSpec, result: [LibraryItemV2])?
 
-    /// Cache for external file content read during text search — cleared on rebuildItems.
-    private static var externalFileContentCache: [UUID: String] = [:]
-
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -26,15 +23,13 @@ final class LibraryViewModel: ObservableObject {
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
         let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }
-        let externalFileItems = ExternalSourceRegistry.shared.libraryFiles.map { LibraryItemV2.externalFile($0) }
         let vaultFileItems = VaultFileService.shared.files.map { LibraryItemV2.vaultFile($0) }
         let sessionItems = BrowserSessionStorage.shared.sessions.map { LibraryItemV2.session($0) }
 
-        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + externalFileItems + vaultFileItems + sessionItems
+        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems + sessionItems
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
-        Self.externalFileContentCache.removeAll()
     }
 
     func filteredItems(
@@ -61,7 +56,6 @@ final class LibraryViewModel: ObservableObject {
                 case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
                 case .contact:      entityMatch = scopeTypes.contains(.contact)
                 case .todo:         entityMatch = scopeTypes.contains(.todo)
-                case .externalFile:  entityMatch = false
                 case .vaultFile:    entityMatch = scopeTypes.contains(.vaultFile)
                 case .session:      entityMatch = scopeTypes.contains(.session)
                 }
@@ -159,11 +153,6 @@ final class LibraryViewModel: ObservableObject {
             .sink { [weak self] _ in self?.rebuildItems() }
             .store(in: &cancellables)
 
-        ExternalSourceRegistry.shared.$libraryFiles
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
-            .store(in: &cancellables)
-
         VaultFileService.shared.$files
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildItems() }
@@ -198,16 +187,6 @@ final class LibraryViewModel: ObservableObject {
             var tFields = [todo.title, todo.details]
             tFields.append(contentsOf: todo.checklist.map(\.title))
             fields = tFields
-        case .externalFile(let file):
-            let content: String
-            if let cached = externalFileContentCache[file.id] {
-                content = cached
-            } else {
-                let loaded = (try? String(contentsOf: file.path, encoding: .utf8)) ?? ""
-                externalFileContentCache[file.id] = loaded
-                content = loaded
-            }
-            fields = [file.title, content]
         case .vaultFile(let file):
             var vFields = [file.filename, file.displayTitle, file.notes]
             if let ocr = file.ocrText { vFields.append(ocr) }

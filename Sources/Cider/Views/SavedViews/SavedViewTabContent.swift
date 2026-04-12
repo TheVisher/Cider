@@ -705,19 +705,6 @@ struct SavedViewTabContent: View {
             } else {
                 GenericLibraryItemCard(item: item)
             }
-        case .externalFile(let file):
-            SourceCardView(
-                file: file,
-                width: cardSizing.bookmarkSizing.cardMinWidth,
-                onOpen: {
-                    NotificationCenter.default.post(
-                        name: .openExternalFile,
-                        object: nil,
-                        userInfo: ["fileURL": file.path]
-                    )
-                },
-                onDelete: { try? FileManager.default.trashItem(at: file.path, resultingItemURL: nil) }
-            )
         case .vaultFile:
             EmptyView()
         case .session:
@@ -775,7 +762,7 @@ struct SavedViewTabContent: View {
         case .todo:
             // Todos can link to contacts and date cards — placeholder for now
             return []
-        case .bookmark, .note, .externalFile, .vaultFile, .session:
+        case .bookmark, .note, .vaultFile, .session:
             return []
         }
     }
@@ -801,7 +788,7 @@ struct SavedViewTabContent: View {
             return contact.linkedEntities
         case .todo(let todoCard):
             return todoCard.linkedEntities
-        case .bookmark, .note, .externalFile, .vaultFile, .session:
+        case .bookmark, .note, .vaultFile, .session:
             return []
         }
     }
@@ -879,8 +866,6 @@ struct SavedViewTabContent: View {
             return LibraryEntityRef(type: .contact, entityID: contact.id)
         case .todo(let todoCard):
             return LibraryEntityRef(type: .todo, entityID: todoCard.id)
-        case .externalFile(let file):
-            return LibraryEntityRef(type: .externalFile, entityID: file.id)
         case .vaultFile(let file):
             return LibraryEntityRef(type: .vaultFile, entityID: file.id)
         case .session(let session):
@@ -919,7 +904,7 @@ struct SavedViewTabContent: View {
         case .dateCard(let dateCard): onOpenDateCard?(dateCard)
         case .contact(let contact): onOpenContact?(contact)
         case .todo(let todoCard): onOpenTodo?(todoCard)
-        case .externalFile, .vaultFile, .session: break
+        case .vaultFile, .session: break
         }
     }
 }
@@ -960,7 +945,6 @@ private struct GenericLibraryItemCard: View {
         case .dateCard: "calendar"
         case .contact: "person.crop.circle"
         case .todo: "checklist"
-        case .externalFile: "folder.badge.gear"
         case .vaultFile: "doc.on.doc"
         case .session: "rectangle.stack"
         }
@@ -978,8 +962,6 @@ private struct GenericLibraryItemCard: View {
             contact.relationshipLabel.isEmpty ? "Contact" : contact.relationshipLabel
         case .todo(let todoCard):
             todoCard.isCompleted ? "Completed" : "Todo"
-        case .externalFile(let file):
-            file.sourceName
         case .vaultFile(let file):
             file.filename
         case .session(let session):

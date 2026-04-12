@@ -257,7 +257,6 @@ extension CiderPanelView {
         selectedVaultFile = nil
         selectedSession = nil
         selectedNote = nil
-        notesViewModel.activeExternalFile = nil
         isEditingNoteTitle = false
         AIAssistantViewModel.shared.clearContext()
         if anyOpen {

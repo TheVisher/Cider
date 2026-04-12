@@ -149,7 +149,7 @@ extension CiderPanelView {
                         case .contact:      return scopeTypes.contains(.contact)
                         case .todo:         return scopeTypes.contains(.todo)
                         case .session:      return scopeTypes.contains(.session)
-                        case .externalFile, .vaultFile: return false
+                        case .vaultFile: return false
                         }
                     }
                 }

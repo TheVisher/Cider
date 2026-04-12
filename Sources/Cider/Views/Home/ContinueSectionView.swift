@@ -134,7 +134,6 @@ extension LibraryItemV2 {
         case .dateCard(let dc): dc.isCompleted ? "checkmark.circle.fill" : "calendar"
         case .contact: "person.crop.circle"
         case .todo(let tc): tc.isCompleted ? "checkmark.circle.fill" : "checklist"
-        case .externalFile: "folder.badge.gear"
         case .vaultFile: "doc.on.doc"
         case .session: "rectangle.stack"
         }
@@ -142,7 +141,7 @@ extension LibraryItemV2 {
 
     var iconColor: Color {
         switch self {
-        case .bookmark, .note, .externalFile, .vaultFile, .session: CiderColors.tertiary
+        case .bookmark, .note, .vaultFile, .session: CiderColors.tertiary
         case .dateCard(let dc): dc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
         case .contact: CiderColors.controlAccent
         case .todo(let tc): tc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
