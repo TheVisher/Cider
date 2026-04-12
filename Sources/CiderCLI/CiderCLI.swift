@@ -3314,6 +3314,10 @@ struct CiderCLI {
           cider-cli bookmark enrich <id-prefix> | --all
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
                     [--media-type image|gif|video] [--hero-mode <mode>] [--reader-unavailable true|false]
+          cider-cli bookmark similar <id-prefix> [--limit <n>]
+          cider-cli bookmark carousel-add <id-prefix> <image-path>
+          cider-cli bookmark carousel-remove <id-prefix> --index <n>
+          cider-cli bookmark carousel-reorder <id-prefix> --from <n> --to <n>
 
         NOTES
           cider-cli note list [--folder <name|path>]
@@ -3323,6 +3327,9 @@ struct CiderCLI {
           cider-cli note move <id-prefix> --folder <name|path>
           cider-cli note delete <id-prefix>
           cider-cli note update <id-prefix> [--title <t>] [--content <c>]
+          cider-cli note snapshots <id-prefix>
+          cider-cli note restore-snapshot <id-prefix> --at <index>
+          cider-cli note attach-image <id-prefix> <image-path>
 
         TODOS
           cider-cli todo list [--completed]      (--completed = include completed)
@@ -3331,6 +3338,10 @@ struct CiderCLI {
           cider-cli todo delete <id-prefix>
           cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--priority <p>]
           cider-cli todo export <id-prefix> --to <path.ics>
+          cider-cli todo checklist list <todo-id>
+          cider-cli todo checklist add <todo-id> --title <title>
+          cider-cli todo checklist toggle <todo-id> --item <item-id> [--subtask <subtask-id>]
+          cider-cli todo checklist remove <todo-id> --item <item-id>
 
         EVENTS
           cider-cli event list
@@ -3345,12 +3356,15 @@ struct CiderCLI {
           cider-cli contact delete <id-prefix>
           cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
           cider-cli contact export <id-prefix> --to <path.vcf>
+          cider-cli contact set-avatar <id-prefix> <image-path>
+          cider-cli contact remove-avatar <id-prefix>
 
         FILES
           cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name|path>]
           cider-cli file get <id-prefix>
           cider-cli file move <id-prefix> --folder <name|path>
           cider-cli file delete <id-prefix>
+          cider-cli file enrich <id-prefix> | --all
 
         FOLDERS
           cider-cli folder list
@@ -3361,6 +3375,10 @@ struct CiderCLI {
           cider-cli folder rename <name|path> --to <new-name>
           cider-cli folder move <name|path> --to <parent-path>
           cider-cli folder delete <name|path>
+          cider-cli folder set-icon <name|path> <emoji>
+          cider-cli folder remove-icon <name|path>
+          cider-cli folder set-cover <name|path> <image-path>
+          cider-cli folder remove-cover <name|path>
           cider-cli folder doctor [--fix] [--yes]
 
         FOLDER ARGUMENT FORMS
@@ -3415,6 +3433,16 @@ struct CiderCLI {
           cider-cli query "notes from yesterday"
           cider-cli query "bookmarks about AI this month"
           Time: today, yesterday, recently, last week, last month, this year, N days ago, N weeks ago
+
+        CLIPBOARD (alias: cb)
+          cider-cli clipboard list [--limit <n>]
+          cider-cli clipboard get <id-prefix>
+          cider-cli clipboard dismiss <id-prefix>
+          cider-cli clipboard clear
+          cider-cli clipboard stats
+
+        EMBEDDINGS
+          cider-cli embeddings backfill
 
         DUPLICATE CHECK
           cider-cli duplicate-check <url>
