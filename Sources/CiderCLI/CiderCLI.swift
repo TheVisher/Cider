@@ -1438,9 +1438,78 @@ struct CiderCLI {
                 print("\nRun with --fix to apply fixes interactively, or --yes for scripted mode.")
             }
 
+        case "get", "show", "info":
+            guard let nameOrPath = args.first else {
+                print("Error: Folder name or path required.")
+                return
+            }
+            guard let folder = findFolderStrict(nameOrPath) else { return }
+            let service = VaultFolderService.shared
+            let parentName = service.parentID(for: folder)
+                .flatMap { service.folder(for: $0)?.relativePath } ?? "(root)"
+            let childCount = service.children(of: folder.id).count
+            let itemCounts = countItemsInFolder(folder.id)
+            if jsonOutput {
+                var dict = folderToDict(folder)
+                dict["parent"] = parentName
+                dict["childFolderCount"] = childCount
+                dict["itemCount"] = itemCounts
+                outputJSON(dict)
+            } else {
+                print("Folder: \(folder.relativePath)")
+                print("  ID:       \(folder.id.uuidString)")
+                print("  Parent:   \(parentName)")
+                print("  Children: \(childCount) subfolder(s)")
+                print("  Items:    \(itemCounts)")
+                print("  Icon:     \(folder.icon ?? "(none)")")
+                print("  Cover:    \(folder.coverImagePath ?? "(none)")")
+                print("  Created:  \(folder.createdAt.formatted())")
+            }
+
+        case "children":
+            guard let nameOrPath = args.first else {
+                print("Error: Folder name or path required. Use '/' for root-level folders.")
+                return
+            }
+            let service = VaultFolderService.shared
+            let parentID: UUID?
+            if nameOrPath == "/" || nameOrPath == "root" {
+                parentID = nil
+            } else {
+                guard let folder = findFolderStrict(nameOrPath) else { return }
+                parentID = folder.id
+            }
+            let children = service.children(of: parentID)
+            if jsonOutput {
+                outputJSON(children.map(folderToDict))
+            } else {
+                let label = parentID.flatMap { service.folder(for: $0)?.relativePath } ?? "Root"
+                print("Children of \(label) (\(children.count)):")
+                for child in children {
+                    print("  📁 \(child.relativePath) (\(child.id.uuidString.prefix(8)))")
+                }
+            }
+
+        case "ancestors", "path":
+            guard let nameOrPath = args.first else {
+                print("Error: Folder name or path required.")
+                return
+            }
+            guard let folder = findFolderStrict(nameOrPath) else { return }
+            let chain = VaultFolderService.shared.path(to: folder.id)
+            if jsonOutput {
+                outputJSON(chain.map(folderToDict))
+            } else {
+                print("Path to \(folder.relativePath):")
+                for (i, ancestor) in chain.enumerated() {
+                    let indent = String(repeating: "  ", count: i)
+                    print("  \(indent)📁 \(ancestor.name) (\(ancestor.id.uuidString.prefix(8)))")
+                }
+            }
+
         default:
             print("Unknown folder command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, move, delete, restore, doctor")
+            print("Commands: list, create, rename, move, delete, restore, doctor, get, children, ancestors")
         }
     }
 
@@ -1554,9 +1623,73 @@ struct CiderCLI {
                 print("Error: Board '\(boardName)' not found")
             }
 
+        case "create":
+            let name = args.first ?? "New Board"
+            let board = storage.createBoard(name: name)
+            print("Created board: \(board.name) (\(board.id))")
+
+        case "rename":
+            guard let nameOrID = args.first, let newName = parseFlag("--to", from: args) else {
+                print("Error: Usage: cider-cli board rename <name|id> --to <new-name>")
+                return
+            }
+            guard let board = findBoard(nameOrID, in: storage) else { return }
+            storage.renameBoard(id: board.id, name: newName)
+            print("Renamed: \(board.name) → \(newName)")
+
+        case "delete", "rm":
+            guard let nameOrID = args.first else {
+                print("Error: Board name or ID required.")
+                return
+            }
+            guard let board = findBoard(nameOrID, in: storage) else { return }
+            if let trashItem = storage.deleteBoard(id: board.id) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .kanbanBoard, trashItem: trashItem))
+                print("Deleted board: \(board.name) (moved to trash)")
+            } else {
+                print("Error: Could not delete board")
+            }
+
+        case "add-column":
+            guard let boardRef = args.first,
+                  let colName = parseFlag("--name", from: args) else {
+                print("Error: Usage: cider-cli board add-column <board> --name <column-name> [--done]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            let isDone = args.contains("--done")
+            if let col = storage.addColumn(boardID: board.id, name: colName, isDoneColumn: isDone) {
+                print("Added column: \(col.name) (\(col.id))\(isDone ? " [done column]" : "")")
+            } else {
+                print("Error: Could not add column")
+            }
+
+        case "rename-column":
+            guard let boardRef = args.first,
+                  let colRef = parseFlag("--column", from: args),
+                  let newName = parseFlag("--to", from: args) else {
+                print("Error: Usage: cider-cli board rename-column <board> --column <col> --to <new-name>")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let col = findColumn(colRef, in: board) else { return }
+            storage.renameColumn(boardID: board.id, columnID: col.id, name: newName)
+            print("Renamed column: \(col.name) → \(newName)")
+
+        case "delete-column":
+            guard let boardRef = args.first,
+                  let colRef = parseFlag("--column", from: args) else {
+                print("Error: Usage: cider-cli board delete-column <board> --column <col>")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let col = findColumn(colRef, in: board) else { return }
+            storage.deleteColumn(boardID: board.id, columnID: col.id)
+            print("Deleted column: \(col.name)")
+
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, add-card, move-card, delete-card")
+            print("Commands: list, show, create, rename, delete, add-card, move-card, delete-card, add-column, rename-column, delete-column")
         }
     }
 
@@ -1640,9 +1773,41 @@ struct CiderCLI {
                 print("Error: No label found matching '\(identifier)'")
             }
 
+        case "merge":
+            guard let firstArg = args.first,
+                  let targetName = parseFlag("--into", from: args) else {
+                print("Error: Usage: cider-cli label merge <source>[,<source>...] --into <target>")
+                return
+            }
+            let lower = targetName.lowercased()
+            let target = storage.labels.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(targetName) == .orderedSame ||
+                $0.id.uuidString.lowercased().hasPrefix(lower)
+            })
+            guard let target else {
+                print("Error: Target label '\(targetName)' not found")
+                return
+            }
+            let sourceNames = firstArg.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            var sourceIDs: [UUID] = []
+            for name in sourceNames {
+                let srcLower = name.lowercased()
+                if let src = storage.labels.first(where: {
+                    $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame ||
+                    $0.id.uuidString.lowercased().hasPrefix(srcLower)
+                }) {
+                    sourceIDs.append(src.id)
+                } else {
+                    print("Error: Source label '\(name)' not found")
+                    return
+                }
+            }
+            storage.mergeLabels(sourceIDs: sourceIDs, into: target.id)
+            print("Merged \(sourceIDs.count) label(s) into '\(target.name)'")
+
         default:
             print("Unknown label command: \(subcommand ?? "nil")")
-            print("Commands: list, create, rename, delete")
+            print("Commands: list, create, rename, delete, merge")
         }
     }
 
@@ -1692,7 +1857,10 @@ struct CiderCLI {
     static func handleTrash(subcommand: String?, args: [String]) {
         switch subcommand {
         case "list", "ls":
-            let items = TrashStorage.shared.allTrashItems()
+            var items = TrashStorage.shared.allTrashItems()
+            if let typeFilter = parseFlag("--type", from: args) {
+                items = items.filter { $0.itemType.rawValue.localizedCaseInsensitiveCompare(typeFilter) == .orderedSame }
+            }
             if jsonOutput {
                 outputJSON(items.map(trashItemToDict))
             } else {
@@ -2287,6 +2455,36 @@ struct CiderCLI {
         return args[flagIndex + 1]
     }
 
+    static func countItemsInFolder(_ folderID: UUID) -> Int {
+        let bm = VaultBookmarkService.shared.bookmarks.filter { $0.folderID == folderID }.count
+        let notes = NotesStorage.shared.notes.filter { $0.folderID == folderID }.count
+        let todos = TodoCardStorage.shared.todoCards.filter { $0.folderID == folderID }.count
+        let events = DateCardStorage.shared.dateCards.filter { $0.folderID == folderID }.count
+        let contacts = ContactStorage.shared.contacts.filter { $0.folderID == folderID }.count
+        let files = VaultFileService.shared.files.filter { $0.folderID == folderID }.count
+        return bm + notes + todos + events + contacts + files
+    }
+
+    static func findBoard(_ nameOrID: String, in storage: KanbanStorage) -> KanbanBoard? {
+        if let board = storage.boards.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
+        }) {
+            return board
+        }
+        print("Error: Board '\(nameOrID)' not found")
+        return nil
+    }
+
+    static func findColumn(_ nameOrID: String, in board: KanbanBoard) -> KanbanColumn? {
+        if let col = board.columns.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(nameOrID) == .orderedSame || $0.id == nameOrID
+        }) {
+            return col
+        }
+        print("Error: Column '\(nameOrID)' not found in board '\(board.name)'. Available: \(board.columns.map(\.name).joined(separator: ", "))")
+        return nil
+    }
+
     /// Split a CSV argument into individual ID prefixes, trimming whitespace
     /// and skipping empties. Returns an array even for a single value.
     /// Used by bulk move / tag commands: `cider-cli bookmark move a,b,c ...`.
@@ -2555,6 +2753,9 @@ struct CiderCLI {
 
         FOLDERS
           cider-cli folder list
+          cider-cli folder get <name|path>
+          cider-cli folder children <name|path|/>
+          cider-cli folder ancestors <name|path>
           cider-cli folder create <name|path> [--parent <name>]
           cider-cli folder rename <name|path> --to <new-name>
           cider-cli folder move <name|path> --to <parent-path>
@@ -2572,22 +2773,29 @@ struct CiderCLI {
         BOARDS (Kanban)
           cider-cli board list
           cider-cli board show <board-name-or-id>
+          cider-cli board create <name>
+          cider-cli board rename <name|id> --to <new-name>
+          cider-cli board delete <name|id>
           cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
+          cider-cli board add-column <board> --name <col-name> [--done]
+          cider-cli board rename-column <board> --column <col> --to <new-name>
+          cider-cli board delete-column <board> --column <col>
 
         LABELS (alias: tag)
           cider-cli label list
           cider-cli label create <name> [--color <hex>]
           cider-cli label rename <name> --to <new-name>
           cider-cli label delete <id-prefix|name>
+          cider-cli label merge <source>[,<source>...] --into <target>
 
         SEARCH
           cider-cli search <query>
           Supports: @bookmarks @notes @todos @events @images @files @folder:<name> @tag:<name>
 
         TRASH
-          cider-cli trash list
+          cider-cli trash list [--type <bookmark|note|todo|event|contact|file|folder>]
           cider-cli trash restore <id-prefix>
           cider-cli trash empty
           cider-cli trash purge [--days <n>]
