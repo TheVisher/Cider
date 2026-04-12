@@ -24,9 +24,8 @@ final class LibraryViewModel: ObservableObject {
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
         let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }
         let vaultFileItems = VaultFileService.shared.files.map { LibraryItemV2.vaultFile($0) }
-        let sessionItems = BrowserSessionStorage.shared.sessions.map { LibraryItemV2.session($0) }
 
-        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems + sessionItems
+        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
@@ -57,7 +56,6 @@ final class LibraryViewModel: ObservableObject {
                 case .contact:      entityMatch = scopeTypes.contains(.contact)
                 case .todo:         entityMatch = scopeTypes.contains(.todo)
                 case .vaultFile:    entityMatch = scopeTypes.contains(.vaultFile)
-                case .session:      entityMatch = scopeTypes.contains(.session)
                 }
                 guard entityMatch else { return false }
             } else {
@@ -158,10 +156,6 @@ final class LibraryViewModel: ObservableObject {
             .sink { [weak self] _ in self?.rebuildItems() }
             .store(in: &cancellables)
 
-        BrowserSessionStorage.shared.$sessions
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuildItems() }
-            .store(in: &cancellables)
     }
 
     /// Token-based search: splits query into words, each must match in at least one field.
@@ -191,10 +185,6 @@ final class LibraryViewModel: ObservableObject {
             var vFields = [file.filename, file.displayTitle, file.notes]
             if let ocr = file.ocrText { vFields.append(ocr) }
             fields = vFields
-        case .session(let session):
-            var sFields = [session.name]
-            sFields.append(contentsOf: session.tabs.compactMap(\.title))
-            fields = sFields
         }
 
         // Also match against label names for the item

@@ -201,7 +201,6 @@ struct LibraryTableRow: View {
         case .contact: "Contact"
         case .todo: "Todo"
         case .vaultFile: "File"
-        case .session: "Session"
         }
     }
 
@@ -248,10 +247,6 @@ struct LibraryTableRow: View {
                 .foregroundColor(todoCard.isCompleted ? CiderColors.success : CiderColors.secondary)
         case .vaultFile(let file):
             Image(systemName: file.fileType.systemImageName)
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.secondary)
-        case .session:
-            Image(systemName: "rectangle.stack")
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.secondary)
         }

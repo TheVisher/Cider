@@ -56,10 +56,6 @@ struct CountItemsTool: Tool {
             let count = ClipboardStorage.shared.items.count
             return ("The clipboard history has \(count) items.")
 
-        case "sessions", "session", "browser sessions":
-            let count = BrowserSessionStorage.shared.sessions.count
-            return ("The user has \(count) saved browser sessions.")
-
         case "all", "everything", "summary":
             let bookmarks = VaultBookmarkService.shared.bookmarks.count
             let notes = NotesStorage.shared.notes.count
@@ -68,15 +64,14 @@ struct CountItemsTool: Tool {
             let contacts = ContactStorage.shared.contacts.count
             let folders = VaultFolderService.shared.folders.count
             let tags = CardLabelStorage.shared.labels.count
-            let sessions = BrowserSessionStorage.shared.sessions.count
             return ("""
             Library summary: \(bookmarks) bookmarks, \(notes) notes, \
             \(events) events, \(todos) todos, \(contacts) contacts, \
-            \(folders) folders, \(tags) tags, \(sessions) browser sessions.
+            \(folders) folders, \(tags) tags.
             """)
 
         default:
-            return ("Unknown item type '\(type)'. Valid types: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, sessions, all.")
+            return ("Unknown item type '\(type)'. Valid types: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, all.")
         }
     } }
 }
@@ -535,37 +530,6 @@ struct GetFolderContentsTool: Tool {
             return ("Folder \"\(folder.name)\" is empty.")
         }
         return ("Folder \"\(folder.name)\" (\(total) items):\n" + results.joined(separator: "\n"))
-    } }
-}
-
-// MARK: - Get Browser Sessions Tool
-
-/// Returns saved browser sessions.
-struct GetBrowserSessionsTool: Tool {
-    let name = "getBrowserSessions"
-    let description = "Get the user's saved browser sessions — groups of tabs saved from their browser."
-
-    @Generable
-    struct Arguments {}
-
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
-        let sessions = BrowserSessionStorage.shared.sessions
-        if sessions.isEmpty {
-            return ("No saved browser sessions.")
-        }
-
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-
-        var lines: [String] = []
-        for s in sessions.sorted(by: { $0.createdAt > $1.createdAt }).prefix(10) {
-            let tabCount = s.tabs.count
-            let browser = s.sourceBrowserName ?? "Unknown"
-            lines.append("\"\(s.name)\" — \(tabCount) tabs from \(browser) (\(formatter.string(from: s.createdAt)))")
-        }
-        if sessions.count > 10 { lines.append("...and \(sessions.count - 10) more sessions") }
-
-        return ("Saved browser sessions (\(sessions.count) total):\n" + lines.joined(separator: "\n"))
     } }
 }
 

@@ -386,10 +386,6 @@ struct FolderKanbanView: View {
                     .foregroundColor(CiderColors.tertiary)
                     .lineLimit(1)
             }
-        case .session(let session):
-            Text("\(session.tabCount) tab\(session.tabCount == 1 ? "" : "s")")
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
         case .vaultFile(let file):
             Text(file.filename)
                 .font(CiderFont.caption)

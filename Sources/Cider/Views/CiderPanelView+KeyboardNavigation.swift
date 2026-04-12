@@ -132,9 +132,7 @@ extension CiderPanelView {
                 .map { LibraryItemV2.dateCard($0) }
             let contacts = ContactStorage.shared.contacts.filter { $0.folderID == folderID }
                 .map { LibraryItemV2.contact($0) }
-            let sessions = BrowserSessionStorage.shared.sessions.filter { $0.folderID == folderID }
-                .map { LibraryItemV2.session($0) }
-            var all = (bookmarks + notes + dateCards + contacts + sessions)
+            var all = (bookmarks + notes + dateCards + contacts)
                 .sorted { $0.createdDate > $1.createdDate }
 
             let query = debouncedSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -148,7 +146,6 @@ extension CiderPanelView {
                         case .dateCard:     return scopeTypes.contains(.dateCard)
                         case .contact:      return scopeTypes.contains(.contact)
                         case .todo:         return scopeTypes.contains(.todo)
-                        case .session:      return scopeTypes.contains(.session)
                         case .vaultFile: return false
                         }
                     }
@@ -286,12 +283,6 @@ extension CiderPanelView {
             if let uuid = UUID(uuidString: uuidString),
                let contact = ContactStorage.shared.contact(for: uuid) {
                 openContactDetail(contact)
-            }
-        } else if id.hasPrefix("session-") {
-            let uuidString = String(id.dropFirst("session-".count))
-            if let uuid = UUID(uuidString: uuidString),
-               let session = BrowserSessionStorage.shared.sessions.first(where: { $0.id == uuid }) {
-                openSessionDetail(session)
             }
         }
     }

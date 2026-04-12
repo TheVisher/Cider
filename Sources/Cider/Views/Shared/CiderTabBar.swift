@@ -11,7 +11,6 @@ struct CiderTabBar: View {
     var onAddTab: (() -> Void)?
     var onReopenTab: ((UUID) -> Void)?
     var onOpenBoard: ((KanbanBoard) -> Void)?
-    var onOpenSessionsTab: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared

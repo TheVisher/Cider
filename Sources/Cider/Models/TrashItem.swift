@@ -68,11 +68,6 @@ struct TodoCardTrashPayload: Codable {
     }
 }
 
-/// Payload stored alongside a trashed browser session.
-struct BrowserSessionTrashPayload: Codable {
-    let session: BrowserSession
-}
-
 /// Payload stored alongside a trashed kanban board.
 struct KanbanBoardTrashPayload: Codable {
     let yamlContent: String
@@ -155,9 +150,6 @@ struct TrashItem: Codable, Identifiable {
     // Vault folder-specific
     var vaultFolderPayload: VaultFolderTrashPayload?
 
-    // Session-specific
-    var sessionPayload: BrowserSessionTrashPayload?
-
     // Kanban board-specific
     var kanbanBoardPayload: KanbanBoardTrashPayload?
 
@@ -178,7 +170,6 @@ struct TrashItem: Codable, Identifiable {
         todoCardPayload: TodoCardTrashPayload? = nil,
         contactPayload: ContactTrashPayload? = nil,
         vaultFolderPayload: VaultFolderTrashPayload? = nil,
-        sessionPayload: BrowserSessionTrashPayload? = nil,
         kanbanBoardPayload: KanbanBoardTrashPayload? = nil,
         vaultFilePayload: VaultFileTrashPayload? = nil
     ) {
@@ -195,7 +186,6 @@ struct TrashItem: Codable, Identifiable {
         self.todoCardPayload = todoCardPayload
         self.contactPayload = contactPayload
         self.vaultFolderPayload = vaultFolderPayload
-        self.sessionPayload = sessionPayload
         self.kanbanBoardPayload = kanbanBoardPayload
         self.vaultFilePayload = vaultFilePayload
     }

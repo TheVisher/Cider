@@ -166,20 +166,6 @@ extension CiderPanelView {
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
-        } else if let session = selectedSession {
-            GenericItemDetailPanel(
-                title: session.name,
-                detailViewMode: .slideOut,
-                width: BookmarksDesign.detailsSlideOutMinWidth,
-                maxWidth: BookmarksDesign.detailsSlideOutMinWidth,
-                onClose: closeGenericDetail,
-                onModeChange: { _ in }
-            ) {
-                SessionDetailView(
-                    session: session,
-                    onDismiss: closeGenericDetail
-                )
-            }
         }
     }
 
@@ -309,7 +295,6 @@ extension CiderPanelView {
         if let contact = selectedContact { return contact.displayName }
         if let todoCard = selectedTodoCard { return todoCard.title }
         if let vaultFile = selectedVaultFile { return vaultFile.filename }
-        if let session = selectedSession { return session.name }
         if isNoteDetailPageMode {
             return notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
         }

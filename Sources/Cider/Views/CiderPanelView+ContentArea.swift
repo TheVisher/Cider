@@ -68,7 +68,7 @@ extension CiderPanelView {
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
                 onOpenVaultFile: { openVaultFileDetail($0) },
-                onOpenSession: { openSessionDetail($0) },
+
                 onSelectTag: { id in
                     selectedTagIDs = [id]
                 },
@@ -105,7 +105,7 @@ extension CiderPanelView {
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
                 onOpenVaultFile: { openVaultFileDetail($0) },
-                onOpenSession: { openSessionDetail($0) },
+
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 scrollToItemID: $scrollToItemID,
                 focusedItemID: focusedItemID
@@ -150,7 +150,7 @@ extension CiderPanelView {
                             onOpenContact: { openContactDetail($0) },
                             onOpenTodo: { openTodoDetail($0) },
                             onOpenVaultFile: { openVaultFileDetail($0) },
-                            onOpenSession: { openSessionDetail($0) },
+            
                             onlyUnassigned: savedView.filterSpec.onlyUnassigned,
                             activeLabelIDs: savedView.filterSpec.labelIDs,
                             onToggleLabelBulk: { toggleTagOnSelected($0) },
@@ -193,7 +193,7 @@ extension CiderPanelView {
                     onOpenContact: { openContactDetail($0) },
                     onOpenTodo: { openTodoDetail($0) },
                     onOpenVaultFile: { openVaultFileDetail($0) },
-                    onOpenSession: { openSessionDetail($0) },
+    
                     onToggleLabelBulk: { toggleTagOnSelected($0) },
                     scrollToItemID: $scrollToItemID,
                     focusedItemID: focusedItemID
@@ -220,7 +220,7 @@ extension CiderPanelView {
                     onOpenContact: { openContactDetail($0) },
                     onOpenTodo: { openTodoDetail($0) },
                     onOpenVaultFile: { openVaultFileDetail($0) },
-                    onOpenSession: { openSessionDetail($0) },
+    
                     onSelectTag: { id in
                         selectedTagIDs = [id]
                     },

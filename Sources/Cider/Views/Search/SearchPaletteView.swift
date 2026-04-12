@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Quick Action Model
 
 enum QuickAction: String, CaseIterable, Identifiable {
-    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newKanban, saveSession, openSettings
+    case newBookmark, newNote, newEvent, newContact, newTodo, newFolder, newTag, newTab, newKanban, openSettings
 
     var id: String { rawValue }
 
@@ -18,7 +18,6 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTag:       return "New Tag"
         case .newTab:        return "New Tab"
         case .newKanban:    return "New Board"
-        case .saveSession:  return "Save Browser Session"
         case .openSettings: return "Open Settings"
         }
     }
@@ -34,7 +33,6 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTag:       return "tag"
         case .newTab:        return "plus.square.on.square"
         case .newKanban:    return "square.split.2x1"
-        case .saveSession:  return "globe.badge.chevron.backward"
         case .openSettings: return "gearshape"
         }
     }
@@ -50,7 +48,6 @@ enum QuickAction: String, CaseIterable, Identifiable {
         case .newTag:       return ["label", "create", "add"]
         case .newTab:        return ["view", "create", "add"]
         case .newKanban:    return ["board", "kanban", "project", "columns", "create", "add"]
-        case .saveSession:  return ["browser", "tabs", "session", "capture", "save", "chrome", "safari"]
         case .openSettings: return ["preferences", "config", "set"]
         }
     }
@@ -131,10 +128,6 @@ struct SearchPaletteView: View {
 
     private var todoResults: [SearchResult] {
         results.filter { $0.type == .todo }
-    }
-
-    private var sessionResults: [SearchResult] {
-        results.filter { $0.type == .session }
     }
 
     private var vaultFileResults: [SearchResult] {
@@ -322,8 +315,6 @@ struct SearchPaletteView: View {
                 if let todoCard = result.todoCard {
                     onOpenTodo?(todoCard)
                 }
-            case .session:
-                break
             case .vaultFile:
                 if let vaultFile = result.vaultFile {
                     NSWorkspace.shared.open(vaultFile.absoluteURL)
@@ -408,7 +399,6 @@ struct SearchPaletteView: View {
         if lower == "events" { return "calendar" }
         if lower == "contacts" { return "person" }
         if lower == "todos" { return "checklist" }
-        if lower == "sessions" { return "rectangle.stack" }
         if lower == "files" { return "doc" }
         if lower.hasPrefix("folder:") { return "folder" }
         if lower.hasPrefix("tag:") { return "tag" }
@@ -585,9 +575,6 @@ struct SearchPaletteView: View {
                         }
                         if !todoResults.isEmpty {
                             resultsSection(title: "Todos", icon: "checklist", results: todoResults)
-                        }
-                        if !sessionResults.isEmpty {
-                            resultsSection(title: "Sessions", icon: "rectangle.stack", results: sessionResults)
                         }
                         if !vaultFileResults.isEmpty {
                             resultsSection(title: "Files", icon: "doc", results: vaultFileResults)
@@ -946,7 +933,6 @@ struct SearchPaletteView: View {
         case .dateCard:  return "calendar"
         case .contact:   return "person"
         case .todo:      return "checklist"
-        case .session:   return "rectangle.stack"
         case .vaultFile: return "doc"
         }
     }

@@ -242,7 +242,6 @@ func outputJSON(_ value: Any) {
         "contacts": ContactStorage.shared.contacts.count,
         "vaultFiles": VaultFileService.shared.files.count,
         "vaultFilesImages": VaultFileService.shared.files.filter { $0.fileType == .image }.count,
-        "sessions": BrowserSessionStorage.shared.sessions.count,
         "folders": VaultFolderService.shared.folders.count,
         "labels": CardLabelStorage.shared.labels.count,
         "boards": KanbanStorage.shared.boards.count,

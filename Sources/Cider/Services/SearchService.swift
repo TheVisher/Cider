@@ -6,7 +6,6 @@ enum SearchResultType {
     case dateCard
     case contact
     case todo
-    case session
     case vaultFile
 }
 
@@ -29,7 +28,6 @@ struct SearchResult: Identifiable {
     var dateCard: DateCard?
     var contact: ContactCard?
     var todoCard: TodoCard?
-    var session: BrowserSession?
     var vaultFile: VaultFile?
 }
 
@@ -55,7 +53,6 @@ struct SearchScope: Equatable {
                 case .dateCard:  return "Events"
                 case .contact:   return "Contacts"
                 case .todo:      return "Todos"
-                case .session:   return "Sessions"
                 case .vaultFile: return "Files"
                 }
             }.sorted()
@@ -112,7 +109,6 @@ enum SearchService {
             (["events", "event", "datecards", "datecard"], .dateCard),
             (["contacts", "contact"], .contact),
             (["todos", "todo", "tasks", "task"], .todo),
-            (["sessions", "session"], .session),
             (["files", "file", "images", "image", "vaultfiles", "vaultfile"], .vaultFile),
         ]
 
@@ -322,21 +318,6 @@ enum SearchService {
             }
         }
 
-        if shouldSearchType(.session) {
-            let sessions = BrowserSessionStorage.shared.sessions
-            if tokens.isEmpty {
-                results += sessions.map { session in
-                    SearchResult(
-                        id: session.id, type: .session, title: session.name,
-                        subtitle: "\(session.tabCount) tab\(session.tabCount == 1 ? "" : "s")",
-                        snippet: nil, date: session.updatedAt, session: session
-                    )
-                }
-            } else {
-                results += searchSessions(tokens, in: sessions)
-            }
-        }
-
         if shouldSearchType(.vaultFile) {
             let vaultFiles = VaultFileService.shared.files
             var filtered = applyFolderFilter(vaultFiles, scope: scope) { $0.folderID }
@@ -505,20 +486,6 @@ enum SearchService {
                 snippet: snippet,
                 date: contact.updatedAt,
                 contact: contact
-            )
-        }
-    }
-
-    static func searchSessions(_ tokens: [String], in sessions: [BrowserSession]) -> [SearchResult] {
-        sessions.compactMap { session in
-            let tabTitles = session.tabs.compactMap { $0.title }
-            let tabURLs = session.tabs.map { $0.urlString }
-            let fields = [session.name] + tabTitles + tabURLs
-            guard matchesAllTokens(tokens, in: fields) else { return nil }
-            return SearchResult(
-                id: session.id, type: .session, title: session.name,
-                subtitle: "\(session.tabCount) tab\(session.tabCount == 1 ? "" : "s")",
-                snippet: nil, date: session.updatedAt, session: session
             )
         }
     }

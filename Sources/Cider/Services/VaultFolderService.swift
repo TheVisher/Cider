@@ -452,15 +452,6 @@ final class VaultFolderService {
                     failures.append(.init(itemType: "contact", itemID: contact.id, title: contact.displayName))
                 }
             }
-            // Browser sessions — data-only, separate sessions table with its
-            // own folder_id FK (not in the items table).
-            for session in BrowserSessionStorage.shared.sessions where session.folderID == id {
-                BrowserSessionStorage.shared.assignSession(session.id, toFolder: nil)
-                let nowUnfiled = BrowserSessionStorage.shared.sessions.first(where: { $0.id == session.id })?.folderID == nil
-                if !nowUnfiled {
-                    failures.append(.init(itemType: "session", itemID: session.id, title: session.name))
-                }
-            }
         }
 
         // 4. Abort on any failure — do NOT trash the folder, do NOT delete
@@ -590,12 +581,6 @@ final class VaultFolderService {
             guard let fid = contact.folderID, let path = folderPathByID[fid] else { continue }
             items.append(BreadcrumbItem(
                 itemID: contact.id, itemType: "contact", title: contact.displayName, previousFolderPath: path
-            ))
-        }
-        for session in BrowserSessionStorage.shared.sessions {
-            guard let fid = session.folderID, let path = folderPathByID[fid] else { continue }
-            items.append(BreadcrumbItem(
-                itemID: session.id, itemType: "session", title: session.name, previousFolderPath: path
             ))
         }
 
@@ -989,9 +974,6 @@ final class VaultFolderService {
             }
             for contact in ContactStorage.shared.contacts where contact.folderID == id {
                 ContactStorage.shared.assignContact(contact.id, toFolder: nil)
-            }
-            for session in BrowserSessionStorage.shared.sessions where session.folderID == id {
-                BrowserSessionStorage.shared.assignSession(session.id, toFolder: nil)
             }
             for file in VaultFileService.shared.files where file.folderID == id {
                 VaultFileService.shared.assignFile(file.id, toFolder: nil)

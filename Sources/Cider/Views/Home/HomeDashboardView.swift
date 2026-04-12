@@ -21,7 +21,6 @@ struct HomeDashboardView: View {
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onOpenTodo: (TodoCard) -> Void = { _ in }
     var onOpenVaultFile: (VaultFile) -> Void = { _ in }
-    var onOpenSession: (BrowserSession) -> Void = { _ in }
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -457,33 +456,6 @@ struct HomeDashboardView: View {
                 onSelect: { handleSelect(item: item) },
                 onShiftSelect: { handleShiftSelect(item: item) }
             )
-        case .session(let session):
-            SessionCardCardView(
-                session: session,
-                onOpen: { handleNormalAction { onOpenSession(session) } },
-                folders: bookmarksViewModel.folders,
-                onMoveToFolder: { folderID in
-                    let oldFolderID = session.folderID
-                    BrowserSessionStorage.shared.assignSession(session.id, toFolder: folderID)
-                    let folderName = bookmarksViewModel.folders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
-                    CiderUndoManager.shared.record(.movedToFolder(
-                        itemType: .session, itemID: session.id, title: session.name,
-                        fromFolderID: oldFolderID, toFolderID: folderID, folderName: folderName
-                    ))
-                },
-                onDelete: {
-                    handleContextMenuDelete(item: item) {
-                        if let trashItem = BrowserSessionStorage.shared.delete(session.id) {
-                            CiderUndoManager.shared.record(.deletedToTrash(itemType: .session, trashItem: trashItem))
-                        }
-                    }
-                },
-                isSelected: isItemSelected(item),
-                isFocused: focusedItemID == item.id,
-                onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) },
-                onToggleLabelBulk: onToggleLabelBulk
-            )
         }
     }
 
@@ -548,11 +520,6 @@ struct HomeDashboardView: View {
                 } else if id.hasPrefix("todo-"),
                           let uuid = UUID(uuidString: String(id.dropFirst("todo-".count))) {
                     if let item = TodoCardStorage.shared.deleteTodoCard(uuid) {
-                        allTrashItems.append(item)
-                    }
-                } else if id.hasPrefix("session-"),
-                          let uuid = UUID(uuidString: String(id.dropFirst("session-".count))) {
-                    if let item = BrowserSessionStorage.shared.delete(uuid) {
                         allTrashItems.append(item)
                     }
                 } else if id.hasPrefix("vaultfile-"),
@@ -645,8 +612,6 @@ struct HomeDashboardView: View {
         case .todo(let todoCard): presentTodoDetail(todoCard)
         case .vaultFile(let vaultFile):
             onOpenVaultFile(vaultFile)
-        case .session(let session):
-            onOpenSession(session)
         }
     }
 
@@ -654,7 +619,7 @@ struct HomeDashboardView: View {
         switch item {
         case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
         case .note(let note): return noteDragProvider(for: note)
-        case .dateCard, .contact, .todo, .vaultFile, .session: return nil
+        case .dateCard, .contact, .todo, .vaultFile: return nil
         }
     }
 

@@ -100,7 +100,6 @@ final class CardLabelStorage: ObservableObject {
         DateCardStorage.shared.removeLabelsFromAll(labelID: id)
         ContactStorage.shared.removeLabelsFromAll(labelID: id)
         TodoCardStorage.shared.removeLabelsFromAll(labelID: id)
-        BrowserSessionStorage.shared.removeLabelsFromAll(labelID: id)
         return true
     }
 

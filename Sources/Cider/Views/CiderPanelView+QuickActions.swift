@@ -29,11 +29,6 @@ extension CiderPanelView {
             savedViewStorage.addToTabOrder(savedView.id)
             selectedFolderID = nil
             selectedTab = .savedView(id: savedView.id, name: savedView.name)
-        case .saveSession:
-            Task {
-                let vm = BrowserSessionsViewModel()
-                await vm.captureAndSave(name: "")
-            }
         case .openSettings:
             NotificationCenter.default.post(name: .openCiderSettings, object: nil)
         }

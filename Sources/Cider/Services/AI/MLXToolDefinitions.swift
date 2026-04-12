@@ -9,9 +9,9 @@ enum MLXToolDefinitions {
         let tools: [[String: Any]] = [
             tool(
                 name: "countItems",
-                description: "Count the user's items in Cider. Can count bookmarks, notes, events, todos, contacts, folders, tags, clipboard items, or browser sessions. Use itemType \"all\" for a summary of everything.",
+                description: "Count the user's items in Cider. Can count bookmarks, notes, events, todos, contacts, folders, tags, or clipboard items. Use itemType \"all\" for a summary of everything.",
                 properties: [
-                    "itemType": prop("string", "Type of item to count: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, sessions, or all")
+                    "itemType": prop("string", "Type of item to count: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, or all")
                 ],
                 required: ["itemType"]
             ),
@@ -73,12 +73,6 @@ enum MLXToolDefinitions {
                     "folderName": prop("string", "The folder name to look inside")
                 ],
                 required: ["folderName"]
-            ),
-            tool(
-                name: "getBrowserSessions",
-                description: "Get the user's saved browser sessions — groups of tabs saved from their browser.",
-                properties: [:],
-                required: []
             ),
             tool(
                 name: "createFolder",

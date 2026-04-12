@@ -372,7 +372,7 @@ private struct EntityFilterChip: View {
         case .todo: "Todos"
         case .externalFile: "Sources"
         case .vaultFile: "Images"
-        case .session: "Sessions"
+        case .session: "Sessions" // Legacy, kept for backward compat
         }
     }
 
@@ -385,7 +385,7 @@ private struct EntityFilterChip: View {
         case .todo: "checklist"
         case .externalFile: "folder.badge.gear"
         case .vaultFile: "photo"
-        case .session: "rectangle.stack"
+        case .session: "rectangle.stack" // Legacy, kept for backward compat
         }
     }
 

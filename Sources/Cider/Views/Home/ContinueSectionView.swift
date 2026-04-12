@@ -135,13 +135,12 @@ extension LibraryItemV2 {
         case .contact: "person.crop.circle"
         case .todo(let tc): tc.isCompleted ? "checkmark.circle.fill" : "checklist"
         case .vaultFile: "doc.on.doc"
-        case .session: "rectangle.stack"
         }
     }
 
     var iconColor: Color {
         switch self {
-        case .bookmark, .note, .vaultFile, .session: CiderColors.tertiary
+        case .bookmark, .note, .vaultFile: CiderColors.tertiary
         case .dateCard(let dc): dc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
         case .contact: CiderColors.controlAccent
         case .todo(let tc): tc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary

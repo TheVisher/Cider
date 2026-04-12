@@ -34,8 +34,6 @@ enum MLXToolExecutor {
             return getOverdueTodos()
         case "getFolderContents":
             return getFolderContents(arguments)
-        case "getBrowserSessions":
-            return getBrowserSessions()
         case "getCurrentItem":
             return getCurrentItem()
         case "findSimilar":
@@ -120,8 +118,6 @@ enum MLXToolExecutor {
             return "The user has \(CardLabelStorage.shared.labels.count) tags/labels."
         case "clipboard":
             return "The clipboard history has \(ClipboardStorage.shared.items.count) items."
-        case "sessions", "session", "browser sessions":
-            return "The user has \(BrowserSessionStorage.shared.sessions.count) saved browser sessions."
         case "all", "everything", "summary":
             let b = VaultBookmarkService.shared.bookmarks.count
             let n = NotesStorage.shared.notes.count
@@ -130,10 +126,9 @@ enum MLXToolExecutor {
             let c = ContactStorage.shared.contacts.count
             let f = VaultFolderService.shared.folders.count
             let l = CardLabelStorage.shared.labels.count
-            let s = BrowserSessionStorage.shared.sessions.count
-            return "Library summary: \(b) bookmarks, \(n) notes, \(e) events, \(t) todos, \(c) contacts, \(f) folders, \(l) tags, \(s) browser sessions."
+            return "Library summary: \(b) bookmarks, \(n) notes, \(e) events, \(t) todos, \(c) contacts, \(f) folders, \(l) tags."
         default:
-            return "Unknown item type '\(type)'. Valid types: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, sessions, all."
+            return "Unknown item type '\(type)'. Valid types: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, all."
         }
     }
 
@@ -436,22 +431,6 @@ enum MLXToolExecutor {
         let total = bookmarks.count + notes.count + events.count + todos.count + contacts.count
         if total == 0 { return "Folder \"\(folder.name)\" is empty." }
         return "Folder \"\(folder.name)\" (\(total) items):\n" + results.joined(separator: "\n")
-    }
-
-    private static func getBrowserSessions() -> String {
-        let sessions = BrowserSessionStorage.shared.sessions
-        if sessions.isEmpty { return "No saved browser sessions." }
-
-        let fmt = DateFormatter()
-        fmt.dateStyle = .medium
-
-        var lines: [String] = []
-        for s in sessions.sorted(by: { $0.createdAt > $1.createdAt }).prefix(10) {
-            let browser = s.sourceBrowserName ?? "Unknown"
-            lines.append("\"\(s.name)\" — \(s.tabs.count) tabs from \(browser) (\(fmt.string(from: s.createdAt)))")
-        }
-        if sessions.count > 10 { lines.append("...and \(sessions.count - 10) more sessions") }
-        return "Saved browser sessions (\(sessions.count) total):\n" + lines.joined(separator: "\n")
     }
 
     private static func getCurrentItem() -> String {

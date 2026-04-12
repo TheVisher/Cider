@@ -14,8 +14,6 @@ extension CiderPanelView {
             for n in notes { selectedItemIDs.insert("note-\(n.id.uuidString)") }
             for dc in dateCards { selectedItemIDs.insert("datecard-\(dc.id.uuidString)") }
             for c in contacts { selectedItemIDs.insert("contact-\(c.id.uuidString)") }
-            let sessions = BrowserSessionStorage.shared.sessions.filter { $0.folderID == folderID }
-            for s in sessions { selectedItemIDs.insert("session-\(s.id.uuidString)") }
         } else if selectedTab?.savedViewID != nil {
             for item in libraryViewModel.items {
                 selectedItemIDs.insert(item.id)
@@ -30,8 +28,6 @@ extension CiderPanelView {
         var notesToDelete: [Note] = []
         var dateCardIDsToDelete: [UUID] = []
         var contactIDsToDelete: [UUID] = []
-        var sessionIDsToDelete: [UUID] = []
-
         for id in selectedItemIDs {
             if id.hasPrefix("bookmark-") {
                 let uuidString = String(id.dropFirst("bookmark-".count))
@@ -54,11 +50,6 @@ extension CiderPanelView {
                 let uuidString = String(id.dropFirst("contact-".count))
                 if let uuid = UUID(uuidString: uuidString) {
                     contactIDsToDelete.append(uuid)
-                }
-            } else if id.hasPrefix("session-") {
-                let uuidString = String(id.dropFirst("session-".count))
-                if let uuid = UUID(uuidString: uuidString) {
-                    sessionIDsToDelete.append(uuid)
                 }
             }
         }
@@ -89,11 +80,6 @@ extension CiderPanelView {
         }
         for cID in contactIDsToDelete {
             if let trashItem = ContactStorage.shared.deleteContact(cID) {
-                allTrashItems.append(trashItem)
-            }
-        }
-        for sID in sessionIDsToDelete {
-            if let trashItem = BrowserSessionStorage.shared.delete(sID) {
                 allTrashItems.append(trashItem)
             }
         }
@@ -128,11 +114,6 @@ extension CiderPanelView {
                 let uuidString = String(id.dropFirst("contact-".count))
                 if let uuid = UUID(uuidString: uuidString) {
                     ContactStorage.shared.assignContact(uuid, toFolder: folderID)
-                }
-            } else if id.hasPrefix("session-") {
-                let uuidString = String(id.dropFirst("session-".count))
-                if let uuid = UUID(uuidString: uuidString) {
-                    BrowserSessionStorage.shared.assignSession(uuid, toFolder: folderID)
                 }
             }
         }
@@ -187,18 +168,6 @@ extension CiderPanelView {
                     }
                     ContactStorage.shared.updateContact(updated)
                 }
-            } else if id.hasPrefix("session-") {
-                let uuidString = String(id.dropFirst("session-".count))
-                if let uuid = UUID(uuidString: uuidString),
-                   let session = BrowserSessionStorage.shared.sessions.first(where: { $0.id == uuid }) {
-                    var updated = session
-                    if allHave {
-                        updated.labelIDs.removeAll { $0 == labelID }
-                    } else if !updated.labelIDs.contains(labelID) {
-                        updated.labelIDs.append(labelID)
-                    }
-                    _ = BrowserSessionStorage.shared.save(updated)
-                }
             }
         }
     }
@@ -228,12 +197,6 @@ extension CiderPanelView {
                 if let uuid = UUID(uuidString: uuidString),
                    let contact = ContactStorage.shared.contact(for: uuid) {
                     if !contact.labelIDs.contains(labelID) { return false }
-                }
-            } else if id.hasPrefix("session-") {
-                let uuidString = String(id.dropFirst("session-".count))
-                if let uuid = UUID(uuidString: uuidString),
-                   let session = BrowserSessionStorage.shared.sessions.first(where: { $0.id == uuid }) {
-                    if !session.labelIDs.contains(labelID) { return false }
                 }
             }
         }

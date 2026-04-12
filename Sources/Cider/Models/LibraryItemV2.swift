@@ -7,7 +7,6 @@ enum LibraryItemV2: Identifiable, Hashable {
     case contact(ContactCard)
     case todo(TodoCard)
     case vaultFile(VaultFile)
-    case session(BrowserSession)
 
     var id: String {
         switch self {
@@ -23,8 +22,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             "todo-\(todo.id.uuidString)"
         case .vaultFile(let file):
             "vaultfile-\(file.id.uuidString)"
-        case .session(let session):
-            "session-\(session.id.uuidString)"
         }
     }
 
@@ -42,8 +39,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             .todo
         case .vaultFile:
             .vaultFile
-        case .session:
-            .session
         }
     }
 
@@ -61,8 +56,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             todo.createdAt
         case .vaultFile(let file):
             file.createdAt
-        case .session(let session):
-            session.createdAt
         }
     }
 
@@ -80,8 +73,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             todo.updatedAt
         case .vaultFile(let file):
             file.modifiedAt
-        case .session(let session):
-            session.updatedAt
         }
     }
 
@@ -99,8 +90,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             todo.title
         case .vaultFile(let file):
             file.filename
-        case .session(let session):
-            session.name
         }
     }
 
@@ -118,8 +107,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             todo.folderID
         case .vaultFile(let file):
             file.folderID
-        case .session(let session):
-            session.folderID
         }
     }
 
@@ -137,8 +124,6 @@ enum LibraryItemV2: Identifiable, Hashable {
             return Set(todo.labelIDs)
         case .vaultFile(let file):
             return Set(file.labelIDs)
-        case .session(let session):
-            return Set(session.labelIDs)
         }
     }
 
@@ -150,7 +135,7 @@ enum LibraryItemV2: Identifiable, Hashable {
             return contact.birthday
         case .todo(let todo):
             return todo.earliestApproachingDate
-        case .bookmark, .note, .vaultFile, .session:
+        case .bookmark, .note, .vaultFile:
             return nil
         }
     }
@@ -161,7 +146,7 @@ enum LibraryItemV2: Identifiable, Hashable {
             return dateCard.isCompleted
         case .todo(let todo):
             return todo.isCompleted
-        case .bookmark, .note, .contact, .vaultFile, .session:
+        case .bookmark, .note, .contact, .vaultFile:
             return false
         }
     }

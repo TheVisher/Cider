@@ -29,7 +29,6 @@ final class FoundationModelsProvider: AIAssistantProvider {
         GetUpcomingEventsTool(),
         GetOverdueTodosTool(),
         GetFolderContentsTool(),
-        GetBrowserSessionsTool(),
         FindSimilarTool(),
         // Write tools
         CreateFolderTool(),

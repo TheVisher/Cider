@@ -66,7 +66,6 @@ struct CiderCLI {
         // silently drag their items along with the folder into trash.
         _ = DateCardStorage.shared
         _ = ContactStorage.shared
-        _ = BrowserSessionStorage.shared
 
         // Wait for async storage initialization — poll until notes are loaded
         // (NotesStorage uses Task { @MainActor } in init which needs actor time)
@@ -1267,7 +1266,6 @@ struct CiderCLI {
             let affectedTodos = TodoCardStorage.shared.todoCards.filter { isInAffected($0.folderID, affectedFolderIDs) }
             let affectedEvents = DateCardStorage.shared.dateCards.filter { isInAffected($0.folderID, affectedFolderIDs) }
             let affectedContacts = ContactStorage.shared.contacts.filter { isInAffected($0.folderID, affectedFolderIDs) }
-            let affectedSessions = BrowserSessionStorage.shared.sessions.filter { isInAffected($0.folderID, affectedFolderIDs) }
 
             print("About to delete folder: \(folder.relativePath)")
             if !descendants.isEmpty {
@@ -1277,11 +1275,11 @@ struct CiderCLI {
                 }
             }
             let totalItems = affectedBookmarks.count + affectedNotes.count + affectedFiles.count
-                + affectedTodos.count + affectedEvents.count + affectedContacts.count + affectedSessions.count
+                + affectedTodos.count + affectedEvents.count + affectedContacts.count
             if totalItems > 0 {
                 print("  Items (\(totalItems), will relocate to Inbox):")
                 print("    bookmarks: \(affectedBookmarks.count), notes: \(affectedNotes.count), files: \(affectedFiles.count),")
-                print("    todos: \(affectedTodos.count), events: \(affectedEvents.count), contacts: \(affectedContacts.count), sessions: \(affectedSessions.count)")
+                print("    todos: \(affectedTodos.count), events: \(affectedEvents.count), contacts: \(affectedContacts.count)")
             }
 
             if let result = VaultFolderService.shared.deleteFolder(folder.id) {
@@ -1390,16 +1388,6 @@ struct CiderCLI {
                     }
                     _ = ContactStorage.shared.assignContact(contact.id, toFolder: targetFolder.id)
                     print("  ↺ contact: \(item.title) → \(item.previousFolderPath)")
-                    restored += 1
-                case "session":
-                    guard let session = BrowserSessionStorage.shared.sessions.first(where: { $0.id == item.itemID }) else {
-                        misses.append(item); continue
-                    }
-                    if session.folderID != nil {
-                        skippedRefiled.append(item); continue
-                    }
-                    BrowserSessionStorage.shared.assignSession(session.id, toFolder: targetFolder.id)
-                    print("  ↺ session: \(item.title) → \(item.previousFolderPath)")
                     restored += 1
                 default:
                     misses.append(item)
@@ -1922,7 +1910,6 @@ struct CiderCLI {
                 case .dateCard: icon = "📅"
                 case .contact: icon = "👤"
                 case .todo: icon = "☑️"
-                case .session: icon = "🌐"
                 case .vaultFile: icon = "📎"
                 }
                 let subtitle = result.subtitle.map { " — \($0)" } ?? ""
@@ -2014,7 +2001,6 @@ struct CiderCLI {
         let events = DateCardStorage.shared.dateCards
         let contacts = ContactStorage.shared.contacts
         let files = VaultFileService.shared.files
-        let sessions = BrowserSessionStorage.shared.sessions
         let folders = VaultFolderService.shared.folders
         let labels = CardLabelStorage.shared.labels
         let boards = KanbanStorage.shared.boards
@@ -2031,7 +2017,6 @@ struct CiderCLI {
             print("  Events:       \(events.count)")
             print("  Contacts:     \(contacts.count)")
             print("  Vault Files:  \(files.count) (\(files.filter { $0.fileType == .image }.count) images)")
-            print("  Sessions:     \(sessions.count)")
             print("  Folders:      \(folders.count)")
             print("  Labels:       \(labels.count)")
             print("  Boards:       \(boards.count) (\(boards.flatMap(\.columns).flatMap(\.cards).count) cards)")
@@ -2141,7 +2126,6 @@ struct CiderCLI {
         let events = DateCardStorage.shared.dateCards
         let contacts = ContactStorage.shared.contacts
         let files = VaultFileService.shared.files
-        let sessions = BrowserSessionStorage.shared.sessions
         let folders = VaultFolderService.shared.folders
         let labels = CardLabelStorage.shared.labels
         let boards = KanbanStorage.shared.boards
@@ -2206,7 +2190,6 @@ struct CiderCLI {
             print("  Events:       \(events.count)")
             print("  Contacts:     \(contacts.count)")
             print("  Files:        \(files.count) (\(files.filter { $0.fileType == .image }.count) images)")
-            print("  Sessions:     \(sessions.count)")
             print("  Trash:        \(trash.count)")
             print("")
             print("  FOLDERS (\(folders.count))")

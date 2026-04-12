@@ -489,35 +489,6 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
     }
 
-    // MARK: - Session Trash
-
-    func trashSession(_ session: BrowserSession, sessionsDir: URL) -> TrashItem {
-        let trashDir = sessionsDir.appendingPathComponent(trashDirName)
-        try? FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
-
-        let payload = BrowserSessionTrashPayload(session: session)
-        let trashItem = TrashItem(
-            itemID: session.id,
-            itemType: .session,
-            title: session.name,
-            originalFolderID: nil,
-            sessionPayload: payload
-        )
-
-        addToManifest(trashItem, trashDir: trashDir)
-        return trashItem
-    }
-
-    func restoreSession(_ trashItem: TrashItem) {
-        guard let payload = trashItem.sessionPayload else { return }
-
-        let sessionsDir = StoragePaths.directoryURL(for: .sessions)
-        let trashDir = sessionsDir.appendingPathComponent(trashDirName)
-
-        BrowserSessionStorage.shared.restoreFromTrash(payload.session)
-        removeFromManifest(trashItem.id, trashDir: trashDir)
-    }
-
     // MARK: - Vault File Trash
 
     private var vaultFilesTrashDir: URL {
@@ -651,7 +622,7 @@ final class TrashStorage {
         case .vaultFolder:
             VaultFolderService.shared.restoreFolder(trashItem)
         case .session:
-            restoreSession(trashItem)
+            break // Sessions feature removed
         case .kanbanBoard:
             restoreKanbanBoard(trashItem)
         case .vaultFile:
@@ -771,8 +742,7 @@ final class TrashStorage {
                 removeFromManifest(trashItem.id, trashDir: trashDir)
             }
         case .session:
-            let trashDir = StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName)
-            removeFromManifest(trashItem.id, trashDir: trashDir)
+            break // Sessions feature removed
         case .kanbanBoard:
             let trashDir = StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
@@ -843,7 +813,7 @@ final class TrashStorage {
         case .contact:
             return StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
         case .session:
-            return StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName)
+            return StoragePaths.directoryURL(for: .sessions).appendingPathComponent(trashDirName) // Legacy
         case .kanbanBoard:
             return StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
         case .vaultFile:
