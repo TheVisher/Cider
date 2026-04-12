@@ -8,7 +8,23 @@ import OSLog
 @MainActor
 struct CiderCLI {
     static func main() async {
-        let args = Array(CommandLine.arguments.dropFirst())
+        var args = Array(CommandLine.arguments.dropFirst())
+
+        // Sandbox vault override — `--vault <path>` points the CLI at an
+        // alternate vault root for the duration of this invocation. Must run
+        // BEFORE any storage service is touched, since StoragePaths memoizes
+        // the vault URL on first read.
+        if let idx = args.firstIndex(of: "--vault") {
+            guard idx + 1 < args.count else {
+                print("Error: --vault requires a path argument.")
+                return
+            }
+            let path = NSString(string: args[idx + 1]).expandingTildeInPath
+            let url = URL(fileURLWithPath: path)
+            StoragePaths.vaultOverride = url
+            args.removeSubrange(idx...(idx + 1))
+            FileHandle.standardError.write(Data("Using sandbox vault: \(url.path)\n".utf8))
+        }
 
         guard let command = args.first else {
             printUsage()
@@ -131,14 +147,22 @@ struct CiderCLI {
 
         case "add", "create":
             guard let url = args.first else {
-                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--path <vault-relative-path>] [--folder <name>]")
+                print("Error: URL required. Usage: cider-cli bookmark add <url> [--title <title>] [--folder <name|path>] [--path <vault-path>]")
                 return
+            }
+            // Resolve the destination folder BEFORE creating, so that a bad
+            // --folder/--path doesn't leave an orphan bookmark in Inbox.
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
             }
             let title = parseFlag("--title", from: args)
             let bookmark = service.add(urlString: url, title: title)
             if let bookmark {
-                if let folder = resolveFolder(from: args) {
-                    _ = service.assignBookmark(bookmark.id, toFolder: folder.id)
+                if let targetFolder {
+                    _ = service.assignBookmark(bookmark.id, toFolder: targetFolder.id)
                 }
                 print("Created bookmark: \(bookmark.title) (\(bookmark.id.uuidString.prefix(8)))")
             } else {
@@ -195,11 +219,16 @@ struct CiderCLI {
 
         case "move":
             guard let firstArg = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli bookmark move <id>[,id,...] --path <vault-relative-path> | --folder <name>")
+                print("Error: ID prefix required. Usage: cider-cli bookmark move <id>[,id,...] [--folder <name|path> | --path <vault-path>]")
                 return
             }
             let prefixes = splitIDs(firstArg)
-            let folder = resolveFolder(from: args)
+            let folder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: folder = nil
+            case .resolved(let f): folder = f
+            case .failed: return
+            }
             let newFolderName = folder?.name ?? "Inbox"
             var moved = 0
             var misses: [String] = []
@@ -346,14 +375,22 @@ struct CiderCLI {
             }
 
         case "create":
+            // Resolve target folder BEFORE creating to avoid orphaning a note
+            // in Inbox when --folder/--path was given but didn't resolve.
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
             let title = args.first ?? "Untitled"
             let content = parseFlag("--content", from: args) ?? ""
             let note = storage.createNew(initialContent: content)
             if !title.isEmpty, title != "Untitled" {
                 storage.rename(note: note, to: title)
             }
-            if let folder = resolveFolder(from: args) {
-                _ = storage.assignNote(note.id, toFolder: folder.id)
+            if let targetFolder {
+                _ = storage.assignNote(note.id, toFolder: targetFolder.id)
             }
             print("Created note: \(title) (\(note.id.uuidString.prefix(8)))")
 
@@ -396,11 +433,16 @@ struct CiderCLI {
 
         case "move":
             guard let firstArg = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli note move <id>[,id,...] [--path <path> | --folder <name>]")
+                print("Error: ID prefix required. Usage: cider-cli note move <id>[,id,...] [--folder <name|path> | --path <vault-path>]")
                 return
             }
             let prefixes = splitIDs(firstArg)
-            let targetFolder = resolveFolder(from: args)
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
             let targetName = targetFolder?.name ?? "Inbox"
             var moved = 0
             var misses: [String] = []
@@ -526,6 +568,12 @@ struct CiderCLI {
             }
 
         case "create":
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
             let title = args.first ?? "Untitled Todo"
             let dueString = parseFlag("--due", from: args)
             let priorityString = parseFlag("--priority", from: args)
@@ -539,8 +587,8 @@ struct CiderCLI {
                 }
             }()
             var todo = storage.createTodoCard(title: title, dueDate: dueDate, priority: priority)
-            if let folder = resolveFolder(from: args) {
-                todo.folderID = folder.id
+            if let targetFolder {
+                todo.folderID = targetFolder.id
                 _ = storage.updateTodoCard(todo)
             }
             print("Created todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
@@ -632,12 +680,18 @@ struct CiderCLI {
             }
 
         case "create":
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
             let title = args.first ?? "Untitled Event"
             let dateString = parseFlag("--date", from: args) ?? dateFormatter.string(from: Date())
             let date = dateFormatter.date(from: dateString) ?? Date()
             var card = storage.createDateCard(title: title, startAt: date)
-            if let folder = resolveFolder(from: args) {
-                card.folderID = folder.id
+            if let targetFolder {
+                card.folderID = targetFolder.id
                 _ = storage.updateDateCard(card)
             }
             print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
@@ -704,6 +758,12 @@ struct CiderCLI {
             }
 
         case "create":
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
             let name = args.first ?? "New Contact"
             let email = parseFlag("--email", from: args)
             let phone = parseFlag("--phone", from: args)
@@ -726,8 +786,8 @@ struct CiderCLI {
                     contact.birthday = birthday; needsUpdate = true
                 }
             }
-            if let folder = resolveFolder(from: args) {
-                contact.folderID = folder.id; needsUpdate = true
+            if let targetFolder {
+                contact.folderID = targetFolder.id; needsUpdate = true
             }
             if needsUpdate { _ = storage.updateContact(contact) }
             print("Created contact: \(contact.displayName) (\(contact.id.uuidString.prefix(8)))")
@@ -841,11 +901,16 @@ struct CiderCLI {
 
         case "move":
             guard let firstArg = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli file move <id>[,id,...] [--path <path> | --folder <name>]")
+                print("Error: ID prefix required. Usage: cider-cli file move <id>[,id,...] [--folder <name|path> | --path <vault-path>]")
                 return
             }
             let prefixes = splitIDs(firstArg)
-            let targetFolder = resolveFolder(from: args)
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
             let targetName = targetFolder?.name ?? "Inbox"
             var moved = 0
             var misses: [String] = []
@@ -960,15 +1025,30 @@ struct CiderCLI {
     static func handleFolder(subcommand: String?, args: [String]) {
         switch subcommand {
         case "list", "ls":
-            let folders = VaultFolderService.shared.folders
+            // Component-wise sort so children always immediately follow their
+            // parent. Lex-sorting by path puts "Restaurants 2" before
+            // "Restaurants/Italian" (space < /), which previously caused the
+            // text renderer to attribute children to the wrong sibling.
+            let sorted = VaultFolderService.shared.folders.sorted { a, b in
+                let aParts = a.relativePath.split(separator: "/").map(String.init)
+                let bParts = b.relativePath.split(separator: "/").map(String.init)
+                for i in 0..<min(aParts.count, bParts.count) {
+                    let cmp = aParts[i].localizedCaseInsensitiveCompare(bParts[i])
+                    if cmp != .orderedSame {
+                        return cmp == .orderedAscending
+                    }
+                }
+                return aParts.count < bParts.count
+            }
             if jsonOutput {
-                outputJSON(folders.map(folderToDict))
+                outputJSON(sorted.map(folderToDict))
             } else {
-                print("Folders (\(folders.count)):")
-                for folder in folders {
-                    let depth = folder.relativePath.components(separatedBy: "/").count - 1
-                    let indent = String(repeating: "  ", count: depth)
-                    print("  \(indent)📁 \(folder.name) (\(folder.id.uuidString.prefix(8)))")
+                print("Folders (\(sorted.count)):")
+                // Print full relativePath on every row — no more depth-only
+                // indentation that could imply the wrong parent. Agents can
+                // grep `^  📁 Restaurants/` to find children of `Restaurants`.
+                for folder in sorted {
+                    print("  📁 \(folder.relativePath) (\(folder.id.uuidString.prefix(8)))")
                 }
             }
 
@@ -989,8 +1069,26 @@ struct CiderCLI {
                 return
             }
 
-            let parentID = parentName.flatMap { findFolder(named: $0)?.id }
+            // If --parent was given, refuse to silently fall back to the root
+            // when it doesn't resolve. Previously a typo'd parent name would
+            // create the folder at the vault root with no warning.
+            let parentID: UUID?
+            if let parentName {
+                guard let parent = findFolder(named: parentName) else {
+                    print("Error: Parent folder '\(parentName)' not found")
+                    return
+                }
+                parentID = parent.id
+            } else {
+                parentID = nil
+            }
             if let folder = VaultFolderService.shared.createFolder(name: name, parentID: parentID) {
+                // The folder service auto-suffixes name collisions
+                // ("Restaurants" → "Restaurants 2"). Surface that loudly so
+                // agents don't assume their requested name was honored.
+                if folder.name != name {
+                    print("Note: name '\(name)' was already taken — created as '\(folder.name)' instead")
+                }
                 print("Created folder: \(folder.relativePath) (\(folder.id.uuidString.prefix(8)))")
             } else {
                 print("Error: Could not create folder: \(name)")
@@ -1004,8 +1102,20 @@ struct CiderCLI {
             // Strict lookup: path-match first, ambiguity-errors on bare names.
             // Prevents renaming the wrong folder when two share a leaf name.
             guard let folder = findFolderStrict(oldName) else { return }
+            let oldPath = folder.relativePath
             let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)
-            print(success ? "Renamed: \(folder.relativePath) → \(newName)" : "Error: Could not rename folder")
+            if success {
+                // Re-read to capture the post-rename name; the service
+                // auto-suffixes collisions, so the requested newName may
+                // not match the actual one.
+                let actualName = VaultFolderService.shared.folder(for: folder.id)?.name ?? newName
+                if actualName != newName {
+                    print("Note: name '\(newName)' was already taken — renamed to '\(actualName)' instead")
+                }
+                print("Renamed: \(oldPath) → \(actualName)")
+            } else {
+                print("Error: Could not rename folder")
+            }
 
         case "move", "mv":
             guard let nameOrID = args.first else {
@@ -1598,10 +1708,24 @@ struct CiderCLI {
                 print("Error: ID prefix required.")
                 return
             }
+            // Match against BOTH the trash entry id (what `trash list` shows)
+            // and the original item id (what `bookmark delete` etc. echo back).
+            // Lets the agent paste back whichever id they have on hand.
+            let lower = idPrefix.lowercased()
             let items = TrashStorage.shared.allTrashItems()
-            if let item = items.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
-                TrashStorage.shared.restore(item)
-                print("Restored: \(item.title)")
+            let matches = items.filter {
+                $0.id.uuidString.lowercased().hasPrefix(lower) ||
+                $0.itemID.uuidString.lowercased().hasPrefix(lower)
+            }
+            if matches.count == 1 {
+                TrashStorage.shared.restore(matches[0])
+                print("Restored: \(matches[0].title)")
+            } else if matches.count > 1 {
+                print("Error: ID prefix '\(idPrefix)' matches \(matches.count) trash items:")
+                for item in matches {
+                    print("  [\(item.id.uuidString.prefix(8))] \(item.title) (\(item.itemType.rawValue))")
+                }
+                print("Use a longer id prefix to disambiguate.")
             } else {
                 print("Error: No trash item found with ID prefix: \(idPrefix)")
             }
@@ -1613,6 +1737,14 @@ struct CiderCLI {
 
         case "purge":
             let days = Int(parseFlag("--days", from: args) ?? "30") ?? 30
+            // The underlying purge guards `days > 0` (so AppDelegate's
+            // periodic purge can't accidentally wipe everything when the
+            // retention setting is 0). Mirror that here with an explicit
+            // error so the agent doesn't think `--days 0` purged things.
+            if days <= 0 {
+                print("Error: --days must be > 0. Use 'cider-cli trash empty' to delete everything.")
+                return
+            }
             TrashStorage.shared.purgeExpired(olderThan: days)
             print("Purged items older than \(days) days")
 
@@ -2271,15 +2403,46 @@ struct CiderCLI {
         return nil
     }
 
-    /// Resolves --path or --folder from args to a VaultFolder. Prefers --path.
-    static func resolveFolder(from args: [String]) -> VaultFolder? {
+    /// Result of resolving a `--folder` / `--path` flag from args.
+    /// Distinguishes "user did not specify a folder" (caller may default to
+    /// Inbox) from "user specified one but it didn't resolve" (caller MUST
+    /// bail — error has already been printed). Eliminates the silent
+    /// false-success where missing folders made write commands no-op to Inbox.
+    enum FolderArgResolution {
+        case unspecified
+        case resolved(VaultFolder)
+        case failed
+    }
+
+    /// Path-aware resolution of `--folder` / `--path`. Prefers `--path`
+    /// (auto-creates missing components). For `--folder`, accepts either a
+    /// leaf name or a vault-relative path (any value containing `/`).
+    static func resolveFolderArg(from args: [String]) -> FolderArgResolution {
         if let path = parseFlag("--path", from: args) {
-            return findOrCreateFolderByPath(path)
+            if let folder = findOrCreateFolderByPath(path) {
+                return .resolved(folder)
+            }
+            print("Error: Could not resolve or create folder path '\(path)'")
+            return .failed
         }
         if let name = parseFlag("--folder", from: args) {
-            return findFolder(named: name)
+            // Path-aware: anything containing '/' is treated as a vault-relative
+            // path and routed through the strict resolver (which prints its own
+            // not-found / ambiguity errors). Bare names use the legacy
+            // leaf-name lookup so existing scripts keep working.
+            if name.contains("/") {
+                if let folder = findFolderStrict(name) {
+                    return .resolved(folder)
+                }
+                return .failed
+            }
+            if let folder = findFolder(named: name) {
+                return .resolved(folder)
+            }
+            print("Error: No folder found with name '\(name)'")
+            return .failed
         }
-        return nil
+        return .unspecified
     }
 
     /// Resolves a vault-relative path (e.g. "People/Baine") to a registered VaultFolder.
@@ -2345,11 +2508,11 @@ struct CiderCLI {
         CiderCLI — Full command-line interface to Cider's vault
 
         BOOKMARKS (alias: bm)
-          cider-cli bookmark list [--folder <name>] [--limit <n>]
-          cider-cli bookmark add <url> [--title <title>] [--folder <name>]
+          cider-cli bookmark list [--folder <name|path>] [--limit <n>]
+          cider-cli bookmark add <url> [--title <title>] [--folder <name|path>]
           cider-cli bookmark get <id-prefix>
           cider-cli bookmark search <query>
-          cider-cli bookmark move <id-prefix> --folder <name>
+          cider-cli bookmark move <id-prefix> --folder <name|path>
           cider-cli bookmark tag <id-prefix> <label-name>
           cider-cli bookmark untag <id-prefix> <label-name>
           cider-cli bookmark delete <id-prefix>
@@ -2357,44 +2520,54 @@ struct CiderCLI {
           cider-cli bookmark update <id-prefix> [--title <t>] [--notes <n>] [--url <u>]
 
         NOTES
-          cider-cli note list [--folder <name>]
-          cider-cli note create <title> [--content <text>] [--folder <name>]
+          cider-cli note list [--folder <name|path>]
+          cider-cli note create <title> [--content <text>] [--folder <name|path>]
           cider-cli note get <id-prefix>
           cider-cli note pin <id-prefix>
-          cider-cli note move <id-prefix> --folder <name>
+          cider-cli note move <id-prefix> --folder <name|path>
           cider-cli note delete <id-prefix>
           cider-cli note update <id-prefix> [--title <t>] [--content <c>]
 
         TODOS
-          cider-cli todo list [--completed]
-          cider-cli todo create <title> [--due yyyy-MM-dd] [--priority high|medium|low] [--folder <name>]
+          cider-cli todo list [--completed]      (--completed = include completed)
+          cider-cli todo create <title> [--due yyyy-MM-dd] [--priority high|medium|low] [--folder <name|path>]
           cider-cli todo complete <id-prefix>
           cider-cli todo delete <id-prefix>
           cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--priority <p>]
 
         EVENTS
           cider-cli event list
-          cider-cli event create <title> [--date yyyy-MM-dd] [--folder <name>]
+          cider-cli event create <title> [--date yyyy-MM-dd] [--folder <name|path>]
           cider-cli event delete <id-prefix>
           cider-cli event update <id-prefix> [--title <t>] [--date <d>] [--location <l>]
 
         CONTACTS
           cider-cli contact list
-          cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name>]
+          cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name|path>]
           cider-cli contact delete <id-prefix>
           cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
 
         FILES
-          cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name>]
+          cider-cli file list [--type image|pdf|video|audio|document|archive] [--folder <name|path>]
           cider-cli file get <id-prefix>
-          cider-cli file move <id-prefix> --folder <name>
+          cider-cli file move <id-prefix> --folder <name|path>
           cider-cli file delete <id-prefix>
 
         FOLDERS
           cider-cli folder list
-          cider-cli folder create <name> [--parent <name>]
-          cider-cli folder rename <name> --to <new-name>
-          cider-cli folder delete <name>
+          cider-cli folder create <name|path> [--parent <name>]
+          cider-cli folder rename <name|path> --to <new-name>
+          cider-cli folder move <name|path> --to <parent-path>
+          cider-cli folder delete <name|path>
+          cider-cli folder doctor [--fix] [--yes]
+
+        FOLDER ARGUMENT FORMS
+          --folder accepts a leaf name OR a vault-relative path:
+            --folder Italian             (leaf name; errors if ambiguous)
+            --folder "Restaurants/Italian" (path; errors if missing)
+          --path is similar but auto-creates missing folders along the way:
+            --path "Food/Restaurants/Tacoma"
+          A bare folder name that contains '/' is always treated as a path.
 
         BOARDS (Kanban)
           cider-cli board list
@@ -2436,6 +2609,13 @@ struct CiderCLI {
 
         DUPLICATE CHECK
           cider-cli duplicate-check <url>
+
+        GLOBAL FLAGS
+          --vault <path>   Use a sandbox vault for this invocation. Bypasses
+                           the user's saved CiderConfig vault path and any
+                           per-type directory overrides. Prints
+                           'Using sandbox vault: <path>' to stderr.
+          --json           Emit machine-readable JSON output (most commands).
         """)
     }
 }

@@ -70,10 +70,18 @@ enum StoragePaths {
     nonisolated(unsafe) private static var _cachedVaultURL: URL?
     nonisolated(unsafe) private static var _cachedTypeURLs: [StorageType: URL] = [:]
 
+    /// Process-local vault root override. When non-nil, takes precedence over
+    /// `CiderConfig.vaultDirectory` and bypasses per-type `directoryOverrides`.
+    /// Used by `cider-cli --vault <path>` to point at a sandbox vault without
+    /// touching the user's saved config. Must be set BEFORE any service touches
+    /// `cachedVaultDirectoryURL` (which memoizes on first read).
+    nonisolated(unsafe) static var vaultOverride: URL?
+
     // MARK: - Vault Root
 
     /// Returns the vault root directory URL, expanding tildes.
     static func vaultDirectoryURL(config: CiderConfig = CiderConfig.load()) -> URL {
+        if let override = vaultOverride { return override }
         let expanded = NSString(string: config.vaultDirectory).expandingTildeInPath
         return URL(fileURLWithPath: expanded)
     }
@@ -92,8 +100,12 @@ enum StoragePaths {
 
     /// Returns the directory URL for a specific storage type.
     /// Checks for a user override first, then falls back to vault subdirectory.
+    /// When `vaultOverride` is set (sandbox mode), per-type overrides are ignored
+    /// so that all storage stays inside the sandbox vault.
     static func directoryURL(for type: StorageType, config: CiderConfig = CiderConfig.load()) -> URL {
-        if let override = config.directoryOverrides[type.rawValue], !override.isEmpty {
+        if vaultOverride == nil,
+           let override = config.directoryOverrides[type.rawValue],
+           !override.isEmpty {
             let expanded = NSString(string: override).expandingTildeInPath
             return URL(fileURLWithPath: expanded)
         }
