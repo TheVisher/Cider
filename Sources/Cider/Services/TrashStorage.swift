@@ -68,10 +68,29 @@ final class TrashStorage {
             }
         }
 
+        // Move carousel images
+        var trashCarouselRelPaths: [String]?
+        if let carouselPaths = bookmark.carouselImagePaths, !carouselPaths.isEmpty {
+            var movedPaths: [String] = []
+            for relPath in carouselPaths {
+                let srcURL = bookmarksDir.appendingPathComponent(relPath)
+                let filename = srcURL.lastPathComponent
+                let destURL = trashOrigDir.appendingPathComponent(filename)
+                if fm.fileExists(atPath: srcURL.path) {
+                    try? fm.moveItem(at: srcURL, to: destURL)
+                    movedPaths.append("\(originalsDirName)/\(filename)")
+                }
+            }
+            if !movedPaths.isEmpty {
+                trashCarouselRelPaths = movedPaths
+            }
+        }
+
         let payload = BookmarkTrashPayload(
             bookmark: bookmark,
             trashThumbnailRelativePath: trashThumbnailRelPath,
-            trashOriginalRelativePath: trashOriginalRelPath
+            trashOriginalRelativePath: trashOriginalRelPath,
+            trashCarouselRelativePaths: trashCarouselRelPaths
         )
 
         let trashItem = TrashItem(
@@ -103,16 +122,23 @@ final class TrashStorage {
 
         // Resolve trash dir: probe the filesystem — whichever .trash/ dir still
         // contains this bookmark's asset files is the one it was moved into.
-        let inboxTrashDir = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
-        let legacyTrashDir = StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
+        // Check: per-folder trash, inbox trash, legacy trash (in that order).
+        var candidateDirs: [URL] = []
+        if let folderID = trashItem.originalFolderID,
+           let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            let folderDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(vaultFolder.relativePath)
+            candidateDirs.append(folderDir.appendingPathComponent(trashDirName))
+        }
+        candidateDirs.append(StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks).appendingPathComponent(trashDirName))
+        candidateDirs.append(StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName))
 
         let trashDir: URL
-        let probeRelPath = payload.trashThumbnailRelativePath ?? payload.trashOriginalRelativePath
+        let probeRelPath = payload.trashThumbnailRelativePath ?? payload.trashOriginalRelativePath ?? payload.trashCarouselRelativePaths?.first
         if let rel = probeRelPath,
-           fm.fileExists(atPath: inboxTrashDir.appendingPathComponent(rel).path) {
-            trashDir = inboxTrashDir
+           let found = candidateDirs.first(where: { fm.fileExists(atPath: $0.appendingPathComponent(rel).path) }) {
+            trashDir = found
         } else {
-            trashDir = legacyTrashDir
+            trashDir = candidateDirs.first ?? StoragePaths.directoryURL(for: .bookmarks).appendingPathComponent(trashDirName)
         }
 
         var restoredBookmark = payload.bookmark
@@ -143,6 +169,22 @@ final class TrashStorage {
                     withIntermediateDirectories: true
                 )
                 try? fm.moveItem(at: srcURL, to: destURL)
+            }
+        }
+
+        // Move carousel images back
+        if let trashCarouselPaths = payload.trashCarouselRelativePaths,
+           let originalCarouselPaths = restoredBookmark.carouselImagePaths {
+            for (trashRelPath, originalRelPath) in zip(trashCarouselPaths, originalCarouselPaths) {
+                let srcURL = trashDir.appendingPathComponent(trashRelPath)
+                let destURL = targetDir.appendingPathComponent(originalRelPath)
+                if fm.fileExists(atPath: srcURL.path) {
+                    try? fm.createDirectory(
+                        at: destURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true
+                    )
+                    try? fm.moveItem(at: srcURL, to: destURL)
+                }
             }
         }
 

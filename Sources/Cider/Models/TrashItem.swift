@@ -21,6 +21,23 @@ struct BookmarkTrashPayload: Codable {
     let trashThumbnailRelativePath: String?
     /// Path of original image relative to the `.trash/` directory.
     let trashOriginalRelativePath: String?
+    /// Paths of carousel images relative to the `.trash/` directory.
+    let trashCarouselRelativePaths: [String]?
+
+    init(bookmark: Bookmark, trashThumbnailRelativePath: String?, trashOriginalRelativePath: String?, trashCarouselRelativePaths: [String]? = nil) {
+        self.bookmark = bookmark
+        self.trashThumbnailRelativePath = trashThumbnailRelativePath
+        self.trashOriginalRelativePath = trashOriginalRelativePath
+        self.trashCarouselRelativePaths = trashCarouselRelativePaths
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bookmark = try c.decode(Bookmark.self, forKey: .bookmark)
+        trashThumbnailRelativePath = try c.decodeIfPresent(String.self, forKey: .trashThumbnailRelativePath)
+        trashOriginalRelativePath = try c.decodeIfPresent(String.self, forKey: .trashOriginalRelativePath)
+        trashCarouselRelativePaths = try c.decodeIfPresent([String].self, forKey: .trashCarouselRelativePaths)
+    }
 }
 
 /// Payload stored alongside a trashed note.
