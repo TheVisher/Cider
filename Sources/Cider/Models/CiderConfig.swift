@@ -303,7 +303,7 @@ struct CiderConfig: Codable {
             captureToastPosition: .topCenterScreen,
             undoToastPosition: .bottomRightPanel,
             homeSort: .createdDescending,
-            homeEntityFilter: Set(LibraryEntityType.allCases),
+            homeEntityFilter: LibraryEntityType.activeCases,
             enableSpotlightIndexing: false,
             enableSoundEffects: false,
             enableAutoTagging: true,
@@ -502,9 +502,7 @@ struct CiderConfig: Codable {
         var decodedFilter = try container.decodeIfPresent(
             Set<LibraryEntityType>.self,
             forKey: .homeEntityFilter
-        ) ?? Set(LibraryEntityType.allCases)
-        // Ensure new entity types are included in existing configs
-        decodedFilter.insert(.vaultFile)
+        ) ?? LibraryEntityType.activeCases
         homeEntityFilter = decodedFilter
         enableSpotlightIndexing = try container.decodeIfPresent(
             Bool.self,
@@ -590,7 +588,7 @@ struct CiderConfig: Codable {
         captureToastPosition: ToastPosition = .topCenterScreen,
         undoToastPosition: ToastPosition = .bottomRightPanel,
         homeSort: LibrarySortMode = .createdDescending,
-        homeEntityFilter: Set<LibraryEntityType> = Set(LibraryEntityType.allCases),
+        homeEntityFilter: Set<LibraryEntityType> = LibraryEntityType.activeCases,
         enableSpotlightIndexing: Bool = false,
         enableSoundEffects: Bool = false,
         enableAutoTagging: Bool = true,

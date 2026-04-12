@@ -244,7 +244,7 @@ struct ViewOptionsDropdown<Mode: DisplayModeOption>: View {
 
             let columns = [GridItem(.flexible(), spacing: Spacing.xs), GridItem(.flexible(), spacing: Spacing.xs)]
             LazyVGrid(columns: columns, spacing: Spacing.xs) {
-                ForEach(LibraryEntityType.allCases, id: \.self) { type in
+                ForEach(Array(LibraryEntityType.activeCases).sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { type in
                     EntityFilterChip(
                         type: type,
                         isOn: binding.wrappedValue.contains(type),

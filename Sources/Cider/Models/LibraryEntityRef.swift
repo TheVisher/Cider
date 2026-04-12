@@ -6,9 +6,13 @@ enum LibraryEntityType: String, Codable, CaseIterable, Hashable {
     case dateCard
     case contact
     case todo
-    case externalFile
+    case externalFile // Legacy — kept for backward-compat decoding only
     case vaultFile
-    case session
+    case session      // Legacy — kept for backward-compat decoding only
+
+    /// Active entity types — excludes legacy cases (externalFile, session).
+    /// Use this instead of `allCases` for UI filters, defaults, and new view creation.
+    static let activeCases: Set<LibraryEntityType> = [.bookmark, .note, .dateCard, .contact, .todo, .vaultFile]
 }
 
 struct LibraryEntityRef: Identifiable, Codable, Hashable {

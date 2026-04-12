@@ -335,7 +335,7 @@ struct TagDetailView: View {
                 continueSectionCollapsed: .constant(true),
                 selectedItemIDs: $selectedItemIDs,
                 sortMode: .constant(.createdDescending),
-                entityFilter: .constant(Set(LibraryEntityType.allCases)),
+                entityFilter: .constant(LibraryEntityType.activeCases),
                 onOpenNote: onOpenNote,
                 onShowBookmarkDetails: onShowBookmarkDetails,
                 onEditDateCard: onEditDateCard,

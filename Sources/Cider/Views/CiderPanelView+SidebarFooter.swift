@@ -333,7 +333,7 @@ extension CiderPanelView {
     func entityFilterBinding(for savedViewID: UUID) -> Binding<Set<LibraryEntityType>> {
         Binding(
             get: {
-                savedViewStorage.savedView(for: savedViewID)?.filterSpec.entityTypes ?? Set(LibraryEntityType.allCases)
+                savedViewStorage.savedView(for: savedViewID)?.filterSpec.entityTypes ?? LibraryEntityType.activeCases
             },
             set: { newValue in
                 guard var savedView = savedViewStorage.savedView(for: savedViewID) else { return }

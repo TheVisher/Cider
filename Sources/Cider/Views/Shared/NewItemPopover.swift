@@ -802,11 +802,10 @@ private struct TabCreationForm: View {
     let onCreate: (String, Set<LibraryEntityType>) -> Void
 
     @State private var name = ""
-    @State private var selectedTypes: Set<LibraryEntityType> = Set(LibraryEntityType.allCases)
+    @State private var selectedTypes: Set<LibraryEntityType> = LibraryEntityType.activeCases
     @State private var errorMessage = ""
 
-    // Entity types shown as content filter pills (excludes externalFile — edge case)
-    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact, .todo]
+    private let filterableTypes: [LibraryEntityType] = [.bookmark, .note, .dateCard, .contact, .todo, .vaultFile]
 
     var body: some View {
         VStack(spacing: Spacing.sm) {
@@ -881,9 +880,8 @@ private struct TabCreationForm: View {
         case .dateCard:     return "Events"
         case .contact:      return "Contacts"
         case .todo:         return "Todos"
-        case .externalFile: return "Files"
         case .vaultFile: return "Files"
-        case .session: return "Sessions"
+        case .externalFile, .session: return "" // Legacy — not shown
         }
     }
 
@@ -893,7 +891,7 @@ private struct TabCreationForm: View {
             errorMessage = "Name is required"
             return
         }
-        let types = selectedTypes.isEmpty ? Set(LibraryEntityType.allCases) : selectedTypes
+        let types = selectedTypes.isEmpty ? LibraryEntityType.activeCases : selectedTypes
         onCreate(trimmedName, types)
     }
 }

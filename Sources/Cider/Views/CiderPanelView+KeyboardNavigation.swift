@@ -162,7 +162,7 @@ extension CiderPanelView {
             if let savedView = savedViewStorage.savedView(for: savedViewID), !savedView.isBlank, !savedView.isOnboarding {
                 let filterSpec = SavedViewFilterSpec(
                     entityTypes: savedView.filterSpec.entityTypes.isEmpty
-                        ? Set(LibraryEntityType.allCases) : savedView.filterSpec.entityTypes,
+                        ? LibraryEntityType.activeCases : savedView.filterSpec.entityTypes,
                     labelIDs: savedView.filterSpec.labelIDs,
                     includeCompleted: true,
                     textQuery: debouncedSearchText,
