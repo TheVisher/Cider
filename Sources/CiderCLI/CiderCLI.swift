@@ -3109,7 +3109,24 @@ struct CiderCLI {
             }
 
         case "add-daily":
-            let observation = args.joined(separator: " ")
+            // Strip flags (--json, --vault <path>, etc.) from observation text
+            var textParts: [String] = []
+            var i = 0
+            while i < args.count {
+                if args[i].hasPrefix("--") {
+                    // Skip flag; if it takes a value (--vault, --date), skip that too
+                    let flagsWithValues: Set<String> = ["--vault", "--date", "--limit"]
+                    if flagsWithValues.contains(args[i]), i + 1 < args.count {
+                        i += 2
+                    } else {
+                        i += 1
+                    }
+                } else {
+                    textParts.append(args[i])
+                    i += 1
+                }
+            }
+            let observation = textParts.joined(separator: " ")
             guard !observation.isEmpty else {
                 print("Error: Usage: cider-cli memory add-daily <observation>")
                 return
