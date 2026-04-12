@@ -228,18 +228,25 @@ final class TrashStorage {
     func restoreNote(_ trashItem: TrashItem) {
         guard let payload = trashItem.notePayload else { return }
 
-        let inboxNotesDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
-        // Trash is stored in Inbox/Notes/.trash/
-        let trashDir = inboxNotesDir.appendingPathComponent(trashDirName)
         let fm = FileManager.default
 
-        // Also check legacy trash location (.cider/notes/.trash/)
-        let legacyTrashDir = StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName)
-
-        var srcURL = trashDir.appendingPathComponent(payload.noteFilename)
-        if !fm.fileExists(atPath: srcURL.path) {
-            srcURL = legacyTrashDir.appendingPathComponent(payload.noteFilename)
+        // Probe trash dirs: per-folder (if note had a folder), inbox, legacy
+        var candidateTrashDirs: [URL] = []
+        if let folderID = payload.folderID,
+           let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+            let folderDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(vaultFolder.relativePath)
+            candidateTrashDirs.append(folderDir.appendingPathComponent(trashDirName))
         }
+        candidateTrashDirs.append(StoragePaths.cachedInboxSubdirectoryURL(for: .notes).appendingPathComponent(trashDirName))
+        candidateTrashDirs.append(StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName))
+
+        let trashDir: URL
+        if let found = candidateTrashDirs.first(where: { fm.fileExists(atPath: $0.appendingPathComponent(payload.noteFilename).path) }) {
+            trashDir = found
+        } else {
+            trashDir = candidateTrashDirs.first ?? StoragePaths.directoryURL(for: .notes).appendingPathComponent(trashDirName)
+        }
+        let srcURL = trashDir.appendingPathComponent(payload.noteFilename)
 
         // Determine destination: vault folder if the note had one, otherwise Inbox/Notes/
         let destDir: URL
@@ -248,7 +255,7 @@ final class TrashStorage {
             destDir = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(vaultFolder.relativePath)
             try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
         } else {
-            destDir = inboxNotesDir
+            destDir = StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
             try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
         }
 
@@ -877,6 +884,11 @@ final class TrashStorage {
                 }
                 if let relPath = payload.trashOriginalRelativePath {
                     try? fm.removeItem(at: trashDir.appendingPathComponent(relPath))
+                }
+                if let carouselPaths = payload.trashCarouselRelativePaths {
+                    for relPath in carouselPaths {
+                        try? fm.removeItem(at: trashDir.appendingPathComponent(relPath))
+                    }
                 }
             }
         case .note:
