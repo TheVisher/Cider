@@ -211,6 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             // Start reconciler (handles notifications + agent outbox on launch, wake, day rollover, tz change)
             ReminderReconciler.shared.start()
+
+            // Register agent tools and enable orchestrator for AI panel
+            await AgentToolRegistration.registerAll()
+            AIAssistantViewModel.shared.enableOrchestrator()
+
             // Re-reconcile on vault changes (debounced)
             self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards
                 .debounce(for: .seconds(2), scheduler: RunLoop.main)

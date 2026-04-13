@@ -24,8 +24,25 @@ final class AIAssistantViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
 
-    var isAvailable: Bool { provider.isAvailable }
-    var providerName: String { provider.displayName }
+    /// When true, messages are routed through AgentOrchestrator instead of
+    /// the legacy AIAssistantProvider path.
+    private var useOrchestrator = false
+
+    /// Thread ID for the current orchestrator conversation.
+    private var orchestratorThreadID: UUID?
+
+    var isAvailable: Bool {
+        if useOrchestrator {
+            return true // Orchestrator availability checked at message time
+        }
+        return provider.isAvailable
+    }
+    var providerName: String {
+        if useOrchestrator, let agentProvider = currentAgentProvider {
+            return agentProvider.displayName
+        }
+        return provider.displayName
+    }
 
     /// Whether the local MLX model is active.
     var isUsingLocalModel: Bool { provider is MLXProvider }
@@ -37,6 +54,19 @@ final class AIAssistantViewModel: ObservableObject {
 
     private let foundationModelsProvider = FoundationModelsProvider()
     private let mlxProvider = MLXProvider()
+
+    /// Agent provider adapters for the orchestrator path.
+    private let foundationModelsAgentProvider = FoundationModelsAgentProvider()
+    private let mlxAgentProvider = MLXAgentProvider()
+
+    /// The currently active agent provider (for orchestrator mode).
+    private var currentAgentProvider: (any AgentProvider)? {
+        guard useOrchestrator else { return nil }
+        if MLXModelManager.shared.isLocalModelEnabled {
+            return mlxAgentProvider
+        }
+        return foundationModelsAgentProvider
+    }
 
     init(provider: AIAssistantProvider? = nil) {
         if let provider {
@@ -61,6 +91,25 @@ final class AIAssistantViewModel: ObservableObject {
             MLXModelManager.shared.unloadModel()
         }
         MLXModelManager.shared.isLocalModelEnabled = useLocalModel
+
+        // Update orchestrator provider if active
+        if useOrchestrator, let agentProvider = currentAgentProvider {
+            Task {
+                await AgentOrchestrator.shared.setProvider(agentProvider)
+            }
+        }
+    }
+
+    /// Enable the orchestrator-backed code path. Called once tools are registered.
+    func enableOrchestrator() {
+        useOrchestrator = true
+        orchestratorThreadID = currentConversationID ?? UUID()
+        if let agentProvider = currentAgentProvider {
+            Task {
+                await AgentOrchestrator.shared.setProvider(agentProvider)
+            }
+        }
+        logger.info("Orchestrator mode enabled")
     }
 
     /// Load the most recent conversation on startup.
@@ -92,6 +141,62 @@ final class AIAssistantViewModel: ObservableObject {
 
         startTypewriterLoop()
 
+        if useOrchestrator {
+            sendViaOrchestrator(trimmed)
+        } else {
+            sendViaLegacyProvider()
+        }
+    }
+
+    /// Route message through the AgentOrchestrator, streaming text back for typewriter.
+    private func sendViaOrchestrator(_ text: String) {
+        if orchestratorThreadID == nil {
+            orchestratorThreadID = currentConversationID ?? UUID()
+        }
+
+        let threadID = orchestratorThreadID!
+
+        // Build AgentContext from the current AIAssistantContext
+        let agentContext = buildAgentContext()
+
+        streamTask = Task {
+            do {
+                let envelope = AgentEnvelope.uiPanel(
+                    text: text,
+                    threadID: threadID,
+                    context: agentContext
+                )
+                let response = try await AgentOrchestrator.shared.handleMessage(envelope)
+
+                // Stream the full response through typewriter
+                streamingText = response.text
+                await finishTypewriter()
+
+                let assistantMessage = AIAssistantMessage(role: .assistant, content: response.text)
+                messages.append(assistantMessage)
+
+                if !response.toolCallsMade.isEmpty {
+                    logger.info("Orchestrator made \(response.toolCallsMade.count) tool call(s)")
+                }
+            } catch {
+                logger.error("Orchestrator error: \(error.localizedDescription, privacy: .public)")
+                await finishTypewriter()
+                let errorMessage = AIAssistantMessage(
+                    role: .assistant,
+                    content: "Error: \(error.localizedDescription)"
+                )
+                messages.append(errorMessage)
+            }
+
+            streamingText = ""
+            displayedStreamingText = ""
+            isStreaming = false
+            saveCurrentConversation()
+        }
+    }
+
+    /// Original provider-based send path (streaming text chunks).
+    private func sendViaLegacyProvider() {
         streamTask = Task {
             let stream = provider.streamResponse(messages: messages, context: context)
             do {
@@ -124,6 +229,37 @@ final class AIAssistantViewModel: ObservableObject {
             // Auto-save after each exchange
             saveCurrentConversation()
         }
+    }
+
+    /// Convert the current AIAssistantContext to an AgentContext for the orchestrator.
+    private func buildAgentContext() -> AgentContext {
+        var agentCtx = AgentContext.empty
+
+        if let bookmark = context.currentBookmark {
+            agentCtx.currentBookmark = .init(
+                title: bookmark.title,
+                url: bookmark.url,
+                summary: bookmark.summary
+            )
+        }
+        if let note = context.currentNote {
+            agentCtx.currentNote = .init(title: note.title, excerpt: note.excerpt)
+        }
+        if let folder = context.currentFolder {
+            agentCtx.currentFolder = .init(name: folder.name, itemCount: folder.itemCount)
+        }
+        if let event = context.currentEvent {
+            agentCtx.currentEvent = .init(title: event.title, date: event.date, location: event.location)
+        }
+        if let contact = context.currentContact {
+            agentCtx.currentContact = .init(name: contact.name, email: contact.email)
+        }
+        if let todo = context.currentTodo {
+            agentCtx.currentTodo = .init(title: todo.title, status: todo.status)
+        }
+        agentCtx.selectedItemCount = context.selectedItemCount
+
+        return agentCtx
     }
 
     // MARK: - Typewriter Effect
@@ -184,6 +320,7 @@ final class AIAssistantViewModel: ObservableObject {
         stopStreaming()
         messages.removeAll()
         currentConversationID = nil
+        orchestratorThreadID = nil
         provider.resetSession()
     }
 
@@ -193,6 +330,7 @@ final class AIAssistantViewModel: ObservableObject {
         stopStreaming()
         messages.removeAll()
         currentConversationID = nil
+        orchestratorThreadID = nil
         provider.resetSession()
     }
 
