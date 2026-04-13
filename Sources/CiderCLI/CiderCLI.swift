@@ -1066,10 +1066,42 @@ struct CiderCLI {
                 print("Error: Failed to create event (disk write failed)")
                 return
             }
+            // Recurrence rule
+            var needsUpdate = false
+            if let freqStr = parseFlag("--frequency", from: args) {
+                let freq: DateCardRecurrenceFrequency
+                switch freqStr.lowercased() {
+                case "daily": freq = .daily
+                case "weekly": freq = .weekly
+                case "monthly": freq = .monthly
+                case "yearly": freq = .yearly
+                default:
+                    print("Error: Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.")
+                    return
+                }
+                let interval = parseFlag("--interval", from: args).flatMap(Int.init) ?? 1
+                let endDate = parseFlag("--end-date", from: args).flatMap { dateFormatter.date(from: $0) }
+                card.recurrenceRule = DateCardRecurrenceRule(frequency: freq, interval: interval, endDate: endDate)
+                needsUpdate = true
+            }
+            // Reminder rules (multiple --remind flags)
+            let remindValues = parseFlagAll("--remind", from: args)
+            for value in remindValues {
+                guard let minutes = Int(value) else {
+                    print("Error: --remind requires an integer (minutes before event). Got: '\(value)'")
+                    return
+                }
+                card.rules.append(SurfacingRule(
+                    type: .remindBeforeMinutes,
+                    integerValue: minutes
+                ))
+                needsUpdate = true
+            }
             if let targetFolder {
                 card.folderID = targetFolder.id
-                _ = storage.updateDateCard(card)
+                needsUpdate = true
             }
+            if needsUpdate { _ = storage.updateDateCard(card) }
             print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
 
         case "delete", "rm":
@@ -1098,6 +1130,44 @@ struct CiderCLI {
                     card.startAt = date; changed = true
                 }
                 if let loc = parseFlag("--location", from: args) { card.location = loc; changed = true }
+                // Reminder rules: --remind replaces existing, --clear-reminders removes all
+                if args.contains("--clear-reminders") {
+                    card.rules.removeAll { $0.type == .remindBeforeMinutes }
+                    changed = true
+                }
+                let remindValues = parseFlagAll("--remind", from: args)
+                if !remindValues.isEmpty {
+                    // Replace existing reminder rules
+                    card.rules.removeAll { $0.type == .remindBeforeMinutes }
+                    for value in remindValues {
+                        guard let minutes = Int(value) else {
+                            print("Error: --remind requires an integer (minutes before event). Got: '\(value)'")
+                            return
+                        }
+                        card.rules.append(SurfacingRule(
+                            type: .remindBeforeMinutes,
+                            integerValue: minutes
+                        ))
+                    }
+                    changed = true
+                }
+                // Recurrence rule on update
+                if let freqStr = parseFlag("--frequency", from: args) {
+                    let freq: DateCardRecurrenceFrequency
+                    switch freqStr.lowercased() {
+                    case "daily": freq = .daily
+                    case "weekly": freq = .weekly
+                    case "monthly": freq = .monthly
+                    case "yearly": freq = .yearly
+                    default:
+                        print("Error: Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.")
+                        return
+                    }
+                    let interval = parseFlag("--interval", from: args).flatMap(Int.init) ?? 1
+                    let endDate = parseFlag("--end-date", from: args).flatMap { dateFormatter.date(from: $0) }
+                    card.recurrenceRule = DateCardRecurrenceRule(frequency: freq, interval: interval, endDate: endDate)
+                    changed = true
+                }
                 if changed {
                     _ = storage.updateDateCard(card)
                     print("Updated: \(card.title) (\(card.id.uuidString.prefix(8)))")
@@ -1184,6 +1254,7 @@ struct CiderCLI {
                 localDF.timeZone = .current
                 if let birthday = localDF.date(from: birthdayStr) {
                     contact.birthday = birthday; needsUpdate = true
+                    LibraryItemEditor.createOrUpdateBirthdayDateCard(for: contact, birthday: birthday)
                 }
             }
             if let targetFolder {
@@ -1225,6 +1296,7 @@ struct CiderCLI {
                     localDF.timeZone = .current
                     if let date = localDF.date(from: bday) {
                         contact.birthday = date; changed = true
+                        LibraryItemEditor.createOrUpdateBirthdayDateCard(for: contact, birthday: date)
                     }
                 }
                 if changed {
