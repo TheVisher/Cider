@@ -128,37 +128,37 @@ actor AgentOrchestrator {
     private let wakeJobStore = AgentWakeJobStore.shared
 
     /// Process an inbound message from any channel.
-    func handleMessage(
-        _ text: String,
-        threadID: UUID,
-        channel: AgentChannel,
-        context: AgentContext = .empty
-    ) async throws {
+    /// The envelope carries sender identity, channel metadata, and the message text.
+    func handleMessage(_ envelope: AgentEnvelope) async throws {
         // Check sender authorization for this channel
-        guard channelPolicy.isAuthorized(channel: channel) else {
+        guard channelPolicy.isAuthorized(envelope: envelope) else {
+            auditLog.record(.unauthorized(envelope: envelope))
             throw AgentError.unauthorized
         }
 
-        let thread = getOrCreateThread(id: threadID, channel: channel)
-        thread.append(.user(text))
+        let thread = getOrCreateThread(id: envelope.threadID, channel: envelope.channel)
+        thread.append(.user(envelope.text))
 
         // Get tools allowed for this channel
-        let allowedTools = channelPolicy.allowedTools(for: channel)
+        let allowedTools = channelPolicy.allowedTools(for: envelope.channel)
+        let allowedToolNames = Set(allowedTools.map(\.name))
 
         // Build messages for provider
-        let systemPrompt = buildSystemPrompt(thread: thread, context: context)
+        let systemPrompt = buildSystemPrompt(thread: thread, context: envelope.context)
         let messages = thread.messagesForProvider()
 
-        // Run the orchestrator-owned tool loop
+        // Run the orchestrator-owned tool loop (passes allowed names for enforcement)
         let response = try await runConversationLoop(
             systemPrompt: systemPrompt,
             messages: messages,
-            allowedTools: allowedTools
+            allowedTools: allowedTools,
+            allowedToolNames: allowedToolNames
         )
 
         // Deliver response to the originating channel
         thread.append(.assistant(response.text))
-        try await deliver(response.text, to: channel, threadID: threadID)
+        try await deliver(response.text, to: envelope.channel, threadID: envelope.threadID)
+        auditLog.record(.messageHandled(envelope: envelope, toolCalls: response.toolCallsMade))
         thread.save()
     }
 
@@ -200,13 +200,14 @@ actor AgentOrchestrator {
         systemPrompt: String,
         messages: [AgentMessage],
         allowedTools: [AgentToolDefinition],
+        allowedToolNames: Set<String>,
         maxRounds: Int = 5
     ) async throws -> AgentResponse {
         var conversationMessages = messages
         var allToolCalls: [AgentToolCall] = []
 
         for _ in 0..<maxRounds {
-            let providerResponse = try await provider.respond(
+            let providerResponse = try await provider.generate(
                 systemPrompt: systemPrompt,
                 messages: conversationMessages,
                 tools: allowedTools
@@ -217,9 +218,40 @@ actor AgentOrchestrator {
                 return AgentResponse(text: providerResponse.text, toolCallsMade: allToolCalls)
             }
 
-            // Execute requested tool calls
+            // Execute requested tool calls — ENFORCE permissions at execution time
             for request in providerResponse.toolRequests {
-                let result = await toolRegistry.execute(
+                // Guard: reject tool calls not in the allowed set for this channel.
+                // This is the execution-time enforcement — the provider only sees
+                // allowed tools in its prompt, but a misbehaving model could still
+                // emit a forbidden tool name. This guard catches that.
+                guard allowedToolNames.contains(request.name) else {
+                    let denial = "Tool '\(request.name)' is not permitted on this channel."
+                    auditLog.record(.toolDenied(name: request.name, channel: currentChannel))
+                    conversationMessages.append(.toolResult(name: request.name, result: denial))
+                    continue
+                }
+
+                // Check if tool requires confirmation for this channel
+                if let tool = allowedTools.first(where: { $0.name == request.name }),
+                   tool.requiresConfirmation {
+                    // Create a pending confirmation token — user must approve
+                    let token = confirmationStore.create(
+                        toolName: request.name,
+                        arguments: request.arguments,
+                        threadID: currentThreadID,
+                        expiresIn: 300  // 5 minute TTL
+                    )
+                    let confirmMsg = "I'd like to \(request.name). Reply 'yes' to confirm, or 'no' to cancel. (Expires in 5 min)"
+                    conversationMessages.append(.toolResult(name: request.name, result: "AWAITING_CONFIRMATION:\(token.id)"))
+                    // Response will include the confirmation request
+                    return AgentResponse(
+                        text: confirmMsg,
+                        toolCallsMade: allToolCalls,
+                        pendingConfirmation: token
+                    )
+                }
+
+                let result = try await toolRegistry.execute(
                     name: request.name,
                     arguments: request.arguments
                 )
@@ -270,6 +302,10 @@ enum WakeJobStatus: String, Codable {
 }
 ```
 
+### Delivery guarantee: at-least-once
+
+Wake jobs provide **at-least-once** delivery, not exactly-once. If Cider crashes after sending the iMessage but before marking the job as delivered, the reminder will be sent again on retry. This is the correct tradeoff for reminders — receiving a duplicate is better than missing one entirely. The deduplication key prevents creating multiple jobs for the same reminder, but does not prevent re-delivery of an already-sent message after a crash.
+
 ### Job lifecycle
 
 ```
@@ -279,8 +315,30 @@ enum WakeJobStatus: String, Codable {
 4. Orchestrator attempts delivery (provider → iMessage send)
 5a. Success → status = .delivered, threadID stored for reply routing
 5b. Failure → status = .failed, error logged, attemptCount++
-6. On next reconciliation, retryPendingWakeJobs() picks up failed jobs
-7. After N failures or past TTL → status = .expired (falls back to local notification)
+6. Retry scheduler fires with exponential backoff (30s, 1m, 2m, 5m, 10m)
+7. Reconciliation events (launch, wake, day rollover) also trigger retryPendingWakeJobs()
+8. After maxRetries (5) or past TTL (1 hour) → status = .expired, falls back to local notification
+```
+
+### Retry scheduler
+
+Failed wake jobs are retried on two triggers:
+
+1. **Backoff timer** — After a failure, schedule a retry with exponential backoff + jitter. This handles transient outages (provider down, iMessage send failure) while the app is running.
+2. **Reconciliation events** — Launch, wake-from-sleep, day rollover also sweep pending/failed jobs. This handles cases where the app was closed or sleeping during the backoff window.
+
+```swift
+private func scheduleRetry(for job: AgentWakeJob) {
+    let baseDelay: TimeInterval = 30  // 30 seconds
+    let delay = baseDelay * pow(2.0, Double(min(job.attemptCount, 5)))
+    let jitter = TimeInterval.random(in: 0...(delay * 0.2))
+
+    Task {
+        try? await Task.sleep(for: .seconds(delay + jitter))
+        guard !Task.isCancelled else { return }
+        await retryJob(job.id)
+    }
+}
 ```
 
 ### Deduplication
@@ -322,6 +380,39 @@ enum AgentChannel: String, Codable {
     case iMessage      // User texted the agent's iMessage address
     case system        // Cider triggered the agent internally (reminders, events)
     case notification   // User replied to a notification action
+}
+
+/// Every inbound message is wrapped in an envelope that carries sender identity,
+/// channel metadata, and routing info. This is how the orchestrator knows WHO
+/// sent the message and whether they're authorized.
+struct AgentEnvelope {
+    let text: String
+    let threadID: UUID
+    let channel: AgentChannel
+    let context: AgentContext
+
+    // Sender identity (normalized)
+    let senderID: String?           // Phone number, Apple ID, or nil for local/system
+    let senderDisplayName: String?  // For logging/audit
+
+    // Channel-specific metadata
+    let iMessageChatID: String?     // chat.db row ID for reply routing
+    let notificationRequestID: String?  // For notification reply routing
+
+    static func uiPanel(text: String, threadID: UUID, context: AgentContext) -> AgentEnvelope {
+        AgentEnvelope(text: text, threadID: threadID, channel: .uiPanel, context: context,
+                      senderID: nil, senderDisplayName: nil, iMessageChatID: nil, notificationRequestID: nil)
+    }
+
+    static func iMessage(text: String, threadID: UUID, senderID: String, senderName: String?, chatID: String) -> AgentEnvelope {
+        AgentEnvelope(text: text, threadID: threadID, channel: .iMessage, context: .empty,
+                      senderID: senderID, senderDisplayName: senderName, iMessageChatID: chatID, notificationRequestID: nil)
+    }
+
+    static func system(text: String, threadID: UUID, context: AgentContext) -> AgentEnvelope {
+        AgentEnvelope(text: text, threadID: threadID, channel: .system, context: context,
+                      senderID: nil, senderDisplayName: nil, iMessageChatID: nil, notificationRequestID: nil)
+    }
 }
 ```
 
@@ -417,14 +508,25 @@ struct AgentChannelPolicy {
         .iMessage: .standard       // Remote — read + safe writes, no delete/move without confirm
     ]
 
-    func isAuthorized(channel: AgentChannel) -> Bool {
-        switch channel {
+    func isAuthorized(envelope: AgentEnvelope) -> Bool {
+        switch envelope.channel {
         case .iMessage:
-            // Check sender against allowlist
-            return true // TODO: implement sender extraction + check
-        default:
-            return true
+            // Sender must be in allowlist. Normalize handles (strip +, lowercase).
+            guard let senderID = envelope.senderID else { return false }
+            let normalized = normalizeHandle(senderID)
+            return iMessageAllowlist.contains(normalized)
+        case .uiPanel, .system:
+            return true  // Local user / Cider-initiated — always authorized
+        case .notification:
+            return true  // Notification replies come from the device owner
         }
+    }
+
+    /// Normalize phone numbers and Apple IDs for consistent matching.
+    /// "+1 (425) 244-3451" → "14252443451", "user@icloud.com" → "user@icloud.com"
+    private func normalizeHandle(_ handle: String) -> String {
+        if handle.contains("@") { return handle.lowercased() }
+        return handle.filter(\.isNumber)
     }
 
     func allowedTools(for channel: AgentChannel) -> [AgentToolDefinition] {
@@ -779,7 +881,22 @@ Adding a new tool = one `AgentToolRegistry.shared.register(...)` call.
 
 **Files:** ~2 new, ~2 modified. Reminders become durable.
 
-### Phase 3: Add API Providers + Settings
+### Phase 3: iMessage Channel + Channel Security
+
+**Goal:** The agent can send and receive iMessages. Senders are allowlisted. Tools are permission-gated per channel. This is the riskiest surface and the one needed for reminders — build it before adding more providers.
+
+- Implement `iMessageBridge` — AppleScript outbound, chat.db FSEvents inbound
+- Add `AgentChannelPolicy` with allowlist, per-channel tool permissions, and sender normalization
+- Add `AgentEnvelope` as the inbound message wrapper with sender identity
+- Add per-tool categories and `requiresConfirmation` metadata with confirmation token flow
+- Add iMessage sender configuration in settings (allowlist management)
+- Add audit logging for all remote actions and allowlist decisions
+- Wire inbound messages → orchestrator → outbound reply
+- Reminder wake jobs now deliver via iMessage through the orchestrator
+
+**Files:** ~5 new, ~3 modified.
+
+### Phase 4: Add API Providers + Settings
 
 **Goal:** Users can choose Claude, OpenAI, or Gemini as their AI backend. Per-provider config.
 
@@ -791,19 +908,6 @@ Adding a new tool = one `AgentToolRegistry.shared.register(...)` call.
 - Add token usage tracking and cost display for API providers
 
 **Files:** ~3 new provider files, ~3 modified (config, settings UI, provider picker).
-
-### Phase 4: iMessage Channel + Channel Security
-
-**Goal:** The agent can send and receive iMessages. Senders are allowlisted. Tools are permission-gated per channel.
-
-- Implement `iMessageBridge` — AppleScript outbound, chat.db FSEvents inbound
-- Add `AgentChannelPolicy` with allowlist and per-channel tool permissions
-- Add per-tool categories and `requiresConfirmation` metadata
-- Add iMessage sender configuration in settings (allowlist management)
-- Wire inbound messages → orchestrator → outbound reply
-- Reminder wake jobs now deliver via iMessage through the orchestrator
-
-**Files:** ~4 new, ~3 modified.
 
 ### Phase 5: Advanced Features
 
