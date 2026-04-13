@@ -262,15 +262,9 @@ extension AppDelegate {
             width: minimumWidth,
             height: currentFrame.height
         )
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            panel.setFrame(newFrame, display: true)
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.3
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
-            panel.animator().setFrame(newFrame, display: true)
-        }
+        // Expand instantly — the slideout's SwiftUI transition provides the animation.
+        // Running both simultaneously caused competing animations and visual jank.
+        panel.setFrame(newFrame, display: true)
     }
 
     func restoreCiderPanelAfterSlideOut() {
