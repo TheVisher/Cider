@@ -61,6 +61,10 @@ enum MLXToolExecutor {
             return renameFolder(arguments)
         case "unfileItems":
             return unfileItems(arguments)
+        case "createReminder":
+            return createReminder(arguments)
+        case "cancelReminder":
+            return cancelReminder(arguments)
 
         // MARK: - Special
 
@@ -743,5 +747,99 @@ enum MLXToolExecutor {
 
         if unfiled.isEmpty { return "No filed items found matching \"\(query)\"." }
         return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
+    }
+
+    // MARK: - Create Reminder
+
+    private static func createReminder(_ args: [String: Any]) -> String {
+        let title = string("title", from: args)
+        guard !title.isEmpty else {
+            return "Reminder title is required."
+        }
+        let dateStr = string("date", from: args)
+        guard !dateStr.isEmpty else {
+            return "Date is required (yyyy-MM-dd format)."
+        }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = .current
+        guard let date = df.date(from: dateStr) else {
+            return "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01')."
+        }
+
+        let storage = DateCardStorage.shared
+        var card = storage.createDateCard(title: title, startAt: date)
+        guard storage.dateCards.contains(where: { $0.id == card.id }) else {
+            return "Failed to create reminder (disk write failed)."
+        }
+
+        card.allDay = true
+
+        let loc = string("location", from: args)
+        if !loc.isEmpty { card.location = loc }
+        let det = string("details", from: args)
+        if !det.isEmpty { card.details = det }
+
+        // Recurrence
+        let freqStr = string("frequency", from: args).lowercased()
+        if !freqStr.isEmpty {
+            let freq: DateCardRecurrenceFrequency
+            switch freqStr {
+            case "daily": freq = .daily
+            case "weekly": freq = .weekly
+            case "monthly": freq = .monthly
+            case "yearly": freq = .yearly
+            default: return "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly."
+            }
+            card.recurrenceRule = DateCardRecurrenceRule(frequency: freq)
+        }
+
+        // Reminder offsets
+        let firstOffset = integer("remindMinutesBefore", from: args, default: 15)
+        card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: firstOffset))
+        if let second = args["secondRemindMinutesBefore"] as? Int {
+            card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: second))
+        }
+
+        _ = storage.updateDateCard(card)
+        ReminderReconciler.shared.reconcile()
+
+        let recurring = card.recurrenceRule != nil ? " (recurring \(card.recurrenceRule!.frequency.rawValue))" : ""
+        return "Created reminder: \"\(title)\" on \(dateStr)\(recurring)."
+    }
+
+    // MARK: - Cancel Reminder
+
+    private static func cancelReminder(_ args: [String: Any]) -> String {
+        let query = string("title", from: args).lowercased()
+        guard !query.isEmpty else {
+            return "Reminder title is required."
+        }
+
+        let storage = DateCardStorage.shared
+        guard var card = storage.dateCards.first(where: {
+            $0.title.lowercased().contains(query)
+        }) else {
+            return "No reminder found matching \"\(query)\"."
+        }
+
+        let deleteEntirely = args["deleteEntirely"] as? Bool ?? false
+
+        if deleteEntirely {
+            if let trashItem = storage.deleteDateCard(card.id) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                DateCardNotificationService.shared.cancelNotification(for: card.id)
+                return "Deleted reminder: \"\(card.title)\" (moved to trash)."
+            }
+            return "Failed to delete reminder."
+        }
+
+        for i in card.rules.indices where card.rules[i].type == .remindBeforeMinutes {
+            card.rules[i].isEnabled = false
+        }
+        _ = storage.updateDateCard(card)
+        DateCardNotificationService.shared.cancelNotification(for: card.id)
+        return "Disabled reminders for \"\(card.title)\". The event still exists but won't send notifications."
     }
 }

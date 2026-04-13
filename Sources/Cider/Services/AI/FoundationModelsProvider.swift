@@ -42,7 +42,9 @@ final class FoundationModelsProvider: AIAssistantProvider {
         GetCurrentItemTool(),
         DeleteItemTool(),
         RenameFolderTool(),
-        UnfileItemsTool()
+        UnfileItemsTool(),
+        CreateReminderTool(),
+        CancelReminderTool()
     ]
 
     var isAvailable: Bool {

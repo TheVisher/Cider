@@ -191,6 +191,29 @@ enum MLXToolDefinitions {
                 ],
                 required: ["searchQuery"]
             ),
+            tool(
+                name: "createReminder",
+                description: "Create a reminder or recurring event. Can be one-time or recurring (daily, weekly, monthly, yearly). Specify when to be reminded with minute offsets.",
+                properties: [
+                    "title": prop("string", "Title of the reminder"),
+                    "date": prop("string", "Date in yyyy-MM-dd format"),
+                    "frequency": prop("string", "Recurrence: daily, weekly, monthly, yearly, or empty for one-time"),
+                    "remindMinutesBefore": prop("integer", "Minutes before event to remind (1440=1day, 60=1hr, 0=at-time). Default 15."),
+                    "secondRemindMinutesBefore": prop("integer", "Optional second reminder offset in minutes"),
+                    "location": prop("string", "Optional location"),
+                    "details": prop("string", "Optional notes or details")
+                ],
+                required: ["title", "date"]
+            ),
+            tool(
+                name: "cancelReminder",
+                description: "Cancel a reminder by title. Can delete the entire event or just disable its notification rules.",
+                properties: [
+                    "title": prop("string", "Title or partial title of the reminder to cancel"),
+                    "deleteEntirely": prop("boolean", "If true, delete the event. If false, just disable notifications. Default false.")
+                ],
+                required: ["title"]
+            ),
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: tools, options: [.sortedKeys]),
