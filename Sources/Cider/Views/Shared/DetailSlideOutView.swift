@@ -183,19 +183,20 @@ struct DetailSlideOutView: View {
                 let isReaderUnavailable = bm.readerUnavailable == true
                 let restored = bm.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
                 heroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
-                // Eagerly preload for the new bookmark
+                // Defer preload until after slideout animation settles
                 if bm.hasURL, let url = bm.url {
-                    webViewStore.preload(url: url, bookmarkID: bm.id)
+                    let bookmarkID = bm.id
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        guard !Task.isCancelled else { return }
+                        webViewStore.preload(url: url, bookmarkID: bookmarkID)
+                    }
                 }
             } else {
                 heroMode = .thumbnail
             }
         }
         .onAppear {
-            // Eagerly preload web + reader content when the detail view appears
-            if let bm = bookmark, bm.hasURL, let url = bm.url {
-                webViewStore.preload(url: url, bookmarkID: bm.id)
-            }
             // Enable the sidebar's own transition only after the first render,
             // so it doesn't compound with the parent panel's slide-in animation.
             DispatchQueue.main.async { sidebarTransitionEnabled = true }
