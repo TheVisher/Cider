@@ -285,7 +285,14 @@ private struct BookmarkTableIcon: View {
 
     private func loadFavicon() async -> NSImage? {
         guard let url = bookmark.thumbnailFileURL else { return nil }
-        return await Task.detached(priority: .utility) {
+        let cacheKey = url.path + ":favicon"
+        let modifiedAt = bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
+
+        if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
+            return cached
+        }
+
+        let result: NSImage? = await Task.detached(priority: .utility) {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                       kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -293,6 +300,11 @@ private struct BookmarkTableIcon: View {
                   ] as CFDictionary) else { return nil as NSImage? }
             return NSImage(cgImage: cgImage, size: NSSize(width: 20, height: 20))
         }.value
+
+        if let image = result {
+            BookmarkThumbnailCache.shared.set(image, for: cacheKey, modifiedAt: modifiedAt)
+        }
+        return result
     }
 }
 

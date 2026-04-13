@@ -188,6 +188,21 @@ struct BookmarkThumbnailView: View {
         }
 
         let remoteURLString = bookmark.thumbnailRemoteURLString
+        let cacheKey = fileURL.path
+        let modifiedAt = bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
+
+        // Check shared cache first
+        if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
+            let width = cached.size.width
+            let height = cached.size.height
+            let isIcon = Self.shouldRenderAsIconOverlay(
+                width: width, height: height, remoteURLString: remoteURLString
+            )
+            thumbnailImage = cached
+            rendersAsIconOverlay = isIcon
+            onAspectRatioResolved?(isIcon ? nil : height / width)
+            return
+        }
 
         let result: (NSImage, Bool, CGFloat?)? = await Task.detached(priority: .userInitiated) {
             guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
@@ -214,6 +229,7 @@ struct BookmarkThumbnailView: View {
         guard !Task.isCancelled else { return }
 
         if let (image, isIcon, aspectRatio) = result, !shouldSuppressDownloadedThumbnail {
+            BookmarkThumbnailCache.shared.set(image, for: cacheKey, modifiedAt: modifiedAt)
             thumbnailImage = image
             rendersAsIconOverlay = isIcon
             onAspectRatioResolved?(aspectRatio)
@@ -378,7 +394,14 @@ struct CarouselPageImage: View {
     }
 
     private func loadImage() async -> NSImage? {
-        await Task.detached(priority: .userInitiated) {
+        let cacheKey = url.path
+        let modifiedAt = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+
+        if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
+            return cached
+        }
+
+        let result: NSImage? = await Task.detached(priority: .userInitiated) {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -390,6 +413,11 @@ struct CarouselPageImage: View {
             guard w > 0, h > 0 else { return nil }
             return NSImage(cgImage: cgImage, size: NSSize(width: w, height: h))
         }.value
+
+        if let image = result {
+            BookmarkThumbnailCache.shared.set(image, for: cacheKey, modifiedAt: modifiedAt)
+        }
+        return result
     }
 }
 
