@@ -74,7 +74,9 @@ extension CiderPanelView {
         let isReaderUnavailable = bookmark.readerUnavailable == true
         let restored = bookmark.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
         bookmarkHeroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
-        // Don't preload here — DetailSlideOutView.onChange handles it after animation settles
+        // Reset stale web state immediately (cheap — just nils properties).
+        // Preload is deferred — DetailSlideOutView.onChange handles it after animation settles.
+        detailWebViewStore.reset()
         if detailViewMode == .slideOut {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,
