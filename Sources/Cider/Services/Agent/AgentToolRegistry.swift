@@ -3,13 +3,15 @@ import os
 
 // MARK: - Tool Definition
 
-struct AgentToolDefinition: Sendable {
+struct AgentToolDefinition: @unchecked Sendable {
     let name: String
     let description: String
     let parameters: [AgentToolParameter]
     let categories: Set<ToolCategory>
     let requiresConfirmation: Bool
-    let execute: @Sendable ([String: Any]) async throws -> String
+    /// Execute the tool with the given arguments. Runs on MainActor because
+    /// tools access storage singletons that are MainActor-isolated.
+    let execute: @MainActor ([String: Any]) async throws -> String
 }
 
 struct AgentToolParameter: Sendable {
@@ -62,7 +64,10 @@ actor AgentToolRegistry {
             return "Unknown tool: \(name)"
         }
         logger.info("Executing tool: \(name)")
-        return try await tool.execute(arguments)
+        // Tools access @MainActor storage singletons. The arguments dict is built
+        // by the orchestrator from provider output and is not shared across actors.
+        nonisolated(unsafe) let args = arguments
+        return try await tool.execute(args)
     }
 
     /// Return tools filtered by permission level.
