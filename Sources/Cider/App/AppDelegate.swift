@@ -201,21 +201,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 EmbeddingStore.shared.backfillMissing(bookmarks: VaultBookmarkService.shared.bookmarks)
             }
 
-            // Date card notifications — always subscribe, service gates on config internally
+            // Reminder engine — reconciler handles local notifications + outbox
             let notificationService = DateCardNotificationService.shared
             self.dateCardNotificationService = notificationService
             if config.enableDateCardNotifications {
                 Task {
-                    let granted = await notificationService.requestPermission()
-                    if granted {
-                        notificationService.rescheduleAll()
-                    }
+                    let _ = await notificationService.requestPermission()
                 }
             }
+            // Start reconciler (handles notifications + agent outbox on launch, wake, day rollover, tz change)
+            ReminderReconciler.shared.start()
+            // Re-reconcile on vault changes (debounced)
             self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards
                 .debounce(for: .seconds(2), scheduler: RunLoop.main)
-                .sink { dateCards in
-                    notificationService.scheduleNotifications(for: dateCards)
+                .sink { _ in
+                    ReminderReconciler.shared.reconcile()
                 }
         }
     }

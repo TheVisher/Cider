@@ -167,6 +167,7 @@ struct CiderConfig: Codable {
         case dateCardSurfacingDays
         case enableDateCardNotifications
         case dateCardDefaultNotificationMinutes
+        case enableAgentReminders
         case hasCompletedOnboarding
         case showDragModeHints
         case enableClipboardHistory
@@ -241,6 +242,7 @@ struct CiderConfig: Codable {
     var dateCardSurfacingDays: Int  // Days ahead to surface approaching date cards (0 = disabled)
     var enableDateCardNotifications: Bool  // Send system notifications for approaching date cards
     var dateCardDefaultNotificationMinutes: Int  // Default notification lead time in minutes (15, 30, 60, 120, 1440)
+    var enableAgentReminders: Bool  // Write outbox files for agent-delivered iMessage reminders
     var hasCompletedOnboarding: Bool  // Whether the user has dismissed the first-run onboarding tab
     var showDragModeHints: Bool  // Show overlay hints when dragging bookmarks that have both image+URL
     var enableClipboardHistory: Bool  // Record clipboard history for the clipboard viewer
@@ -316,6 +318,7 @@ struct CiderConfig: Codable {
             dateCardSurfacingDays: 7,
             enableDateCardNotifications: false,
             dateCardDefaultNotificationMinutes: 30,
+            enableAgentReminders: false,
             hasCompletedOnboarding: false,
             showDragModeHints: true,
             enableClipboardHistory: true,
@@ -526,6 +529,7 @@ struct CiderConfig: Codable {
         dateCardSurfacingDays = try container.decodeIfPresent(Int.self, forKey: .dateCardSurfacingDays) ?? 7
         enableDateCardNotifications = try container.decodeIfPresent(Bool.self, forKey: .enableDateCardNotifications) ?? false
         dateCardDefaultNotificationMinutes = try container.decodeIfPresent(Int.self, forKey: .dateCardDefaultNotificationMinutes) ?? 30
+        enableAgentReminders = try container.decodeIfPresent(Bool.self, forKey: .enableAgentReminders) ?? false
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         showDragModeHints = try container.decodeIfPresent(Bool.self, forKey: .showDragModeHints) ?? true
         enableClipboardHistory = try container.decodeIfPresent(Bool.self, forKey: .enableClipboardHistory) ?? true
@@ -601,6 +605,7 @@ struct CiderConfig: Codable {
         dateCardSurfacingDays: Int = 7,
         enableDateCardNotifications: Bool = false,
         dateCardDefaultNotificationMinutes: Int = 30,
+        enableAgentReminders: Bool = false,
         hasCompletedOnboarding: Bool = false,
         showDragModeHints: Bool = true,
         enableClipboardHistory: Bool = true,
@@ -674,6 +679,7 @@ struct CiderConfig: Codable {
         self.dateCardSurfacingDays = dateCardSurfacingDays
         self.enableDateCardNotifications = enableDateCardNotifications
         self.dateCardDefaultNotificationMinutes = dateCardDefaultNotificationMinutes
+        self.enableAgentReminders = enableAgentReminders
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.showDragModeHints = showDragModeHints
         self.enableClipboardHistory = enableClipboardHistory
