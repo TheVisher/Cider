@@ -531,10 +531,22 @@ actor AgentOrchestrator {
         let asksToCaptureOrSave = [
             "save", "add", "capture", "store", "bookmark this", "file this"
         ].contains(where: normalized.contains)
-        let asksToCreateEvent = [
-            "appointment", "schedule", "event", "date card", "calendar", "reminder"
-        ].contains(where: normalized.contains) && [
+        let creationIntentSignals = [
             "create", "make", "add", "save", "schedule", "set up"
+        ]
+        let reminderIntentSignals = [
+            "remind me", "set a reminder", "reminder for", "alert me", "ping me", "nudge me"
+        ]
+        let asksToCreateEvent = (
+            [
+                "appointment", "schedule", "event", "date card", "calendar", "reminder"
+            ].contains(where: normalized.contains) && creationIntentSignals.contains(where: normalized.contains)
+        ) || reminderIntentSignals.contains(where: normalized.contains)
+        let taskReminderSignals = [
+            "remind me to", "todo", "task", "pay", "call", "take", "send", "buy", "do ", "finish", "pick up"
+        ].contains(where: normalized.contains)
+        let calendarEventSignals = [
+            "appointment", "meeting", "reservation", "flight", "birthday", "calendar event", "date card"
         ].contains(where: normalized.contains)
 
         if asksForCount {
@@ -610,12 +622,22 @@ actor AgentOrchestrator {
         }
 
         if asksToCreateEvent {
-            route = "event-create"
-            detail = "appointment or date-card capture"
-            hints.append("- For appointments, reminders, and date-card captures, prefer one complete `cider-cli event create` call with all known fields instead of create-then-edit.")
-            hints.append("- Use `cider-cli event create \"<title>\" --date YYYY-MM-DD --time \"h:mm AM\" --location \"<location>\" --details \"<details>\"` when the request includes a specific time.")
-            hints.append("- Use `--all-day` for date-only events, `--timed` or `--time` for timed events, and include `--remind <minutes>` when reminder timing is part of the request.")
-            hints.append("- If the destination folder is clear, include `--path \"<vault-path>\"` at creation time instead of creating in Inbox and fixing it later.")
+            if taskReminderSignals && !calendarEventSignals {
+                route = "todo-create"
+                detail = "task-like reminder capture"
+                hints.append("- This sounds like an actionable reminder, so prefer creating a todo instead of a date card unless the user clearly described a calendar event.")
+                hints.append("- For task-like reminders such as \"remind me to call/pay/take/send/do X\", prefer `cider-cli todo create \"<title>\" --due YYYY-MM-DD --time \"h:mm AM\" --priority medium` when a time is known.")
+                hints.append("- If the user gave a date and time, keep it as a timed todo so it can later be completed, snoozed, or stopped.")
+                hints.append("- After creating the todo, verify with `cider-cli todo get <id-prefix> --json` or `cider-cli todo list --json` instead of a natural-language `query`.")
+                hints.append("- Reserve `cider-cli event create` for actual calendar occurrences like appointments, meetings, reservations, flights, birthdays, or other scheduled events.")
+            } else {
+                route = "event-create"
+                detail = "appointment or date-card capture"
+                hints.append("- For appointments and calendar occurrences, prefer one complete `cider-cli event create` call with all known fields instead of create-then-edit.")
+                hints.append("- Use `cider-cli event create \"<title>\" --date YYYY-MM-DD --time \"h:mm AM\" --location \"<location>\" --details \"<details>\"` when the request includes a specific time.")
+                hints.append("- Use `--all-day` for date-only events and `--timed` or `--time` for timed events.")
+                hints.append("- If the destination folder is clear, include `--path \"<vault-path>\"` at creation time instead of creating in Inbox and fixing it later.")
+            }
         }
 
         if !asksForCount && !asksForRecent && !asksForSearch {

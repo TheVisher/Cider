@@ -143,6 +143,7 @@ final class ReminderReconciler {
 
     private func nextReminderFireDate(after now: Date) -> Date? {
         let dateCards = DateCardStorage.shared.dateCards
+        let todos = TodoCardStorage.shared.todoCards
         let config = CiderConfig.load()
         let telegramRemindersEnabled = telegramReminderSchedulingEnabled()
         let calendar = Calendar.current
@@ -186,6 +187,13 @@ final class ReminderReconciler {
             }
         }
 
+        if telegramRemindersEnabled {
+            for todo in todos where !todo.isCompleted {
+                guard let dueDate = todo.dueDate, todoHasExplicitTime(dueDate), dueDate > now else { continue }
+                earliest = minOptional(earliest, dueDate)
+            }
+        }
+
         return earliest
     }
 
@@ -207,5 +215,10 @@ final class ReminderReconciler {
     private func minOptional(_ lhs: Date?, _ rhs: Date) -> Date {
         guard let lhs else { return rhs }
         return min(lhs, rhs)
+    }
+
+    private func todoHasExplicitTime(_ date: Date) -> Bool {
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
     }
 }

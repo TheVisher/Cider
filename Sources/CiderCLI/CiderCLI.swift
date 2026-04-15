@@ -770,9 +770,36 @@ struct CiderCLI {
                 print("Todos (\(todos.count)):")
                 for todo in todos {
                     let status = todo.isCompleted ? "✅" : "⬜"
-                    let due = todo.dueDate.map { " due: \(dateFormatter.string(from: $0))" } ?? ""
+                    let due = todo.dueDate.map { " due: \(formattedTodoDueDate($0))" } ?? ""
                     let priority = todo.priority.map { " [\($0.rawValue)]" } ?? ""
                     print("  \(status) [\(todo.id.uuidString.prefix(8))] \(todo.title)\(priority)\(due)")
+                }
+            }
+
+        case "get":
+            guard let idPrefix = args.first else {
+                print("Error: ID prefix required.")
+                return
+            }
+            guard let todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) else {
+                print("Error: No todo found with ID prefix: \(idPrefix)")
+                return
+            }
+            if jsonOutput {
+                outputJSON(todoToDict(todo))
+            } else {
+                print("Todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
+                print("Status: \(todo.isCompleted ? "completed" : "open")")
+                if let dueDate = todo.dueDate {
+                    print("Due: \(formattedTodoDueDate(dueDate))")
+                }
+                if let priority = todo.priority {
+                    print("Priority: \(priority.rawValue)")
+                }
+                let folderName = todo.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+                print("Folder: \(folderName)")
+                if !todo.details.isEmpty {
+                    print("Details: \(todo.details)")
                 }
             }
 
@@ -785,8 +812,18 @@ struct CiderCLI {
             }
             let title = args.first ?? "Untitled Todo"
             let dueString = parseFlag("--due", from: args)
+            let timeString = parseFlag("--time", from: args)
             let priorityString = parseFlag("--priority", from: args)
-            let dueDate = dueString.flatMap { dateFormatter.date(from: $0) }
+            let dueDate: Date?
+            if let dueString {
+                guard let resolvedDueDate = resolveEventStartAt(dateString: dueString, timeString: timeString) else {
+                    print("Error: Invalid todo due date/time. Use --due yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+                    return
+                }
+                dueDate = resolvedDueDate
+            } else {
+                dueDate = nil
+            }
             let priority: TodoPriority? = {
                 switch priorityString?.lowercased() {
                 case "high": return .high
@@ -837,15 +874,39 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli todo update <id> [--title <title>] [--details <details>] [--due yyyy-MM-dd] [--priority high|medium|low]")
+                print("Error: ID prefix required. Usage: cider-cli todo update <id> [--title <title>] [--details <details>] [--due yyyy-MM-dd] [--time \"h:mm a\"] [--priority high|medium|low]")
                 return
             }
             if var todo = storage.todoCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
                 var changed = false
                 if let t = parseFlag("--title", from: args) { todo.title = t; changed = true }
                 if let d = parseFlag("--details", from: args) { todo.details = d; changed = true }
-                if let ds = parseFlag("--due", from: args), let date = dateFormatter.date(from: ds) {
-                    todo.dueDate = date; changed = true
+                let dueArg = parseFlag("--due", from: args)
+                let timeArg = parseFlag("--time", from: args)
+                if dueArg != nil || timeArg != nil {
+                    let baseDateString: String
+                    if let dueArg {
+                        baseDateString = dueArg
+                    } else if let existingDueDate = todo.dueDate {
+                        baseDateString = localDateFormatter.string(from: existingDueDate)
+                    } else {
+                        print("Error: --time requires an existing due date or an explicit --due yyyy-MM-dd.")
+                        return
+                    }
+
+                    let desiredTimeString: String?
+                    if let timeArg {
+                        desiredTimeString = timeArg
+                    } else {
+                        desiredTimeString = todo.dueDate.map { localTimeFormatter.string(from: $0) }
+                    }
+
+                    guard let updatedDueDate = resolveEventStartAt(dateString: baseDateString, timeString: desiredTimeString) else {
+                        print("Error: Invalid todo due date/time. Use --due yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+                        return
+                    }
+                    todo.dueDate = updatedDueDate
+                    changed = true
                 }
                 if let p = parseFlag("--priority", from: args) {
                     switch p.lowercased() {
@@ -893,7 +954,7 @@ struct CiderCLI {
 
         default:
             print("Unknown todo command: \(subcommand ?? "nil")")
-            print("Commands: list, create, complete, delete, update, export, checklist")
+            print("Commands: list, get, create, complete, delete, update, export, checklist")
         }
     }
 
@@ -3031,7 +3092,7 @@ struct CiderCLI {
                 print("  ────────────")
                 for todo in activeTodos.prefix(10) {
                     let priority = todo.priority.map { " [\($0.rawValue)]" } ?? ""
-                    let due = todo.dueDate.map { " due:\(dateFormatter.string(from: $0))" } ?? ""
+                    let due = todo.dueDate.map { " due:\(formattedTodoDueDate($0))" } ?? ""
                     print("  ☑️  \(todo.title)\(priority)\(due)")
                 }
             }
@@ -3643,6 +3704,18 @@ struct CiderCLI {
         return f
     }()
 
+    static func todoHasExplicitTime(_ date: Date) -> Bool {
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute, .second], from: date)
+        return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
+    }
+
+    static func formattedTodoDueDate(_ date: Date) -> String {
+        if todoHasExplicitTime(date) {
+            return "\(localDateFormatter.string(from: date)) \(localTimeFormatter.string(from: date))"
+        }
+        return dateFormatter.string(from: date)
+    }
+
     static func parseFlag(_ flag: String, from args: [String]) -> String? {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
@@ -4138,10 +4211,11 @@ struct CiderCLI {
 
         TODOS
           cider-cli todo list [--completed]      (--completed = include completed)
-          cider-cli todo create <title> [--due yyyy-MM-dd] [--priority high|medium|low] [--folder <name|path>]
+          cider-cli todo get <id-prefix>
+          cider-cli todo create <title> [--due yyyy-MM-dd] [--time "h:mm a"] [--priority high|medium|low] [--folder <name|path>]
           cider-cli todo complete <id-prefix>
           cider-cli todo delete <id-prefix>
-          cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--priority <p>]
+          cider-cli todo update <id-prefix> [--title <t>] [--details <d>] [--due <date>] [--time "h:mm a"] [--priority <p>]
           cider-cli todo export <id-prefix> --to <path.ics>
           cider-cli todo checklist list <todo-id>
           cider-cli todo checklist add <todo-id> --title <title>

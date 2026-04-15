@@ -160,7 +160,7 @@ private struct TrashItemRow: View {
                 .frame(width: SettingsDesign.trashIconColumnWidth)
 
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(item.title)
+                Text(item.displayTitle)
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.primary)
                     .lineLimit(1)
