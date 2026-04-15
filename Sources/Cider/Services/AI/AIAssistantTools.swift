@@ -1203,3 +1203,153 @@ struct UnfileItemsTool: Tool {
         return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
     } }
 }
+
+// MARK: - Create Reminder Tool
+
+/// Creates a recurring or one-time reminder as a DateCard with surfacing rules.
+struct CreateReminderTool: Tool {
+    let name = "createReminder"
+    let description = """
+    Create a reminder or recurring event. Can be one-time or recurring \
+    (daily, weekly, monthly, yearly). Specify when to be reminded with \
+    minute offsets (e.g. 1440 = 1 day before, 60 = 1 hour before, 0 = at time).
+    """
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Title of the reminder (e.g. 'Pay Rent', 'Team Meeting')")
+        var title: String
+
+        @Guide(description: "Date in yyyy-MM-dd format (e.g. '2026-05-01')")
+        var date: String
+
+        @Guide(description: "Recurrence: 'daily', 'weekly', 'monthly', 'yearly', or empty for one-time")
+        var frequency: String?
+
+        @Guide(description: "How many minutes before the event to send the first reminder (e.g. 1440 for 1 day, 60 for 1 hour, 0 for at-time). Default 15.")
+        var remindMinutesBefore: Int?
+
+        @Guide(description: "Optional second reminder offset in minutes (e.g. 0 for at-time if first reminder is day-before)")
+        var secondRemindMinutesBefore: Int?
+
+        @Guide(description: "Whether the event lasts all day. Default true for date-only events.")
+        var allDay: Bool?
+
+        @Guide(description: "Optional location")
+        var location: String?
+
+        @Guide(description: "Optional notes or details")
+        var details: String?
+    }
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return "Reminder title cannot be empty." }
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = .current
+        guard let date = df.date(from: arguments.date) else {
+            return "Invalid date format. Use yyyy-MM-dd (e.g. '2026-05-01')."
+        }
+
+        let storage = DateCardStorage.shared
+        var card = storage.createDateCard(title: title, startAt: date)
+        guard storage.dateCards.contains(where: { $0.id == card.id }) else {
+            return "Failed to create reminder (disk write failed)."
+        }
+
+        card.allDay = arguments.allDay ?? true
+
+        if let loc = arguments.location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty {
+            card.location = loc
+        }
+        if let det = arguments.details?.trimmingCharacters(in: .whitespacesAndNewlines), !det.isEmpty {
+            card.details = det
+        }
+
+        // Recurrence
+        if let freqStr = arguments.frequency?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !freqStr.isEmpty {
+            let freq: DateCardRecurrenceFrequency
+            switch freqStr {
+            case "daily": freq = .daily
+            case "weekly": freq = .weekly
+            case "monthly": freq = .monthly
+            case "yearly": freq = .yearly
+            default: return "Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly."
+            }
+            card.recurrenceRule = DateCardRecurrenceRule(frequency: freq)
+        }
+
+        // Reminder offsets
+        let firstOffset = arguments.remindMinutesBefore ?? 15
+        card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: firstOffset))
+        if let second = arguments.secondRemindMinutesBefore {
+            card.rules.append(SurfacingRule(type: .remindBeforeMinutes, integerValue: second))
+        }
+
+        _ = storage.updateDateCard(card)
+
+        // Trigger reconciliation so notifications are scheduled immediately
+        ReminderReconciler.shared.reconcile()
+
+        let recurring = card.recurrenceRule != nil ? " (recurring \(card.recurrenceRule!.frequency.rawValue))" : ""
+        let remindDesc = card.rules
+            .filter { $0.type == .remindBeforeMinutes }
+            .compactMap(\.integerValue)
+            .map { $0 == 0 ? "at time" : "\($0) min before" }
+            .joined(separator: ", ")
+        return "Created reminder: \"\(title)\" on \(arguments.date)\(recurring). Reminders: \(remindDesc)."
+    } }
+}
+
+// MARK: - Cancel Reminder Tool
+
+/// Cancels or disables reminders on a DateCard.
+struct CancelReminderTool: Tool {
+    let name = "cancelReminder"
+    let description = """
+    Cancel a reminder by title. Can either delete the entire event/reminder \
+    or just disable its notification rules.
+    """
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Title or partial title of the reminder to cancel")
+        var title: String
+
+        @Guide(description: "If true, delete the entire event. If false, just disable reminder notifications. Default false.")
+        var deleteEntirely: Bool?
+    }
+
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+        let query = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return "Reminder title cannot be empty." }
+
+        let storage = DateCardStorage.shared
+        guard var card = storage.dateCards.first(where: {
+            $0.title.lowercased().contains(query)
+        }) else {
+            return "No reminder found matching \"\(arguments.title)\"."
+        }
+
+        if arguments.deleteEntirely == true {
+            if let trashItem = storage.deleteDateCard(card.id) {
+                CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+                DateCardNotificationService.shared.cancelNotification(for: card.id)
+                return "Deleted reminder: \"\(card.title)\" (moved to trash)."
+            }
+            return "Failed to delete reminder."
+        }
+
+        // Disable all reminder rules
+        for i in card.rules.indices where card.rules[i].type == .remindBeforeMinutes {
+            card.rules[i].isEnabled = false
+        }
+        _ = storage.updateDateCard(card)
+        DateCardNotificationService.shared.cancelNotification(for: card.id)
+        return "Disabled reminders for \"\(card.title)\". The event still exists but won't send notifications."
+    } }
+}

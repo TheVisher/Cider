@@ -89,7 +89,13 @@ extension AppDelegate {
             frame = NSRect(x: x, y: y, width: width, height: preferredHeight)
         }
 
-        panel.setFrame(frame, display: true)
+        let clamped = clampedAIAssistantFrame(frame)
+        if clamped.origin != frame.origin {
+            UserDefaults.standard.set(clamped.origin.x, forKey: "cider.aiAssistantPanelX")
+            UserDefaults.standard.set(clamped.origin.y, forKey: "cider.aiAssistantPanelY")
+        }
+
+        panel.setFrame(clamped, display: true)
         panel.orderFront(nil)
         panel.makeKey()
         aiAssistantShadowPanel?.updateFrame(for: panel.frame)
@@ -104,5 +110,29 @@ extension AppDelegate {
         }
         aiAssistantPanel?.orderOut(nil)
         aiAssistantShadowPanel?.orderOut(nil)
+    }
+
+    private func clampedAIAssistantFrame(_ frame: NSRect) -> NSRect {
+        let screen = NSScreen.screens.first(where: {
+            $0.visibleFrame.intersects(frame)
+        }) ?? NSScreen.screens.first(where: {
+            NSMouseInRect(NSEvent.mouseLocation, $0.frame, false)
+        }) ?? NSScreen.main
+
+        guard let screen else { return frame }
+
+        let visible = screen.visibleFrame
+        let width = min(frame.width, visible.width)
+        let height = min(frame.height, visible.height)
+
+        let minX = visible.minX
+        let maxX = max(visible.minX, visible.maxX - width)
+        let minY = visible.minY
+        let maxY = max(visible.minY, visible.maxY - height)
+
+        let x = min(max(frame.origin.x, minX), maxX)
+        let y = min(max(frame.origin.y, minY), maxY)
+
+        return NSRect(x: x, y: y, width: width, height: height)
     }
 }

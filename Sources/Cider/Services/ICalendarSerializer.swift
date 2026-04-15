@@ -434,7 +434,10 @@ enum ICalendarSerializer {
     private static let dateOnlyFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd"
-        f.timeZone = TimeZone(identifier: "UTC")
+        // DATE values in iCalendar are calendar days, not instants in UTC.
+        // Parsing them as UTC shifts all-day events backward in western timezones.
+        f.timeZone = .autoupdatingCurrent
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 

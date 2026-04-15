@@ -898,6 +898,14 @@ struct BookmarkDetailsHeroPreview: View {
             return
         }
 
+        let cacheKey = fileURL.path
+        let modifiedAt = bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
+
+        if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
+            thumbnailImage = cached
+            return
+        }
+
         let image: NSImage? = await Task.detached(priority: .userInitiated) {
             guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
             let options: [CFString: Any] = [
@@ -909,7 +917,12 @@ struct BookmarkDetailsHeroPreview: View {
         }.value
 
         guard !Task.isCancelled else { return }
-        thumbnailImage = image
+        if let image {
+            BookmarkThumbnailCache.shared.set(image, for: cacheKey, modifiedAt: modifiedAt)
+            thumbnailImage = image
+        } else {
+            thumbnailImage = nil
+        }
     }
 }
 

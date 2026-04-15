@@ -93,8 +93,8 @@ struct DetailSlideOutView: View {
                                 .opacity(heroMode == .thumbnail ? 1 : 0)
                                 .allowsHitTesting(heroMode == .thumbnail)
 
-                            // Web layer (always present — eagerly preloaded)
-                            if let url = bookmark?.url {
+                            // Web layer — only instantiate when preload is ready or user switched to web mode
+                            if let url = bookmark?.url, heroMode == .web || webViewStore.webViewReady {
                                 ZStack {
                                     BookmarkWebView(url: url, isLoading: $webViewIsLoading, isActive: heroMode == .web, store: webViewStore)
 
@@ -183,18 +183,28 @@ struct DetailSlideOutView: View {
                 let isReaderUnavailable = bm.readerUnavailable == true
                 let restored = bm.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
                 heroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
-                // Eagerly preload for the new bookmark
+                // Defer preload until after slideout animation settles
                 if bm.hasURL, let url = bm.url {
-                    webViewStore.preload(url: url, bookmarkID: bm.id)
+                    let bookmarkID = bm.id
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        guard !Task.isCancelled else { return }
+                        webViewStore.preload(url: url, bookmarkID: bookmarkID)
+                    }
                 }
             } else {
                 heroMode = .thumbnail
             }
         }
         .onAppear {
-            // Eagerly preload web + reader content when the detail view appears
+            // Deferred preload on first appear (onChange may not fire on nil → value in all cases)
             if let bm = bookmark, bm.hasURL, let url = bm.url {
-                webViewStore.preload(url: url, bookmarkID: bm.id)
+                let bookmarkID = bm.id
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    guard !Task.isCancelled else { return }
+                    webViewStore.preload(url: url, bookmarkID: bookmarkID)
+                }
             }
             // Enable the sidebar's own transition only after the first render,
             // so it doesn't compound with the parent panel's slide-in animation.

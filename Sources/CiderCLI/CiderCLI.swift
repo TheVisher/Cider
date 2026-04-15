@@ -1059,17 +1059,73 @@ struct CiderCLI {
             case .failed: return
             }
             let title = args.first ?? "Untitled Event"
-            let dateString = parseFlag("--date", from: args) ?? dateFormatter.string(from: Date())
-            let date = dateFormatter.date(from: dateString) ?? Date()
-            var card = storage.createDateCard(title: title, startAt: date)
+            let dateString = parseFlag("--date", from: args) ?? localDateFormatter.string(from: Date())
+            let timeString = parseFlag("--time", from: args)
+            guard let startAt = resolveEventStartAt(dateString: dateString, timeString: timeString) else {
+                print("Error: Invalid event date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+                return
+            }
+            var card = storage.createDateCard(title: title, startAt: startAt)
             guard storage.dateCards.contains(where: { $0.id == card.id }) else {
                 print("Error: Failed to create event (disk write failed)")
                 return
             }
+            // Recurrence rule
+            var needsUpdate = false
+            if args.contains("--all-day") {
+                card.allDay = true
+                card.startAt = Calendar.autoupdatingCurrent.startOfDay(for: startAt)
+                needsUpdate = true
+            } else if timeString != nil || args.contains("--timed") {
+                card.allDay = false
+                needsUpdate = true
+            } else {
+                card.allDay = true
+                card.startAt = Calendar.autoupdatingCurrent.startOfDay(for: startAt)
+                needsUpdate = true
+            }
+            if let loc = parseFlag("--location", from: args) {
+                card.location = loc
+                needsUpdate = true
+            }
+            if let details = parseFlag("--details", from: args) {
+                card.details = details
+                needsUpdate = true
+            }
+            if let freqStr = parseFlag("--frequency", from: args) {
+                let freq: DateCardRecurrenceFrequency
+                switch freqStr.lowercased() {
+                case "daily": freq = .daily
+                case "weekly": freq = .weekly
+                case "monthly": freq = .monthly
+                case "yearly": freq = .yearly
+                default:
+                    print("Error: Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.")
+                    return
+                }
+                let interval = parseFlag("--interval", from: args).flatMap(Int.init) ?? 1
+                let endDate = parseFlag("--end-date", from: args).flatMap { dateFormatter.date(from: $0) }
+                card.recurrenceRule = DateCardRecurrenceRule(frequency: freq, interval: interval, endDate: endDate)
+                needsUpdate = true
+            }
+            // Reminder rules (multiple --remind flags)
+            let remindValues = parseFlagAll("--remind", from: args)
+            for value in remindValues {
+                guard let minutes = Int(value) else {
+                    print("Error: --remind requires an integer (minutes before event). Got: '\(value)'")
+                    return
+                }
+                card.rules.append(SurfacingRule(
+                    type: .remindBeforeMinutes,
+                    integerValue: minutes
+                ))
+                needsUpdate = true
+            }
             if let targetFolder {
                 card.folderID = targetFolder.id
-                _ = storage.updateDateCard(card)
+                needsUpdate = true
             }
+            if needsUpdate { _ = storage.updateDateCard(card) }
             print("Created event: \(card.title) (\(card.id.uuidString.prefix(8)))")
 
         case "delete", "rm":
@@ -1088,16 +1144,79 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli event update <id> [--title <title>] [--date yyyy-MM-dd] [--location <location>]")
+                print("Error: ID prefix required. Usage: cider-cli event update <id> [--title <title>] [--date yyyy-MM-dd] [--time \"h:mm a\"] [--location <location>] [--details <text>]")
                 return
             }
             if var card = storage.dateCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
                 var changed = false
                 if let t = parseFlag("--title", from: args) { card.title = t; changed = true }
-                if let ds = parseFlag("--date", from: args), let date = dateFormatter.date(from: ds) {
-                    card.startAt = date; changed = true
+                let dateArg = parseFlag("--date", from: args)
+                let timeArg = parseFlag("--time", from: args)
+                if dateArg != nil || timeArg != nil || args.contains("--all-day") || args.contains("--timed") {
+                    let existingDateString = localDateFormatter.string(from: card.startAt)
+                    let existingTimeString = localTimeFormatter.string(from: card.startAt)
+                    let baseDateString = dateArg ?? existingDateString
+                    let desiredTimeString: String? = {
+                        if args.contains("--all-day") { return nil }
+                        if let timeArg { return timeArg }
+                        if args.contains("--timed") || !card.allDay { return existingTimeString }
+                        return nil
+                    }()
+
+                    guard let updatedStartAt = resolveEventStartAt(dateString: baseDateString, timeString: desiredTimeString) else {
+                        print("Error: Invalid event date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+                        return
+                    }
+                    card.startAt = args.contains("--all-day")
+                        ? Calendar.autoupdatingCurrent.startOfDay(for: updatedStartAt)
+                        : updatedStartAt
+                    if args.contains("--all-day") {
+                        card.allDay = true
+                    } else if timeArg != nil || args.contains("--timed") {
+                        card.allDay = false
+                    }
+                    changed = true
                 }
                 if let loc = parseFlag("--location", from: args) { card.location = loc; changed = true }
+                if let details = parseFlag("--details", from: args) { card.details = details; changed = true }
+                // Reminder rules: --remind replaces existing, --clear-reminders removes all
+                if args.contains("--clear-reminders") {
+                    card.rules.removeAll { $0.type == .remindBeforeMinutes }
+                    changed = true
+                }
+                let remindValues = parseFlagAll("--remind", from: args)
+                if !remindValues.isEmpty {
+                    // Replace existing reminder rules
+                    card.rules.removeAll { $0.type == .remindBeforeMinutes }
+                    for value in remindValues {
+                        guard let minutes = Int(value) else {
+                            print("Error: --remind requires an integer (minutes before event). Got: '\(value)'")
+                            return
+                        }
+                        card.rules.append(SurfacingRule(
+                            type: .remindBeforeMinutes,
+                            integerValue: minutes
+                        ))
+                    }
+                    changed = true
+                }
+                // Recurrence rule on update
+                if let freqStr = parseFlag("--frequency", from: args) {
+                    let freq: DateCardRecurrenceFrequency
+                    switch freqStr.lowercased() {
+                    case "daily": freq = .daily
+                    case "weekly": freq = .weekly
+                    case "monthly": freq = .monthly
+                    case "yearly": freq = .yearly
+                    default:
+                        print("Error: Invalid frequency '\(freqStr)'. Use daily, weekly, monthly, or yearly.")
+                        return
+                    }
+                    let interval = parseFlag("--interval", from: args).flatMap(Int.init) ?? 1
+                    let endDate = parseFlag("--end-date", from: args).flatMap { dateFormatter.date(from: $0) }
+                    card.recurrenceRule = DateCardRecurrenceRule(frequency: freq, interval: interval, endDate: endDate)
+                    changed = true
+                }
                 if changed {
                     _ = storage.updateDateCard(card)
                     print("Updated: \(card.title) (\(card.id.uuidString.prefix(8)))")
@@ -1184,6 +1303,7 @@ struct CiderCLI {
                 localDF.timeZone = .current
                 if let birthday = localDF.date(from: birthdayStr) {
                     contact.birthday = birthday; needsUpdate = true
+                    LibraryItemEditor.createOrUpdateBirthdayDateCard(for: contact, birthday: birthday)
                 }
             }
             if let targetFolder {
@@ -1225,6 +1345,7 @@ struct CiderCLI {
                     localDF.timeZone = .current
                     if let date = localDF.date(from: bday) {
                         contact.birthday = date; changed = true
+                        LibraryItemEditor.createOrUpdateBirthdayDateCard(for: contact, birthday: date)
                     }
                 }
                 if changed {
@@ -2248,6 +2369,116 @@ struct CiderCLI {
                 print("Error: Board '\(boardName)' not found")
             }
 
+        case "update-card":
+            guard let boardRef = args.first,
+                  let cardID = parseFlag("--card", from: args) else {
+                print("Error: Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var card = board.columns.flatMap(\.cards).first(where: { $0.id == cardID }) else {
+                print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+
+            var changed = false
+
+            if let title = parseFlag("--title", from: args) {
+                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, trimmed != card.title {
+                    card.title = trimmed
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-notes") {
+                if card.notes != nil {
+                    card.notes = nil
+                    changed = true
+                }
+            } else if let notes = parseFlag("--notes", from: args) {
+                let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = trimmed.isEmpty ? nil : trimmed
+                if normalized != card.notes {
+                    card.notes = normalized
+                    changed = true
+                }
+            }
+
+            if let priorityValue = parseFlag("--priority", from: args) {
+                let nextPriority: KanbanPriority?
+                switch priorityValue.lowercased() {
+                case "high": nextPriority = .high
+                case "medium": nextPriority = .medium
+                case "low": nextPriority = .low
+                case "none", "clear": nextPriority = nil
+                default:
+                    print("Error: Invalid priority '\(priorityValue)'. Use low, medium, high, or none.")
+                    return
+                }
+                if nextPriority != card.priority {
+                    card.priority = nextPriority
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-agent") {
+                if card.agent != nil {
+                    card.agent = nil
+                    changed = true
+                }
+            } else if let agent = parseFlag("--agent", from: args) {
+                let trimmed = agent.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = trimmed.isEmpty ? nil : trimmed
+                if normalized != card.agent {
+                    card.agent = normalized
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-tags") {
+                if !card.tags.isEmpty {
+                    card.tags = []
+                    changed = true
+                }
+            } else if let tagsValue = parseFlag("--tags", from: args) {
+                let tags = tagsValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                if tags != card.tags {
+                    card.tags = tags
+                    changed = true
+                }
+            }
+
+            if let colorValue = parseFlag("--color", from: args) {
+                let nextColor: KanbanCardColor?
+                switch colorValue.lowercased() {
+                case "blue": nextColor = .blue
+                case "green": nextColor = .green
+                case "orange": nextColor = .orange
+                case "red": nextColor = .red
+                case "purple": nextColor = .purple
+                case "none", "clear": nextColor = nil
+                default:
+                    print("Error: Invalid color '\(colorValue)'. Use blue, green, orange, red, purple, or none.")
+                    return
+                }
+                if nextColor != card.color {
+                    card.color = nextColor
+                    changed = true
+                }
+            }
+
+            guard changed else {
+                print("No card changes requested.")
+                return
+            }
+
+            storage.updateCard(boardID: board.id, card: card)
+            print("Updated card: \(card.title) [\(card.id)]")
+
         case "move-card":
             guard let boardName = args.first,
                   let cardID = parseFlag("--card", from: args),
@@ -2346,7 +2577,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, create, rename, delete, add-card, move-card, delete-card, add-column, rename-column, delete-column")
+            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, add-column, rename-column, delete-column")
         }
     }
 
@@ -3396,10 +3627,63 @@ struct CiderCLI {
         return f
     }()
 
+    static let localDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
+    static let localTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
     static func parseFlag(_ flag: String, from args: [String]) -> String? {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    static func resolveEventStartAt(dateString: String, timeString: String?) -> Date? {
+        let calendar = Calendar.autoupdatingCurrent
+
+        guard let baseDate = localDateFormatter.date(from: dateString) else {
+            return nil
+        }
+
+        guard let timeString, !timeString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return calendar.startOfDay(for: baseDate)
+        }
+
+        let supportedFormats = ["h:mm a", "h:mma", "H:mm", "HH:mm"]
+        let timeFormatters: [DateFormatter] = supportedFormats.map { format in
+            let formatter = DateFormatter()
+            formatter.dateFormat = format
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .autoupdatingCurrent
+            return formatter
+        }
+
+        guard let parsedTime = timeFormatters.compactMap({ $0.date(from: timeString) }).first else {
+            return nil
+        }
+
+        let dateComponents = calendar.dateComponents([.year, .month, .day], from: baseDate)
+        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: parsedTime)
+        var combined = DateComponents()
+        combined.year = dateComponents.year
+        combined.month = dateComponents.month
+        combined.day = dateComponents.day
+        combined.hour = timeComponents.hour
+        combined.minute = timeComponents.minute
+        combined.second = timeComponents.second ?? 0
+        combined.timeZone = .autoupdatingCurrent
+        return calendar.date(from: combined)
     }
 
     static func countItemsInFolder(_ folderID: UUID) -> Int {
@@ -3923,6 +4207,9 @@ struct CiderCLI {
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
           cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high]
+          cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes]
+                                         [--priority low|medium|high|none] [--agent <name>] [--clear-agent]
+                                         [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
           cider-cli board add-column <board> --name <col-name> [--done]

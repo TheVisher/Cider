@@ -73,9 +73,9 @@ struct AIAssistantPanelView: View {
             } label: {
                 HStack(spacing: Spacing.xxs) {
                     Circle()
-                        .fill(viewModel.isUsingLocalModel ? CiderColors.success : CiderColors.controlAccent)
+                        .fill(runtimePillColor)
                         .frame(width: 6, height: 6)
-                    Text(viewModel.isUsingLocalModel ? "Local" : "Apple")
+                    Text(runtimePillTitle)
                         .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
@@ -318,7 +318,7 @@ struct AIAssistantPanelView: View {
 
             // Apple Intelligence option
             Button {
-                viewModel.switchProvider(useLocalModel: false)
+                viewModel.switchRuntime(to: .appleIntelligence)
                 showModelPicker = false
             } label: {
                 HStack(spacing: Spacing.sm) {
@@ -351,7 +351,7 @@ struct AIAssistantPanelView: View {
 
             // Local model option
             Button {
-                viewModel.switchProvider(useLocalModel: true)
+                viewModel.switchRuntime(to: .localModel)
                 showModelPicker = false
             } label: {
                 HStack(spacing: Spacing.sm) {
@@ -372,6 +372,38 @@ struct AIAssistantPanelView: View {
                         Image(systemName: "checkmark")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.success)
+                    }
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.horizontal, Spacing.md)
+
+            Button {
+                viewModel.switchRuntime(to: .codexCLI)
+                showModelPicker = false
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "terminal")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.warning)
+                        .frame(width: 14, alignment: .center)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Codex CLI")
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.primary)
+                        Text(codexSubtitle)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer()
+                    if viewModel.runtimeSelection == .codexCLI {
+                        Image(systemName: "checkmark")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.warning)
                     }
                 }
                 .padding(.horizontal, Spacing.md)
@@ -413,6 +445,52 @@ struct AIAssistantPanelView: View {
         } else {
             let tier = modelManager.recommendedTier
             return "32K context, ~\(String(format: "%.1f", tier.downloadSizeGB)) GB download"
+        }
+    }
+
+    private var codexSubtitle: String {
+        switch viewModel.runtimeHealth.status {
+        case .running:
+            return "Persistent background agent"
+        case .starting, .restarting:
+            return "Starting runtime..."
+        case .failed:
+            return viewModel.runtimeHealth.lastError ?? "Runtime failed"
+        case .unavailable:
+            return "CLI unavailable"
+        default:
+            return "Persistent CLI runtime (Phase 1)"
+        }
+    }
+
+    private var runtimePillTitle: String {
+        switch viewModel.runtimeSelection {
+        case .appleIntelligence:
+            return "Apple"
+        case .localModel:
+            return "Local"
+        case .codexCLI:
+            return "Codex"
+        }
+    }
+
+    private var runtimePillColor: Color {
+        switch viewModel.runtimeSelection {
+        case .appleIntelligence:
+            return CiderColors.controlAccent
+        case .localModel:
+            return CiderColors.success
+        case .codexCLI:
+            switch viewModel.runtimeHealth.status {
+            case .running:
+                return CiderColors.success
+            case .starting, .restarting:
+                return CiderColors.warning
+            case .failed, .unavailable:
+                return CiderColors.destructive
+            default:
+                return CiderColors.warning
+            }
         }
     }
 
