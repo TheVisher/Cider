@@ -29,6 +29,8 @@ Cider's AI assistant currently lives inside the UI chat panel. It responds when 
 - Handles tool execution, conversation state, and context injection identically regardless of input channel
 - Uses durable job persistence for wake events so reminders survive crashes and delivery failures
 
+For the intended product behavior of the vault-native assistant, also read [VAULT_AGENT_VISION.md](/Users/minivish/Cider/Docs/Architecture/VAULT_AGENT_VISION.md).
+
 The agent is not a separate process. It is a Swift service inside Cider's process, same as `VaultBookmarkService` or `DateCardStorage`. Cider owns its lifecycle.
 
 ---

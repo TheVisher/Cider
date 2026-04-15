@@ -35,18 +35,33 @@ struct KanbanBoardView: View {
 
     var body: some View {
         if let board {
-            VStack(spacing: 0) {
-                boardHeader(board)
-                Divider().background(CiderColors.separator)
-                columnsArea(board)
+            ZStack {
+                VStack(spacing: 0) {
+                    boardHeader(board)
+                    Divider().background(CiderColors.separator)
+                    columnsArea(board)
+                }
+
+                if let editingCard {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            self.editingCard = nil
+                        }
+
+                    KanbanCardDetailView(
+                        card: editingCard,
+                        boardID: boardID,
+                        storage: storage,
+                        onClose: { self.editingCard = nil }
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .zIndex(1)
+                }
             }
-            .sheet(item: $editingCard) { card in
-                KanbanCardDetailView(
-                    card: card,
-                    boardID: boardID,
-                    storage: storage
-                )
-            }
+            .animation(reduceMotion ? .none : .spring(response: 0.22, dampingFraction: 0.92), value: editingCard != nil)
         } else {
             emptyState
         }

@@ -1,10 +1,17 @@
 import Foundation
 import os.log
 
+enum AIAgentRuntimeSelection: String, Sendable {
+    case appleIntelligence
+    case localModel
+    case codexCLI
+}
+
 /// ViewModel for the AI chat floating panel.
 @MainActor
 final class AIAssistantViewModel: ObservableObject {
     static let shared = AIAssistantViewModel()
+    private static let runtimeSelectionDefaultsKey = "cider.aiRuntimeSelection"
 
     @Published var messages: [AIAssistantMessage] = []
     @Published var isStreaming = false
@@ -17,6 +24,8 @@ final class AIAssistantViewModel: ObservableObject {
 
     /// Current conversation ID (nil = no active conversation yet).
     @Published var currentConversationID: UUID?
+    @Published private(set) var runtimeSelection: AIAgentRuntimeSelection = .appleIntelligence
+    @Published private(set) var runtimeHealth: AgentRuntimeHealth = .idle
 
     private let logger = Logger(subsystem: "com.cider.app", category: "AIAssistant")
     private var provider: AIAssistantProvider
@@ -33,23 +42,33 @@ final class AIAssistantViewModel: ObservableObject {
 
     var isAvailable: Bool {
         if useOrchestrator {
-            return true // Orchestrator availability checked at message time
+            return runtimeHealth.status != .unavailable
         }
         return provider.isAvailable
     }
     var providerName: String {
-        if useOrchestrator, let agentProvider = currentAgentProvider {
-            return agentProvider.displayName
+        if useOrchestrator, let runtime = currentAgentRuntime {
+            return runtime.displayName
         }
         return provider.displayName
     }
 
     /// Whether the local MLX model is active.
-    var isUsingLocalModel: Bool { provider is MLXProvider }
+    var isUsingLocalModel: Bool {
+        if useOrchestrator {
+            return runtimeSelection == .localModel
+        }
+        return provider is MLXProvider
+    }
+
+    var isUsingProcessRuntime: Bool {
+        useOrchestrator && runtimeSelection == .codexCLI
+    }
 
     /// Context window usage (0.0–1.0). Only available for Foundation Models.
     var contextUsage: Double {
-        (provider as? FoundationModelsProvider)?.contextUsage ?? 0
+        if useOrchestrator, runtimeSelection != .appleIntelligence { return 0 }
+        return (provider as? FoundationModelsProvider)?.contextUsage ?? 0
     }
 
     private let foundationModelsProvider = FoundationModelsProvider()
@@ -58,20 +77,39 @@ final class AIAssistantViewModel: ObservableObject {
     /// Agent provider adapters for the orchestrator path.
     private let foundationModelsAgentProvider = FoundationModelsAgentProvider()
     private let mlxAgentProvider = MLXAgentProvider()
+    private lazy var foundationModelsRuntime = ModelAgentRuntime(
+        provider: foundationModelsAgentProvider,
+        id: "model.apple-intelligence"
+    )
+    private lazy var mlxRuntime = ModelAgentRuntime(
+        provider: mlxAgentProvider,
+        id: "model.local-qwen"
+    )
+    private lazy var codexRuntime = CodexProcessRuntime(
+        workingDirectoryURL: StoragePaths.cachedVaultDirectoryURL
+    )
 
-    /// The currently active agent provider (for orchestrator mode).
-    private var currentAgentProvider: (any AgentProvider)? {
+    /// The currently active runtime (for orchestrator mode).
+    private var currentAgentRuntime: (any AgentRuntime)? {
         guard useOrchestrator else { return nil }
-        if MLXModelManager.shared.isLocalModelEnabled {
-            return mlxAgentProvider
+        switch runtimeSelection {
+        case .appleIntelligence:
+            return foundationModelsRuntime
+        case .localModel:
+            return mlxRuntime
+        case .codexCLI:
+            return codexRuntime
         }
-        return foundationModelsAgentProvider
     }
 
     init(provider: AIAssistantProvider? = nil) {
+        let initialRuntimeSelection = Self.loadPersistedRuntimeSelection()
+        runtimeSelection = initialRuntimeSelection
         if let provider {
             self.provider = provider
-        } else if MLXModelManager.shared.isLocalModelEnabled {
+        } else if initialRuntimeSelection == .codexCLI {
+            self.provider = FoundationModelsProvider()
+        } else if MLXModelManager.shared.isLocalModelEnabled || initialRuntimeSelection == .localModel {
             self.provider = MLXProvider()
         } else {
             self.provider = FoundationModelsProvider()
@@ -85,18 +123,70 @@ final class AIAssistantViewModel: ObservableObject {
         clearConversation()
         if useLocalModel {
             provider = mlxProvider
+            runtimeSelection = .localModel
         } else {
             provider = foundationModelsProvider
+            runtimeSelection = .appleIntelligence
             // Unload MLX model to free memory
             MLXModelManager.shared.unloadModel()
         }
         MLXModelManager.shared.isLocalModelEnabled = useLocalModel
 
-        // Update orchestrator provider if active
-        if useOrchestrator, let agentProvider = currentAgentProvider {
+        // Update orchestrator runtime if active
+        if useOrchestrator {
             Task {
-                await AgentOrchestrator.shared.setProvider(agentProvider)
+                await configureOrchestratorRuntime(startIfNeeded: false)
             }
+        }
+    }
+
+    func switchRuntime(to selection: AIAgentRuntimeSelection) {
+        clearConversation()
+        runtimeSelection = selection
+        persistRuntimeSelection(selection)
+
+        switch selection {
+        case .appleIntelligence:
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
+        case .localModel:
+            provider = mlxProvider
+            MLXModelManager.shared.isLocalModelEnabled = true
+        case .codexCLI:
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
+        }
+
+        if useOrchestrator {
+            Task {
+                await configureOrchestratorRuntime(startIfNeeded: selection == .codexCLI)
+            }
+        }
+    }
+
+    /// Runtime switch path for external channels/admin commands that need to await
+    /// the orchestrator reconfiguration before replying.
+    func switchRuntimeFromExternalCommand(to selection: AIAgentRuntimeSelection) async {
+        clearConversation()
+        runtimeSelection = selection
+        persistRuntimeSelection(selection)
+
+        switch selection {
+        case .appleIntelligence:
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
+        case .localModel:
+            provider = mlxProvider
+            MLXModelManager.shared.isLocalModelEnabled = true
+        case .codexCLI:
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
+        }
+
+        if useOrchestrator {
+            await configureOrchestratorRuntime(startIfNeeded: false)
         }
     }
 
@@ -104,10 +194,11 @@ final class AIAssistantViewModel: ObservableObject {
     func enableOrchestrator() {
         useOrchestrator = true
         orchestratorThreadID = currentConversationID ?? UUID()
-        if let agentProvider = currentAgentProvider {
-            Task {
-                await AgentOrchestrator.shared.setProvider(agentProvider)
-            }
+        if runtimeSelection != .codexCLI {
+            runtimeSelection = MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence
+        }
+        Task {
+            await configureOrchestratorRuntime(startIfNeeded: false)
         }
         logger.info("Orchestrator mode enabled")
     }
@@ -161,6 +252,7 @@ final class AIAssistantViewModel: ObservableObject {
 
         streamTask = Task {
             do {
+                try await AgentOrchestrator.shared.startRuntimeIfNeeded()
                 let envelope = AgentEnvelope.uiPanel(
                     text: text,
                     threadID: threadID,
@@ -193,6 +285,20 @@ final class AIAssistantViewModel: ObservableObject {
             isStreaming = false
             saveCurrentConversation()
         }
+    }
+
+    private func configureOrchestratorRuntime(startIfNeeded: Bool) async {
+        guard let runtime = currentAgentRuntime else { return }
+        await AgentOrchestrator.shared.stopRuntimeIfNeeded()
+        await AgentOrchestrator.shared.setRuntime(runtime)
+        if startIfNeeded {
+            do {
+                try await AgentOrchestrator.shared.startRuntimeIfNeeded()
+            } catch {
+                logger.error("Failed to start runtime: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        runtimeHealth = await AgentOrchestrator.shared.runtimeHealth()
     }
 
     /// Original provider-based send path (streaming text chunks).
@@ -400,5 +506,25 @@ final class AIAssistantViewModel: ObservableObject {
 
     func clearContext() {
         context = AIAssistantContext()
+    }
+
+    func refreshRuntimeHealth() {
+        guard useOrchestrator else { return }
+        Task {
+            runtimeHealth = await AgentOrchestrator.shared.runtimeHealth()
+        }
+    }
+
+    private func persistRuntimeSelection(_ selection: AIAgentRuntimeSelection) {
+        UserDefaults.standard.set(selection.rawValue, forKey: Self.runtimeSelectionDefaultsKey)
+    }
+
+    private static func loadPersistedRuntimeSelection() -> AIAgentRuntimeSelection {
+        guard let raw = UserDefaults.standard.string(forKey: runtimeSelectionDefaultsKey),
+              let selection = AIAgentRuntimeSelection(rawValue: raw)
+        else {
+            return MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence
+        }
+        return selection
     }
 }

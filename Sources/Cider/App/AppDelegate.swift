@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Notifications
     var dateCardNotificationService: DateCardNotificationService?
     var dateCardNotificationCancellable: AnyCancellable?
+    var telegramBridgeStarted = false
 
     // Settings
     var settingsWindow: SettingsWindow?
@@ -215,6 +216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Register agent tools and enable orchestrator for AI panel
             await AgentToolRegistration.registerAll()
             AIAssistantViewModel.shared.enableOrchestrator()
+            await TelegramBridge.shared.startIfConfigured()
+            self.telegramBridgeStarted = true
 
             // Re-reconcile on vault changes (debounced)
             self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards
@@ -238,6 +241,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardPanel?.orderOut(nil)
         aiAssistantShadowPanel?.orderOut(nil)
         aiAssistantPanel?.orderOut(nil)
+        if telegramBridgeStarted {
+            Task {
+                await TelegramBridge.shared.stop()
+            }
+        }
+        Task {
+            await AgentOrchestrator.shared.stopRuntimeIfNeeded()
+        }
     }
 
     func applicationWillResignActive(_ notification: Notification) {

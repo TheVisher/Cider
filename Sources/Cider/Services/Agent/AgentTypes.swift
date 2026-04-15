@@ -40,6 +40,9 @@ struct AgentMessage: Identifiable, Codable, Sendable {
 enum AgentChannel: String, Codable, Sendable {
     case uiPanel
     case iMessage
+    case telegram
+    case shareIngress
+    case iosApp
     case system
     case notification
 }
@@ -128,18 +131,56 @@ struct AgentEnvelope: Sendable {
     let text: String
     let threadID: UUID
     let channel: AgentChannel
+    let channelThreadID: String?
     let context: AgentContext
     let senderID: String?
     let senderDisplayName: String?
+    let metadata: [String: String]
 
     static func uiPanel(text: String, threadID: UUID, context: AgentContext) -> AgentEnvelope {
-        AgentEnvelope(text: text, threadID: threadID, channel: .uiPanel, context: context,
-                      senderID: nil, senderDisplayName: nil)
+        AgentEnvelope(
+            text: text,
+            threadID: threadID,
+            channel: .uiPanel,
+            channelThreadID: threadID.uuidString,
+            context: context,
+            senderID: nil,
+            senderDisplayName: nil,
+            metadata: [:]
+        )
     }
 
     static func system(text: String, threadID: UUID, context: AgentContext) -> AgentEnvelope {
-        AgentEnvelope(text: text, threadID: threadID, channel: .system, context: context,
-                      senderID: nil, senderDisplayName: nil)
+        AgentEnvelope(
+            text: text,
+            threadID: threadID,
+            channel: .system,
+            channelThreadID: threadID.uuidString,
+            context: context,
+            senderID: nil,
+            senderDisplayName: nil,
+            metadata: [:]
+        )
+    }
+
+    static func telegram(
+        text: String,
+        threadID: UUID,
+        channelThreadID: String,
+        context: AgentContext,
+        senderID: String?,
+        senderDisplayName: String?
+    ) -> AgentEnvelope {
+        AgentEnvelope(
+            text: text,
+            threadID: threadID,
+            channel: .telegram,
+            channelThreadID: channelThreadID,
+            context: context,
+            senderID: senderID,
+            senderDisplayName: senderDisplayName,
+            metadata: [:]
+        )
     }
 }
 

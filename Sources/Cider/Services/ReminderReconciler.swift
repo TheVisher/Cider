@@ -25,6 +25,9 @@ final class ReminderReconciler {
 
         // 2. Check outbox for agent-delivered reminders
         ReminderOutbox.shared.processReminders()
+        Task {
+            await TelegramBridge.shared.processReminders()
+        }
 
         lastReconcileDate = now
     }

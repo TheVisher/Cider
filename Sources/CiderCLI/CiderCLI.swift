@@ -2320,6 +2320,116 @@ struct CiderCLI {
                 print("Error: Board '\(boardName)' not found")
             }
 
+        case "update-card":
+            guard let boardRef = args.first,
+                  let cardID = parseFlag("--card", from: args) else {
+                print("Error: Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard var card = board.columns.flatMap(\.cards).first(where: { $0.id == cardID }) else {
+                print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+
+            var changed = false
+
+            if let title = parseFlag("--title", from: args) {
+                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, trimmed != card.title {
+                    card.title = trimmed
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-notes") {
+                if card.notes != nil {
+                    card.notes = nil
+                    changed = true
+                }
+            } else if let notes = parseFlag("--notes", from: args) {
+                let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = trimmed.isEmpty ? nil : trimmed
+                if normalized != card.notes {
+                    card.notes = normalized
+                    changed = true
+                }
+            }
+
+            if let priorityValue = parseFlag("--priority", from: args) {
+                let nextPriority: KanbanPriority?
+                switch priorityValue.lowercased() {
+                case "high": nextPriority = .high
+                case "medium": nextPriority = .medium
+                case "low": nextPriority = .low
+                case "none", "clear": nextPriority = nil
+                default:
+                    print("Error: Invalid priority '\(priorityValue)'. Use low, medium, high, or none.")
+                    return
+                }
+                if nextPriority != card.priority {
+                    card.priority = nextPriority
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-agent") {
+                if card.agent != nil {
+                    card.agent = nil
+                    changed = true
+                }
+            } else if let agent = parseFlag("--agent", from: args) {
+                let trimmed = agent.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = trimmed.isEmpty ? nil : trimmed
+                if normalized != card.agent {
+                    card.agent = normalized
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-tags") {
+                if !card.tags.isEmpty {
+                    card.tags = []
+                    changed = true
+                }
+            } else if let tagsValue = parseFlag("--tags", from: args) {
+                let tags = tagsValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                if tags != card.tags {
+                    card.tags = tags
+                    changed = true
+                }
+            }
+
+            if let colorValue = parseFlag("--color", from: args) {
+                let nextColor: KanbanCardColor?
+                switch colorValue.lowercased() {
+                case "blue": nextColor = .blue
+                case "green": nextColor = .green
+                case "orange": nextColor = .orange
+                case "red": nextColor = .red
+                case "purple": nextColor = .purple
+                case "none", "clear": nextColor = nil
+                default:
+                    print("Error: Invalid color '\(colorValue)'. Use blue, green, orange, red, purple, or none.")
+                    return
+                }
+                if nextColor != card.color {
+                    card.color = nextColor
+                    changed = true
+                }
+            }
+
+            guard changed else {
+                print("No card changes requested.")
+                return
+            }
+
+            storage.updateCard(boardID: board.id, card: card)
+            print("Updated card: \(card.title) [\(card.id)]")
+
         case "move-card":
             guard let boardName = args.first,
                   let cardID = parseFlag("--card", from: args),
@@ -2418,7 +2528,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, create, rename, delete, add-card, move-card, delete-card, add-column, rename-column, delete-column")
+            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, add-column, rename-column, delete-column")
         }
     }
 
@@ -3995,6 +4105,9 @@ struct CiderCLI {
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
           cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high]
+          cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes]
+                                         [--priority low|medium|high|none] [--agent <name>] [--clear-agent]
+                                         [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
           cider-cli board add-column <board> --name <col-name> [--done]
