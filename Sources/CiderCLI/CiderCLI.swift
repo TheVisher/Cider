@@ -1059,15 +1059,39 @@ struct CiderCLI {
             case .failed: return
             }
             let title = args.first ?? "Untitled Event"
-            let dateString = parseFlag("--date", from: args) ?? dateFormatter.string(from: Date())
-            let date = dateFormatter.date(from: dateString) ?? Date()
-            var card = storage.createDateCard(title: title, startAt: date)
+            let dateString = parseFlag("--date", from: args) ?? localDateFormatter.string(from: Date())
+            let timeString = parseFlag("--time", from: args)
+            guard let startAt = resolveEventStartAt(dateString: dateString, timeString: timeString) else {
+                print("Error: Invalid event date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+                return
+            }
+            var card = storage.createDateCard(title: title, startAt: startAt)
             guard storage.dateCards.contains(where: { $0.id == card.id }) else {
                 print("Error: Failed to create event (disk write failed)")
                 return
             }
             // Recurrence rule
             var needsUpdate = false
+            if args.contains("--all-day") {
+                card.allDay = true
+                card.startAt = Calendar.autoupdatingCurrent.startOfDay(for: startAt)
+                needsUpdate = true
+            } else if timeString != nil || args.contains("--timed") {
+                card.allDay = false
+                needsUpdate = true
+            } else {
+                card.allDay = true
+                card.startAt = Calendar.autoupdatingCurrent.startOfDay(for: startAt)
+                needsUpdate = true
+            }
+            if let loc = parseFlag("--location", from: args) {
+                card.location = loc
+                needsUpdate = true
+            }
+            if let details = parseFlag("--details", from: args) {
+                card.details = details
+                needsUpdate = true
+            }
             if let freqStr = parseFlag("--frequency", from: args) {
                 let freq: DateCardRecurrenceFrequency
                 switch freqStr.lowercased() {
@@ -1120,16 +1144,41 @@ struct CiderCLI {
 
         case "update", "set":
             guard let idPrefix = args.first else {
-                print("Error: ID prefix required. Usage: cider-cli event update <id> [--title <title>] [--date yyyy-MM-dd] [--location <location>]")
+                print("Error: ID prefix required. Usage: cider-cli event update <id> [--title <title>] [--date yyyy-MM-dd] [--time \"h:mm a\"] [--location <location>] [--details <text>]")
                 return
             }
             if var card = storage.dateCards.first(where: { $0.id.uuidString.lowercased().hasPrefix(idPrefix.lowercased()) }) {
                 var changed = false
                 if let t = parseFlag("--title", from: args) { card.title = t; changed = true }
-                if let ds = parseFlag("--date", from: args), let date = dateFormatter.date(from: ds) {
-                    card.startAt = date; changed = true
+                let dateArg = parseFlag("--date", from: args)
+                let timeArg = parseFlag("--time", from: args)
+                if dateArg != nil || timeArg != nil || args.contains("--all-day") || args.contains("--timed") {
+                    let existingDateString = localDateFormatter.string(from: card.startAt)
+                    let existingTimeString = localTimeFormatter.string(from: card.startAt)
+                    let baseDateString = dateArg ?? existingDateString
+                    let desiredTimeString: String? = {
+                        if args.contains("--all-day") { return nil }
+                        if let timeArg { return timeArg }
+                        if args.contains("--timed") || !card.allDay { return existingTimeString }
+                        return nil
+                    }()
+
+                    guard let updatedStartAt = resolveEventStartAt(dateString: baseDateString, timeString: desiredTimeString) else {
+                        print("Error: Invalid event date/time. Use --date yyyy-MM-dd and optional --time \"h:mm a\" or \"HH:mm\".")
+                        return
+                    }
+                    card.startAt = args.contains("--all-day")
+                        ? Calendar.autoupdatingCurrent.startOfDay(for: updatedStartAt)
+                        : updatedStartAt
+                    if args.contains("--all-day") {
+                        card.allDay = true
+                    } else if timeArg != nil || args.contains("--timed") {
+                        card.allDay = false
+                    }
+                    changed = true
                 }
                 if let loc = parseFlag("--location", from: args) { card.location = loc; changed = true }
+                if let details = parseFlag("--details", from: args) { card.details = details; changed = true }
                 // Reminder rules: --remind replaces existing, --clear-reminders removes all
                 if args.contains("--clear-reminders") {
                     card.rules.removeAll { $0.type == .remindBeforeMinutes }
@@ -3578,10 +3627,63 @@ struct CiderCLI {
         return f
     }()
 
+    static let localDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
+    static let localTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        return f
+    }()
+
     static func parseFlag(_ flag: String, from args: [String]) -> String? {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    static func resolveEventStartAt(dateString: String, timeString: String?) -> Date? {
+        let calendar = Calendar.autoupdatingCurrent
+
+        guard let baseDate = localDateFormatter.date(from: dateString) else {
+            return nil
+        }
+
+        guard let timeString, !timeString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return calendar.startOfDay(for: baseDate)
+        }
+
+        let supportedFormats = ["h:mm a", "h:mma", "H:mm", "HH:mm"]
+        let timeFormatters: [DateFormatter] = supportedFormats.map { format in
+            let formatter = DateFormatter()
+            formatter.dateFormat = format
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .autoupdatingCurrent
+            return formatter
+        }
+
+        guard let parsedTime = timeFormatters.compactMap({ $0.date(from: timeString) }).first else {
+            return nil
+        }
+
+        let dateComponents = calendar.dateComponents([.year, .month, .day], from: baseDate)
+        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: parsedTime)
+        var combined = DateComponents()
+        combined.year = dateComponents.year
+        combined.month = dateComponents.month
+        combined.day = dateComponents.day
+        combined.hour = timeComponents.hour
+        combined.minute = timeComponents.minute
+        combined.second = timeComponents.second ?? 0
+        combined.timeZone = .autoupdatingCurrent
+        return calendar.date(from: combined)
     }
 
     static func countItemsInFolder(_ folderID: UUID) -> Int {

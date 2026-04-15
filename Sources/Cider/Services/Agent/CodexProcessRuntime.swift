@@ -28,7 +28,7 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
     private var stdoutTask: Task<Void, Never>?
     private var stderrTask: Task<Void, Never>?
     private let startupTimeout: Duration = .seconds(20)
-    private let turnTimeout: Duration = .seconds(120)
+    private let defaultTurnTimeout: Duration = .seconds(120)
     private let initializeRetryCount = 1
 
     init(
@@ -88,10 +88,11 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
                     threadID: threadID,
                     text: turnText
                 )
+                let turnTimeout = self.turnTimeout(for: request.channel)
 
                 try await self.sessionState.prepareTurn(requestID: requestID)
                 try await self.writeJSONObject(turnPayload)
-                let responseText = try await self.withTimeout("turn/start \(requestID)", timeout: self.turnTimeout) { [self] in
+                let responseText = try await self.withTimeout("turn/start \(requestID)", timeout: turnTimeout) { [self] in
                     try await self.sessionState.waitForTurnCompletion(requestID: requestID)
                 }
 
@@ -530,6 +531,19 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
         }
 
         return ["PATH": combined.joined(separator: ":")]
+    }
+
+    private func turnTimeout(for channel: AgentChannel) -> Duration {
+        switch channel {
+        case .telegram:
+            return .seconds(600)
+        case .iMessage, .iosApp:
+            return .seconds(300)
+        case .uiPanel, .system:
+            return defaultTurnTimeout
+        case .shareIngress, .notification:
+            return .seconds(180)
+        }
     }
 
     private func withTimeout<T: Sendable>(

@@ -16,17 +16,39 @@ final class AgentDurableMemoryRecorder {
         let reason: String
     }
 
+    enum Decision {
+        case skipped(String)
+        case recorded(Observation)
+    }
+
     private let logger = Logger(subsystem: "com.cider.app", category: "AgentDurableMemoryRecorder")
 
     func recordIfNeeded(userText: String, channel: AgentChannel) {
-        guard shouldConsider(channel: channel, text: userText),
-              let observation = classify(userText)
-        else {
-            return
+        switch decide(userText: userText, channel: channel) {
+        case .skipped(let reason):
+            logger.debug("Skipped durable memory capture: \(reason, privacy: .public)")
+        case .recorded(let observation):
+            appendToDailyMemory(observation)
+            appendToUserMemory(observation)
+            logger.info("Recorded durable memory [\(observation.reason, privacy: .public)] in section \(observation.section.rawValue, privacy: .public)")
+        }
+    }
+
+    private func decide(userText: String, channel: AgentChannel) -> Decision {
+        let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .skipped("empty user message")
         }
 
-        appendToDailyMemory(observation)
-        appendToUserMemory(observation)
+        if let observation = classify(trimmed) {
+            return .recorded(observation)
+        }
+
+        guard shouldConsider(channel: channel, text: trimmed) else {
+            return .skipped(skipReason(for: channel, text: trimmed))
+        }
+
+        return .skipped("no durable-memory signal matched")
     }
 
     private func shouldConsider(channel: AgentChannel, text: String) -> Bool {
@@ -39,9 +61,9 @@ final class AgentDurableMemoryRecorder {
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 12 else { return false }
+        guard trimmed.split(separator: " ").count >= 3 else { return false }
         guard !trimmed.contains("http://"), !trimmed.contains("https://") else { return false }
         guard !trimmed.hasPrefix("/") else { return false }
-        guard !trimmed.hasSuffix("?") else { return false }
         return true
     }
 
@@ -76,9 +98,12 @@ final class AgentDurableMemoryRecorder {
         let phrases = [
             "remember that ",
             "remember this ",
+            "can you remember that ",
+            "can you remember this ",
             "for future reference, ",
             "for future reference ",
             "keep in mind that ",
+            "please remember ",
             "please remember "
         ]
 
@@ -91,6 +116,30 @@ final class AgentDurableMemoryRecorder {
         }
 
         return nil
+    }
+
+    private func skipReason(for channel: AgentChannel, text: String) -> String {
+        switch channel {
+        case .system, .notification, .shareIngress:
+            return "channel \(channel.rawValue) is not eligible"
+        case .uiPanel, .iMessage, .telegram, .iosApp:
+            break
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count < 12 {
+            return "message too short"
+        }
+        if trimmed.split(separator: " ").count < 3 {
+            return "message too terse"
+        }
+        if trimmed.contains("http://") || trimmed.contains("https://") {
+            return "url-heavy capture belongs elsewhere"
+        }
+        if trimmed.hasPrefix("/") {
+            return "command-like message"
+        }
+        return "message did not qualify"
     }
 
     private func appendToDailyMemory(_ observation: Observation) {
@@ -207,23 +256,26 @@ final class AgentDurableMemoryRecorder {
     }
 
     private let preferenceSignals = [
-        "i prefer", "i like", "i love", "i don't like", "i dislike", "i hate",
-        "my favorite", "i usually prefer"
+        "i prefer", "i usually prefer", "i like", "i love", "i don't like", "i dislike",
+        "i hate", "my favorite", "i'm into", "i am into", "i enjoy", "i don't want",
+        "i do not want", "i'd rather", "i would rather"
     ]
 
     private let projectSignals = [
         "i'm working on", "i am working on", "i'm building", "i am building",
-        "my project", "we're building", "we are building"
+        "my project", "we're building", "we are building", "i'm focused on",
+        "i am focused on", "my goal is", "i'm trying to", "i am trying to"
     ]
 
     private let relationshipSignals = [
         "my wife", "my husband", "my partner", "my girlfriend", "my boyfriend",
         "my daughter", "my son", "my kid", "my kids", "my mom", "my dad",
-        "my sister", "my brother", "my dog", "my cat"
+        "my sister", "my brother", "my friend", "my manager", "my coworker",
+        "my co-worker", "my dog", "my cat"
     ]
 
     private let routineSignals = [
-        "every morning", "every day", "every week", "usually", "most weekends",
-        "i tend to", "i always", "i never"
+        "every morning", "every night", "every day", "every week", "usually",
+        "normally", "most weekends", "on weekends", "i tend to", "i always", "i never"
     ]
 }

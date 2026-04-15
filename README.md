@@ -20,6 +20,10 @@
 
 Cider is a lightweight macOS app that floats above everything. Double-tap the Option key and it appears on whatever screen your mouse is on. Capture bookmarks, write notes, track events, and organize it all with folders and tags, without ever leaving what you're doing.
 
+At its core, Cider is a personal knowledge base and AI 2nd Brain for macOS. It gives you one place to collect what matters, keep context close, and build a system you can actually use every day instead of another app that turns into a pile of saved links.
+
+The AI layer is optional. You can use Cider as a fast native capture and organization tool with no AI workflow at all, or connect the intelligence layer that fits you best, whether that's cloud LLMs, native Apple/macOS AI capabilities, or local models running on your own machine.
+
 No Electron. No subscriptions. Just a native Swift app that stays out of your way until you need it.
 
 ## Features
@@ -34,6 +38,11 @@ No Electron. No subscriptions. Just a native Swift app that stays out of your wa
 - Press Opt+N to start a note from anywhere
 - Rich text editor with markdown, images, code blocks, and tables
 - Copy text from any app and paste it right in
+
+**Build a 2nd Brain, optionally**
+- Use Cider as a plain personal knowledge base with no AI dependency
+- Add AI only when it helps with recall, synthesis, or organization
+- Choose the model/provider setup that fits your workflow: hosted LLMs, native macOS AI, or local models
 
 **Organize your way**
 - Folders with nesting and drag-and-drop

@@ -191,6 +191,7 @@ enum StoragePaths {
         ensureDirectory(memoryDir)
         ensureDirectory(memoryDir.appendingPathComponent("daily"))
         ensureDirectory(memoryDir.appendingPathComponent("concepts"))
+        ensureDirectory(memoryDir.appendingPathComponent("reviews"))
         seedMemoryTemplates(memoryDir: memoryDir)
     }
 
@@ -214,11 +215,30 @@ enum StoragePaths {
 
             ## Daily Notes
             - `daily/YYYY-MM-DD.md` — raw observations from interactions
+            - `reviews/YYYY-W##.md` — weekly memory reviews and synthesis
+
+            ## Working State
+            - [open_loops.md](open_loops.md) — active follow-ups and unfinished threads
 
             ## Concepts (load on-demand when relevant)
             - *(none yet — add when synthesis needs emerge)*
             """
             try? content.write(to: indexURL, atomically: true, encoding: .utf8)
+        }
+
+        let openLoopsURL = memoryDir.appendingPathComponent("open_loops.md")
+        if !fm.fileExists(atPath: openLoopsURL.path) {
+            let content = """
+            ---
+            type: open-loops
+            updated: '\(Self.todayString())'
+            ---
+
+            # Open Loops
+
+            *(No obvious open loops detected yet.)*
+            """
+            try? content.write(to: openLoopsURL, atomically: true, encoding: .utf8)
         }
 
         let userURL = memoryDir.appendingPathComponent("user.md")

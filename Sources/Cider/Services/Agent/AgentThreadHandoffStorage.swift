@@ -62,6 +62,7 @@ final class AgentThreadHandoffStorage {
         }
 
         handoff.recentTurns = Array(handoff.recentTurns.suffix(maxRecentTurns))
+        logger.debug("Loaded handoff for \(externalKey, privacy: .public) with \(handoff.recentTurns.count, privacy: .public) recent turn(s)")
         return handoff
     }
 
@@ -84,6 +85,7 @@ final class AgentThreadHandoffStorage {
         do {
             let data = try encoder.encode(handoff)
             try data.write(to: fileURL(for: thread.externalKey), options: .atomic)
+            logger.debug("Saved handoff for \(thread.externalKey, privacy: .public) with \(recentTurns.count, privacy: .public) recent turn(s)")
         } catch {
             logger.error("Failed to save handoff for \(thread.externalKey, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
@@ -95,9 +97,36 @@ final class AgentThreadHandoffStorage {
         do {
             let data = try encoder.encode(updated)
             try data.write(to: fileURL(for: handoff.externalKey), options: .atomic)
+            logger.debug("Marked handoff restored for \(handoff.externalKey, privacy: .public)")
         } catch {
             logger.error("Failed to mark handoff restored for \(handoff.externalKey, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    func recentHandoffs(since cutoff: Date) -> [AgentThreadHandoff] {
+        ensureDirectory()
+
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else {
+            return []
+        }
+
+        return files
+            .filter { $0.pathExtension == "json" }
+            .compactMap { fileURL in
+                guard let data = try? Data(contentsOf: fileURL),
+                      var handoff = try? decoder.decode(AgentThreadHandoff.self, from: data),
+                      handoff.updatedAt >= cutoff
+                else {
+                    return nil
+                }
+                handoff.recentTurns = Array(handoff.recentTurns.suffix(maxRecentTurns))
+                return handoff
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private func trimmedRecentTurns(from messages: [AgentMessage]) -> [AgentThreadHandoff.RecentTurn] {

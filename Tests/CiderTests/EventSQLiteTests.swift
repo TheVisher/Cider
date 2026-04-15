@@ -144,6 +144,40 @@ struct EventSQLiteTests {
         #expect(service2.dateCards[0].allDay == true)
     }
 
+    @Test("All-day VALUE=DATE preserves local calendar day in Pacific time")
+    func allDayValueDatePreservesPacificCalendarDay() throws {
+        let originalTimeZone = NSTimeZone.default
+        let pacific = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        NSTimeZone.default = pacific
+        defer { NSTimeZone.default = originalTimeZone }
+
+        let parsed = try #require(
+            ICalendarSerializer.parseDateCard(
+                """
+                BEGIN:VCALENDAR
+                VERSION:2.0
+                PRODID:-//Cider//NONSGML v1.0//EN
+                BEGIN:VEVENT
+                UID:11111111-1111-1111-1111-111111111111
+                SUMMARY:Rilynn Nordquist Birthday
+                DTSTART;VALUE=DATE:20260630
+                END:VEVENT
+                END:VCALENDAR
+                """
+            )
+        )
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = pacific
+        let components = calendar.dateComponents([.year, .month, .day], from: parsed.startAt)
+
+        #expect(parsed.allDay == true)
+        #expect(components.year == 2026)
+        #expect(components.month == 6)
+        #expect(components.day == 30)
+        #expect(ICalendarSerializer.serializeDateCard(parsed).contains("DTSTART;VALUE=DATE:20260630"))
+    }
+
     // MARK: - Nil Optionals
 
     @Test("Nil optional fields round-trip as nil")

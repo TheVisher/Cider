@@ -10,6 +10,7 @@ final class ReminderReconciler {
     private nonisolated static let logger = Logger(subsystem: "com.cider.app", category: "ReminderReconciler")
 
     private var dayRolloverTimer: Timer?
+    private var nextDueTimer: Timer?
     private var lastReconcileDate: Date?
     private var wakeObserver: NSObjectProtocol?
     private var screenWakeObserver: NSObjectProtocol?
@@ -28,8 +29,12 @@ final class ReminderReconciler {
         Task {
             await TelegramBridge.shared.processReminders()
         }
+        Task {
+            await AgentMemoryReviewService.shared.processScheduledReview(now: now)
+        }
 
         lastReconcileDate = now
+        scheduleNextDueTimer(from: now)
     }
 
     /// Start periodic reconciliation.
@@ -80,6 +85,8 @@ final class ReminderReconciler {
     func stop() {
         dayRolloverTimer?.invalidate()
         dayRolloverTimer = nil
+        nextDueTimer?.invalidate()
+        nextDueTimer = nil
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
@@ -113,5 +120,92 @@ final class ReminderReconciler {
         }
 
         Self.logger.debug("Day rollover timer scheduled")
+    }
+
+    private func scheduleNextDueTimer(from now: Date) {
+        nextDueTimer?.invalidate()
+        nextDueTimer = nil
+
+        guard let nextFireDate = nextReminderFireDate(after: now) else {
+            Self.logger.debug("No upcoming agent reminder due times found")
+            return
+        }
+
+        let interval = max(1, nextFireDate.timeIntervalSince(now))
+        nextDueTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { _ in
+            Task { @MainActor in
+                ReminderReconciler.shared.reconcile()
+            }
+        }
+
+        Self.logger.debug("Next reminder timer scheduled for \(nextFireDate.formatted(), privacy: .public)")
+    }
+
+    private func nextReminderFireDate(after now: Date) -> Date? {
+        let dateCards = DateCardStorage.shared.dateCards
+        let config = CiderConfig.load()
+        let telegramRemindersEnabled = telegramReminderSchedulingEnabled()
+        let calendar = Calendar.current
+        let horizon = calendar.date(byAdding: .day, value: 14, to: now) ?? now.addingTimeInterval(14 * 24 * 60 * 60)
+
+        var earliest: Date?
+
+        for card in dateCards {
+            if card.isCompleted, card.recurrenceRule == nil { continue }
+
+            let reminderRules = card.rules.filter { $0.type == .remindBeforeMinutes && $0.isEnabled }
+            let offsets: [Int]
+            if reminderRules.isEmpty {
+                offsets = (config.enableAgentReminders || telegramRemindersEnabled)
+                    ? [config.dateCardDefaultNotificationMinutes]
+                    : []
+            } else {
+                offsets = reminderRules.compactMap(\.integerValue)
+            }
+            guard !offsets.isEmpty else { continue }
+
+            if card.recurrenceRule != nil {
+                var cursor = card.effectiveDate(now: now)
+                while cursor <= horizon {
+                    for minutesBefore in offsets {
+                        let fireDate = cursor.addingTimeInterval(-Double(minutesBefore) * 60)
+                        if fireDate > now {
+                            earliest = minOptional(earliest, fireDate)
+                        }
+                    }
+                    guard let next = card.nextOccurrence(after: cursor) else { break }
+                    cursor = next
+                }
+            } else {
+                for minutesBefore in offsets {
+                    let fireDate = card.startAt.addingTimeInterval(-Double(minutesBefore) * 60)
+                    if fireDate > now {
+                        earliest = minOptional(earliest, fireDate)
+                    }
+                }
+            }
+        }
+
+        return earliest
+    }
+
+    private func telegramReminderSchedulingEnabled() -> Bool {
+        let configURL = StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent(StoragePaths.ciderInternalDir)
+            .appendingPathComponent("telegram")
+            .appendingPathComponent("config.json")
+
+        guard let data = try? Data(contentsOf: configURL),
+              let config = try? JSONDecoder().decode(TelegramBridgeConfiguration.self, from: data)
+        else {
+            return false
+        }
+
+        return config.isEnabled && config.sendReminders && !config.allowedChatIDs.isEmpty
+    }
+
+    private func minOptional(_ lhs: Date?, _ rhs: Date) -> Date {
+        guard let lhs else { return rhs }
+        return min(lhs, rhs)
     }
 }

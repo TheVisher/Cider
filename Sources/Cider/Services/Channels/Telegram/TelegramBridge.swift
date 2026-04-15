@@ -1,5 +1,6 @@
 import Foundation
 import os
+import AppKit
 
 /// Telegram-first remote chat bridge foundation.
 /// This remains transport-only: routing, permissions, and vault actions stay in Cider.
@@ -17,6 +18,8 @@ actor TelegramBridge: ChannelBridge {
     private var isRunning = false
     private var pollTask: Task<Void, Never>?
     private var inFlightUpdateIDs: Set<Int> = []
+    private let quickAckDelay: Duration = .milliseconds(900)
+    private let longTurnNoticeDelay: Duration = .seconds(75)
 
     private init() {}
 
@@ -125,6 +128,14 @@ actor TelegramBridge: ChannelBridge {
             await processReminder(card, now: now)
         }
 
+        if configuration.sendDailyDigest {
+            await processDailyDigest(dateCards: dateCards, now: now)
+        }
+
+        if configuration.sendWeeklyDigest {
+            await processWeeklyDigest(dateCards: dateCards, now: now)
+        }
+
         saveState()
     }
 
@@ -144,8 +155,13 @@ actor TelegramBridge: ChannelBridge {
         telegramDirectory.appendingPathComponent("state.json")
     }
 
+    private var mediaDirectory: URL {
+        telegramDirectory.appendingPathComponent("media")
+    }
+
     private func bootstrapFilesIfNeeded() throws {
         try FileManager.default.createDirectory(at: telegramDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
 
         if !FileManager.default.fileExists(atPath: configurationURL.path) {
             let encoder = JSONEncoder()
@@ -266,24 +282,12 @@ actor TelegramBridge: ChannelBridge {
             throw AgentError.deliveryFailed(apiResponse.description ?? "Telegram getUpdates returned ok=false")
         }
 
-        return apiResponse.result.compactMap { update in
-            guard let message = update.message else { return nil }
-            let trimmed = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !trimmed.isEmpty else { return nil }
-
-            let displayName = [message.from?.firstName, message.from?.lastName]
-                .compactMap { $0 }
-                .filter { !$0.isEmpty }
-                .joined(separator: " ")
-
-            return TelegramUpdateEnvelope(
-                updateID: update.updateID,
-                chatID: message.chat.id,
-                senderID: message.from?.id ?? message.chat.id,
-                senderDisplayName: displayName.isEmpty ? message.from?.username : displayName,
-                text: trimmed
-            )
+        var envelopes: [TelegramUpdateEnvelope] = []
+        for update in apiResponse.result {
+            guard let envelope = await makeEnvelope(from: update) else { continue }
+            envelopes.append(envelope)
         }
+        return envelopes
     }
 
     private func handle(update: TelegramUpdateEnvelope) async {
@@ -310,17 +314,47 @@ actor TelegramBridge: ChannelBridge {
         }
 
         let envelope = makeEnvelope(from: update)
+        let responseTask = Task {
+            try await AgentOrchestrator.shared.handleMessage(envelope)
+        }
+        let shouldSendQuickAck = Self.shouldSendQuickAcknowledgement(for: update.text)
+        let quickAckTask = Task { [weak self] in
+            guard shouldSendQuickAck else { return }
+            try? await Task.sleep(for: self?.quickAckDelay ?? .seconds(3))
+            guard let self, !Task.isCancelled else { return }
+            let ack = Self.quickAcknowledgement(for: update.text)
+            do {
+                logger.info("Sending Telegram quick ack to chat \(update.chatID)")
+                try await self.sendMessage(ack, to: update.chatID)
+            } catch {
+                logger.error("Failed to send Telegram quick ack: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        let progressTask = Task { [weak self] in
+            try? await Task.sleep(for: self?.longTurnNoticeDelay ?? .seconds(75))
+            guard let self, !Task.isCancelled else { return }
+            do {
+                logger.info("Sending Telegram long-turn notice to chat \(update.chatID)")
+                try await self.sendMessage("Still working on that. I'll send the answer as soon as it's ready.", to: update.chatID)
+            } catch {
+                logger.error("Failed to send Telegram long-turn notice: \(error.localizedDescription, privacy: .public)")
+            }
+        }
 
         do {
             if let runtime = await AgentOrchestrator.shared.runtimeIdentity() {
                 logger.info("Routing Telegram message to runtime \(runtime.id, privacy: .public)")
             }
-            let response = try await AgentOrchestrator.shared.handleMessage(envelope)
+            let response = try await responseTask.value
+            quickAckTask.cancel()
+            progressTask.cancel()
             if !response.text.isEmpty {
                 logger.info("Sending Telegram runtime response to chat \(update.chatID)")
                 try await sendMessage(response.text, to: update.chatID)
             }
         } catch {
+            quickAckTask.cancel()
+            progressTask.cancel()
             let message = "Cider error: \(error.localizedDescription)"
             do {
                 logger.info("Sending Telegram error response to chat \(update.chatID)")
@@ -434,6 +468,146 @@ actor TelegramBridge: ChannelBridge {
         }
     }
 
+    private static func quickAcknowledgement(for text: String) -> String {
+        let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if normalized.contains("the user sent an image on telegram")
+            || normalized.contains("caption:")
+            || normalized.contains("ocr text from image:") {
+            return "Got it. Let me look at that image."
+        }
+
+        if normalized.contains("http://") || normalized.contains("https://") || normalized.contains("www.") {
+            return "Got it. Let me save that."
+        }
+
+        if ["save this", "save that", "add this", "capture this"].contains(where: normalized.contains) {
+            return "Got it. Let me save that."
+        }
+
+        if ["how many", "count", "total", "number of"].contains(where: normalized.contains) {
+            return "Checking your vault."
+        }
+
+        if ["find", "search", "look up", "lookup", "do i have", "what do i have", "show me"].contains(where: normalized.contains) {
+            return "Let me look into that."
+        }
+
+        if ["birthday", "contact", "contacts", "event", "todo", "note", "bookmark"].contains(where: normalized.contains) {
+            return "Okay. Let me check that."
+        }
+
+        return "Got it. Working on it now."
+    }
+
+    private static func shouldSendQuickAcknowledgement(for text: String) -> Bool {
+        let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty { return false }
+
+        if normalized.count > 120 || normalized.contains("\n") {
+            return true
+        }
+
+        let likelyLongSignals = [
+            "http://", "https://", "www.",
+            "save", "add", "capture", "bookmark",
+            "find", "search", "look up", "lookup", "what do i have",
+            "how many", "count", "total",
+            "appointment", "event", "reminder", "date card",
+            "the user sent an image on telegram", "ocr text from image:"
+        ]
+        return likelyLongSignals.contains(where: normalized.contains)
+    }
+
+    private func makeEnvelope(from update: TelegramUpdate) async -> TelegramUpdateEnvelope? {
+        guard let message = update.message else { return nil }
+
+        let displayName = [message.from?.firstName, message.from?.lastName]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        let text = await inboundText(for: message)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        return TelegramUpdateEnvelope(
+            updateID: update.updateID,
+            chatID: message.chat.id,
+            senderID: message.from?.id ?? message.chat.id,
+            senderDisplayName: displayName.isEmpty ? message.from?.username : displayName,
+            text: trimmed
+        )
+    }
+
+    private func inboundText(for message: TelegramMessage) async -> String {
+        let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let caption = message.caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard let photo = message.photo?.max(by: { lhs, rhs in
+            let lhsScore = (lhs.fileSize ?? 0) + lhs.width * lhs.height
+            let rhsScore = (rhs.fileSize ?? 0) + rhs.width * rhs.height
+            return lhsScore < rhsScore
+        }) else {
+            return !text.isEmpty ? text : caption
+        }
+
+        var lines: [String] = ["The user sent an image on Telegram."]
+        if !caption.isEmpty {
+            lines.append("Caption: \(caption)")
+        } else if !text.isEmpty {
+            lines.append("Message text: \(text)")
+        }
+
+        if let localURL = try? await downloadPhoto(fileID: photo.fileID) {
+            lines.append("Local image copy: \(localURL.path)")
+            if let ocrText = await OCRService.extractText(from: localURL)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !ocrText.isEmpty {
+                lines.append("OCR text from image: \(ocrText)")
+            } else {
+                lines.append("OCR text from image: (none detected)")
+            }
+        } else {
+            lines.append("Image download failed, so only caption/text context is available.")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func downloadPhoto(fileID: String) async throws -> URL {
+        let request = try apiRequest(
+            method: "getFile",
+            queryItems: [URLQueryItem(name: "file_id", value: fileID)]
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
+            throw AgentError.deliveryFailed("Telegram getFile failed")
+        }
+
+        let apiResponse = try JSONDecoder().decode(TelegramGetFileResponse.self, from: data)
+        guard apiResponse.ok, let filePath = apiResponse.result?.filePath else {
+            throw AgentError.deliveryFailed(apiResponse.description ?? "Telegram getFile returned ok=false")
+        }
+
+        guard !configuration.botToken.isEmpty else {
+            throw AgentError.deliveryFailed("Telegram bot token is not configured")
+        }
+
+        let remoteURL = URL(string: "https://api.telegram.org/file/bot\(configuration.botToken)/\(filePath)")!
+        let (fileData, fileResponse) = try await URLSession.shared.data(from: remoteURL)
+        guard let fileHTTP = fileResponse as? HTTPURLResponse, 200..<300 ~= fileHTTP.statusCode else {
+            throw AgentError.deliveryFailed("Telegram file download failed")
+        }
+
+        try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+        let ext = URL(fileURLWithPath: filePath).pathExtension
+        let localURL = mediaDirectory.appendingPathComponent("\(fileID).\(ext.isEmpty ? "jpg" : ext)")
+        try fileData.write(to: localURL, options: .atomic)
+        return localURL
+    }
+
     // MARK: - Outbound
 
     func sendMessage(_ text: String, to chatID: Int64) async throws {
@@ -476,14 +650,20 @@ actor TelegramBridge: ChannelBridge {
         if card.isCompleted, card.recurrenceRule == nil { return }
 
         let reminderRules = card.rules.filter { $0.type == .remindBeforeMinutes && $0.isEnabled }
-        guard !reminderRules.isEmpty else { return }
+        let offsets: [Int]
+        if reminderRules.isEmpty {
+            let config = CiderConfig.load()
+            offsets = [config.dateCardDefaultNotificationMinutes]
+        } else {
+            offsets = reminderRules.compactMap { $0.integerValue ?? 15 }
+        }
+        guard !offsets.isEmpty else { return }
 
         let horizon = now.addingTimeInterval(24 * 60 * 60)
         var cursor = card.effectiveDate(now: now)
 
         while cursor <= horizon {
-            for rule in reminderRules {
-                let minutesBefore = rule.integerValue ?? 15
+            for minutesBefore in offsets {
                 let fireDate = cursor.addingTimeInterval(-Double(minutesBefore) * 60)
                 if fireDate <= now, fireDate > now.addingTimeInterval(-5 * 60) {
                     let reminderID = reminderIdentifier(cardID: card.id, occurrence: cursor, offset: minutesBefore)
@@ -504,6 +684,183 @@ actor TelegramBridge: ChannelBridge {
             guard let next = card.nextOccurrence(after: cursor) else { break }
             cursor = next
         }
+    }
+
+    private func processDailyDigest(dateCards: [DateCard], now: Date) async {
+        let calendar = Calendar.current
+        let digestHour = 8
+        let currentHour = calendar.component(.hour, from: now)
+        guard currentHour >= digestHour else { return }
+
+        let dayKey = dayDigestKey(for: now)
+        guard !state.deliveredDailyDigestKeys.contains(dayKey) else { return }
+
+        let startOfToday = calendar.startOfDay(for: now)
+        guard let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) else { return }
+
+        let dueToday = upcomingOccurrences(
+            for: dateCards,
+            from: startOfToday,
+            to: startOfTomorrow.addingTimeInterval(-1),
+            now: now
+        )
+
+        guard !dueToday.isEmpty else {
+            state.deliveredDailyDigestKeys.insert(dayKey)
+            return
+        }
+
+        let message = dailyDigestMessage(for: dueToday, now: now)
+        for chatID in configuration.allowedChatIDs {
+            do {
+                try await sendMessage(message, to: chatID)
+            } catch {
+                logger.error("Failed to deliver Telegram daily digest: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        logger.info("Delivered Telegram daily digest \(dayKey, privacy: .public)")
+        state.deliveredDailyDigestKeys.insert(dayKey)
+    }
+
+    private func processWeeklyDigest(dateCards: [DateCard], now: Date) async {
+        let calendar = Calendar.current
+        let digestHour = 8
+        let currentHour = calendar.component(.hour, from: now)
+        guard currentHour >= digestHour else { return }
+
+        let weekKey = weekDigestKey(for: now)
+        guard !state.deliveredWeeklyDigestKeys.contains(weekKey) else { return }
+
+        let weekday = calendar.component(.weekday, from: now)
+        guard weekday == 2 else { return } // Monday in Gregorian calendar
+
+        let startOfToday = calendar.startOfDay(for: now)
+        guard let weekHorizon = calendar.date(byAdding: .day, value: 7, to: startOfToday) else { return }
+
+        let upcomingWeek = upcomingOccurrences(
+            for: dateCards,
+            from: startOfToday,
+            to: weekHorizon.addingTimeInterval(-1),
+            now: now
+        )
+
+        guard !upcomingWeek.isEmpty else {
+            state.deliveredWeeklyDigestKeys.insert(weekKey)
+            return
+        }
+
+        let message = weeklyDigestMessage(for: upcomingWeek, now: now)
+        for chatID in configuration.allowedChatIDs {
+            do {
+                try await sendMessage(message, to: chatID)
+            } catch {
+                logger.error("Failed to deliver Telegram weekly digest: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        logger.info("Delivered Telegram weekly digest \(weekKey, privacy: .public)")
+        state.deliveredWeeklyDigestKeys.insert(weekKey)
+    }
+
+    private struct ScheduledOccurrence {
+        let card: DateCard
+        let occurrence: Date
+    }
+
+    private func upcomingOccurrences(
+        for dateCards: [DateCard],
+        from start: Date,
+        to end: Date,
+        now: Date
+    ) -> [ScheduledOccurrence] {
+        var results: [ScheduledOccurrence] = []
+
+        for card in dateCards {
+            if card.isCompleted, card.recurrenceRule == nil { continue }
+
+            if card.recurrenceRule != nil {
+                var cursor = card.effectiveDate(now: now)
+                while cursor <= end {
+                    if cursor >= start {
+                        results.append(ScheduledOccurrence(card: card, occurrence: cursor))
+                    }
+                    guard let next = card.nextOccurrence(after: cursor) else { break }
+                    cursor = next
+                }
+            } else {
+                let target = card.startAt
+                if target >= start && target <= end {
+                    results.append(ScheduledOccurrence(card: card, occurrence: target))
+                }
+            }
+        }
+
+        return results.sorted { lhs, rhs in
+            if lhs.occurrence == rhs.occurrence {
+                return lhs.card.title.localizedCaseInsensitiveCompare(rhs.card.title) == .orderedAscending
+            }
+            return lhs.occurrence < rhs.occurrence
+        }
+    }
+
+    private func dailyDigestMessage(for occurrences: [ScheduledOccurrence], now: Date) -> String {
+        var lines = ["Good morning. Here's what's due today:"]
+        lines.append(contentsOf: formattedDigestLines(for: occurrences, now: now, includeWeekday: false))
+        return lines.joined(separator: "\n")
+    }
+
+    private func weeklyDigestMessage(for occurrences: [ScheduledOccurrence], now: Date) -> String {
+        var lines = ["This week's upcoming items:"]
+        lines.append(contentsOf: formattedDigestLines(for: occurrences, now: now, includeWeekday: true))
+        return lines.joined(separator: "\n")
+    }
+
+    private func formattedDigestLines(
+        for occurrences: [ScheduledOccurrence],
+        now: Date,
+        includeWeekday: Bool
+    ) -> [String] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.timeZone = .current
+        formatter.dateFormat = includeWeekday ? "EEE, MMM d" : "MMM d"
+
+        return occurrences.prefix(8).map { scheduled in
+            let dayText: String
+            if calendar.isDateInToday(scheduled.occurrence) {
+                dayText = "Today"
+            } else if calendar.isDateInTomorrow(scheduled.occurrence) {
+                dayText = "Tomorrow"
+            } else {
+                dayText = formatter.string(from: scheduled.occurrence)
+            }
+
+            let timeText: String
+            if scheduled.card.allDay {
+                timeText = "all day"
+            } else {
+                let timeFormatter = DateFormatter()
+                timeFormatter.timeStyle = .short
+                timeFormatter.dateStyle = .none
+                timeFormatter.timeZone = .current
+                timeText = timeFormatter.string(from: scheduled.occurrence)
+            }
+
+            return "- \(dayText): \(scheduled.card.title) (\(timeText))"
+        }
+    }
+
+    private func dayDigestKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func weekDigestKey(for date: Date) -> String {
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        let year = comps.yearForWeekOfYear ?? calendar.component(.year, from: date)
+        let week = comps.weekOfYear ?? 0
+        return "\(year)-W\(week)"
     }
 
     private func reminderIdentifier(cardID: UUID, occurrence: Date, offset: Int) -> String {
@@ -563,6 +920,22 @@ private struct TelegramMessage: Decodable {
     let chat: TelegramChat
     let from: TelegramUser?
     let text: String?
+    let caption: String?
+    let photo: [TelegramPhotoSize]?
+}
+
+private struct TelegramPhotoSize: Decodable {
+    let fileID: String
+    let width: Int
+    let height: Int
+    let fileSize: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case fileID = "file_id"
+        case width
+        case height
+        case fileSize = "file_size"
+    }
 }
 
 private struct TelegramChat: Decodable {
@@ -590,5 +963,19 @@ private struct TelegramSendMessageRequest: Encodable {
     private enum CodingKeys: String, CodingKey {
         case chatID = "chat_id"
         case text
+    }
+}
+
+private struct TelegramGetFileResponse: Decodable {
+    let ok: Bool
+    let result: TelegramFileResult?
+    let description: String?
+}
+
+private struct TelegramFileResult: Decodable {
+    let filePath: String
+
+    private enum CodingKeys: String, CodingKey {
+        case filePath = "file_path"
     }
 }

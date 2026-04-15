@@ -358,6 +358,8 @@ actor AgentOrchestrator {
             Do not claim the user must enable a separate vault connector if the answer can be obtained from the local vault or `cider-cli`.
             For count questions like "how many bookmarks/folders/notes/todos/events/contacts/files/images/labels/boards do I have?", use `cider-cli status --json` first and treat that output as canonical unless the user explicitly asks for on-disk filesystem counts.
             Prefer `cider-cli` for exact counts, searches, and mutations. Fall back to `.cider` indexes next. Only use raw filesystem counts as a last resort.
+            Do not inspect arbitrary vault files, `_cider_*` sidecars, or run broad shell exploration when a direct `cider-cli` command can answer the question.
+            Do not probe CLI help during a live user turn unless command syntax is truly unknown and cannot be inferred from the known command set.
             If filesystem counts differ from `cider-cli` or Cider indexes, report the `cider-cli` value as the app-authoritative count and mention the filesystem count only as a secondary caveat.
             Do not derive app-level totals by counting Markdown files or folders directly when `cider-cli` or Cider indexes can answer.
             Do not answer factual vault questions from memory alone when a current `cider-cli` query can verify the answer.
@@ -489,6 +491,7 @@ actor AgentOrchestrator {
             query.terms.contains(where: normalized.contains)
         }
         let asksForBookmarkFacts = normalized.contains("bookmark") || normalized.contains("url") || normalized.contains("link")
+        let containsURL = normalized.contains("http://") || normalized.contains("https://") || normalized.contains("www.")
         let asksForBroadTopicLookup = [
             "what do i have about",
             "what do i have on",
@@ -525,6 +528,14 @@ actor AgentOrchestrator {
             && matchedEntityScopes.isEmpty
         let explicitlyRequestsFilesystem = ["filesystem", "on disk", "on-disk", "raw files", "files on disk"]
             .contains(where: normalized.contains)
+        let asksToCaptureOrSave = [
+            "save", "add", "capture", "store", "bookmark this", "file this"
+        ].contains(where: normalized.contains)
+        let asksToCreateEvent = [
+            "appointment", "schedule", "event", "date card", "calendar", "reminder"
+        ].contains(where: normalized.contains) && [
+            "create", "make", "add", "save", "schedule", "set up"
+        ].contains(where: normalized.contains)
 
         if asksForCount {
             route = "status"
@@ -584,6 +595,27 @@ actor AgentOrchestrator {
             route = "query"
             detail = "generic vault search"
             hints.append("- For factual lookups across the vault, prefer `cider-cli query \"<question>\" --json` before ad hoc file inspection.")
+        }
+
+        if containsURL && !asksForBookmarkExistence && (asksToCaptureOrSave || !asksForSearch) {
+            route = "bookmark-capture"
+            detail = "url capture"
+            hints.append("- This looks like a bookmark capture. Duplicate-check the URL first with `cider-cli duplicate-check \"<url>\" --json`.")
+            hints.append("- Keep this turn on the fast path: `duplicate-check -> bookmark add -> bookmark get`. If the duplicate check finds an existing bookmark, report that result and stop.")
+            hints.append("- Decide the destination path before saving when confidence is high enough. Use folder-aware CLI lookups if needed, then save directly with `cider-cli bookmark add \"<url>\" --title \"<title>\" --path \"<vault-path>\"`.")
+            hints.append("- Do not save to Inbox first and move it later unless routing is genuinely unclear.")
+            hints.append("- Let Cider do the native scraping/enrichment pass after save. Save first, then re-read the bookmark with `cider-cli bookmark get <id-prefix> --json` and report the stored result.")
+            hints.append("- Do not fetch raw page HTML, do not manually call oEmbed or WebView, do not read `.cider` indexes or `_cider_bookmarks.json`, and do not scan random vault files before saving unless the direct CLI path failed.")
+            hints.append("- Only add extra AI enrichment after the bookmark already exists and only by writing AI-owned fields such as `--ai-summary` when that extra context is genuinely useful.")
+        }
+
+        if asksToCreateEvent {
+            route = "event-create"
+            detail = "appointment or date-card capture"
+            hints.append("- For appointments, reminders, and date-card captures, prefer one complete `cider-cli event create` call with all known fields instead of create-then-edit.")
+            hints.append("- Use `cider-cli event create \"<title>\" --date YYYY-MM-DD --time \"h:mm AM\" --location \"<location>\" --details \"<details>\"` when the request includes a specific time.")
+            hints.append("- Use `--all-day` for date-only events, `--timed` or `--time` for timed events, and include `--remind <minutes>` when reminder timing is part of the request.")
+            hints.append("- If the destination folder is clear, include `--path \"<vault-path>\"` at creation time instead of creating in Inbox and fixing it later.")
         }
 
         if !asksForCount && !asksForRecent && !asksForSearch {
