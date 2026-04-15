@@ -75,26 +75,38 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
 
     func send(_ request: AgentRuntimeRequest) async throws -> AgentRuntimeResponse {
         try await operationGate.run {
-            try await self.startUnlocked()
-            await self.processManager.markActivity()
+            do {
+                try await self.startUnlocked()
+                await self.processManager.markActivity()
 
-            let threadID = try await self.ensureThreadStarted()
-            let requestID = await self.sessionState.nextRequestID()
-            let turnText = self.buildTurnText(from: request)
-            self.logger.info("Codex turn starting on thread \(threadID, privacy: .public) with request \(requestID, privacy: .public)")
-            let turnPayload = self.makeTurnStartPayload(
-                requestID: requestID,
-                threadID: threadID,
-                text: turnText
-            )
+                let threadID = try await self.ensureThreadStarted()
+                let requestID = await self.sessionState.nextRequestID()
+                let turnText = self.buildTurnText(from: request)
+                self.logger.info("Codex turn starting on thread \(threadID, privacy: .public) with request \(requestID, privacy: .public)")
+                let turnPayload = self.makeTurnStartPayload(
+                    requestID: requestID,
+                    threadID: threadID,
+                    text: turnText
+                )
 
-            try await self.sessionState.prepareTurn(requestID: requestID)
-            try await self.writeJSONObject(turnPayload)
-            let responseText = try await self.withTimeout("turn/start \(requestID)", timeout: self.turnTimeout) { [self] in
-                try await self.sessionState.waitForTurnCompletion(requestID: requestID)
+                try await self.sessionState.prepareTurn(requestID: requestID)
+                try await self.writeJSONObject(turnPayload)
+                let responseText = try await self.withTimeout("turn/start \(requestID)", timeout: self.turnTimeout) { [self] in
+                    try await self.sessionState.waitForTurnCompletion(requestID: requestID)
+                }
+
+                let trimmedResponse = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedResponse.isEmpty {
+                    self.logger.warning("Codex turn completed with empty text for request \(requestID, privacy: .public) on thread \(threadID, privacy: .public)")
+                } else {
+                    self.logger.info("Codex turn completed for request \(requestID, privacy: .public) with \(trimmedResponse.count, privacy: .public) characters")
+                    self.logHeuristicFallbacks(in: trimmedResponse, requestID: requestID)
+                }
+                return AgentRuntimeResponse(text: responseText, toolRequests: [])
+            } catch {
+                self.logger.error("Codex send failed for channel \(request.channel.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                throw error
             }
-            self.logger.info("Codex turn completed for request \(requestID, privacy: .public)")
-            return AgentRuntimeResponse(text: responseText, toolRequests: [])
         }
     }
 
@@ -118,10 +130,21 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
         await sessionState.resetForNewProcess()
         installReaders(stdout: stdout, stderr: stderr)
         logger.info("Codex runtime starting initialize handshake")
-        try await sendInitialize()
-        logger.info("Codex runtime initialize completed")
-        try await ensureThreadStarted()
-        logger.info("Codex runtime thread ready")
+        do {
+            try await sendInitialize()
+            logger.info("Codex runtime initialize completed")
+        } catch {
+            logger.error("Codex runtime initialize handshake failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+
+        do {
+            _ = try await ensureThreadStarted()
+            logger.info("Codex runtime thread ready")
+        } catch {
+            logger.error("Codex runtime thread-start failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
     }
 
     func stream(_ request: AgentRuntimeRequest) -> AsyncThrowingStream<AgentRuntimeEvent, Error> {
@@ -189,7 +212,7 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
                 return
             } catch {
                 lastError = error
-                logger.error("Codex initialize attempt \(attempt + 1, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                logger.error("Codex initialize attempt \(attempt + 1, privacy: .public) failed for request \(requestID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 guard attempt < initializeRetryCount else { break }
             }
         }
@@ -215,9 +238,20 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
                 "experimentalRawEvents": false
             ]
         ]
-        try await writeJSONObject(payload)
-        return try await withTimeout("thread/start \(requestID)", timeout: self.startupTimeout) { [self] in
-            try await self.sessionState.waitForThreadID()
+        do {
+            try await writeJSONObject(payload)
+        } catch {
+            logger.error("Codex thread/start write failed for request \(requestID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+
+        do {
+            return try await withTimeout("thread/start \(requestID)", timeout: self.startupTimeout) { [self] in
+                try await self.sessionState.waitForThreadID()
+            }
+        } catch {
+            logger.error("Codex thread/start wait failed for request \(requestID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
 
@@ -226,7 +260,7 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
         guard let data = line.data(using: .utf8),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            logger.debug("Ignoring non-JSON Codex stdout line")
+            logger.debug("Ignoring non-JSON Codex stdout line from Codex process")
             return
         }
 
@@ -234,18 +268,24 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
             logger.debug("Codex response received for id \(id, privacy: .public)")
             if let errorObject = raw["error"] as? [String: Any] {
                 let message = errorObject["message"] as? String ?? "Unknown Codex error"
+                logger.error("Codex response \(id, privacy: .public) returned error: \(message, privacy: .public)")
                 await sessionState.failRequest(id: id, error: AgentError.deliveryFailed(message))
                 return
             }
             if let result = raw["result"] as? [String: Any] {
                 await sessionState.completeRequest(id: id, result: try? JSONSerialization.data(withJSONObject: result))
+            } else {
+                logger.warning("Codex response \(id, privacy: .public) was missing a result payload")
             }
             return
         }
 
-        guard let method = raw["method"] as? String,
-              let params = raw["params"] as? [String: Any]
-        else {
+        guard let method = raw["method"] as? String else {
+            logger.warning("Ignoring malformed Codex stdout JSON without method field")
+            return
+        }
+        guard let params = raw["params"] as? [String: Any] else {
+            logger.warning("Ignoring malformed Codex stdout JSON for method \(method, privacy: .public) without params")
             return
         }
 
@@ -253,6 +293,9 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
         case "item/agentMessage/delta":
             let turnID = params["turnId"] as? String
             let delta = params["delta"] as? String ?? ""
+            if turnID == nil {
+                logger.debug("Codex agentMessage delta was missing a turn id")
+            }
             await sessionState.appendTurnDelta(turnID: turnID, delta: delta)
         case "item/completed":
             if let item = params["item"] as? [String: Any],
@@ -261,20 +304,36 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
                let turnID = params["turnId"] as? String,
                let text = item["text"] as? String {
                 await sessionState.setTurnFinalText(turnID: turnID, text: text)
+            } else if let item = params["item"] as? [String: Any],
+                      let type = item["type"] as? String,
+                      type == "agentMessage" {
+                logger.warning("Codex agentMessage completion was missing turn id or text")
             }
         case "turn/completed":
             guard let turn = params["turn"] as? [String: Any],
                   let turnID = turn["id"] as? String
-            else { return }
+            else {
+                logger.warning("Codex turn/completed notification was missing a turn id")
+                return
+            }
             logger.debug("Codex turn/completed for turn \(turnID, privacy: .public)")
-            await sessionState.completeTurn(turnID: turnID)
+            let completion = await sessionState.completeTurn(turnID: turnID)
+            if completion.requestID == nil {
+                logger.warning("Codex turn/completed had no matching request for turn \(turnID, privacy: .public)")
+            }
+            if completion.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                logger.warning("Codex turn/completed produced empty text for turn \(turnID, privacy: .public)")
+            }
         case "thread/started":
             if let thread = params["thread"] as? [String: Any],
                let threadID = thread["id"] as? String {
                 logger.debug("Codex thread/started \(threadID, privacy: .public)")
                 await sessionState.setThreadID(threadID)
+            } else {
+                logger.warning("Codex thread/started notification was missing a thread id")
             }
         default:
+            logger.debug("Ignoring unsupported Codex stdout method \(method, privacy: .public)")
             break
         }
     }
@@ -299,7 +358,7 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
                     await processManager.markActivity()
                     await handleStdoutLine(line)
                 } else {
-                    logger.debug("Codex stderr: \(line, privacy: .public)")
+                    logStderrLine(line)
                 }
             }
         }
@@ -312,15 +371,85 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
                     await processManager.markActivity()
                     await handleStdoutLine(line)
                 } else {
-                    logger.debug("Codex stderr: \(line, privacy: .public)")
+                    logStderrLine(line)
                 }
             }
+        }
+    }
+
+    private func logStderrLine(_ line: String) {
+        let lowercased = line.lowercased()
+        if lowercased.contains("timed out") || lowercased.contains("timeout") {
+            logger.warning("Codex stderr [timeout]: \(line, privacy: .public)")
+            return
+        }
+
+        if lowercased.contains("error")
+            || lowercased.contains("failed")
+            || lowercased.contains("exception")
+            || lowercased.contains("panic")
+            || lowercased.contains("traceback")
+            || lowercased.contains("permission denied")
+            || lowercased.contains("sandbox")
+            || lowercased.contains("enoent")
+            || lowercased.contains("eacces")
+            || lowercased.contains("econn")
+        {
+            logger.warning("Codex stderr [error]: \(line, privacy: .public)")
+            return
+        }
+
+        if lowercased.contains("thread")
+            || lowercased.contains("turn")
+            || lowercased.contains("approval")
+            || lowercased.contains("request")
+        {
+            logger.debug("Codex stderr [signal]: \(line, privacy: .public)")
+            return
+        }
+
+        logger.debug("Codex stderr: \(line, privacy: .public)")
+    }
+
+    private func logHeuristicFallbacks(in responseText: String, requestID: String) {
+        let normalized = responseText.lowercased()
+
+        let indexSignals = [
+            ".cider/index",
+            ".cider/index.json",
+            "index json",
+            "vault index",
+            "from the index",
+            "from cider indexes",
+            "fall back to indexes",
+            "fallback to indexes"
+        ]
+
+        let filesystemSignals = [
+            "on disk",
+            "filesystem",
+            "counted files",
+            "counted folders",
+            "counting files",
+            "markdown files",
+            "directory count",
+            "raw files",
+            "raw file count"
+        ]
+
+        if indexSignals.contains(where: normalized.contains) {
+            logger.warning("Codex turn \(requestID, privacy: .public) appears to mention fallback from CLI to indexes")
+        }
+
+        if filesystemSignals.contains(where: normalized.contains) {
+            logger.warning("Codex turn \(requestID, privacy: .public) appears to mention raw filesystem inspection")
         }
     }
 
     private func writeJSONObject(_ object: [String: Any]) async throws {
         let data = try JSONSerialization.data(withJSONObject: object)
         guard let handle = await processManager.stdinHandle() else {
+            logger.error("Codex stdin is unavailable while writing JSON-RPC payload")
             throw AgentError.deliveryFailed("Codex stdin is unavailable")
         }
         try handle.write(contentsOf: data + Data([0x0A]))
@@ -414,6 +543,7 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
+                self.logger.warning("Codex runtime timed out during \(label, privacy: .public)")
                 throw AgentError.deliveryFailed("Codex runtime timed out during \(label)")
             }
 
@@ -548,13 +678,19 @@ private actor SessionState {
         activeTurnTexts[turnID] = text
     }
 
-    func completeTurn(turnID: String) {
+    struct TurnCompletionDetails {
+        let requestID: String?
+        let text: String
+    }
+
+    func completeTurn(turnID: String) -> TurnCompletionDetails {
         let text = activeTurnTexts.removeValue(forKey: turnID) ?? ""
         let requestID = activeTurnRequestIDs.removeValue(forKey: turnID)
         if let requestID {
             activeTurnIDsByRequest.removeValue(forKey: requestID)
         }
         completedTurns[turnID] = .success(text)
+        return TurnCompletionDetails(requestID: requestID, text: text)
     }
 }
 

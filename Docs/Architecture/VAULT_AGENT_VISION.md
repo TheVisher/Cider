@@ -81,6 +81,22 @@ That memory should not become a second database of raw facts already stored else
 
 The vault's structured entities remain the source of truth for direct factual content. Agent memory is for durable context, not duplication.
 
+In practical terms, memory should favor:
+
+- stable user preferences
+- recurring projects and priorities
+- repeated workflows and organizational conventions
+- durable relationship context about important people
+- long-lived habits or patterns that improve future assistance
+
+Memory should avoid:
+
+- routine small talk
+- one-off acknowledgements
+- temporary operational chatter
+- speculative assumptions about the user's life
+- raw factual data that already has a clear home in bookmarks, notes, todos, events, contacts, or files
+
 ### 5. On-The-Go Utility
 
 The user should be able to text the agent naturally while away from the app and still get useful results.
@@ -95,6 +111,19 @@ Examples:
 - "what have I saved about Ashley lately?"
 
 The remote experience should feel like real access to the vault, not a crippled companion mode.
+
+### 6. Short-Term Continuity
+
+The agent should not feel amnesic after a Cider restart.
+
+However, that continuity should be efficient and scoped:
+
+- keep a compact rolling handoff per thread
+- prefer a summary plus recent turns over replaying full transcripts
+- restore that handoff only when the next message looks like a continuation
+- keep durable memory separate from short-term thread continuity
+
+The goal is not to load old chat history on every launch. The goal is to preserve continuity when the user clearly means to pick back up where they left off.
 
 ## Behavioral Priorities
 
@@ -116,6 +145,13 @@ For the current Telegram-backed Codex runtime:
 - native app-tool wiring may come later, but should integrate through `AgentToolRegistry`, not through an ad hoc second path
 
 This means prompt and memory guidance are part of the product, not just implementation detail. Until native tool wiring exists, runtime reliability depends heavily on giving the agent the right operating instructions.
+
+For restart continuity in the current architecture:
+
+- per-thread handoffs should be stored separately from UI chat transcripts
+- handoffs should be compact and recent, not full forever-archives
+- restore should be selective, not eager
+- durable memory should remain the long-term layer, while handoffs remain the short-term conversational layer
 
 ## Instruction Design Requirements
 
@@ -145,6 +181,22 @@ The goal is:
 
 The result should feel like a growing personal knowledge companion anchored in the user's actual saved material.
 
+## Memory Decision Rules
+
+When deciding whether an interaction should create durable memory, the system should ask:
+
+1. Will this likely matter on a future day, not just this turn?
+2. Is this a durable preference, pattern, project, person, or convention?
+3. Does this belong in memory, or does it actually belong in a structured Cider entity?
+4. Is the takeaway specific enough to help later, but small enough to avoid transcript-style noise?
+
+Default bias:
+
+- prefer restraint when uncertain
+- prefer structured entities over memory files for raw facts
+- record the durable takeaway, not the whole conversation
+- avoid promoting routine chatter into memory just because it happened in conversation
+
 ## What Success Looks Like
 
 The system is succeeding when the user can:
@@ -173,3 +225,7 @@ When coding against this vision:
 - improve instruction quality when tool capability is still prompt-mediated
 - add structure where it improves trust, safety, and correctness
 - evaluate new features by whether they make the agent more useful as a second brain, not merely more "AI-powered"
+
+## Regression Practice
+
+Use the shared Telegram regression set in [TELEGRAM_AGENT_REGRESSION_SET.md](/Users/minivish/Cider/Docs/Architecture/TELEGRAM_AGENT_REGRESSION_SET.md) to validate grouped behavior changes in broad passes rather than re-testing every small implementation card in isolation.

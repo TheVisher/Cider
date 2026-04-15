@@ -21,6 +21,8 @@ final class AgentThread: @unchecked Sendable {
     var createdAt: Date
     var updatedAt: Date
     var metadata: [String: String] = [:]
+    var restoredHandoff: AgentThreadHandoff?
+    var restoredFromHandoffAt: Date?
 
     init(id: UUID, externalKey: String, channel: AgentChannel, context: AgentContext = .empty) {
         self.id = id
@@ -42,6 +44,14 @@ final class AgentThread: @unchecked Sendable {
 actor AgentOrchestrator {
     static let shared = AgentOrchestrator()
     private let logger = Logger(subsystem: "com.cider.app", category: "AgentOrchestrator")
+    private let handoffStorage = AgentThreadHandoffStorage()
+    private let durableMemoryRecorder = AgentDurableMemoryRecorder()
+
+    private struct ProcessRuntimeRoutingDecision: Sendable {
+        let route: String
+        let detail: String?
+        let hints: String?
+    }
 
     // Current runtime (set via setRuntime or setProvider adapter)
     private var runtime: (any AgentRuntime)?
@@ -107,7 +117,8 @@ actor AgentOrchestrator {
             id: envelope.threadID,
             externalKey: externalKey(for: envelope),
             channel: envelope.channel,
-            context: envelope.context
+            context: envelope.context,
+            restoringFrom: recentHandoffIfNeeded(for: envelope)
         )
         thread.append(.user(envelope.text))
 
@@ -115,9 +126,24 @@ actor AgentOrchestrator {
         let permissionLevel = permissionLevel(for: envelope.channel)
         let allowedTools = await AgentToolRegistry.shared.tools(for: permissionLevel)
         let allowedToolNames = Set(allowedTools.map(\.name))
+        let routingDecision = runtime.kind == .process
+            ? processRuntimeRoutingDecision(for: envelope.text)
+            : nil
+        if let routingDecision {
+            if let detail = routingDecision.detail {
+                logger.debug("Process runtime routing on \(envelope.channel.rawValue, privacy: .public): route=\(routingDecision.route, privacy: .public) detail=\(detail, privacy: .public)")
+            } else {
+                logger.debug("Process runtime routing on \(envelope.channel.rawValue, privacy: .public): route=\(routingDecision.route, privacy: .public)")
+            }
+        }
 
         // Build system prompt
-        let systemPrompt = buildSystemPrompt(thread: thread, runtime: runtime, allowedTools: allowedTools)
+        let systemPrompt = buildSystemPrompt(
+            thread: thread,
+            runtime: runtime,
+            allowedTools: allowedTools,
+            routingDecision: routingDecision
+        )
 
         // Run the tool loop
         let response = try await runConversationLoop(
@@ -131,6 +157,8 @@ actor AgentOrchestrator {
         )
 
         thread.append(.assistant(response.text))
+        handoffStorage.save(thread: thread)
+        durableMemoryRecorder.recordIfNeeded(userText: envelope.text, channel: envelope.channel)
         logger.info("Handled message on \(envelope.channel.rawValue) via runtime \(runtime.id, privacy: .public): \(response.toolCallsMade.count) tool calls")
         return response
     }
@@ -246,7 +274,8 @@ actor AgentOrchestrator {
         id: UUID,
         externalKey: String,
         channel: AgentChannel,
-        context: AgentContext
+        context: AgentContext,
+        restoringFrom handoff: AgentThreadHandoff?
     ) -> AgentThread {
         // Check by external key first (for reply routing)
         if let existingID = threadsByKey[externalKey], let existing = threads[existingID] {
@@ -262,6 +291,17 @@ actor AgentOrchestrator {
 
         // Create new
         let thread = AgentThread(id: id, externalKey: externalKey, channel: channel, context: context)
+        if let handoff {
+            thread.restoredHandoff = handoff
+            thread.restoredFromHandoffAt = Date()
+            thread.messages = handoff.recentTurns.map {
+                AgentMessage(role: $0.role, content: $0.content, timestamp: $0.timestamp)
+            }
+            if !handoff.summary.isEmpty {
+                thread.metadata["restoredSummary"] = handoff.summary
+            }
+            handoffStorage.markRestored(handoff)
+        }
         threads[id] = thread
         threadsByKey[externalKey] = id
         return thread
@@ -299,9 +339,9 @@ actor AgentOrchestrator {
     private func buildSystemPrompt(
         thread: AgentThread,
         runtime: any AgentRuntime,
-        allowedTools: [AgentToolDefinition]
+        allowedTools: [AgentToolDefinition],
+        routingDecision: ProcessRuntimeRoutingDecision?
     ) -> String {
-        let latestUserMessage = thread.messages.last(where: { $0.role == .user })?.content ?? ""
         var prompt = """
         You are Cider's AI assistant. Cider is a native macOS personal knowledge management app \
         that manages bookmarks, notes, todos, events, contacts, and files in a local vault.
@@ -324,7 +364,7 @@ actor AgentOrchestrator {
             Do not ask to enable tools unless the request truly requires an unavailable app-only capability.
             """
 
-            if let routingHints = processRuntimeRoutingHints(for: latestUserMessage) {
+            if let routingDecision, let routingHints = routingDecision.hints {
                 prompt += "\n\nCLI routing for this request:\n\(routingHints)"
             }
         } else if !allowedTools.isEmpty {
@@ -341,14 +381,70 @@ actor AgentOrchestrator {
             prompt += "\n\nCurrent context:\n\(contextDesc)"
         }
 
+        if let restoredSummary = thread.metadata["restoredSummary"], !restoredSummary.isEmpty {
+            prompt += "\n\nRecent thread handoff:\n\(restoredSummary)"
+        }
+
+        if let restoredTurns = restoredTurnsDescription(for: thread), !restoredTurns.isEmpty {
+            prompt += "\n\nRecent prior turns:\n\(restoredTurns)"
+        }
+
         return prompt
     }
 
-    private func processRuntimeRoutingHints(for userMessage: String) -> String? {
+    private func restoredTurnsDescription(for thread: AgentThread) -> String? {
+        guard let handoff = thread.restoredHandoff else { return nil }
+        let turns = handoff.recentTurns.suffix(6).map { turn in
+            let label = turn.role == .user ? "User" : "Assistant"
+            return "- \(label): \(turn.content)"
+        }
+        let joined = turns.joined(separator: "\n")
+        return joined.isEmpty ? nil : joined
+    }
+
+    private func recentHandoffIfNeeded(for envelope: AgentEnvelope) -> AgentThreadHandoff? {
+        let key = externalKey(for: envelope)
+        guard threadsByKey[key] == nil, shouldRestoreRecentHandoff(for: envelope.text) else {
+            return nil
+        }
+
+        guard let handoff = handoffStorage.load(externalKey: key) else {
+            return nil
+        }
+
+        let age = Date().timeIntervalSince(handoff.updatedAt)
+        logger.info("Restoring recent handoff for \(key, privacy: .public) (\(Int(age), privacy: .public)s old)")
+        return handoff
+    }
+
+    private func shouldRestoreRecentHandoff(for userMessage: String) -> Bool {
+        let normalized = userMessage.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+
+        let explicitSignals = [
+            "continue", "pick up where we left off", "resume", "as we discussed",
+            "what were we talking about", "we were talking about", "before i restarted",
+            "last time", "earlier", "the other day", "just discussed", "previous conversation"
+        ]
+        if explicitSignals.contains(where: normalized.contains) {
+            return true
+        }
+
+        let referentialSignals = [
+            "that one", "that thing", "that bookmark", "that note",
+            "why didn't that", "why didnt that", "did that", "what about that",
+            "can you find it", "where is it", "that update"
+        ]
+        return referentialSignals.contains(where: normalized.contains)
+    }
+
+    private func processRuntimeRoutingDecision(for userMessage: String) -> ProcessRuntimeRoutingDecision? {
         let normalized = userMessage.lowercased()
         guard !normalized.isEmpty else { return nil }
 
         var hints: [String] = []
+        var route = "none"
+        var detail: String?
 
         let countTerms = [
             "how many", "count", "total", "number of", "how much"
@@ -431,15 +527,21 @@ actor AgentOrchestrator {
             .contains(where: normalized.contains)
 
         if asksForCount {
+            route = "status"
+            detail = "count question"
             hints.append("- For high-level totals, run `cider-cli status --json` first and answer from that output.")
             hints.append("- Do not replace that with manual vault file counting unless the user explicitly asks for filesystem numbers.")
         }
 
         if asksForRecent {
             if asksForWholeVaultRecent {
+                route = "recent:whole-vault"
+                detail = "whole-vault recency"
                 hints.append("- For whole-vault recency questions, do not rely on the default 24-hour recent window.")
                 hints.append("- Prefer `cider-cli recent --hours 87600 --json` so older items remain eligible, then preserve the user's requested limit if they gave one.")
             } else {
+                route = "recent"
+                detail = "recent activity"
                 hints.append("- For recent vault activity, prefer `cider-cli recent --json` and preserve any requested limit.")
             }
         }
@@ -449,20 +551,38 @@ actor AgentOrchestrator {
         }
 
         if asksForBookmarkExistence {
+            if normalized.contains("http://") || normalized.contains("https://") || normalized.contains("www.") {
+                route = "duplicate-check"
+                detail = "url duplicate check"
+            } else if asksAboutDuplicates && !asksForBookmarkFacts {
+                route = "query"
+                detail = "saved-before verification"
+            } else {
+                route = "bookmark-search/list"
+                detail = "bookmark existence or search"
+            }
             hints.append("- For bookmark existence, duplicate, or bookmark search questions, prefer `cider-cli duplicate-check \"<url>\" --json` when the user gave a URL, otherwise prefer `cider-cli bookmark search \"<query>\" --json` or `cider-cli bookmark list --json`.")
             hints.append("- If the user asks whether they already saved something and the item is not clearly a bookmark, use `cider-cli query \"<question>\" --json` to verify the current vault state before answering.")
         } else if asksForSearch && !matchedEntityScopes.isEmpty {
             let entityDescriptions = matchedEntityScopes.map(\.entityLabel).joined(separator: ", ")
+            route = "scoped-search"
+            detail = matchedEntityScopes.map(\.cliScope).joined(separator: ", ")
             hints.append("- This looks scoped to specific entity types: \(entityDescriptions). Prefer a scoped search first, such as `cider-cli search \"\(matchedEntityScopes[0].cliScope) <topic>\" --json`, then expand with `cider-cli query \"<question>\" --json` if the request becomes cross-entity.")
             hints.append("- If the user is asking for one exact item, verify against the scoped search results before summarizing.")
         } else if asksForBroadTopicLookup {
+            route = "query"
+            detail = "broad topic lookup"
             hints.append("- For broad topical or cross-entity questions like \"what do I have about X?\" or \"summarize my notes/bookmarks on X\", start with `cider-cli query \"<topic>\" --json`.")
             hints.append("- If the request is clearly scoped to one entity type, use the matching search path next, such as `cider-cli search \"@notes <topic>\" --json`, `@bookmarks`, `@contacts`, `@todos`, `@events`, or `@files` as appropriate.")
             hints.append("- Use the entity-specific CLI when it is a better fit than a general vault sweep; do not fall back to ad hoc filesystem inspection for topic lookups.")
         } else if asksAmbiguousRetrieval {
+            route = "query"
+            detail = "ambiguous retrieval"
             hints.append("- This retrieval request is ambiguous. Start with `cider-cli query \"<question>\" --json` to sweep the vault before making assumptions about entity type or location.")
             hints.append("- If the query result is mixed or unclear, answer with the best verified result and briefly ask a clarifying follow-up instead of guessing.")
         } else if asksForSearch {
+            route = "query"
+            detail = "generic vault search"
             hints.append("- For factual lookups across the vault, prefer `cider-cli query \"<question>\" --json` before ad hoc file inspection.")
         }
 
@@ -474,7 +594,12 @@ actor AgentOrchestrator {
             hints.append("- Do not mention raw filesystem counts unless they were explicitly requested or they conflict with app/index results in a way worth surfacing.")
         }
 
-        return hints.isEmpty ? nil : hints.joined(separator: "\n")
+        guard !hints.isEmpty || route != "none" else { return nil }
+        return ProcessRuntimeRoutingDecision(
+            route: route,
+            detail: detail,
+            hints: hints.isEmpty ? nil : hints.joined(separator: "\n")
+        )
     }
 
     private func canonicalAgentInstructions() -> String? {
