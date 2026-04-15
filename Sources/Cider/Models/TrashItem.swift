@@ -173,6 +173,15 @@ struct TrashItem: Codable, Identifiable {
     // Vault file-specific
     var vaultFilePayload: VaultFileTrashPayload?
 
+    /// User-facing title for trash listings.
+    /// Some older/generated items carried Unix timestamp suffixes in their raw
+    /// title (for example test/import names like "CodexNote-1775948805 2").
+    /// We keep the stored value intact for restore/debugging, but hide that
+    /// suffix in the trash UI so rows read like normal item names.
+    var displayTitle: String {
+        Self.cleanedDisplayTitle(title)
+    }
+
     init(
         id: UUID = UUID(),
         itemID: UUID,
@@ -205,5 +214,32 @@ struct TrashItem: Codable, Identifiable {
         self.vaultFolderPayload = vaultFolderPayload
         self.kanbanBoardPayload = kanbanBoardPayload
         self.vaultFilePayload = vaultFilePayload
+    }
+
+    private static func cleanedDisplayTitle(_ rawTitle: String) -> String {
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return rawTitle }
+
+        let pattern = #"^(.*?)(?:[- ]\d{10,})(?: (\d+))?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return trimmed }
+        let nsRange = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        guard let match = regex.firstMatch(in: trimmed, range: nsRange),
+              match.numberOfRanges >= 2,
+              let baseRange = Range(match.range(at: 1), in: trimmed) else {
+            return trimmed
+        }
+
+        var cleaned = String(trimmed[baseRange])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if match.numberOfRanges >= 3,
+           let suffixRange = Range(match.range(at: 2), in: trimmed) {
+            let suffix = trimmed[suffixRange].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !suffix.isEmpty {
+                cleaned = "\(cleaned) \(suffix)"
+            }
+        }
+
+        return cleaned.isEmpty ? trimmed : cleaned
     }
 }

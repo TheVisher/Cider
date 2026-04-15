@@ -22,6 +22,7 @@ final class ReminderOutbox {
     /// Check which reminders are due and write outbox files for agent delivery.
     func processReminders() {
         let dateCards = DateCardStorage.shared.dateCards
+        let todos = TodoCardStorage.shared.todoCards
         let now = Date()
         let config = CiderConfig.load()
 
@@ -29,6 +30,10 @@ final class ReminderOutbox {
 
         for card in dateCards {
             processCard(card, now: now)
+        }
+
+        for todo in todos {
+            processTodo(todo, now: now)
         }
     }
 
@@ -64,12 +69,29 @@ final class ReminderOutbox {
         }
     }
 
+    private func processTodo(_ todo: TodoCard, now: Date) {
+        guard !todo.isCompleted, let dueDate = todo.dueDate, todoHasExplicitTime(dueDate) else { return }
+
+        if dueDate <= now, dueDate > now.addingTimeInterval(-5 * 60) {
+            let fileID = todoOutboxFileID(todoID: todo.id, dueDate: dueDate)
+            if !isDelivered(fileID) {
+                writeTodoOutboxFile(todo: todo, dueDate: dueDate, fileID: fileID)
+                markDelivered(fileID)
+            }
+        }
+    }
+
     // MARK: - File ID
 
     private func outboxFileID(cardID: UUID, occurrence: Date, offset: Int) -> String {
         let formatter = ISO8601DateFormatter()
         let iso = formatter.string(from: occurrence)
         return "\(cardID.uuidString)-\(iso)-\(offset)min"
+    }
+
+    private func todoOutboxFileID(todoID: UUID, dueDate: Date) -> String {
+        let iso = ISO8601DateFormatter().string(from: dueDate)
+        return "todo-\(todoID.uuidString)-\(iso)-0min"
     }
 
     // MARK: - Delivery Dedup (3 sources: ledger, outbox/, outbox/sent/)
@@ -158,5 +180,39 @@ final class ReminderOutbox {
         let url = outboxDirectory.appendingPathComponent("\(fileID).md")
         try? content.write(to: url, atomically: true, encoding: .utf8)
         Self.logger.info("Wrote outbox reminder: \(fileID)")
+    }
+
+    private func writeTodoOutboxFile(todo: TodoCard, dueDate: Date, fileID: String) {
+        try? FileManager.default.createDirectory(at: outboxDirectory, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+
+        var body = "Reminder: \(todo.title) is now.\nDate: \(formatter.string(from: dueDate))"
+        if !todo.details.isEmpty { body += "\nDetails: \(todo.details)" }
+
+        let content = """
+        ---
+        type: reminder
+        todoID: \(todo.id.uuidString)
+        title: \(todo.title)
+        occurrence: \(ISO8601DateFormatter().string(from: dueDate))
+        minutesBefore: 0
+        recurring: false
+        createdAt: \(ISO8601DateFormatter().string(from: Date()))
+        ---
+
+        \(body)
+        """
+
+        let url = outboxDirectory.appendingPathComponent("\(fileID).md")
+        try? content.write(to: url, atomically: true, encoding: .utf8)
+        Self.logger.info("Wrote outbox todo reminder: \(fileID)")
+    }
+
+    private func todoHasExplicitTime(_ date: Date) -> Bool {
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
     }
 }

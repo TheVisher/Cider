@@ -14,6 +14,27 @@ final class TrashStorage {
     private let thumbnailsDirName = "thumbnails"
     private let originalsDirName = "originals"
 
+    private func uniqueTrashDestination(for sourceURL: URL, in trashDir: URL) -> URL {
+        let fm = FileManager.default
+        let filename = sourceURL.lastPathComponent
+        let candidate = trashDir.appendingPathComponent(filename)
+        guard fm.fileExists(atPath: candidate.path) else { return candidate }
+
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var counter = 2
+        while true {
+            let uniquified = ext.isEmpty
+                ? "\(base) \(counter)"
+                : "\(base) \(counter).\(ext)"
+            let url = trashDir.appendingPathComponent(uniquified)
+            if !fm.fileExists(atPath: url.path) {
+                return url
+            }
+            counter += 1
+        }
+    }
+
     // MARK: - Database
 
     /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
@@ -304,14 +325,20 @@ final class TrashStorage {
         try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
         // Move the .ics content file to trash if provided
+        var movedICSFilename: String?
         if let icsFileURL, fm.fileExists(atPath: icsFileURL.path) {
-            let destURL = trashDir.appendingPathComponent(icsFileURL.lastPathComponent)
-            try? fm.moveItem(at: icsFileURL, to: destURL)
+            let destURL = uniqueTrashDestination(for: icsFileURL, in: trashDir)
+            do {
+                try fm.moveItem(at: icsFileURL, to: destURL)
+                movedICSFilename = destURL.lastPathComponent
+            } catch {
+                Self.logger.error("Failed to move date card to trash: \(error.localizedDescription)")
+            }
         }
 
         let payload = DateCardTrashPayload(
             dateCard: dateCard,
-            trashICSFilename: icsFileURL?.lastPathComponent
+            trashICSFilename: movedICSFilename
         )
         let trashItem = TrashItem(
             itemID: dateCard.id,
@@ -365,14 +392,20 @@ final class TrashStorage {
         try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
 
         // Move the .ics content file to trash if provided
+        var movedICSFilename: String?
         if let icsFileURL, fm.fileExists(atPath: icsFileURL.path) {
-            let destURL = trashDir.appendingPathComponent(icsFileURL.lastPathComponent)
-            try? fm.moveItem(at: icsFileURL, to: destURL)
+            let destURL = uniqueTrashDestination(for: icsFileURL, in: trashDir)
+            do {
+                try fm.moveItem(at: icsFileURL, to: destURL)
+                movedICSFilename = destURL.lastPathComponent
+            } catch {
+                Self.logger.error("Failed to move todo to trash: \(error.localizedDescription)")
+            }
         }
 
         let payload = TodoCardTrashPayload(
             todoCard: todoCard,
-            trashICSFilename: icsFileURL?.lastPathComponent
+            trashICSFilename: movedICSFilename
         )
         let trashItem = TrashItem(
             itemID: todoCard.id,

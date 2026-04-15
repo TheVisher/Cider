@@ -121,11 +121,17 @@ actor TelegramBridge: ChannelBridge {
             return
         }
 
-        let dateCards = await MainActor.run { DateCardStorage.shared.dateCards }
+        let (dateCards, todos) = await MainActor.run {
+            (DateCardStorage.shared.dateCards, TodoCardStorage.shared.todoCards)
+        }
         let now = Date()
 
         for card in dateCards {
             await processReminder(card, now: now)
+        }
+
+        for todo in todos {
+            await processTodoReminder(todo, now: now)
         }
 
         if configuration.sendDailyDigest {
@@ -686,6 +692,26 @@ actor TelegramBridge: ChannelBridge {
         }
     }
 
+    private func processTodoReminder(_ todo: TodoCard, now: Date) async {
+        guard !todo.isCompleted, let dueDate = todo.dueDate, todoHasExplicitTime(dueDate) else { return }
+
+        let fireDate = dueDate
+        guard fireDate <= now, fireDate > now.addingTimeInterval(-5 * 60) else { return }
+
+        let reminderID = todoReminderIdentifier(todoID: todo.id, dueDate: dueDate)
+        guard !state.deliveredReminderIDs.contains(reminderID) else { return }
+
+        let message = todoReminderMessage(for: todo, dueDate: dueDate)
+        for chatID in configuration.allowedChatIDs {
+            do {
+                try await sendMessage(message, to: chatID)
+            } catch {
+                logger.error("Failed to deliver Telegram todo reminder: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        state.deliveredReminderIDs.insert(reminderID)
+    }
+
     private func processDailyDigest(dateCards: [DateCard], now: Date) async {
         let calendar = Calendar.current
         let digestHour = 8
@@ -759,6 +785,34 @@ actor TelegramBridge: ChannelBridge {
         }
         logger.info("Delivered Telegram weekly digest \(weekKey, privacy: .public)")
         state.deliveredWeeklyDigestKeys.insert(weekKey)
+    }
+
+    private func todoReminderIdentifier(todoID: UUID, dueDate: Date) -> String {
+        let iso = ISO8601DateFormatter().string(from: dueDate)
+        return "todo-\(todoID.uuidString)-\(iso)-0min"
+    }
+
+    private func todoReminderMessage(for todo: TodoCard, dueDate: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+
+        var lines = [
+            "Reminder: \(todo.title) is now.",
+            "Date: \(formatter.string(from: dueDate))",
+        ]
+        if let priority = todo.priority {
+            lines.append("Priority: \(priority.displayName)")
+        }
+        if !todo.details.isEmpty {
+            lines.append("Details: \(todo.details)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func todoHasExplicitTime(_ date: Date) -> Bool {
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
     }
 
     private struct ScheduledOccurrence {
