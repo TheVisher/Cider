@@ -1065,8 +1065,7 @@ final class VaultFolderService {
             return
         }
         reconcileWithFilesystem()
-        // Reload sidecar metadata and rescan vault files
-        SidecarService.shared.loadAll()
+        // Rescan vault files after folder reconciliation settles.
         VaultFileService.shared.scan()
         NotificationCenter.default.post(name: .vaultFilesystemDidChange, object: nil)
         // Debounced adoption: wait for FSEvents to settle, then scan once

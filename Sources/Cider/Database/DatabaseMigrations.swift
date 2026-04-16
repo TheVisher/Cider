@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 4
+    static let latestVersion: Int = 5
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -43,7 +43,28 @@ enum DatabaseMigrations {
         }
         if currentVersion < 4 {
             try migrateToV4(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 5 {
+            try migrateToV5(db)
+        }
+    }
+
+    // MARK: - V4 -> V5: Note summaries move into SQLite
+
+    private static func migrateToV5(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 5...")
+
+        try withTransaction(db) {
+            if try tableExists(db, table: "notes"),
+               !(try columnExists(db, table: "notes", column: "summary")) {
+                try runOnDB(db, "ALTER TABLE notes ADD COLUMN summary TEXT;")
+            }
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (5);")
+        }
+
+        logger.info("Migration to v5 complete")
     }
 
     // MARK: - V3 -> V4: Todo surfacing rules

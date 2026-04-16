@@ -79,6 +79,7 @@ enum CiderSchema {
         CREATE TABLE IF NOT EXISTS notes (
             item_id   TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
             content   TEXT NOT NULL DEFAULT '',
+            summary   TEXT,
             is_pinned INTEGER NOT NULL DEFAULT 0
         );
         """

@@ -7,9 +7,10 @@ import UniformTypeIdentifiers
 
 // MARK: - VaultBookmarkService
 
-/// File-based bookmark service that reads `.webloc` files + sidecars as the source of truth.
-/// Replaces the monolithic `BookmarksStorage` JSON/HTML approach. Individual bookmark files
-/// on disk ARE the data; the performance index cache is just for fast startup.
+/// File-based bookmark service that treats `.webloc` files as the durable
+/// artifact and SQLite as the canonical metadata layer.
+/// Legacy sidecars are still read as a fallback during migration, but normal
+/// runtime writes should not depend on them.
 @MainActor
 final class VaultBookmarkService: ObservableObject {
     static let shared = VaultBookmarkService()
@@ -366,14 +367,8 @@ final class VaultBookmarkService: ObservableObject {
         }
     }
 
-    /// Writes the sidecar entry for a specific bookmark in its folder directory.
     private func persistSidecar(for bookmark: Bookmark) {
-        let (dirURL, _) = resolveBookmarkDirectory(bookmark.folderID)
-        guard let relativePath = bookmark.relativePath else { return }
-        let filename = (relativePath as NSString).lastPathComponent
-        let fileService = BookmarkFileService.shared
-        let entry = fileService.sidecarEntry(from: bookmark)
-        fileService.updateSidecar(at: dirURL, setting: filename, to: entry)
+        _ = bookmark
     }
 
     // MARK: - Directory Resolution
@@ -537,7 +532,7 @@ final class VaultBookmarkService: ObservableObject {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             let filename = fileURL.lastPathComponent
             let dirURL = fileURL.deletingLastPathComponent()
-            BookmarkFileService.shared.delete(filename: filename, from: dirURL)
+            BookmarkFileService.shared.delete(bookmark: bookmark, filename: filename, from: dirURL)
         }
     }
 

@@ -184,6 +184,29 @@ struct NotesSQLiteTests {
         #expect(Set(loaded.labelIDs) == Set([label1.id, label2.id]))
     }
 
+    @Test("Note summary round-trips through SQLite")
+    func noteSummaryRoundTrip() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let note = Note(
+            title: "Summarized",
+            content: "Longer note body",
+            summary: "Short summary for card display",
+            relativePath: "Inbox/Notes/Summarized.md"
+        )
+
+        service.persistNoteToDatabase(db, note: note)
+
+        let service2 = makeService(db)
+        service2.loadNotesFromDatabase(db)
+
+        #expect(service2.notes.count == 1)
+        #expect(service2.notes[0].summary == "Short summary for card display")
+    }
+
     // MARK: - Update
 
     @Test("Updating an existing note replaces its data")

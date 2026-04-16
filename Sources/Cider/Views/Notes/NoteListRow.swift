@@ -25,10 +25,6 @@ struct NoteListRow: View {
     @State private var renamingTitle = ""
     @FocusState private var isRenameFocused: Bool
 
-    private var sidecarMeta: SidecarItemMetadata? {
-        SidecarService.shared.metadata(forNote: note)
-    }
-
     private func handleClick(normalAction: () -> Void) {
         let flags = NSEvent.modifierFlags
         if let onSelect, flags.contains(.command) {
@@ -107,12 +103,12 @@ struct NoteListRow: View {
                                 .foregroundColor(CiderColors.quaternary)
                         }
 
-                        if let sidecarTags = sidecarMeta?.tags, !sidecarTags.isEmpty {
+                        if !note.tags.isEmpty {
                             Text("\u{00B7}")
                                 .font(CiderFont.captionSemibold)
                                 .foregroundColor(CiderColors.quaternary)
 
-                            Text(sidecarTags.joined(separator: ", "))
+                            Text(note.tags.joined(separator: ", "))
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                                 .lineLimit(1)

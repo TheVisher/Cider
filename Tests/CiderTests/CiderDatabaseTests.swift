@@ -97,6 +97,98 @@ struct CiderDatabaseTests {
         #expect(stmt.int(at: 0) == 1)
     }
 
+    @Test("Integrity check returns ok for a healthy database")
+    func integrityCheckPasses() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        let status = try db.integrityCheck()
+        #expect(status.isHealthy)
+        #expect(status.messages == ["ok"])
+    }
+
+    @Test("VACUUM INTO creates a portable backup containing current data")
+    func vacuumIntoCreatesBackup() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        let insert = try db.prepare(
+            "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+        )
+        insert.bind("backup-label", at: 1)
+            .bind("Backed Up", at: 2)
+            .bind("#FF0000", at: 3)
+            .bind("custom", at: 4)
+            .bind(0.0, at: 5)
+            .bind(0.0, at: 6)
+        try insert.step()
+
+        let backupURL = url.deletingPathExtension().appendingPathExtension("backup.db")
+        defer { cleanup(backupURL) }
+
+        try db.vacuum(into: backupURL)
+
+        let backupDB = CiderDatabase()
+        try backupDB.open(at: backupURL)
+        defer { backupDB.close() }
+
+        let stmt = try backupDB.prepare("SELECT name FROM labels WHERE id = ?;")
+        stmt.bind("backup-label", at: 1)
+        #expect(try stmt.step())
+        #expect(stmt.string(at: 0) == "Backed Up")
+    }
+
+    @Test("DatabaseSafetyService captures a pre-open snapshot of database files")
+    func preOpenSnapshotCopiesDatabaseFiles() throws {
+        let isolatedDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-db-safety-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: isolatedDir, withIntermediateDirectories: true)
+        let url = isolatedDir.appendingPathComponent("cider.db")
+        defer { try? FileManager.default.removeItem(at: isolatedDir) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        let insert = try db.prepare(
+            "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+        )
+        insert.bind("snapshot-label", at: 1)
+            .bind("Snapshot", at: 2)
+            .bind("#00FF00", at: 3)
+            .bind("custom", at: 4)
+            .bind(0.0, at: 5)
+            .bind(0.0, at: 6)
+        try insert.step()
+        db.close()
+
+        let walURL = URL(fileURLWithPath: url.path + "-wal")
+        try Data("wal".utf8).write(to: walURL)
+        defer { try? FileManager.default.removeItem(at: walURL) }
+
+        let service = DatabaseSafetyService()
+        service.capturePreOpenSnapshotIfNeeded(databaseURL: url)
+
+        let preflightDir = service.preOpenSnapshotsDirectory(for: url)
+        let snapshots = try FileManager.default.contentsOfDirectory(at: preflightDir, includingPropertiesForKeys: nil)
+        #expect(!snapshots.isEmpty)
+
+        let matchingSnapshot = snapshots.first { snapshotURL in
+            let dbCopy = snapshotURL.appendingPathComponent(url.lastPathComponent).path
+            let walCopy = snapshotURL.appendingPathComponent(walURL.lastPathComponent).path
+            return FileManager.default.fileExists(atPath: dbCopy)
+                && FileManager.default.fileExists(atPath: walCopy)
+        }
+
+        #expect(matchingSnapshot != nil)
+    }
+
     // MARK: - Reopening
 
     @Test("Reopening database preserves data and does not re-migrate")

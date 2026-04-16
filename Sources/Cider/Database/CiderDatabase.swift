@@ -2,6 +2,14 @@ import Foundation
 import SQLite3
 import os
 
+struct DatabaseIntegrityStatus: Equatable {
+    let messages: [String]
+
+    var isHealthy: Bool {
+        messages.count == 1 && messages[0].caseInsensitiveCompare("ok") == .orderedSame
+    }
+}
+
 /// SQLite database connection manager for Cider.
 /// Not a singleton — instantiate for testing, share one instance in the app.
 @MainActor
@@ -12,6 +20,7 @@ final class CiderDatabase {
 
     private let logger = Logger(subsystem: "com.cider.app", category: "CiderDatabase")
     private var db: OpaquePointer?
+    private(set) var databaseURL: URL?
 
     /// Whether the database connection is currently open.
     var isOpen: Bool { db != nil }
@@ -40,6 +49,7 @@ final class CiderDatabase {
         }
 
         db = handle
+        databaseURL = url
 
         do {
             // Enable WAL mode for concurrent reads
@@ -53,6 +63,7 @@ final class CiderDatabase {
             // Close the handle to avoid leaking on setup failure
             sqlite3_close_v2(handle)
             db = nil
+            databaseURL = nil
             throw error
         }
 
@@ -64,6 +75,7 @@ final class CiderDatabase {
         guard let db else { return }
         sqlite3_close_v2(db)
         self.db = nil
+        self.databaseURL = nil
         logger.info("Database closed")
     }
 
@@ -108,5 +120,26 @@ final class CiderDatabase {
             try? runSQL("ROLLBACK;")
             throw error
         }
+    }
+
+    /// Force a checkpoint so the main database file is current before backup/inspection work.
+    func checkpointWal(mode: String = "TRUNCATE") throws {
+        try runSQL("PRAGMA wal_checkpoint(\(mode));")
+    }
+
+    /// Run `PRAGMA integrity_check` and return the raw status rows.
+    func integrityCheck() throws -> DatabaseIntegrityStatus {
+        let stmt = try prepare("PRAGMA integrity_check;")
+        var messages: [String] = []
+        while try stmt.step() {
+            messages.append(stmt.string(at: 0))
+        }
+        return DatabaseIntegrityStatus(messages: messages)
+    }
+
+    /// Create a portable SQLite backup using `VACUUM INTO`.
+    func vacuum(into destinationURL: URL) throws {
+        let escapedPath = destinationURL.path.replacingOccurrences(of: "'", with: "''")
+        try runSQL("VACUUM INTO '\(escapedPath)';")
     }
 }

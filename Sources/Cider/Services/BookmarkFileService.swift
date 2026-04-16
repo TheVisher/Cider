@@ -1,10 +1,11 @@
 import Foundation
 import os
 
-/// Manages individual `.webloc` files and per-folder `_cider_bookmarks.json` sidecars.
+/// Manages individual `.webloc` files and legacy per-folder `_cider_bookmarks.json` sidecars.
 ///
-/// Each bookmark is stored as a macOS `.webloc` plist file (URL only) plus an entry
-/// in the folder's sidecar JSON (all Cider metadata — tags, labels, thumbnails, etc.).
+/// The `.webloc` file is the durable on-disk artifact. Sidecars are only a
+/// transitional fallback for older vaults while bookmark metadata moves fully
+/// into SQLite.
 ///
 /// This service handles:
 /// - Writing/reading `.webloc` files
@@ -66,7 +67,7 @@ final class BookmarkFileService {
 
     // MARK: - Write
 
-    /// Writes a bookmark as a `.webloc` file and updates the folder's sidecar.
+    /// Writes a bookmark as a `.webloc` file.
     /// Returns the vault-relative path of the written file (e.g. `"Entertainment/YouTube - Some Video.webloc"`).
     @discardableResult
     func write(bookmark: Bookmark, toDirectory dirURL: URL, dirRelativePath: String) throws -> String {
@@ -85,10 +86,6 @@ final class BookmarkFileService {
             try data.write(to: fileURL, options: .atomic)
         }
 
-        // Update sidecar
-        let entry = sidecarEntry(from: bookmark)
-        updateSidecar(at: dirURL, setting: filename, to: entry)
-
         let relativePath = dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
         logger.info("Wrote bookmark file: \(relativePath)")
         return relativePath
@@ -96,7 +93,7 @@ final class BookmarkFileService {
 
     // MARK: - Read
 
-    /// Reads a single `.webloc` file + its sidecar entry and returns a `Bookmark`.
+    /// Reads a single `.webloc` file and augments it with sidecar metadata if present.
     func read(filename: String, from dirURL: URL, dirRelativePath: String) -> Bookmark? {
         let fileURL = dirURL.appendingPathComponent(filename)
 
@@ -172,26 +169,22 @@ final class BookmarkFileService {
         let destFileURL = destDirURL.appendingPathComponent(destFilename)
         try fm.moveItem(at: sourceFileURL, to: destFileURL)
 
-        // Move thumbnail if present
-        let sidecar = loadSidecar(at: sourceDirURL)
-        if let entry = sidecar.items[filename] {
-            if let thumbName = entry.thumbnailFilename {
-                moveAsset(named: thumbName, subdir: Self.thumbnailsDir, from: sourceDirURL, to: destDirURL)
-            }
-            if let origName = entry.originalImageFilename {
-                moveAsset(named: origName, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
-            }
-            if let carousel = entry.carouselImageFilenames {
-                for name in carousel {
-                    moveAsset(named: name, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
-                }
+        let entry = sidecarEntry(from: bookmark)
+        if let thumbName = entry.thumbnailFilename {
+            moveAsset(named: thumbName, subdir: Self.thumbnailsDir, from: sourceDirURL, to: destDirURL)
+        }
+        if let origName = entry.originalImageFilename {
+            moveAsset(named: origName, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
+        }
+        if let carousel = entry.carouselImageFilenames {
+            for name in carousel {
+                moveAsset(named: name, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
             }
         }
 
-        // Update sidecars: remove from source, add to dest
-        let entry = sidecar.items[filename] ?? sidecarEntry(from: bookmark)
+        // Clean up any legacy sidecar entries so they do not drift after the move.
         removeSidecarEntry(at: sourceDirURL, filename: filename)
-        updateSidecar(at: destDirURL, setting: destFilename, to: entry)
+        removeSidecarEntry(at: destDirURL, filename: destFilename)
 
         let relativePath = destDirRelativePath.isEmpty ? destFilename : "\(destDirRelativePath)/\(destFilename)"
         logger.info("Moved bookmark: \(filename) → \(relativePath)")
@@ -226,6 +219,32 @@ final class BookmarkFileService {
         }
 
         // Remove sidecar entry
+        removeSidecarEntry(at: dirURL, filename: filename)
+        logger.info("Deleted bookmark file: \(filename)")
+    }
+
+    /// Deletes a bookmark's `.webloc` file using the in-memory bookmark metadata
+    /// to locate assets, then cleans up any legacy sidecar entry.
+    func delete(bookmark: Bookmark, filename: String, from dirURL: URL) {
+        let fileURL = dirURL.appendingPathComponent(filename)
+        try? fm.removeItem(at: fileURL)
+
+        let entry = sidecarEntry(from: bookmark)
+        if let thumbName = entry.thumbnailFilename {
+            let thumbURL = dirURL.appendingPathComponent(Self.thumbnailsDir).appendingPathComponent(thumbName)
+            try? fm.removeItem(at: thumbURL)
+        }
+        if let origName = entry.originalImageFilename {
+            let origURL = dirURL.appendingPathComponent(Self.originalsDir).appendingPathComponent(origName)
+            try? fm.removeItem(at: origURL)
+        }
+        if let carousel = entry.carouselImageFilenames {
+            for name in carousel {
+                let url = dirURL.appendingPathComponent(Self.originalsDir).appendingPathComponent(name)
+                try? fm.removeItem(at: url)
+            }
+        }
+
         removeSidecarEntry(at: dirURL, filename: filename)
         logger.info("Deleted bookmark file: \(filename)")
     }

@@ -100,7 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 at: dbPath.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
             try CiderDatabase.shared.open(at: dbPath)
+            DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
         } catch {
             Logger(subsystem: Bundle.main.bundleIdentifier ?? "Cider", category: "Startup")
                 .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
@@ -156,8 +158,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             VaultIndexService.shared.rebuildFromCurrentState()
         }
 
-        // Load sidecar metadata and scan vault files
-        SidecarService.shared.loadAll()
         VaultFileService.shared.ensureInboxDirectories()
         // Reconcile SQLite with filesystem (handles external changes while app was closed).
         // This triggers VaultFileService.scan() and rescans content services.

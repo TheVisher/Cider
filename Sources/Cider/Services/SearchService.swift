@@ -420,15 +420,7 @@ enum SearchService {
 
     // Note content is loaded off the main actor to avoid blocking the UI.
     static func searchNotes(_ tokens: [String], in notes: [Note]) async -> [SearchResult] {
-        // Collect sidecar tags on main actor before dispatching to background
-        var sidecarTags: [UUID: [String]] = [:]
-        for note in notes {
-            if let meta = SidecarService.shared.metadata(forNote: note),
-               let tags = meta.tags, !tags.isEmpty {
-                sidecarTags[note.id] = tags
-            }
-        }
-        return await fetchNoteResults(tokens: tokens, notes: notes, sidecarTags: sidecarTags)
+        await fetchNoteResults(tokens: tokens, notes: notes)
     }
 
     static func searchDateCards(_ tokens: [String], in dateCards: [DateCard]) -> [SearchResult] {
@@ -545,8 +537,7 @@ enum SearchService {
     // Runs off the main actor — safe to do synchronous disk reads here.
     private nonisolated static func fetchNoteResults(
         tokens: [String],
-        notes: [Note],
-        sidecarTags: [UUID: [String]] = [:]
+        notes: [Note]
     ) async -> [SearchResult] {
         notes.compactMap { note in
             let fileURL = note.absoluteFileURL
@@ -556,7 +547,7 @@ enum SearchService {
                 .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let tagsString = (sidecarTags[note.id] ?? []).joined(separator: " ")
+            let tagsString = note.tags.joined(separator: " ")
             let fields = [note.title, strippedContent, tagsString]
             guard matchesAllTokens(tokens, in: fields) else { return nil }
 

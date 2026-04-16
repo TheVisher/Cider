@@ -46,7 +46,9 @@ struct CiderCLI {
                 at: dbPath.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
             try CiderDatabase.shared.open(at: dbPath)
+            DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
         } catch {
             Logger(subsystem: "Cider", category: "CLI")
                 .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")

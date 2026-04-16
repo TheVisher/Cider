@@ -80,6 +80,9 @@ final class NotesStorage: ObservableObject {
             loadNotesFromDatabase(db)
             if !notes.isEmpty {
                 loadVaultFolderNotes()
+                if importSidecarMetadataIntoNotes() {
+                    persistNotesToDatabaseIfNeeded()
+                }
                 return
             }
         }
@@ -95,8 +98,8 @@ final class NotesStorage: ObservableObject {
             var scanIndex = result.index
             var scanNotes = result.notes
             // loadAndScan runs off-actor and cannot read sidecars. Reconcile
-            // UUIDs here on the main actor so identity survives loss of the
-            // JSON index.
+            // UUIDs here on the main actor so existing legacy sidecars can
+            // still help recover identity during the transition.
             self.reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
             self.index = scanIndex
             self.notes = scanNotes
@@ -109,6 +112,7 @@ final class NotesStorage: ObservableObject {
             // content service touches .shared.
             self.discoverVaultFolderNoteFiles()
             self.loadVaultFolderNotes()
+            let importedSidecarMetadata = self.importSidecarMetadataIntoNotes()
 
             // One-time migration: persist JSON notes to SQLite
             if !self.notes.isEmpty, let db = self.resolvedDatabase {
@@ -122,6 +126,8 @@ final class NotesStorage: ObservableObject {
                 } catch {
                     self.logger.error("Failed to migrate JSON notes to SQLite: \(error.localizedDescription)")
                 }
+            } else if importedSidecarMetadata {
+                self.persistNotesToDatabaseIfNeeded()
             }
         }
     }
@@ -170,6 +176,9 @@ final class NotesStorage: ObservableObject {
             loadNotesFromDatabase(db)
             if !notes.isEmpty {
                 loadVaultFolderNotes()
+                if importSidecarMetadataIntoNotes() {
+                    persistNotesToDatabaseIfNeeded()
+                }
                 return
             }
         }
@@ -189,6 +198,9 @@ final class NotesStorage: ObservableObject {
         notes = scanNotes
         if result.needsSave || scanIndex != result.index { saveIndex() }
         loadVaultFolderNotes()
+        if importSidecarMetadataIntoNotes() {
+            persistNotesToDatabaseIfNeeded()
+        }
     }
 
     private func ensureDirectory() {
@@ -206,9 +218,9 @@ final class NotesStorage: ObservableObject {
 
     // Task 13: JSON index persistence removed. The in-memory `index` dict is
     // rebuilt on launch from SQLite (`loadNotesFromDatabase`) and from .md
-    // scan (`scanNotes`/`loadAndScan`). Note identity is persisted in per-note
-    // `.cider-meta.json` sidecars for recoverability. Stubs retained so the
-    // mutation call sites stay put.
+    // scan (`scanNotes`/`loadAndScan`). Legacy note sidecars are still read as
+    // a fallback during migration, but the runtime no longer depends on
+    // writing them. Stubs retained so the mutation call sites stay put.
     private func saveIndex() { /* no-op */ }
 
     // MARK: - Scanning
@@ -279,19 +291,12 @@ final class NotesStorage: ObservableObject {
                 relativePath = filename
             }
 
-            // Persist the UUID to the sidecar if it isn't there yet, so future
-            // scans can recover identity even if the JSON index is deleted.
-            if !sidecarDir.isEmpty, sidecarUUID != uuid {
-                var meta = SidecarService.shared.metadata(for: filename, inDirectory: sidecarDir) ?? SidecarItemMetadata()
-                meta.id = uuid
-                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: sidecarDir)
-            }
-
             // Lazy: don't load content during scan
             scannedNotes.append(Note(
                 id: uuid,
                 title: title,
                 content: "",
+                summary: nil,
                 createdAt: createDate,
                 modifiedAt: modDate,
                 relativePath: relativePath,
@@ -327,6 +332,7 @@ final class NotesStorage: ObservableObject {
                         id: uuid,
                         title: String(entry.filename.dropLast(3)),
                         content: "",
+                        summary: nil,
                         createdAt: entry.createdAt ?? Date(),
                         modifiedAt: modDate,
                         relativePath: "\(vaultFolder.relativePath)/\(entry.filename)",
@@ -397,7 +403,13 @@ final class NotesStorage: ObservableObject {
                 if let existingTags = try? loadTags(db, itemID: notes[i].id), !existingTags.isEmpty {
                     notes[i].tags = existingTags
                 }
+                if let existingSummary = try? loadSummary(db, itemID: notes[i].id),
+                   !existingSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   (notes[i].summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+                    notes[i].summary = existingSummary
+                }
             }
+            _ = importSidecarMetadataIntoNotes()
 
             try db.withTransaction {
                 for note in self.notes {
@@ -455,17 +467,11 @@ final class NotesStorage: ObservableObject {
                     isPinned: nil
                 )
 
-                // Persist UUID to sidecar for future identity recovery.
-                var meta = SidecarService.shared.metadata(for: filename, inDirectory: sidecarDir) ?? SidecarItemMetadata()
-                if meta.id != uuid {
-                    meta.id = uuid
-                    SidecarService.shared.setMetadata(meta, for: filename, inDirectory: sidecarDir)
-                }
-
                 notes.append(Note(
                     id: uuid,
                     title: String(filename.dropLast(3)),
                     content: "",
+                    summary: nil,
                     createdAt: createDate,
                     modifiedAt: modDate,
                     relativePath: "\(folder.relativePath)/\(filename)",
@@ -510,6 +516,7 @@ final class NotesStorage: ObservableObject {
                 id: uuid,
                 title: String(entry.filename.dropLast(3)),
                 content: "",
+                summary: nil,
                 createdAt: entry.createdAt ?? Date(),
                 modifiedAt: modDate,
                 relativePath: "\(vaultFolder.relativePath)/\(entry.filename)",
@@ -531,9 +538,8 @@ final class NotesStorage: ObservableObject {
     /// Reconciles UUIDs against per-directory sidecar files after a background
     /// `loadAndScan`. Because `loadAndScan` is nonisolated and cannot reach the
     /// main-actor `SidecarService`, any scanned note whose filename was missing
-    /// from the JSON index was assigned a fresh `UUID()`. If a sidecar persisted
-    /// a previous UUID for that file, adopt it here. Afterwards, persist every
-    /// resolved UUID back to the sidecar so future recoveries work.
+    /// from the JSON index was assigned a fresh `UUID()`. If an existing sidecar
+    /// persisted a previous UUID for that file, adopt it here.
     private func reconcileUUIDsWithSidecars(
         notes: inout [Note],
         index: inout [UUID: NoteIndexEntry]
@@ -551,8 +557,8 @@ final class NotesStorage: ObservableObject {
                 continue
             }
 
-            // The sidecar is the file-level source of truth for identity.
-            // If it disagrees with what loadAndScan produced, adopt the sidecar ID.
+            // During migration, an existing sidecar can still provide the
+            // stable note ID if the scanned state disagrees.
             if let persistedID = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: dirPath),
                persistedID != note.id {
                 idRemaps.append((old: note.id, new: persistedID))
@@ -560,6 +566,7 @@ final class NotesStorage: ObservableObject {
                     id: persistedID,
                     title: note.title,
                     content: note.content,
+                    summary: note.summary,
                     createdAt: note.createdAt,
                     modifiedAt: note.modifiedAt,
                     relativePath: note.relativePath,
@@ -569,13 +576,6 @@ final class NotesStorage: ObservableObject {
                 )
             }
 
-            // Persist this note's UUID to the sidecar (idempotent).
-            let resolvedID = notes[i].id
-            var meta = SidecarService.shared.metadata(for: filename, inDirectory: dirPath) ?? SidecarItemMetadata()
-            if meta.id != resolvedID {
-                meta.id = resolvedID
-                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: dirPath)
-            }
         }
 
         // Apply ID remaps to the index.
@@ -724,7 +724,6 @@ final class NotesStorage: ObservableObject {
         let note = Note(id: uuid, title: title, content: initialContent, createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
-        SidecarService.shared.syncNote(note)
         return note
     }
 
@@ -808,7 +807,6 @@ final class NotesStorage: ObservableObject {
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
-        SidecarService.shared.syncNote(note)
         return note
     }
 
@@ -906,16 +904,6 @@ final class NotesStorage: ObservableObject {
             try FileManager.default.moveItem(at: oldFileURL, to: newFileURL)
             contentCache.removeValue(forKey: note.id)
 
-            // Move sidecar metadata from old filename to new filename
-            let oldFilename = (note.relativePath as NSString).lastPathComponent
-            let dirPath = note.relativePath.contains("/")
-                ? (note.relativePath as NSString).deletingLastPathComponent
-                : "\(StoragePaths.inboxDir)/Notes"
-            if let existingMeta = SidecarService.shared.metadata(for: oldFilename, inDirectory: dirPath) {
-                SidecarService.shared.removeMetadata(for: oldFilename, inDirectory: dirPath)
-                SidecarService.shared.setMetadata(existingMeta, for: newFilename, inDirectory: dirPath)
-            }
-
             if var entry = index[note.id] {
                 entry.filename = newFilename
                 index[note.id] = entry
@@ -969,13 +957,10 @@ final class NotesStorage: ObservableObject {
 
         // Determine the new directory: vault folder or Inbox/Notes/
         let newDirURL: URL
-        let newRelativePath: String
         if let folderID, let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
             newDirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
-            newRelativePath = "\(vaultFolder.relativePath)/\(filename)"
         } else {
             newDirURL = inboxNotesDirectoryURL
-            newRelativePath = "\(StoragePaths.inboxDir)/Notes/\(filename)"
         }
 
         var newFileURL = newDirURL.appendingPathComponent(filename)
@@ -1040,7 +1025,6 @@ final class NotesStorage: ObservableObject {
         }
         saveIndex()
         persistNoteToDatabase(notes[idx])
-        SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
@@ -1054,7 +1038,6 @@ final class NotesStorage: ObservableObject {
         }
         saveIndex()
         persistNoteToDatabase(notes[idx])
-        SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
@@ -1071,7 +1054,6 @@ final class NotesStorage: ObservableObject {
         notes[idx].tags.append(trimmed)
         notes[idx].modifiedAt = Date()
         persistNoteToDatabase(notes[idx])
-        SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
@@ -1085,7 +1067,6 @@ final class NotesStorage: ObservableObject {
         guard notes[idx].tags.count != before else { return false }
         notes[idx].modifiedAt = Date()
         persistNoteToDatabase(notes[idx])
-        SidecarService.shared.syncNote(notes[idx])
         return true
     }
 
@@ -1099,7 +1080,6 @@ final class NotesStorage: ObservableObject {
                 index[notes[i].id] = entry
             }
             affectedNotes.append(notes[i])
-            SidecarService.shared.syncNote(notes[i])
             changed = true
         }
         if changed {
@@ -1142,10 +1122,10 @@ final class NotesStorage: ObservableObject {
             }
             if moveSucceeded {
                 noteForTrash = Note(
-                    id: note.id, title: note.title, content: note.content,
+                    id: note.id, title: note.title, content: note.content, summary: note.summary,
                     createdAt: note.createdAt, modifiedAt: note.modifiedAt,
                     relativePath: "\(StoragePaths.inboxDir)/Notes/\(filename)", labelIDs: note.labelIDs,
-                    folderID: note.folderID, isPinned: note.isPinned
+                    folderID: note.folderID, isPinned: note.isPinned, tags: note.tags
                 )
             } else {
                 // Move failed — trash from the original location instead
@@ -1230,7 +1210,6 @@ final class NotesStorage: ObservableObject {
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
-        SidecarService.shared.syncNote(note)
     }
 
     /// Update an existing note from a sync pull (remote is newer).
@@ -1315,10 +1294,9 @@ final class NotesStorage: ObservableObject {
         if folderID != nil {
             loadVaultFolderNotes()
         }
-        // Persist restored note to database and sidecar
+        // Persist restored note to the database
         if let restoredNote = notes.first(where: { $0.id == noteID }) {
             persistNoteToDatabase(restoredNote)
-            SidecarService.shared.syncNote(restoredNote)
         }
         // Cancel pending sync deletion and push so the note reappears on web
         SyncService.shared.cancelNoteDeletion(of: noteID)
@@ -1688,7 +1666,7 @@ final class NotesStorage: ObservableObject {
         do {
             let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
-                       n.content, n.is_pinned
+                       n.content, n.summary, n.is_pinned
                 FROM items i
                 JOIN notes n ON n.item_id = i.id
                 WHERE i.type = 'note'
@@ -1701,13 +1679,14 @@ final class NotesStorage: ObservableObject {
                 let folderID = DatabaseHelpers.decodeUUID(stmt.optionalString(at: 4) ?? "")
                 let relativePath = stmt.optionalString(at: 5) ?? ""
                 let title = stmt.string(at: 1)
-                let isPinned = stmt.bool(at: 7)
+                let isPinned = stmt.bool(at: 8)
                 let createdAt = DatabaseHelpers.decodeDate(stmt.double(at: 2))
 
                 var note = Note(
                     id: id,
                     title: title,
                     content: stmt.string(at: 6),
+                    summary: stmt.optionalString(at: 7),
                     createdAt: createdAt,
                     modifiedAt: DatabaseHelpers.decodeDate(stmt.double(at: 3)),
                     relativePath: relativePath,
@@ -1772,6 +1751,13 @@ final class NotesStorage: ObservableObject {
         return names
     }
 
+    private func loadSummary(_ db: CiderDatabase, itemID: UUID) throws -> String? {
+        let stmt = try db.prepare("SELECT summary FROM notes WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        guard try stmt.step() else { return nil }
+        return stmt.optionalString(at: 0)
+    }
+
     // Internal for testing
     /// Persist a single note to the database (items + notes + item_labels) in a transaction.
     func persistNoteToDatabase(_ note: Note) {
@@ -1822,15 +1808,17 @@ final class NotesStorage: ObservableObject {
 
         // 2. UPSERT into notes
         let noteStmt = try db.prepare("""
-            INSERT INTO notes (item_id, content, is_pinned)
-            VALUES (?, ?, ?)
+            INSERT INTO notes (item_id, content, summary, is_pinned)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 content = excluded.content,
+                summary = excluded.summary,
                 is_pinned = excluded.is_pinned;
             """)
         noteStmt.bind(itemID, at: 1)
             .bind(note.content, at: 2)
-            .bind(note.isPinned ? Int64(1) : Int64(0), at: 3)
+            .bind(note.summary, at: 3)
+            .bind(note.isPinned ? Int64(1) : Int64(0), at: 4)
         try noteStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert via EXISTS guard so
@@ -1882,6 +1870,53 @@ final class NotesStorage: ObservableObject {
                 insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
                 try insItemTag.step()
             }
+        }
+    }
+
+    @discardableResult
+    private func importSidecarMetadataIntoNotes() -> Bool {
+        var changed = false
+
+        for i in notes.indices {
+            let note = notes[i]
+            guard note.relativePath.contains("/") else { continue }
+
+            let filename = (note.relativePath as NSString).lastPathComponent
+            let directoryPath = (note.relativePath as NSString).deletingLastPathComponent
+            guard let meta = SidecarService.shared.metadata(for: filename, inDirectory: directoryPath) else { continue }
+
+            if let summary = meta.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty,
+               (notes[i].summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+                notes[i].summary = summary
+                changed = true
+            }
+
+            let labelNames = Set(notes[i].labelIDs.compactMap { id in
+                CardLabelStorage.shared.label(for: id)?.name.lowercased()
+            })
+            let importedTags = (meta.tags ?? []).filter { !labelNames.contains($0.lowercased()) }
+            for importedTag in importedTags {
+                if !notes[i].tags.contains(where: { $0.caseInsensitiveCompare(importedTag) == .orderedSame }) {
+                    notes[i].tags.append(importedTag)
+                    changed = true
+                }
+            }
+        }
+
+        return changed
+    }
+
+    private func persistNotesToDatabaseIfNeeded() {
+        guard let db = resolvedDatabase else { return }
+        do {
+            try db.withTransaction {
+                for note in self.notes {
+                    try self.persistNoteToDatabaseInner(db, note: note)
+                }
+            }
+        } catch {
+            logger.error("Failed to persist imported note metadata to SQLite: \(error.localizedDescription)")
         }
     }
 
