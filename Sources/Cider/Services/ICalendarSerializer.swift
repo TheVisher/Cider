@@ -52,6 +52,11 @@ enum ICalendarSerializer {
         if !todo.notes.isEmpty {
             lines.append("X-CIDER-NOTES:\(escapeICalText(todo.notes))")
         }
+        if !todo.rules.isEmpty,
+           let jsonData = try? rulesEncoder.encode(todo.rules),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            lines.append("X-CIDER-RULES:\(escapeICalText(jsonString))")
+        }
         if !todo.checklist.isEmpty {
             // Checklist is complex (nested subtasks, amounts, etc.) — encode as JSON
             if let jsonData = try? checklistEncoder.encode(todo.checklist),
@@ -84,6 +89,7 @@ enum ICalendarSerializer {
         var labelIDs: [UUID] = []
         var linkedEntities: [LibraryEntityRef] = []
         var notes = ""
+        var rules: [SurfacingRule] = []
         var checklist: [TodoChecklistItem] = []
         var createdAt: Date?
         var updatedAt: Date?
@@ -123,6 +129,11 @@ enum ICalendarSerializer {
                 linkedEntities = parseLinkedEntities(value)
             case "X-CIDER-NOTES":
                 notes = unescapeICalText(value)
+            case "X-CIDER-RULES":
+                let jsonString = unescapeICalText(value)
+                if let jsonData = jsonString.data(using: .utf8) {
+                    rules = (try? rulesDecoder.decode([SurfacingRule].self, from: jsonData)) ?? []
+                }
             case "X-CIDER-CHECKLIST":
                 let jsonString = unescapeICalText(value)
                 if let jsonData = jsonString.data(using: .utf8) {
@@ -147,6 +158,7 @@ enum ICalendarSerializer {
             labelIDs: labelIDs,
             notes: notes,
             linkedEntities: linkedEntities,
+            rules: rules,
             createdAt: createdAt ?? Date(),
             updatedAt: updatedAt ?? Date()
         )

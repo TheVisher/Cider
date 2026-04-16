@@ -695,21 +695,26 @@ actor TelegramBridge: ChannelBridge {
     private func processTodoReminder(_ todo: TodoCard, now: Date) async {
         guard !todo.isCompleted, let dueDate = todo.dueDate, todoHasExplicitTime(dueDate) else { return }
 
-        let fireDate = dueDate
-        guard fireDate <= now, fireDate > now.addingTimeInterval(-5 * 60) else { return }
+        let reminderRules = todo.rules.filter { $0.type == .remindBeforeMinutes && $0.isEnabled }
+        let offsets = reminderRules.isEmpty ? [0] : reminderRules.compactMap { $0.integerValue ?? 0 }
 
-        let reminderID = todoReminderIdentifier(todoID: todo.id, dueDate: dueDate)
-        guard !state.deliveredReminderIDs.contains(reminderID) else { return }
+        for minutesBefore in offsets {
+            let fireDate = dueDate.addingTimeInterval(-Double(minutesBefore) * 60)
+            guard fireDate <= now, fireDate > now.addingTimeInterval(-5 * 60) else { continue }
 
-        let message = todoReminderMessage(for: todo, dueDate: dueDate)
-        for chatID in configuration.allowedChatIDs {
-            do {
-                try await sendMessage(message, to: chatID)
-            } catch {
-                logger.error("Failed to deliver Telegram todo reminder: \(error.localizedDescription, privacy: .public)")
+            let reminderID = todoReminderIdentifier(todoID: todo.id, dueDate: dueDate, offset: minutesBefore)
+            guard !state.deliveredReminderIDs.contains(reminderID) else { continue }
+
+            let message = todoReminderMessage(for: todo, dueDate: dueDate, minutesBefore: minutesBefore)
+            for chatID in configuration.allowedChatIDs {
+                do {
+                    try await sendMessage(message, to: chatID)
+                } catch {
+                    logger.error("Failed to deliver Telegram todo reminder: \(error.localizedDescription, privacy: .public)")
+                }
             }
+            state.deliveredReminderIDs.insert(reminderID)
         }
-        state.deliveredReminderIDs.insert(reminderID)
     }
 
     private func processDailyDigest(dateCards: [DateCard], now: Date) async {
@@ -787,18 +792,31 @@ actor TelegramBridge: ChannelBridge {
         state.deliveredWeeklyDigestKeys.insert(weekKey)
     }
 
-    private func todoReminderIdentifier(todoID: UUID, dueDate: Date) -> String {
+    private func todoReminderIdentifier(todoID: UUID, dueDate: Date, offset: Int) -> String {
         let iso = ISO8601DateFormatter().string(from: dueDate)
-        return "todo-\(todoID.uuidString)-\(iso)-0min"
+        return "todo-\(todoID.uuidString)-\(iso)-\(offset)min"
     }
 
-    private func todoReminderMessage(for todo: TodoCard, dueDate: Date) -> String {
+    private func todoReminderMessage(for todo: TodoCard, dueDate: Date, minutesBefore: Int) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .full
         formatter.timeStyle = .short
 
+        let timeDescription: String
+        if minutesBefore == 0 {
+            timeDescription = "now"
+        } else if minutesBefore < 60 {
+            timeDescription = "in \(minutesBefore) minute\(minutesBefore == 1 ? "" : "s")"
+        } else if minutesBefore < 1440 {
+            let hours = minutesBefore / 60
+            timeDescription = "in \(hours) hour\(hours == 1 ? "" : "s")"
+        } else {
+            let days = minutesBefore / 1440
+            timeDescription = "in \(days) day\(days == 1 ? "" : "s")"
+        }
+
         var lines = [
-            "Reminder: \(todo.title) is now.",
+            "Reminder: \(todo.title) is \(timeDescription).",
             "Date: \(formatter.string(from: dueDate))",
         ]
         if let priority = todo.priority {

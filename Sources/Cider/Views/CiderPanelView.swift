@@ -400,6 +400,7 @@ struct CiderPanelView: View {
                         created.details = card.details
                         created.checklist = card.checklist
                         created.labelIDs = card.labelIDs
+                        created.rules = card.rules
                         _ = TodoCardStorage.shared.updateTodoCard(created)
                     }
                 },

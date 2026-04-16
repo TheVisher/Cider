@@ -92,7 +92,8 @@ enum CiderSchema {
             is_completed INTEGER NOT NULL DEFAULT 0,
             completed_at REAL,
             notes        TEXT NOT NULL DEFAULT '',
-            checklist    TEXT
+            checklist    TEXT,
+            surfacing_rules TEXT
         );
         """
 

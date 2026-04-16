@@ -118,6 +118,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
     var notes: String
     var linkedEntities: [LibraryEntityRef]
     var folderID: UUID?
+    var rules: [SurfacingRule]
     var createdAt: Date
     var updatedAt: Date
 
@@ -134,6 +135,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         notes: String = "",
         linkedEntities: [LibraryEntityRef] = [],
         folderID: UUID? = nil,
+        rules: [SurfacingRule] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -149,6 +151,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         self.notes = notes
         self.linkedEntities = linkedEntities
         self.folderID = folderID
+        self.rules = rules
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -167,6 +170,7 @@ struct TodoCard: Identifiable, Codable, Hashable {
         notes = (try c.decodeIfPresent(String.self, forKey: .notes)) ?? ""
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
         folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
+        rules = (try c.decodeIfPresent([SurfacingRule].self, forKey: .rules)) ?? []
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
     }
@@ -191,6 +195,12 @@ struct TodoCard: Identifiable, Codable, Hashable {
     var isDueToday: Bool {
         guard !isCompleted, let dueDate else { return false }
         return Calendar.current.isDateInToday(dueDate)
+    }
+
+    var hasExplicitDueTime: Bool {
+        guard let dueDate else { return false }
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: dueDate)
+        return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
     }
 
     /// The earliest approaching due date — either the card's own dueDate or any checklist item's dueDate.

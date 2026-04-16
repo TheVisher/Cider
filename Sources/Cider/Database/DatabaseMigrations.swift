@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 3
+    static let latestVersion: Int = 4
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -39,7 +39,28 @@ enum DatabaseMigrations {
         }
         if currentVersion < 3 {
             try migrateToV3(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 4 {
+            try migrateToV4(db)
+        }
+    }
+
+    // MARK: - V3 -> V4: Todo surfacing rules
+
+    private static func migrateToV4(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 4...")
+
+        try withTransaction(db) {
+            if try tableExists(db, table: "todos"),
+               !(try columnExists(db, table: "todos", column: "surfacing_rules")) {
+                try runOnDB(db, "ALTER TABLE todos ADD COLUMN surfacing_rules TEXT;")
+            }
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (4);")
+        }
+
+        logger.info("Migration to v4 complete")
     }
 
     // MARK: - V2 -> V3: Clean up ghost storage-type folder rows

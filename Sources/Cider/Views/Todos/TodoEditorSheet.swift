@@ -12,11 +12,14 @@ struct TodoEditorSheet: View {
     @State private var details: String
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
+    @State private var hasDueTime: Bool
     @State private var priority: TodoPriority?
     @State private var checklist: [TodoChecklistItem]
     @State private var selectedLabelIDs: Set<UUID>
     @State private var draftLabelName = ""
     @State private var draftItemTitle = ""
+    @State private var notificationEnabled: Bool
+    @State private var notificationMinutes: Int
 
     init(
         existingCard: TodoCard?,
@@ -31,9 +34,13 @@ struct TodoEditorSheet: View {
         _details = State(initialValue: existingCard?.details ?? "")
         _hasDueDate = State(initialValue: existingCard?.dueDate != nil)
         _dueDate = State(initialValue: existingCard?.dueDate ?? Date())
+        _hasDueTime = State(initialValue: existingCard?.hasExplicitDueTime ?? false)
         _priority = State(initialValue: existingCard?.priority)
         _checklist = State(initialValue: existingCard?.checklist ?? [])
         _selectedLabelIDs = State(initialValue: Set(existingCard?.labelIDs ?? []))
+        let existingNotificationRule = existingCard?.rules.first(where: { $0.type == .remindBeforeMinutes && $0.isEnabled })
+        _notificationEnabled = State(initialValue: existingNotificationRule != nil)
+        _notificationMinutes = State(initialValue: existingNotificationRule?.integerValue ?? 0)
     }
 
     var body: some View {
@@ -74,11 +81,37 @@ struct TodoEditorSheet: View {
                         .toggleStyle(.switch)
 
                     if hasDueDate {
+                        Toggle("Include Time", isOn: $hasDueTime)
+                            .toggleStyle(.switch)
+
                         DatePicker(
                             "Due",
                             selection: $dueDate,
-                            displayedComponents: [.date]
+                            displayedComponents: hasDueTime ? [.date, .hourAndMinute] : [.date]
                         )
+
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Toggle("Telegram/agent reminder", isOn: $notificationEnabled)
+                                .toggleStyle(.switch)
+
+                            if notificationEnabled {
+                                if hasDueTime {
+                                    Picker("Remind", selection: $notificationMinutes) {
+                                        Text("At time").tag(0)
+                                        Text("5 minutes before").tag(5)
+                                        Text("15 minutes before").tag(15)
+                                        Text("30 minutes before").tag(30)
+                                        Text("1 hour before").tag(60)
+                                        Text("2 hours before").tag(120)
+                                        Text("1 day before").tag(1440)
+                                    }
+                                } else {
+                                    Text("Todo reminders require a due time, not just a due date.")
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.quaternary)
+                                }
+                            }
+                        }
                     }
 
                     Divider().background(CiderColors.separator)
@@ -378,8 +411,9 @@ struct TodoEditorSheet: View {
         var card = existingCard ?? TodoCard(title: trimmedTitle)
         card.title = trimmedTitle
         card.details = details.trimmingCharacters(in: .whitespacesAndNewlines)
-        card.dueDate = hasDueDate ? dueDate : nil
+        card.dueDate = hasDueDate ? normalizedDueDate : nil
         card.priority = priority
+        card.rules = todoReminderRules
         // Update sortOrder to match current array position
         for i in checklist.indices {
             checklist[i].sortOrder = i
@@ -389,6 +423,16 @@ struct TodoEditorSheet: View {
 
         onSave(card)
         dismiss()
+    }
+
+    private var normalizedDueDate: Date {
+        guard hasDueTime else { return Calendar.current.startOfDay(for: dueDate) }
+        return dueDate
+    }
+
+    private var todoReminderRules: [SurfacingRule] {
+        guard notificationEnabled, hasDueDate, hasDueTime else { return [] }
+        return [SurfacingRule(type: .remindBeforeMinutes, integerValue: notificationMinutes)]
     }
 
     private func labelChip(_ label: CardLabel) -> some View {

@@ -72,11 +72,17 @@ final class ReminderOutbox {
     private func processTodo(_ todo: TodoCard, now: Date) {
         guard !todo.isCompleted, let dueDate = todo.dueDate, todoHasExplicitTime(dueDate) else { return }
 
-        if dueDate <= now, dueDate > now.addingTimeInterval(-5 * 60) {
-            let fileID = todoOutboxFileID(todoID: todo.id, dueDate: dueDate)
-            if !isDelivered(fileID) {
-                writeTodoOutboxFile(todo: todo, dueDate: dueDate, fileID: fileID)
-                markDelivered(fileID)
+        let reminderRules = todo.rules.filter { $0.type == .remindBeforeMinutes && $0.isEnabled }
+        let offsets = reminderRules.isEmpty ? [0] : reminderRules.compactMap { $0.integerValue ?? 0 }
+
+        for minutesBefore in offsets {
+            let fireDate = dueDate.addingTimeInterval(-Double(minutesBefore) * 60)
+            if fireDate <= now, fireDate > now.addingTimeInterval(-5 * 60) {
+                let fileID = todoOutboxFileID(todoID: todo.id, dueDate: dueDate, offset: minutesBefore)
+                if !isDelivered(fileID) {
+                    writeTodoOutboxFile(todo: todo, dueDate: dueDate, minutesBefore: minutesBefore, fileID: fileID)
+                    markDelivered(fileID)
+                }
             }
         }
     }
@@ -89,9 +95,9 @@ final class ReminderOutbox {
         return "\(cardID.uuidString)-\(iso)-\(offset)min"
     }
 
-    private func todoOutboxFileID(todoID: UUID, dueDate: Date) -> String {
+    private func todoOutboxFileID(todoID: UUID, dueDate: Date, offset: Int) -> String {
         let iso = ISO8601DateFormatter().string(from: dueDate)
-        return "todo-\(todoID.uuidString)-\(iso)-0min"
+        return "todo-\(todoID.uuidString)-\(iso)-\(offset)min"
     }
 
     // MARK: - Delivery Dedup (3 sources: ledger, outbox/, outbox/sent/)
@@ -182,14 +188,27 @@ final class ReminderOutbox {
         Self.logger.info("Wrote outbox reminder: \(fileID)")
     }
 
-    private func writeTodoOutboxFile(todo: TodoCard, dueDate: Date, fileID: String) {
+    private func writeTodoOutboxFile(todo: TodoCard, dueDate: Date, minutesBefore: Int, fileID: String) {
         try? FileManager.default.createDirectory(at: outboxDirectory, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()
         formatter.dateStyle = .full
         formatter.timeStyle = .short
 
-        var body = "Reminder: \(todo.title) is now.\nDate: \(formatter.string(from: dueDate))"
+        let timeDescription: String
+        if minutesBefore == 0 {
+            timeDescription = "now"
+        } else if minutesBefore < 60 {
+            timeDescription = "in \(minutesBefore) minute\(minutesBefore == 1 ? "" : "s")"
+        } else if minutesBefore < 1440 {
+            let hours = minutesBefore / 60
+            timeDescription = "in \(hours) hour\(hours == 1 ? "" : "s")"
+        } else {
+            let days = minutesBefore / 1440
+            timeDescription = "in \(days) day\(days == 1 ? "" : "s")"
+        }
+
+        var body = "Reminder: \(todo.title) is \(timeDescription).\nDate: \(formatter.string(from: dueDate))"
         if !todo.details.isEmpty { body += "\nDetails: \(todo.details)" }
 
         let content = """
@@ -198,7 +217,7 @@ final class ReminderOutbox {
         todoID: \(todo.id.uuidString)
         title: \(todo.title)
         occurrence: \(ISO8601DateFormatter().string(from: dueDate))
-        minutesBefore: 0
+        minutesBefore: \(minutesBefore)
         recurring: false
         createdAt: \(ISO8601DateFormatter().string(from: Date()))
         ---

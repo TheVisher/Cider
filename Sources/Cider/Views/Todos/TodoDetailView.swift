@@ -327,17 +327,18 @@ struct TodoDetailView: View {
 
     @ViewBuilder
     private func dueDateBadge(_ date: Date, isCompleted: Bool, isOverdue: Bool, isDueToday: Bool) -> some View {
-        let (text, fgColor, bgColor): (String, Color, Color) = {
-            if isCompleted {
-                return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
-            }
-            if isOverdue {
-                return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
-            }
-            if isDueToday {
-                return ("Today", CiderColors.warning, CiderColors.warningSubtle)
-            }
-            return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+        let text = formattedTodoDueLabel(
+            date,
+            hasExplicitTime: liveTodo.hasExplicitDueTime,
+            isCompleted: isCompleted,
+            isOverdue: isOverdue,
+            isDueToday: isDueToday
+        )
+        let (fgColor, bgColor): (Color, Color) = {
+            if isCompleted { return (CiderColors.tertiary, CiderColors.surfaceInput) }
+            if isOverdue { return (CiderColors.destructive, CiderColors.destructiveSubtle) }
+            if isDueToday { return (CiderColors.warning, CiderColors.warningSubtle) }
+            return (CiderColors.tertiary, CiderColors.surfaceInput)
         }()
         Text(text)
             .font(CiderFont.captionSemibold)
@@ -354,4 +355,21 @@ struct TodoDetailView: View {
         if days == 0 { return CiderColors.warning }
         return CiderColors.tertiary
     }
+}
+
+private func formattedTodoDueLabel(_ date: Date, hasExplicitTime: Bool, isCompleted: Bool, isOverdue: Bool, isDueToday: Bool) -> String {
+    if isCompleted {
+        return hasExplicitTime
+            ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            : date.formatted(.dateTime.month(.abbreviated).day())
+    }
+    if isOverdue {
+        return hasExplicitTime ? "Overdue \(date.formatted(.dateTime.hour().minute()))" : "Overdue"
+    }
+    if isDueToday {
+        return hasExplicitTime ? "Today \(date.formatted(.dateTime.hour().minute()))" : "Today"
+    }
+    return hasExplicitTime
+        ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        : date.formatted(.dateTime.month(.abbreviated).day())
 }

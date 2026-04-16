@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Notifications
     var dateCardNotificationService: DateCardNotificationService?
     var dateCardNotificationCancellable: AnyCancellable?
+    var todoReminderCancellable: AnyCancellable?
     var telegramBridgeStarted = false
 
     // Settings
@@ -221,6 +222,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Re-reconcile on vault changes (debounced)
             self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards
+                .debounce(for: .seconds(2), scheduler: RunLoop.main)
+                .sink { _ in
+                    ReminderReconciler.shared.reconcile()
+                }
+            self.todoReminderCancellable = TodoCardStorage.shared.$todoCards
                 .debounce(for: .seconds(2), scheduler: RunLoop.main)
                 .sink { _ in
                     ReminderReconciler.shared.reconcile()

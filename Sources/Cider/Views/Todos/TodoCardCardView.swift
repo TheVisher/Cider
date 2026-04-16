@@ -214,16 +214,19 @@ struct TodoCardCardView: View {
     }
 
     private func dueDateStyle(_ date: Date) -> (String, Color, Color) {
+        let dateText = todoCard.hasExplicitDueTime
+            ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            : date.formatted(.dateTime.month(.abbreviated).day())
         if todoCard.isCompleted {
-            return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+            return (dateText, CiderColors.tertiary, CiderColors.surfaceInput)
         }
         if todoCard.isOverdue {
-            return ("Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
+            return (todoCard.hasExplicitDueTime ? "Overdue \(date.formatted(.dateTime.hour().minute()))" : "Overdue", CiderColors.destructive, CiderColors.destructiveSubtle)
         }
         if todoCard.isDueToday {
-            return ("Today", CiderColors.warning, CiderColors.warningSubtle)
+            return (todoCard.hasExplicitDueTime ? "Today \(date.formatted(.dateTime.hour().minute()))" : "Today", CiderColors.warning, CiderColors.warningSubtle)
         }
-        return (date.formatted(.dateTime.month(.abbreviated).day()), CiderColors.tertiary, CiderColors.surfaceInput)
+        return (dateText, CiderColors.tertiary, CiderColors.surfaceInput)
     }
 
     private func itemDueDateColor(_ date: Date) -> Color {
@@ -374,28 +377,52 @@ struct TodoListRow: View {
 
     @ViewBuilder
     private func listDueDateBadge(_ date: Date) -> some View {
+        let text = formattedTodoDueLabel(
+            date,
+            hasExplicitTime: todoCard.hasExplicitDueTime,
+            isCompleted: todoCard.isCompleted,
+            isOverdue: todoCard.isOverdue,
+            isDueToday: todoCard.isDueToday
+        )
         if todoCard.isCompleted {
-            Text(date.formatted(.dateTime.month(.abbreviated).day()))
+            Text(text)
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.quaternary)
         } else if todoCard.isOverdue {
-            Text("Overdue")
+            Text(text)
                 .font(CiderFont.micro)
                 .foregroundColor(CiderColors.destructive)
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, Spacing.xxs)
                 .background(Capsule().fill(CiderColors.destructiveSubtle))
         } else if todoCard.isDueToday {
-            Text("Today")
+            Text(text)
                 .font(CiderFont.micro)
                 .foregroundColor(CiderColors.warning)
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, Spacing.xxs)
                 .background(Capsule().fill(CiderColors.warningSubtle))
         } else {
-            Text(date.formatted(.dateTime.month(.abbreviated).day()))
+            Text(text)
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.quaternary)
         }
     }
+}
+
+private func formattedTodoDueLabel(_ date: Date, hasExplicitTime: Bool, isCompleted: Bool, isOverdue: Bool, isDueToday: Bool) -> String {
+    if isCompleted {
+        return hasExplicitTime
+            ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            : date.formatted(.dateTime.month(.abbreviated).day())
+    }
+    if isOverdue {
+        return hasExplicitTime ? "Overdue \(date.formatted(.dateTime.hour().minute()))" : "Overdue"
+    }
+    if isDueToday {
+        return hasExplicitTime ? "Today \(date.formatted(.dateTime.hour().minute()))" : "Today"
+    }
+    return hasExplicitTime
+        ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        : date.formatted(.dateTime.month(.abbreviated).day())
 }

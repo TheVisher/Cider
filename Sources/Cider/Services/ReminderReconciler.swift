@@ -146,6 +146,7 @@ final class ReminderReconciler {
         let todos = TodoCardStorage.shared.todoCards
         let config = CiderConfig.load()
         let telegramRemindersEnabled = telegramReminderSchedulingEnabled()
+        let agentRemindersEnabled = config.enableAgentReminders
         let calendar = Calendar.current
         let horizon = calendar.date(byAdding: .day, value: 14, to: now) ?? now.addingTimeInterval(14 * 24 * 60 * 60)
 
@@ -157,7 +158,7 @@ final class ReminderReconciler {
             let reminderRules = card.rules.filter { $0.type == .remindBeforeMinutes && $0.isEnabled }
             let offsets: [Int]
             if reminderRules.isEmpty {
-                offsets = (config.enableAgentReminders || telegramRemindersEnabled)
+                offsets = (agentRemindersEnabled || telegramRemindersEnabled)
                     ? [config.dateCardDefaultNotificationMinutes]
                     : []
             } else {
@@ -187,10 +188,17 @@ final class ReminderReconciler {
             }
         }
 
-        if telegramRemindersEnabled {
+        if agentRemindersEnabled || telegramRemindersEnabled {
             for todo in todos where !todo.isCompleted {
                 guard let dueDate = todo.dueDate, todoHasExplicitTime(dueDate), dueDate > now else { continue }
-                earliest = minOptional(earliest, dueDate)
+                let reminderRules = todo.rules.filter { $0.type == .remindBeforeMinutes && $0.isEnabled }
+                let offsets = reminderRules.isEmpty ? [0] : reminderRules.compactMap { $0.integerValue ?? 0 }
+                for minutesBefore in offsets {
+                    let fireDate = dueDate.addingTimeInterval(-Double(minutesBefore) * 60)
+                    if fireDate > now {
+                        earliest = minOptional(earliest, fireDate)
+                    }
+                }
             }
         }
 

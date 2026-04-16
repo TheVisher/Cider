@@ -770,10 +770,10 @@ final class TodoCardStorage: ObservableObject {
     /// so mutation paths can find their entries after a DB-first cold launch.
     func loadTodosFromDatabase(_ db: CiderDatabase) {
         do {
-            let stmt = try db.prepare("""
+        let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
                        t.details, t.due_date, t.priority, t.is_completed, t.completed_at,
-                       t.notes, t.checklist
+                       t.notes, t.checklist, t.surfacing_rules
                 FROM items i
                 JOIN todos t ON t.item_id = i.id
                 WHERE i.type = 'todo';
@@ -794,8 +794,11 @@ final class TodoCardStorage: ObservableObject {
                 let completedAt = stmt.optionalDouble(at: 10).map(DatabaseHelpers.decodeDate)
                 let notes = stmt.string(at: 11)
                 let checklistJSON = stmt.optionalString(at: 12)
+                let rulesJSON = stmt.optionalString(at: 13)
                 let checklist: [TodoChecklistItem] =
                     DatabaseHelpers.decodeJSON([TodoChecklistItem].self, from: checklistJSON) ?? []
+                let rules: [SurfacingRule] =
+                    DatabaseHelpers.decodeJSON([SurfacingRule].self, from: rulesJSON) ?? []
 
                 let labelIDs = (try? loadLabelIDs(db, itemID: id)) ?? []
                 let linkedEntities = (try? loadLinkedEntities(db, sourceID: id)) ?? []
@@ -813,6 +816,7 @@ final class TodoCardStorage: ObservableObject {
                     notes: notes,
                     linkedEntities: linkedEntities,
                     folderID: folderID,
+                    rules: rules,
                     createdAt: createdAt,
                     updatedAt: updatedAt
                 )
@@ -959,8 +963,8 @@ final class TodoCardStorage: ObservableObject {
 
         // 2. UPSERT into todos
         let todoStmt = try db.prepare("""
-            INSERT INTO todos (item_id, details, due_date, priority, is_completed, completed_at, notes, checklist)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO todos (item_id, details, due_date, priority, is_completed, completed_at, notes, checklist, surfacing_rules)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 details = excluded.details,
                 due_date = excluded.due_date,
@@ -968,11 +972,15 @@ final class TodoCardStorage: ObservableObject {
                 is_completed = excluded.is_completed,
                 completed_at = excluded.completed_at,
                 notes = excluded.notes,
-                checklist = excluded.checklist;
+                checklist = excluded.checklist,
+                surfacing_rules = excluded.surfacing_rules;
             """)
         let checklistJSON: String? = todo.checklist.isEmpty
             ? nil
             : DatabaseHelpers.encodeJSON(todo.checklist)
+        let rulesJSON: String? = todo.rules.isEmpty
+            ? nil
+            : DatabaseHelpers.encodeJSON(todo.rules)
         todoStmt.bind(itemID, at: 1)
             .bind(todo.details, at: 2)
             .bind(todo.dueDate.map(DatabaseHelpers.encode), at: 3)
@@ -981,6 +989,7 @@ final class TodoCardStorage: ObservableObject {
             .bind(todo.completedAt.map(DatabaseHelpers.encode), at: 6)
             .bind(todo.notes, at: 7)
             .bind(checklistJSON, at: 8)
+            .bind(rulesJSON, at: 9)
         try todoStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert current.
