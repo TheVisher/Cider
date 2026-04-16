@@ -93,8 +93,13 @@ final class BookmarkFileService {
 
     // MARK: - Read
 
-    /// Reads a single `.webloc` file and augments it with sidecar metadata if present.
-    func read(filename: String, from dirURL: URL, dirRelativePath: String) -> Bookmark? {
+    /// Reads a single `.webloc` file and optionally augments it with legacy sidecar metadata.
+    func read(
+        filename: String,
+        from dirURL: URL,
+        dirRelativePath: String,
+        includeLegacySidecarMetadata: Bool = false
+    ) -> Bookmark? {
         let fileURL = dirURL.appendingPathComponent(filename)
 
         // Read URL from .webloc plist
@@ -104,9 +109,13 @@ final class BookmarkFileService {
             return nil
         }
 
-        // Read sidecar entry
-        let sidecar = loadSidecar(at: dirURL)
-        let entry = sidecar.items[filename]
+        let entry: BookmarkSidecarEntry?
+        if includeLegacySidecarMetadata {
+            let sidecar = loadSidecar(at: dirURL)
+            entry = sidecar.items[filename]
+        } else {
+            entry = nil
+        }
 
         let relativePath = dirRelativePath.isEmpty ? filename : "\(dirRelativePath)/\(filename)"
 
@@ -137,13 +146,24 @@ final class BookmarkFileService {
     }
 
     /// Scans a directory for all `.webloc` files and returns bookmarks.
-    func readAll(from dirURL: URL, dirRelativePath: String) -> [Bookmark] {
+    func readAll(
+        from dirURL: URL,
+        dirRelativePath: String,
+        includeLegacySidecarMetadata: Bool = false
+    ) -> [Bookmark] {
         guard let contents = try? fm.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) else {
             return []
         }
         return contents
             .filter { $0.pathExtension.lowercased() == "webloc" }
-            .compactMap { read(filename: $0.lastPathComponent, from: dirURL, dirRelativePath: dirRelativePath) }
+            .compactMap {
+                read(
+                    filename: $0.lastPathComponent,
+                    from: dirURL,
+                    dirRelativePath: dirRelativePath,
+                    includeLegacySidecarMetadata: includeLegacySidecarMetadata
+                )
+            }
     }
 
     // MARK: - Move
@@ -192,36 +212,6 @@ final class BookmarkFileService {
     }
 
     // MARK: - Delete
-
-    /// Deletes a bookmark's `.webloc` file, image assets, and sidecar entry.
-    func delete(filename: String, from dirURL: URL) {
-        // Remove .webloc file
-        let fileURL = dirURL.appendingPathComponent(filename)
-        try? fm.removeItem(at: fileURL)
-
-        // Remove image assets
-        let sidecar = loadSidecar(at: dirURL)
-        if let entry = sidecar.items[filename] {
-            if let thumbName = entry.thumbnailFilename {
-                let thumbURL = dirURL.appendingPathComponent(Self.thumbnailsDir).appendingPathComponent(thumbName)
-                try? fm.removeItem(at: thumbURL)
-            }
-            if let origName = entry.originalImageFilename {
-                let origURL = dirURL.appendingPathComponent(Self.originalsDir).appendingPathComponent(origName)
-                try? fm.removeItem(at: origURL)
-            }
-            if let carousel = entry.carouselImageFilenames {
-                for name in carousel {
-                    let url = dirURL.appendingPathComponent(Self.originalsDir).appendingPathComponent(name)
-                    try? fm.removeItem(at: url)
-                }
-            }
-        }
-
-        // Remove sidecar entry
-        removeSidecarEntry(at: dirURL, filename: filename)
-        logger.info("Deleted bookmark file: \(filename)")
-    }
 
     /// Deletes a bookmark's `.webloc` file using the in-memory bookmark metadata
     /// to locate assets, then cleans up any legacy sidecar entry.

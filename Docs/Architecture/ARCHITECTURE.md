@@ -321,7 +321,7 @@ struct CiderConfig: Codable {
 ### Content Storage
 
 All user content is stored as standard files in `~/CiderVault/` (see `Docs/Architecture/STORAGE.md` for full details):
-- Bookmarks: `.webloc` files + per-folder `.cider-meta.json` sidecar
+- Bookmarks: `.webloc` files, with metadata indexed in SQLite
 - Notes: `.md` files
 - Contacts: `.vcf` files
 - Date Cards / Todos: `.ics` files

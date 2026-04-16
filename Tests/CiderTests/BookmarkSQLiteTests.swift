@@ -514,6 +514,201 @@ struct BookmarkSQLiteTests {
         #expect(loaded.lastEnrichedAt == nil)
     }
 
+    // MARK: - Legacy Sidecar Backfill
+
+    @Test("Legacy bookmark sidecar metadata backfills missing SQLite fields")
+    func mergeLegacySidecarBackfillsMissingFields() {
+        var bookmark = Bookmark(
+            title: "Example Site",
+            urlString: "https://example.com",
+            createdAt: Date(timeIntervalSince1970: 2_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            relativePath: "Inbox/Bookmarks/Example Site.webloc"
+        )
+
+        let labelID = UUID()
+        let dismissedLabelID = UUID()
+        let entry = BookmarkFileService.BookmarkSidecarEntry(
+            id: bookmark.id,
+            title: "Custom Example Title",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            notes: "Saved notes",
+            tags: ["swift", "storage"],
+            labelIDs: [labelID],
+            dismissedLabelIDs: [dismissedLabelID],
+            thumbnailRemoteURLString: "https://example.com/thumb.jpg",
+            thumbnailFilename: "thumb.jpg",
+            originalImageFilename: "original.jpg",
+            metadataUpdatedAt: Date(timeIntervalSince1970: 2_500),
+            aiSummary: "AI summary",
+            ocrText: "OCR",
+            dominantColors: ["#000000"],
+            mediaType: .image,
+            carouselImageFilenames: ["one.jpg", "two.jpg"],
+            readerUnavailable: true,
+            preferredHeroMode: "reader"
+        )
+
+        let changed = VaultBookmarkService.mergeLegacySidecarEntry(
+            entry,
+            into: &bookmark,
+            fallbackFilename: "Example Site.webloc"
+        )
+
+        #expect(changed)
+        #expect(bookmark.title == "Custom Example Title")
+        #expect(bookmark.titleManuallySet == true)
+        #expect(bookmark.notes == "Saved notes")
+        #expect(bookmark.notesManuallySet == true)
+        #expect(bookmark.tags == ["swift", "storage"])
+        #expect(bookmark.labelIDs == [labelID])
+        #expect(bookmark.dismissedLabelIDs == [dismissedLabelID])
+        #expect(bookmark.thumbnailRemoteURLString == "https://example.com/thumb.jpg")
+        #expect(bookmark.thumbnailRelativePath == ".thumbnails/thumb.jpg")
+        #expect(bookmark.originalImageRelativePath == ".originals/original.jpg")
+        #expect(bookmark.aiSummary == "AI summary")
+        #expect(bookmark.ocrText == "OCR")
+        #expect(bookmark.dominantColors == ["#000000"])
+        #expect(bookmark.mediaType == .image)
+        #expect(bookmark.carouselImagePaths == [".originals/one.jpg", ".originals/two.jpg"])
+        #expect(bookmark.readerUnavailable == true)
+        #expect(bookmark.preferredHeroMode == "reader")
+        #expect(bookmark.createdAt == Date(timeIntervalSince1970: 1_000))
+        #expect(bookmark.updatedAt == Date(timeIntervalSince1970: 3_000))
+    }
+
+    @Test("Legacy bookmark sidecar metadata does not overwrite populated SQLite fields")
+    func mergeLegacySidecarPreservesExistingFields() {
+        let labelID = UUID()
+        var bookmark = Bookmark(
+            title: "Already Curated",
+            urlString: "https://example.com",
+            createdAt: Date(timeIntervalSince1970: 2_000),
+            updatedAt: Date(timeIntervalSince1970: 4_000),
+            notes: "Current notes",
+            tags: ["existing"],
+            labelIDs: [labelID],
+            thumbnailRemoteURLString: "https://example.com/current-thumb.jpg",
+            thumbnailRelativePath: ".thumbnails/current-thumb.jpg",
+            aiSummary: "Current summary",
+            relativePath: "Inbox/Bookmarks/Already Curated.webloc",
+            titleManuallySet: true,
+            notesManuallySet: true
+        )
+
+        let entry = BookmarkFileService.BookmarkSidecarEntry(
+            id: bookmark.id,
+            title: "Old Sidecar Title",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            notes: "Old notes",
+            tags: ["old"],
+            labelIDs: [UUID()],
+            dismissedLabelIDs: [],
+            thumbnailRemoteURLString: "https://example.com/old-thumb.jpg",
+            thumbnailFilename: "old-thumb.jpg",
+            originalImageFilename: nil,
+            metadataUpdatedAt: nil,
+            aiSummary: "Old summary",
+            ocrText: nil,
+            dominantColors: nil,
+            mediaType: nil,
+            carouselImageFilenames: nil,
+            readerUnavailable: nil,
+            preferredHeroMode: nil
+        )
+
+        let changed = VaultBookmarkService.mergeLegacySidecarEntry(
+            entry,
+            into: &bookmark,
+            fallbackFilename: "Already Curated.webloc"
+        )
+
+        #expect(changed)
+        #expect(bookmark.title == "Already Curated")
+        #expect(bookmark.notes == "Current notes")
+        #expect(bookmark.tags == ["existing"])
+        #expect(bookmark.labelIDs == [labelID])
+        #expect(bookmark.thumbnailRemoteURLString == "https://example.com/current-thumb.jpg")
+        #expect(bookmark.thumbnailRelativePath == ".thumbnails/current-thumb.jpg")
+        #expect(bookmark.aiSummary == "Current summary")
+        #expect(bookmark.createdAt == Date(timeIntervalSince1970: 1_000))
+        #expect(bookmark.updatedAt == Date(timeIntervalSince1970: 4_000))
+    }
+
+    @Test("Bookmark file reads ignore legacy sidecars unless explicitly requested")
+    func bookmarkFileReadsRequireExplicitLegacySidecarOptIn() throws {
+        let fm = FileManager.default
+        let dirURL = fm.temporaryDirectory.appendingPathComponent("cider-bookmark-sidecar-opt-in-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dirURL) }
+
+        try fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+
+        let fileService = BookmarkFileService.shared
+        let bookmark = Bookmark(
+            title: "Filename Title",
+            urlString: "https://example.com/path",
+            relativePath: "Filename Title.webloc"
+        )
+
+        let relativePath = try fileService.write(
+            bookmark: bookmark,
+            toDirectory: dirURL,
+            dirRelativePath: "Inbox/Bookmarks"
+        )
+        let filename = (relativePath as NSString).lastPathComponent
+
+        fileService.updateSidecar(
+            at: dirURL,
+            setting: filename,
+            to: BookmarkFileService.BookmarkSidecarEntry(
+                id: bookmark.id,
+                title: "Legacy Sidecar Title",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                updatedAt: Date(timeIntervalSince1970: 2_000),
+                notes: "Legacy notes",
+                tags: ["legacy"],
+                labelIDs: [],
+                dismissedLabelIDs: [],
+                thumbnailRemoteURLString: nil,
+                thumbnailFilename: nil,
+                originalImageFilename: nil,
+                metadataUpdatedAt: nil,
+                aiSummary: nil,
+                ocrText: nil,
+                dominantColors: nil,
+                mediaType: nil,
+                carouselImageFilenames: nil,
+                readerUnavailable: nil,
+                preferredHeroMode: nil
+            )
+        )
+
+        let defaultRead = try #require(
+            fileService.read(
+                filename: filename,
+                from: dirURL,
+                dirRelativePath: "Inbox/Bookmarks"
+            )
+        )
+        #expect(defaultRead.title == "Filename Title")
+        #expect(defaultRead.notes.isEmpty)
+        #expect(defaultRead.tags.isEmpty)
+
+        let optedInRead = try #require(
+            fileService.read(
+                filename: filename,
+                from: dirURL,
+                dirRelativePath: "Inbox/Bookmarks",
+                includeLegacySidecarMetadata: true
+            )
+        )
+        #expect(optedInRead.title == "Legacy Sidecar Title")
+        #expect(optedInRead.notes == "Legacy notes")
+        #expect(optedInRead.tags == ["legacy"])
+    }
+
     // MARK: - Empty Database
 
     @Test("Empty database loads empty bookmarks array")

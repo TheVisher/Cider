@@ -95,12 +95,8 @@ final class NotesStorage: ObservableObject {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.loadAndScan(directoryURL: dirURL, indexURL: idxURL, indexFileName: idxName)
             }.value
-            var scanIndex = result.index
-            var scanNotes = result.notes
-            // loadAndScan runs off-actor and cannot read sidecars. Reconcile
-            // UUIDs here on the main actor so existing legacy sidecars can
-            // still help recover identity during the transition.
-            self.reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
+            let scanIndex = result.index
+            let scanNotes = result.notes
             self.index = scanIndex
             self.notes = scanNotes
             if result.needsSave || scanIndex != result.index { self.saveIndex() }
@@ -191,9 +187,8 @@ final class NotesStorage: ObservableObject {
             indexURL: directoryURL.appendingPathComponent(indexFileName),
             indexFileName: indexFileName
         )
-        var scanIndex = result.index
-        var scanNotes = result.notes
-        reconcileUUIDsWithSidecars(notes: &scanNotes, index: &scanIndex)
+        let scanIndex = result.index
+        let scanNotes = result.notes
         index = scanIndex
         notes = scanNotes
         if result.needsSave || scanIndex != result.index { saveIndex() }
@@ -257,14 +252,10 @@ final class NotesStorage: ObservableObject {
 
             let title = String(filename.dropLast(3)) // Remove .md
 
-            // Resolve UUID: (1) JSON index, (2) sidecar `id`, (3) fresh UUID.
-            // Resolving from the sidecar lets us recover stable identity if the
-            // `_cider_notes_index.json` file was ever lost.
-            let sidecarDir: String = relativePrefix ?? "" // "" = scanning legacy .cider/notes/ which has no sidecar
-            let sidecarUUID: UUID? = sidecarDir.isEmpty
-                ? nil
-                : SidecarService.shared.noteUUID(forFilename: filename, inDirectory: sidecarDir)
-            let uuid = filenameToUUID[filename] ?? sidecarUUID ?? UUID()
+            // Resolve UUID from the persisted note index when available.
+            // If the index does not know about this file yet, assign a fresh ID
+            // and persist it back into the index during this scan.
+            let uuid = filenameToUUID[filename] ?? UUID()
             let existingEntry = index[uuid]
             let folderID = existingEntry?.folderID
             let labelIDs = existingEntry?.labelIDs ?? []
@@ -428,8 +419,8 @@ final class NotesStorage: ObservableObject {
     }
 
     /// Scans every vault folder directory for .md files that aren't yet in the
-    /// index, assigns them stable UUIDs (via sidecar if present, else fresh),
-    /// and adds corresponding entries to `index` and `notes`.
+    /// index, assigns fresh UUIDs, and adds corresponding entries to `index`
+    /// and `notes`.
     private func discoverVaultFolderNoteFiles() {
         let fm = FileManager.default
         // Build a fast lookup of filenames already tracked per folder.
@@ -451,9 +442,7 @@ final class NotesStorage: ObservableObject {
                 let filename = file.lastPathComponent
                 if knownFolderFiles.contains("\(folder.id.uuidString):\(filename)") { continue }
 
-                // Resolve UUID via sidecar if possible for stable identity.
-                let sidecarDir = folder.relativePath
-                let uuid = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: sidecarDir) ?? UUID()
+                let uuid = UUID()
 
                 let attrs = try? fm.attributesOfItem(atPath: file.path)
                 let modDate = attrs?[.modificationDate] as? Date ?? Date()
@@ -535,62 +524,9 @@ final class NotesStorage: ObservableObject {
         }
     }
 
-    /// Reconciles UUIDs against per-directory sidecar files after a background
-    /// `loadAndScan`. Because `loadAndScan` is nonisolated and cannot reach the
-    /// main-actor `SidecarService`, any scanned note whose filename was missing
-    /// from the JSON index was assigned a fresh `UUID()`. If an existing sidecar
-    /// persisted a previous UUID for that file, adopt it here.
-    private func reconcileUUIDsWithSidecars(
-        notes: inout [Note],
-        index: inout [UUID: NoteIndexEntry]
-    ) {
-        var idRemaps: [(old: UUID, new: UUID)] = []
-
-        for i in notes.indices {
-            let note = notes[i]
-            let filename = (note.relativePath as NSString).lastPathComponent
-            let dirPath: String
-            if note.relativePath.contains("/") {
-                dirPath = (note.relativePath as NSString).deletingLastPathComponent
-            } else {
-                // Notes without a slash live in legacy .cider/notes/ which has no sidecar.
-                continue
-            }
-
-            // During migration, an existing sidecar can still provide the
-            // stable note ID if the scanned state disagrees.
-            if let persistedID = SidecarService.shared.noteUUID(forFilename: filename, inDirectory: dirPath),
-               persistedID != note.id {
-                idRemaps.append((old: note.id, new: persistedID))
-                notes[i] = Note(
-                    id: persistedID,
-                    title: note.title,
-                    content: note.content,
-                    summary: note.summary,
-                    createdAt: note.createdAt,
-                    modifiedAt: note.modifiedAt,
-                    relativePath: note.relativePath,
-                    labelIDs: note.labelIDs,
-                    folderID: note.folderID,
-                    isPinned: note.isPinned
-                )
-            }
-
-        }
-
-        // Apply ID remaps to the index.
-        for remap in idRemaps {
-            if let entry = index.removeValue(forKey: remap.old) {
-                index[remap.new] = entry
-            }
-        }
-    }
-
     // MARK: - Background Load & Scan
 
-    /// Pure, background-safe scan of .md files on disk. Identity recovery
-    /// happens on the main actor via `reconcileUUIDsWithSidecars` after this
-    /// returns.
+    /// Pure, background-safe scan of `.md` files on disk.
     private nonisolated static func loadAndScan(
         directoryURL: URL,
         indexURL: URL,

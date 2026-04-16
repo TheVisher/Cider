@@ -58,7 +58,7 @@ Removal status:
 
 - blocked until SQLite fully replaces bookmark sidecar reads and backfill is complete
 
-### 2. Note sidecars are still used for identity recovery and UI metadata
+### 2. Note sidecars are now migration-only metadata import
 
 Primary code:
 
@@ -73,24 +73,24 @@ Current sidecar:
 
 What it stores today for notes:
 
-- note UUID recovery
 - derived tag display
 - summary display
 
 Current risk:
 
-- removing note sidecars today can break UUID recovery when rebuilding from disk without SQLite
-- note card/list UI would lose sidecar-derived tags and summary surfaces
+- some legacy note tags/summary may remain stranded in sidecars until those notes are loaded
+- the legacy `.cider-meta.json` format still exists even though normal note runtime no longer depends on it
 
 Replacement path:
 
-- persist note identity and note metadata in SQLite
-- make note UI read from SQLite-backed note metadata
-- stop using `.cider-meta.json` for note identity and display
+- keep opportunistic import of legacy note tags/summary into SQLite-backed notes
+- decide when to remove note-sidecar fallback reads entirely
+- retire `SidecarService` once remaining non-note uses are gone
 
 Removal status:
 
-- good first removal target once SQLite note metadata is complete
+- note identity/runtime dependence has been removed
+- remaining work is full sidecar retirement, not note identity preservation
 
 ### 3. App startup still loads sidecar metadata globally
 
@@ -125,7 +125,7 @@ Primary code:
 
 Current behavior:
 
-- exports `.webloc` files and writes sidecar metadata for bookmarks, notes, and todos
+- exports `.webloc` files and still writes sidecar metadata for remaining legacy item types
 
 Current risk:
 
@@ -236,8 +236,10 @@ Exit criteria:
 Deliverables:
 
 - stop writing note sidecars
+  Status: completed for normal runtime and migration export
 - stop writing bookmark sidecars
 - stop using sidecars in migration/export flows
+  Status: bookmark and note export paths no longer regenerate their legacy sidecars
 
 Exit criteria:
 
@@ -269,7 +271,7 @@ First concrete tasks:
 1. add any missing note metadata fields to SQLite
 2. migrate note sidecar metadata into SQLite
 3. update note card/list UI to read that metadata from SQLite-backed state
-4. remove note UUID recovery dependence on sidecars where possible
+4. remove note UUID recovery dependence on sidecars
 5. stop loading note sidecars on startup
 
 ## Bookmark-Specific Warning

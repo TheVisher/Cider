@@ -9,18 +9,14 @@ final class SummaryService {
     static let shared = SummaryService()
 
     private let logger = Logger(subsystem: "com.cider.app", category: "SummaryService")
-    private var _session: LanguageModelSession?
 
-    private var session: LanguageModelSession {
-        if let existing = _session { return existing }
-        let s = LanguageModelSession(instructions: """
+    private func makeSession() -> LanguageModelSession {
+        LanguageModelSession(instructions: """
         You are a concise bookmark summarizer. Given article or page text, \
         write a 2-sentence summary capturing the main point and key insight. \
         Be factual and direct. Never start with "This article" or "This page". \
         Return only the summary, nothing else.
         """)
-        _session = s
-        return s
     }
 
     // MARK: - Summarize
@@ -34,12 +30,11 @@ final class SummaryService {
         let truncated = String(articleText.prefix(4000))
         guard !truncated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         do {
-            let response = try await session.respond(to: truncated)
+            let response = try await makeSession().respond(to: truncated)
             let summary = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             return summary.isEmpty ? nil : summary
         } catch {
             logger.error("Summary failed: \(error.localizedDescription, privacy: .public)")
-            _session = nil  // reset session on error
             return nil
         }
     }
@@ -59,11 +54,10 @@ final class SummaryService {
         Return only the title, no quotes or explanation.
         """
         do {
-            let response = try await session.respond(to: prompt)
+            let response = try await makeSession().respond(to: prompt)
             let suggested = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             return suggested.isEmpty ? nil : suggested
         } catch {
-            _session = nil
             return nil
         }
     }

@@ -296,29 +296,26 @@ When restoring a bookmark from trash, `TrashStorage.restoreBookmark` resolves th
 
 ## Bookmark File Migration (Monolithic JSON → Individual .webloc Files)
 
-> **Status:** Phases 1-4 complete (dual-write active). Phases 5-6 are future work.
+> **Status:** Runtime has moved to `.webloc` files plus SQLite-backed bookmark metadata. Legacy bookmark sidecars are transition-only backfill input.
 
 ### Rationale
 
-The original bookmark storage used a single monolithic JSON file (`_cider_bookmarks_metadata.json`) for ALL bookmarks and folder definitions. Folders were virtual (UUIDs in an array, not directories on disk), creating a disconnect with `VaultFolderService` which uses actual directories. The migration moves each bookmark to an individual `.webloc` file in the vault folder tree, with sidecar metadata. Folders become real directories. AI sorting becomes simple file movement.
+The original bookmark storage used a single monolithic JSON file (`_cider_bookmarks_metadata.json`) for ALL bookmarks and folder definitions. Folders were virtual (UUIDs in an array, not directories on disk), creating a disconnect with `VaultFolderService` which uses actual directories. The migration moves each bookmark to an individual `.webloc` file in the vault folder tree while SQLite owns bookmark metadata. Folders become real directories. AI sorting becomes simple file movement.
 
 ### Target Architecture
 
 ```
 ~/CiderVault/
 ├── Bookmarks/                          # unfiled bookmarks live here
-│   ├── .cider-meta.json               # metadata for items in this folder
 │   ├── YouTube - Some Video.webloc
 │   └── Reddit - Front Page.webloc
 ├── Entertainment/                      # user folder (real directory)
-│   ├── .cider-meta.json
 │   ├── .thumbnails/                   # thumbnails for items in this folder
 │   │   └── <UUID>.png
 │   ├── .originals/                    # full-size images
 │   │   └── <UUID>.jpg
 │   ├── Netflix - A Show.webloc
 │   └── Videos/                        # sub-folder
-│       ├── .cider-meta.json
 │       └── TikTok - Funny Clip.webloc
 └── ...
 ```
@@ -333,36 +330,10 @@ The original bookmark storage used a single monolithic JSON file (`_cider_bookma
 - Only stores the URL — lightweight, portable
 - When a bookmark's URL is edited, `VaultBookmarkService.updateURL` rewrites the `.webloc` plist on disk to stay in sync
 
-**2. Per-folder `.cider-meta.json` sidecar**
-- Maps each filename to its Cider metadata (tags, AI summary, colors, notes, labels, dates, etc.)
-- One file per folder, not one per bookmark (avoids 2x file count)
-- Structure:
-```json
-{
-  "items": {
-    "YouTube - Some Video.webloc": {
-      "id": "UUID",
-      "title": "YouTube - Some Video",
-      "tags": ["entertainment", "video"],
-      "labelIDs": ["UUID"],
-      "aiSummary": "...",
-      "dominantColors": ["#ff0000"],
-      "thumbnailFilename": "<UUID>.png",
-      "originalImageFilename": "<UUID>.jpg",
-      "carouselImageFilenames": [],
-      "notes": "",
-      "createdAt": "2026-03-10T...",
-      "updatedAt": "2026-03-10T...",
-      "metadataUpdatedAt": "2026-03-10T...",
-      "mediaType": "image",
-      "dismissedLabelIDs": [],
-      "ocrText": null,
-      "readerUnavailable": false,
-      "preferredHeroMode": "thumbnail"
-    }
-  }
-}
-```
+**2. SQLite owns bookmark metadata**
+- `.webloc` stores the URL artifact
+- SQLite stores bookmark metadata (title, notes, tags, labels, summaries, image references, AI fields, identity)
+- legacy bookmark sidecars may still be read during transition, but they are no longer the normal runtime source of truth
 
 **3. Thumbnails/originals move with bookmarks**
 - Each folder has its own `.thumbnails/` and `.originals/` hidden dirs
@@ -372,7 +343,7 @@ The original bookmark storage used a single monolithic JSON file (`_cider_bookma
 **4. Filename = sanitized title**
 - `sanitize(title)` produces a valid macOS filename (no `/`, `:`, max 255 chars)
 - Collision handling: append ` (2)`, ` (3)`, etc.
-- UUID stays in the sidecar metadata, not the filename (human-readable filenames)
+- UUID stays in SQLite, not the filename (human-readable filenames)
 
 **5. `bookmarks.html` still generated**
 - Written to vault root on demand (export feature)

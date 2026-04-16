@@ -2,8 +2,8 @@ import Foundation
 import os
 
 /// Exports existing Cider data into portable vault files.
-/// Creates .webloc files for bookmarks, ensures folders exist as real directories,
-/// and writes comprehensive sidecar metadata for all items.
+/// Creates `.webloc` files for bookmarks, ensures folders exist as real directories,
+/// and writes legacy sidecar metadata where older file types still rely on it.
 ///
 /// This is a one-time migration tool — safe to run multiple times (idempotent).
 @MainActor
@@ -20,8 +20,6 @@ final class VaultMigrationService {
     struct MigrationResult {
         var foldersCreated = 0
         var weblocFilesCreated = 0
-        var bookmarkSidecarsWritten = 0
-        var noteSidecarsWritten = 0
         var todoSidecarsWritten = 0
         var errors: [String] = []
 
@@ -29,8 +27,6 @@ final class VaultMigrationService {
             var parts: [String] = []
             if foldersCreated > 0 { parts.append("\(foldersCreated) folders created") }
             if weblocFilesCreated > 0 { parts.append("\(weblocFilesCreated) bookmark files exported") }
-            if bookmarkSidecarsWritten > 0 { parts.append("\(bookmarkSidecarsWritten) bookmark metadata written") }
-            if noteSidecarsWritten > 0 { parts.append("\(noteSidecarsWritten) note metadata written") }
             if todoSidecarsWritten > 0 { parts.append("\(todoSidecarsWritten) todo metadata written") }
             if parts.isEmpty { parts.append("Everything already up to date") }
             if !errors.isEmpty { parts.append("\(errors.count) errors") }
@@ -101,14 +97,14 @@ final class VaultMigrationService {
 
     // MARK: - Bookmarks
 
-    /// Exports each bookmark as a .webloc file and writes sidecar metadata.
+    /// Exports each bookmark as a `.webloc` file.
     private func migrateBookmarks(_ result: inout MigrationResult) {
         let bookmarks = BookmarksStorage.shared.bookmarks
         let fm = FileManager.default
 
         for bookmark in bookmarks {
             // Determine target directory
-            let (dirURL, dirRelativePath) = resolveDirectory(for: bookmark.folderID, fallback: StorageType.bookmarks.ciderSubpath)
+            let (dirURL, _) = resolveDirectory(for: bookmark.folderID, fallback: StorageType.bookmarks.ciderSubpath)
 
             // Create .webloc file if bookmark has a URL
             if bookmark.hasURL, let url = bookmark.url {
@@ -128,44 +124,7 @@ final class VaultMigrationService {
                         }
                     }
                 }
-
-                // Write sidecar metadata
-                writeSidecarForBookmark(bookmark, filename: filename, dirRelativePath: dirRelativePath, result: &result)
             }
-        }
-    }
-
-    private func writeSidecarForBookmark(_ bookmark: Bookmark, filename: String, dirRelativePath: String, result: inout MigrationResult) {
-        // Build tag list: merge string tags + label names
-        var allTags = bookmark.tags
-        let labelNames = bookmark.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
-        for name in labelNames where !allTags.contains(name) {
-            allTags.append(name)
-        }
-
-        var meta = SidecarItemMetadata()
-        meta.tags = allTags.isEmpty ? nil : allTags.sorted()
-        meta.summary = bookmark.aiSummary
-        meta.date = ISO8601DateFormatter().string(from: bookmark.createdAt)
-
-        // Store extra fields AI tools might find useful
-        var extra: [String: AnyCodableValue] = [:]
-        if !bookmark.urlString.isEmpty {
-            extra["url"] = .string(bookmark.urlString)
-        }
-        if !bookmark.notes.isEmpty {
-            extra["notes"] = .string(bookmark.notes)
-        }
-        if let colors = bookmark.dominantColors, !colors.isEmpty {
-            extra["dominantColors"] = .array(colors.map { .string($0) })
-        }
-        if !extra.isEmpty {
-            meta.extra = extra
-        }
-
-        if !meta.isEmpty {
-            SidecarService.shared.setMetadata(meta, for: filename, inDirectory: dirRelativePath)
-            result.bookmarkSidecarsWritten += 1
         }
     }
 
@@ -173,12 +132,7 @@ final class VaultMigrationService {
 
     /// Writes sidecar metadata for all notes.
     private func migrateNotes(_ result: inout MigrationResult) {
-        let notes = NotesStorage.shared.notes
-
-        for note in notes {
-            SidecarService.shared.syncNote(note)
-            result.noteSidecarsWritten += 1
-        }
+        _ = result
     }
 
     // MARK: - Todos

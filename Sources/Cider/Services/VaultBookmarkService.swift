@@ -112,6 +112,7 @@ final class VaultBookmarkService: ObservableObject {
         if let db = resolvedDatabase {
             loadBookmarksFromDatabase(db)
             if !bookmarks.isEmpty {
+                backfillLegacySidecarMetadataIfNeeded()
                 pruneMissingBookmarksFromDisk(db)
                 logger.info("Loaded \(self.bookmarks.count) bookmarks from database")
                 Task { @MainActor [weak self] in
@@ -130,6 +131,7 @@ final class VaultBookmarkService: ObservableObject {
                 return FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(path).path)
             }
             bookmarks = cached
+            backfillLegacySidecarMetadataIfNeeded()
             logger.info("Loaded \(cached.count) bookmarks from index cache")
             // One-time migration: persist JSON bookmarks to SQLite.
             // `persistBookmarkToDatabaseInner` scrubs dangling folder_id /
@@ -158,6 +160,7 @@ final class VaultBookmarkService: ObservableObject {
         // Full scan
         let scanned = scanAllVaultFolders()
         bookmarks = scanned
+        backfillLegacySidecarMetadataIfNeeded()
         logger.info("Scanned \(scanned.count) bookmarks from vault folders")
         writeIndexCache()
         // Persist scanned bookmarks to SQLite
@@ -274,20 +277,16 @@ final class VaultBookmarkService: ObservableObject {
 
         // Helper to process a single directory
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
-            let found = fileService.readAll(from: dirURL, dirRelativePath: dirRelativePath)
+            let found = fileService.readAll(
+                from: dirURL,
+                dirRelativePath: dirRelativePath,
+                includeLegacySidecarMetadata: false
+            )
             for var bookmark in found {
                 let urlKey = bookmark.urlString.lowercased()
                 // Skip duplicates by URL
                 guard urlKey.isEmpty || seenURLs.insert(urlKey).inserted else { continue }
                 bookmark.folderID = folderID
-
-                // After reading from BookmarkFileService, fix carousel paths
-                // Sidecar strips .originals/ prefix via lastPathComponent; prepend it back
-                if let paths = bookmark.carouselImagePaths {
-                    bookmark.carouselImagePaths = paths.map { filename in
-                        filename.contains("/") ? filename : "\(BookmarkFileService.originalsDir)/\(filename)"
-                    }
-                }
 
                 result.append(bookmark)
             }
@@ -367,8 +366,160 @@ final class VaultBookmarkService: ObservableObject {
         }
     }
 
-    private func persistSidecar(for bookmark: Bookmark) {
-        _ = bookmark
+    /// Imports legacy bookmark sidecar metadata into the in-memory bookmarks
+    /// only when SQLite-backed state is missing equivalent information.
+    /// This keeps sidecars as migration input instead of an ongoing source of truth.
+    @discardableResult
+    func importSidecarMetadataIntoBookmarks() -> Bool {
+        let fileService = BookmarkFileService.shared
+        var sidecarCache: [String: BookmarkFileService.BookmarkFolderSidecar] = [:]
+        var changed = false
+
+        for i in bookmarks.indices {
+            guard let relativePath = bookmarks[i].relativePath, !relativePath.isEmpty else { continue }
+            let dirPath = (relativePath as NSString).deletingLastPathComponent
+            let filename = (relativePath as NSString).lastPathComponent
+
+            let sidecar: BookmarkFileService.BookmarkFolderSidecar
+            if let cached = sidecarCache[dirPath] {
+                sidecar = cached
+            } else {
+                let dirURL = vaultRoot.appendingPathComponent(dirPath)
+                let loaded = fileService.loadSidecar(at: dirURL)
+                sidecarCache[dirPath] = loaded
+                sidecar = loaded
+            }
+
+            guard let entry = sidecar.items[filename] else { continue }
+            if Self.mergeLegacySidecarEntry(entry, into: &bookmarks[i], fallbackFilename: filename) {
+                changed = true
+            }
+        }
+
+        return changed
+    }
+
+    private func backfillLegacySidecarMetadataIfNeeded() {
+        guard importSidecarMetadataIntoBookmarks() else { return }
+        persistAllBookmarksToDatabase()
+        writeIndexCache()
+    }
+
+    @discardableResult
+    static func mergeLegacySidecarEntry(
+        _ entry: BookmarkFileService.BookmarkSidecarEntry,
+        into bookmark: inout Bookmark,
+        fallbackFilename: String
+    ) -> Bool {
+        var changed = false
+        let fallbackTitle = (fallbackFilename as NSString).deletingPathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let entryTitle = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !entryTitle.isEmpty {
+            let currentTitle = bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !bookmark.titleManuallySet && (currentTitle.isEmpty || currentTitle == fallbackTitle) {
+                if bookmark.title != entryTitle {
+                    bookmark.title = entryTitle
+                    changed = true
+                }
+                if bookmark.titleManuallySet == false {
+                    bookmark.titleManuallySet = true
+                    changed = true
+                }
+            }
+        }
+
+        let entryNotes = entry.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !bookmark.notesManuallySet,
+           bookmark.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !entryNotes.isEmpty {
+            bookmark.notes = entryNotes
+            bookmark.notesManuallySet = true
+            changed = true
+        }
+
+        let mergedTags: [String]
+        if bookmark.tags.isEmpty {
+            var seen = Set<String>()
+            mergedTags = entry.tags.compactMap { rawTag in
+                let trimmed = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                let key = trimmed.lowercased()
+                guard seen.insert(key).inserted else { return nil }
+                return trimmed
+            }
+        } else {
+            mergedTags = bookmark.tags
+        }
+        if mergedTags != bookmark.tags {
+            bookmark.tags = mergedTags
+            changed = true
+        }
+
+        if bookmark.labelIDs.isEmpty, !entry.labelIDs.isEmpty {
+            bookmark.labelIDs = entry.labelIDs
+            changed = true
+        }
+        if bookmark.dismissedLabelIDs.isEmpty, !entry.dismissedLabelIDs.isEmpty {
+            bookmark.dismissedLabelIDs = entry.dismissedLabelIDs
+            changed = true
+        }
+        if bookmark.thumbnailRemoteURLString == nil, let thumbnailRemoteURLString = entry.thumbnailRemoteURLString {
+            bookmark.thumbnailRemoteURLString = thumbnailRemoteURLString
+            changed = true
+        }
+        if bookmark.thumbnailRelativePath == nil, let thumbnailFilename = entry.thumbnailFilename, !thumbnailFilename.isEmpty {
+            bookmark.thumbnailRelativePath = "\(BookmarkFileService.thumbnailsDir)/\(thumbnailFilename)"
+            changed = true
+        }
+        if bookmark.originalImageRelativePath == nil, let originalImageFilename = entry.originalImageFilename, !originalImageFilename.isEmpty {
+            bookmark.originalImageRelativePath = "\(BookmarkFileService.originalsDir)/\(originalImageFilename)"
+            changed = true
+        }
+        if bookmark.metadataUpdatedAt == nil, let metadataUpdatedAt = entry.metadataUpdatedAt {
+            bookmark.metadataUpdatedAt = metadataUpdatedAt
+            changed = true
+        }
+        if bookmark.aiSummary == nil, let aiSummary = entry.aiSummary, !aiSummary.isEmpty {
+            bookmark.aiSummary = aiSummary
+            changed = true
+        }
+        if bookmark.ocrText == nil, let ocrText = entry.ocrText, !ocrText.isEmpty {
+            bookmark.ocrText = ocrText
+            changed = true
+        }
+        if bookmark.dominantColors == nil, let dominantColors = entry.dominantColors, !dominantColors.isEmpty {
+            bookmark.dominantColors = dominantColors
+            changed = true
+        }
+        if bookmark.mediaType == nil, let mediaType = entry.mediaType {
+            bookmark.mediaType = mediaType
+            changed = true
+        }
+        if bookmark.carouselImagePaths == nil,
+           let carouselImageFilenames = entry.carouselImageFilenames,
+           !carouselImageFilenames.isEmpty {
+            bookmark.carouselImagePaths = carouselImageFilenames.map { "\(BookmarkFileService.originalsDir)/\($0)" }
+            changed = true
+        }
+        if bookmark.readerUnavailable == nil, let readerUnavailable = entry.readerUnavailable {
+            bookmark.readerUnavailable = readerUnavailable
+            changed = true
+        }
+        if bookmark.preferredHeroMode == nil, let preferredHeroMode = entry.preferredHeroMode, !preferredHeroMode.isEmpty {
+            bookmark.preferredHeroMode = preferredHeroMode
+            changed = true
+        }
+        if entry.createdAt < bookmark.createdAt {
+            bookmark.createdAt = entry.createdAt
+            changed = true
+        }
+        if entry.updatedAt > bookmark.updatedAt {
+            bookmark.updatedAt = entry.updatedAt
+            changed = true
+        }
+
+        return changed
     }
 
     // MARK: - Directory Resolution
@@ -400,12 +551,11 @@ final class VaultBookmarkService: ObservableObject {
                 existing.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             // TODO: Cosmetic issue — the .webloc filename on disk still reflects the old title.
-            // The sidecar has the correct title and the UI reads from that, so this is fine for v1.
+            // The SQLite-backed bookmark title is correct, so the UI still renders the curated title.
             existing.updatedAt = Date()
             existing.urlString = canonical
             existing.isEnriching = false
             bookmarks.insert(existing, at: 0)
-            persistSidecar(for: existing)
             persist()
             startEnrichmentIfNeeded(for: existing.id)
             return existing
@@ -471,7 +621,6 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
 
-        persistSidecar(for: bookmarks[index])
         persist()
     }
 
@@ -515,7 +664,8 @@ final class VaultBookmarkService: ObservableObject {
         return trashItems
     }
 
-    /// Deletes the `.webloc` file and its sidecar entry (not assets — TrashStorage handles those).
+    /// Deletes the `.webloc` file and prunes any leftover legacy sidecar entry
+    /// (not assets — TrashStorage handles those).
     private func deleteWeblocFileOnly(for bookmark: Bookmark) {
         guard let relativePath = bookmark.relativePath, !relativePath.isEmpty else { return }
         let fileURL = vaultRoot.appendingPathComponent(relativePath)
@@ -609,7 +759,6 @@ final class VaultBookmarkService: ObservableObject {
         if changed {
             bookmark.updatedAt = Date()
             bookmarks[index] = bookmark
-            persistSidecar(for: bookmark)
             persist()
         }
 
@@ -637,7 +786,6 @@ final class VaultBookmarkService: ObservableObject {
         if changed {
             bookmarks[index].lastEnrichedAt = Date()
             bookmarks[index].updatedAt = Date()
-            persistSidecar(for: bookmarks[index])
             persist()
         }
         return changed
@@ -700,7 +848,6 @@ final class VaultBookmarkService: ObservableObject {
         guard let idx = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
         guard !bookmarks[idx].labelIDs.contains(labelID) else { return true }
         bookmarks[idx].labelIDs.append(labelID)
-        persistSidecar(for: bookmarks[idx])
         persist()
         return true
     }
@@ -712,7 +859,6 @@ final class VaultBookmarkService: ObservableObject {
         if !bookmarks[idx].dismissedLabelIDs.contains(labelID) {
             bookmarks[idx].dismissedLabelIDs.append(labelID)
         }
-        persistSidecar(for: bookmarks[idx])
         persist()
         return true
     }
@@ -721,7 +867,6 @@ final class VaultBookmarkService: ObservableObject {
         var changed = false
         for i in bookmarks.indices where bookmarks[i].labelIDs.contains(labelID) {
             bookmarks[i].labelIDs.removeAll { $0 == labelID }
-            persistSidecar(for: bookmarks[i])
             changed = true
         }
         if changed { persist() }
@@ -822,7 +967,6 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
         bookmarks[index].updatedAt = remoteUpdatedAt
-        persistSidecar(for: bookmarks[index])
         persist()
 
         if bookmarks[index].thumbnailRelativePath == nil {
@@ -934,15 +1078,12 @@ final class VaultBookmarkService: ObservableObject {
 
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
             guard fm.fileExists(atPath: dirURL.path) else { return }
-            let found = fileService.readAll(from: dirURL, dirRelativePath: dirRelativePath)
+            let found = fileService.readAll(
+                from: dirURL,
+                dirRelativePath: dirRelativePath,
+                includeLegacySidecarMetadata: false
+            )
             for var bookmark in found {
-                // Fix carousel paths — sidecar strips .originals/ prefix via lastPathComponent
-                if let paths = bookmark.carouselImagePaths {
-                    bookmark.carouselImagePaths = paths.map { filename in
-                        filename.contains("/") ? filename : "\(BookmarkFileService.originalsDir)/\(filename)"
-                    }
-                }
-
                 let url = bookmark.urlString.lowercased()
 
                 // Image-only bookmarks (no URL): match by sidecar UUID
@@ -1007,10 +1148,7 @@ final class VaultBookmarkService: ObservableObject {
             if !adopted.isEmpty {
                 logger.info("Adopted \(adopted.count) orphaned .webloc files from vault folders")
                 bookmarks.append(contentsOf: adopted)
-                // Write sidecar entries for adopted files so metadata survives on disk
-                for bookmark in adopted {
-                    persistSidecar(for: bookmark)
-                }
+                _ = importSidecarMetadataIntoBookmarks()
             }
             if reassigned > 0 {
                 logger.info("Reassigned \(reassigned) bookmarks to match filesystem folders")
@@ -1104,7 +1242,6 @@ final class VaultBookmarkService: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard bookmarks[index].readerUnavailable != unavailable else { return }
         bookmarks[index].readerUnavailable = unavailable
-        persistSidecar(for: bookmarks[index])
         persist()
     }
 
@@ -1112,7 +1249,6 @@ final class VaultBookmarkService: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard bookmarks[index].preferredHeroMode != mode else { return }
         bookmarks[index].preferredHeroMode = mode
-        persistSidecar(for: bookmarks[index])
         persist()
     }
 
@@ -1120,7 +1256,6 @@ final class VaultBookmarkService: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard bookmarks[index].mediaType != mediaType else { return }
         bookmarks[index].mediaType = mediaType
-        persistSidecar(for: bookmarks[index])
         persist()
     }
 
@@ -1142,7 +1277,6 @@ final class VaultBookmarkService: ObservableObject {
         if let title, !title.isEmpty, bookmark.title != title, !bookmark.titleManuallySet { bookmark.title = title; changed = true }
         guard changed else { return }
         bookmarks[index] = bookmark
-        persistSidecar(for: bookmark)
         persist()
     }
 
@@ -1163,7 +1297,6 @@ final class VaultBookmarkService: ObservableObject {
         }
         guard changed else { return }
         bookmarks[index] = bookmark
-        persistSidecar(for: bookmark)
         persist()
     }
 
@@ -1171,7 +1304,6 @@ final class VaultBookmarkService: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
         guard bookmarks[index].aiSummary != summary else { return }
         bookmarks[index].aiSummary = summary
-        persistSidecar(for: bookmarks[index])
         persist()
     }
 
@@ -1228,7 +1360,6 @@ final class VaultBookmarkService: ObservableObject {
         bookmark.carouselImagePaths = paths
         bookmark.updatedAt = Date()
         bookmarks[index] = bookmark
-        persistSidecar(for: bookmark)
         persist()
         return true
     }
@@ -1257,7 +1388,6 @@ final class VaultBookmarkService: ObservableObject {
 
         bookmark.updatedAt = Date()
         bookmarks[index] = bookmark
-        persistSidecar(for: bookmark)
         persist()
         return true
     }
@@ -1282,7 +1412,6 @@ final class VaultBookmarkService: ObservableObject {
 
         bookmark.updatedAt = Date()
         bookmarks[index] = bookmark
-        persistSidecar(for: bookmark)
         persist()
         return true
     }
@@ -1383,7 +1512,6 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         bookmarks[index].updatedAt = Date()
-        persistSidecar(for: bookmarks[index])
         persist()
         logger.info("Recovered thumbnail for bookmark \(bookmarkID)")
     }
@@ -1515,7 +1643,6 @@ final class VaultBookmarkService: ObservableObject {
         bookmarks[index] = bookmark
 
         if changed {
-            persistSidecar(for: bookmark)
             persist()
         } else {
             objectWillChange.send()
@@ -1739,7 +1866,6 @@ final class VaultBookmarkService: ObservableObject {
         bookmark.isEnriching = false
 
         bookmarks[index] = bookmark
-        persistSidecar(for: bookmark)
         persist()
         BookmarkAIEnrichment.shared.schedule(for: bookmarks[index])
         return true
