@@ -510,6 +510,60 @@ extension SettingsView {
                     }
                 }
 
+                SettingsSection(title: "SQLite Backups") {
+                    Text("Cider keeps rolling SQLite backups under your vault so metadata can be restored if the DB is ever damaged. Use the CLI restore flow with Cider closed if you need to roll back.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    Text(sqliteBackupSummary())
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.quaternary)
+
+                    HStack(spacing: Spacing.sm) {
+                        Button {
+                            isCreatingDatabaseBackup = true
+                            databaseBackupResult = nil
+                            Task {
+                                do {
+                                    let backupURL = try DatabaseSafetyService.shared.createManualBackup()
+                                    await MainActor.run {
+                                        databaseBackupResult = "Created \(backupURL.lastPathComponent)"
+                                        isCreatingDatabaseBackup = false
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        databaseBackupResult = "Backup failed: \(error.localizedDescription)"
+                                        isCreatingDatabaseBackup = false
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Create Backup Now", systemImage: "internaldrive.badge.plus")
+                        }
+                        .buttonStyle(CiderSecondaryButtonStyle())
+                        .disabled(isCreatingDatabaseBackup || CiderDatabase.shared.databaseURL == nil)
+
+                        Button {
+                            revealSQLiteBackupsFolder()
+                        } label: {
+                            Label("Reveal Backups Folder", systemImage: "folder")
+                        }
+                        .buttonStyle(CiderSecondaryButtonStyle())
+                        .disabled(sqliteBackupDirectory() == nil)
+
+                        if isCreatingDatabaseBackup {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if let databaseBackupResult {
+                            Text(databaseBackupResult)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+                }
+
                 SettingsSection(title: "Legacy Sidecars") {
                     Text("Remove obsolete `.cider-meta.json` and `_cider_bookmarks.json` files after migration. Bookmark sidecars are only removed once the one-time SQLite import has completed.")
                         .font(CiderFont.caption)

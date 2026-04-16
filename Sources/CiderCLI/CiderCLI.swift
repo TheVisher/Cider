@@ -31,6 +31,8 @@ struct CiderCLI {
             printUsage()
             return
         }
+        let subcommand = args.count > 1 ? args[1] : nil
+        let remaining = Array(args.dropFirst(2))
 
         // Initialize storage services
         _ = StoragePaths.ensureVaultStructure()
@@ -52,6 +54,11 @@ struct CiderCLI {
         } catch {
             Logger(subsystem: "Cider", category: "CLI")
                 .error("Failed to open SQLite database: \(error.localizedDescription). Falling back to JSON.")
+        }
+
+        if command == "db" {
+            handleDatabase(subcommand: subcommand, args: remaining)
+            return
         }
 
         let bookmarkService = VaultBookmarkService.shared
@@ -76,9 +83,6 @@ struct CiderCLI {
             try? await Task.sleep(for: .milliseconds(100))
             if !notesStorage.notes.isEmpty { break }
         }
-
-        let subcommand = args.count > 1 ? args[1] : nil
-        let remaining = Array(args.dropFirst(2))
 
         switch command {
         case "bookmark", "bm":
@@ -111,6 +115,8 @@ struct CiderCLI {
             handleRecent(args: Array(args.dropFirst()))
         case "snapshot":
             handleSnapshot()
+        case "db":
+            handleDatabase(subcommand: subcommand, args: remaining)
         case "query":
             await handleQuery(args: Array(args.dropFirst()))
         case "doctor":
@@ -3258,6 +3264,125 @@ struct CiderCLI {
         }
     }
 
+    static func handleDatabase(subcommand: String?, args: [String]) {
+        let database = CiderDatabase.shared
+        guard let databaseURL = database.databaseURL else {
+            print("Error: SQLite database is not open.")
+            return
+        }
+
+        let safety = DatabaseSafetyService.shared
+
+        switch subcommand {
+        case "backups", "list":
+            let backups = safety.listRollingBackups(databaseURL: databaseURL)
+            if jsonOutput {
+                outputJSON(backups.enumerated().map { index, backup in
+                    databaseBackupToDict(backup, index: index)
+                })
+            } else if backups.isEmpty {
+                print("No rolling SQLite backups found.")
+            } else {
+                let formatter = ByteCountFormatter()
+                formatter.countStyle = .file
+                print("SQLite rolling backups (\(backups.count)):")
+                for (index, backup) in backups.enumerated() {
+                    let size = formatter.string(fromByteCount: backup.byteSize)
+                    print("  [\(index)] \(backup.url.lastPathComponent) — \(backup.createdAt.formatted()) — \(size)")
+                }
+            }
+
+        case "backup", "create":
+            do {
+                let backupURL = try safety.createManualBackup(database: database)
+                print("Created SQLite backup at \(backupURL.path)")
+            } catch {
+                print("Error creating SQLite backup: \(error.localizedDescription)")
+            }
+
+        case "integrity", "check":
+            do {
+                let status = try database.integrityCheck()
+                if jsonOutput {
+                    outputJSON([
+                        "healthy": status.isHealthy,
+                        "messages": status.messages,
+                    ])
+                } else if status.isHealthy {
+                    print("SQLite integrity check passed.")
+                } else {
+                    print("SQLite integrity check failed:")
+                    for message in status.messages {
+                        print("  - \(message)")
+                    }
+                }
+            } catch {
+                print("Error running SQLite integrity check: \(error.localizedDescription)")
+            }
+
+        case "restore":
+            guard let selector = args.first else {
+                print("Error: Usage: cider-cli db restore <index|filename|latest> [--yes]")
+                return
+            }
+
+            if isCiderAppRunning() {
+                print("Error: Quit Cider before restoring the SQLite database.")
+                return
+            }
+
+            let backups = safety.listRollingBackups(databaseURL: databaseURL)
+            guard !backups.isEmpty else {
+                print("Error: No rolling SQLite backups are available to restore.")
+                return
+            }
+
+            guard let backup = resolveDatabaseBackup(selector, in: backups) else {
+                print("Error: Could not find a backup matching '\(selector)'. Run 'cider-cli db backups' first.")
+                return
+            }
+
+            guard args.contains("--yes") else {
+                print("Refusing to restore without --yes. This will replace \(databaseURL.path) with \(backup.url.lastPathComponent).")
+                return
+            }
+
+            do {
+                let result = try safety.restoreRollingBackup(
+                    from: backup.url,
+                    into: databaseURL,
+                    database: database,
+                    reopenDatabase: true
+                )
+                let status = try database.integrityCheck()
+                if jsonOutput {
+                    outputJSON([
+                        "restoredBackup": result.restoredBackup.url.lastPathComponent,
+                        "preRestoreSnapshot": result.preRestoreSnapshotURL?.path as Any,
+                        "healthy": status.isHealthy,
+                        "messages": status.messages,
+                    ])
+                } else {
+                    print("Restored SQLite database from \(result.restoredBackup.url.lastPathComponent)")
+                    if let snapshotURL = result.preRestoreSnapshotURL {
+                        print("Pre-restore snapshot: \(snapshotURL.path)")
+                    }
+                    print(status.isHealthy ? "Integrity check passed after restore." : "Integrity check reported issues after restore.")
+                    if !status.isHealthy {
+                        for message in status.messages {
+                            print("  - \(message)")
+                        }
+                    }
+                }
+            } catch {
+                print("Error restoring SQLite backup: \(error.localizedDescription)")
+            }
+
+        default:
+            print("Commands: backups, backup, integrity, restore")
+        }
+    }
+
     /// Parses natural language time expressions from a query string.
     /// Returns (remaining keywords, optional date range).
     static func parseNaturalQuery(_ input: String) -> (String, (start: Date, end: Date)?) {
@@ -3722,6 +3847,40 @@ struct CiderCLI {
         guard let flagIndex = args.firstIndex(of: flag),
               flagIndex + 1 < args.count else { return nil }
         return args[flagIndex + 1]
+    }
+
+    static func resolveDatabaseBackup(
+        _ selector: String,
+        in backups: [DatabaseSafetyService.SQLiteBackupInfo]
+    ) -> DatabaseSafetyService.SQLiteBackupInfo? {
+        if selector == "latest" {
+            return backups.first
+        }
+        if let index = Int(selector), backups.indices.contains(index) {
+            return backups[index]
+        }
+        return backups.first {
+            $0.url.lastPathComponent == selector
+                || $0.url.lastPathComponent.lowercased().hasPrefix(selector.lowercased())
+        }
+    }
+
+    static func databaseBackupToDict(
+        _ backup: DatabaseSafetyService.SQLiteBackupInfo,
+        index: Int
+    ) -> [String: Any] {
+        [
+            "index": index,
+            "kind": backup.kind.rawValue,
+            "name": backup.url.lastPathComponent,
+            "path": backup.url.path,
+            "createdAt": backup.createdAt.timeIntervalSince1970,
+            "byteSize": backup.byteSize,
+        ]
+    }
+
+    static func isCiderAppRunning() -> Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: "com.cider.app").isEmpty
     }
 
     static func resolveEventStartAt(dateString: String, timeString: String?) -> Date? {
@@ -4327,6 +4486,12 @@ struct CiderCLI {
 
         SNAPSHOT
           cider-cli snapshot
+
+        SQLITE DATABASE
+          cider-cli db backups
+          cider-cli db backup
+          cider-cli db integrity
+          cider-cli db restore <index|filename|latest> --yes
 
         QUERY (natural language search)
           cider-cli query "restaurants I saved last week"

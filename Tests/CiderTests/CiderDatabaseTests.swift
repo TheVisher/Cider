@@ -189,6 +189,86 @@ struct CiderDatabaseTests {
         #expect(matchingSnapshot != nil)
     }
 
+    @Test("DatabaseSafetyService lists rolling backups newest first")
+    func listRollingBackupsNewestFirst() throws {
+        let isolatedDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-db-backups-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: isolatedDir, withIntermediateDirectories: true)
+        let url = isolatedDir.appendingPathComponent("cider.db")
+        defer { try? FileManager.default.removeItem(at: isolatedDir) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        let service = DatabaseSafetyService()
+        let first = try service.createRollingBackup(reason: "first", database: db)
+        Thread.sleep(forTimeInterval: 1.1)
+        let second = try service.createRollingBackup(reason: "second", database: db)
+
+        let backups = service.listRollingBackups(databaseURL: url)
+        #expect(backups.count == 2)
+        #expect(backups[0].url.standardizedFileURL == second.standardizedFileURL)
+        #expect(backups[1].url.standardizedFileURL == first.standardizedFileURL)
+    }
+
+    @Test("Restoring a rolling backup replaces the current database contents")
+    func restoreRollingBackupReplacesDatabaseContents() throws {
+        let isolatedDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-db-restore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: isolatedDir, withIntermediateDirectories: true)
+        let url = isolatedDir.appendingPathComponent("cider.db")
+        defer { try? FileManager.default.removeItem(at: isolatedDir) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        let originalInsert = try db.prepare(
+            "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+        )
+        originalInsert.bind("restore-original", at: 1)
+            .bind("Original", at: 2)
+            .bind("#111111", at: 3)
+            .bind("custom", at: 4)
+            .bind(0.0, at: 5)
+            .bind(0.0, at: 6)
+        try originalInsert.step()
+
+        let service = DatabaseSafetyService()
+        let backupURL = try service.createRollingBackup(reason: "restore-test", database: db)
+
+        let changedInsert = try db.prepare(
+            "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+        )
+        changedInsert.bind("restore-after", at: 1)
+            .bind("After Backup", at: 2)
+            .bind("#222222", at: 3)
+            .bind("custom", at: 4)
+            .bind(0.0, at: 5)
+            .bind(0.0, at: 6)
+        try changedInsert.step()
+
+        let result = try service.restoreRollingBackup(
+            from: backupURL,
+            into: url,
+            database: db,
+            reopenDatabase: true
+        )
+        #expect(result.restoredBackup.url == backupURL)
+        #expect(result.preRestoreSnapshotURL != nil)
+
+        let originalLookup = try db.prepare("SELECT name FROM labels WHERE id = ?;")
+        originalLookup.bind("restore-original", at: 1)
+        #expect(try originalLookup.step())
+        #expect(originalLookup.string(at: 0) == "Original")
+
+        let changedLookup = try db.prepare("SELECT count(*) FROM labels WHERE id = ?;")
+        changedLookup.bind("restore-after", at: 1)
+        #expect(try changedLookup.step())
+        #expect(changedLookup.int(at: 0) == 0)
+    }
+
     // MARK: - Reopening
 
     @Test("Reopening database preserves data and does not re-migrate")

@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State var isMigrating = false
     @State var legacySidecarCleanupResult: String?
     @State var isCleaningLegacySidecars = false
+    @State var databaseBackupResult: String?
+    @State var isCreatingDatabaseBackup = false
     @State var pendingSubcategory: SettingsSubcategory?
     @State var automaticallyChecksForUpdates = SparkleUpdaterService.shared.automaticallyChecksForUpdates
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -156,6 +158,33 @@ struct SettingsView: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    func sqliteBackupDirectory() -> URL? {
+        guard let databaseURL = CiderDatabase.shared.databaseURL else { return nil }
+        return DatabaseSafetyService.shared.rollingBackupsDirectory(for: databaseURL)
+    }
+
+    func sqliteBackupSummary() -> String {
+        guard let databaseURL = CiderDatabase.shared.databaseURL else {
+            return "SQLite database is not open yet."
+        }
+
+        let backups = DatabaseSafetyService.shared.listRollingBackups(databaseURL: databaseURL)
+        guard let latest = backups.first else {
+            return "No rolling backups yet. Cider will create them automatically, or you can make one now."
+        }
+
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        let size = formatter.string(fromByteCount: latest.byteSize)
+        return "\(backups.count) rolling backup\(backups.count == 1 ? "" : "s"). Latest: \(latest.createdAt.formatted()) (\(size))."
+    }
+
+    func revealSQLiteBackupsFolder() {
+        guard let directory = sqliteBackupDirectory() else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(directory)
     }
 }
 

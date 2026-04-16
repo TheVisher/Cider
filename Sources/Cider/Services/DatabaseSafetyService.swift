@@ -5,6 +5,38 @@ import os
 final class DatabaseSafetyService {
     static let shared = DatabaseSafetyService()
 
+    struct SQLiteBackupInfo: Equatable {
+        enum Kind: String, Equatable {
+            case rolling
+            case preflight
+        }
+
+        let kind: Kind
+        let url: URL
+        let createdAt: Date
+        let byteSize: Int64
+    }
+
+    enum RestoreError: LocalizedError {
+        case missingBackup(URL)
+        case unhealthyBackup(URL, messages: [String])
+
+        var errorDescription: String? {
+            switch self {
+            case .missingBackup(let url):
+                return "Backup not found at \(url.path)."
+            case .unhealthyBackup(let url, let messages):
+                let detail = messages.isEmpty ? "unknown integrity failure" : messages.joined(separator: " | ")
+                return "Backup at \(url.path) failed integrity check: \(detail)"
+            }
+        }
+    }
+
+    struct RestoreResult: Equatable {
+        let restoredBackup: SQLiteBackupInfo
+        let preRestoreSnapshotURL: URL?
+    }
+
     private struct SafetyState: Codable {
         var lastPreOpenSnapshotAt: Date?
         var lastIntegrityCheckAt: Date?
@@ -121,6 +153,66 @@ final class DatabaseSafetyService {
         backupsRootDirectory(for: databaseURL).appendingPathComponent("preflight", isDirectory: true)
     }
 
+    func listRollingBackups(databaseURL: URL) -> [SQLiteBackupInfo] {
+        listBackups(in: rollingBackupsDirectory(for: databaseURL), kind: .rolling)
+    }
+
+    func listPreOpenSnapshots(databaseURL: URL) -> [SQLiteBackupInfo] {
+        listBackups(in: preOpenSnapshotsDirectory(for: databaseURL), kind: .preflight)
+    }
+
+    @discardableResult
+    func createManualBackup(database: CiderDatabase = .shared) throws -> URL {
+        try createRollingBackup(reason: "manual", database: database)
+    }
+
+    @discardableResult
+    func restoreRollingBackup(
+        from backupURL: URL,
+        into databaseURL: URL,
+        database: CiderDatabase? = nil,
+        reopenDatabase: Bool = false
+    ) throws -> RestoreResult {
+        guard fileManager.fileExists(atPath: backupURL.path) else {
+            throw RestoreError.missingBackup(backupURL)
+        }
+
+        let restoredBackup = try backupInfo(for: backupURL, kind: .rolling)
+
+        let verificationDB = CiderDatabase()
+        try verificationDB.open(at: backupURL)
+        let integrity = try verificationDB.integrityCheck()
+        verificationDB.close()
+        guard integrity.isHealthy else {
+            throw RestoreError.unhealthyBackup(backupURL, messages: integrity.messages)
+        }
+
+        let preRestoreSnapshotURL: URL?
+        if fileManager.fileExists(atPath: databaseURL.path) {
+            preRestoreSnapshotURL = try captureRawSnapshot(databaseURL: databaseURL, reason: "pre-restore")
+        } else {
+            preRestoreSnapshotURL = nil
+        }
+
+        if let database, database.isOpen, database.databaseURL == databaseURL {
+            database.close()
+        }
+
+        try fileManager.createDirectory(
+            at: databaseURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try removeDatabaseArtifacts(at: databaseURL)
+        try fileManager.copyItem(at: backupURL, to: databaseURL)
+
+        if reopenDatabase, let database {
+            try database.open(at: databaseURL)
+        }
+
+        logger.info("Restored SQLite database from backup \(backupURL.lastPathComponent, privacy: .public)")
+        return RestoreResult(restoredBackup: restoredBackup, preRestoreSnapshotURL: preRestoreSnapshotURL)
+    }
+
     private func stateFileURL(for databaseURL: URL) -> URL {
         backupsRootDirectory(for: databaseURL).appendingPathComponent("state.json")
     }
@@ -181,6 +273,60 @@ final class DatabaseSafetyService {
 
         for url in sorted.dropFirst(count) {
             try? fileManager.removeItem(at: url)
+        }
+    }
+
+    private func listBackups(in directoryURL: URL, kind: SQLiteBackupInfo.Kind) -> [SQLiteBackupInfo] {
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
+        let urls = (try? fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        return urls.compactMap { try? backupInfo(for: $0, kind: kind) }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private func backupInfo(for url: URL, kind: SQLiteBackupInfo.Kind) throws -> SQLiteBackupInfo {
+        let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey, .fileSizeKey])
+        let createdAt = values.contentModificationDate ?? values.creationDate ?? .distantPast
+        let byteSize: Int64
+        if kind == .preflight {
+            byteSize = try folderSize(at: url)
+        } else {
+            byteSize = Int64(values.fileSize ?? 0)
+        }
+        return SQLiteBackupInfo(kind: kind, url: url, createdAt: createdAt, byteSize: byteSize)
+    }
+
+    private func folderSize(at directoryURL: URL) throws -> Int64 {
+        guard let enumerator = fileManager.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            total += Int64(values.fileSize ?? 0)
+        }
+        return total
+    }
+
+    private func removeDatabaseArtifacts(at databaseURL: URL) throws {
+        let paths = [
+            databaseURL,
+            URL(fileURLWithPath: databaseURL.path + "-wal"),
+            URL(fileURLWithPath: databaseURL.path + "-shm"),
+        ]
+
+        for url in paths where fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
         }
     }
 

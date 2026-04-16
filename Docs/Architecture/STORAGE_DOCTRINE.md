@@ -144,6 +144,21 @@ The intended safety model is:
 - SQLite backups protect metadata
 - service-layer writes protect consistency
 
+### Current operator tooling
+
+Current SQLite safety tooling lives in `DatabaseSafetyService`.
+
+- rolling backups are stored under `CiderVault/.cider/backups/sqlite/rolling/`
+- pre-open raw snapshots are stored under `CiderVault/.cider/backups/sqlite/preflight/`
+- the app can create a manual backup from Settings -> Data -> Import & Export
+- the CLI can inspect and restore backups:
+  - `cider-cli db backups`
+  - `cider-cli db backup`
+  - `cider-cli db integrity`
+  - `cider-cli db restore <index|filename|latest> --yes`
+
+Restore is intentionally a closed-app workflow. The running app should not replace its own live SQLite file in place.
+
 ## Sidecar Policy
 
 ### Allowed right now
