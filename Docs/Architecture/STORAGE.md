@@ -354,9 +354,9 @@ The original bookmark storage used a single monolithic JSON file (`_cider_bookma
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Add `relativePath` to Bookmark model (`decodeIfPresent` + nil fallback) | Complete |
-| 2 | `BookmarkFileService.swift` — per-file I/O (write/read/move/delete .webloc + sidecar) | Complete |
-| 3 | Dual-write in `persist()` — monolithic JSON (existing) + .webloc files + sidecars (new) | Complete |
-| 4 | One-time migration on first launch (`runBookmarkFileMigrationIfNeeded()`) — creates vault directories, writes .webloc per bookmark, writes per-folder sidecar JSON, sets `didMigrateBookmarkFiles` flag | Complete |
+| 2 | `BookmarkFileService.swift` — per-file I/O for `.webloc` artifacts plus legacy sidecar cleanup/backfill helpers | Complete |
+| 3 | Dual-write in `persist()` — monolithic JSON (existing) + `.webloc` files while SQLite becomes canonical for metadata | Complete |
+| 4 | One-time migration on first launch (`runBookmarkFileMigrationIfNeeded()`) — creates vault directories, writes `.webloc` artifacts, sets `didMigrateBookmarkFiles` flag | Complete |
 | 5 | Wire up FSEvents for live folder watching — detect new .webloc files dropped in, auto-enrich, detect moved/deleted files | Future |
 | 6 | Clean up — remove monolithic JSON write path, remove legacy `Folder` model from JSON, update VaultIndexService to use real file paths, update AI Chat CLAUDE.md | Future |
 
@@ -373,8 +373,8 @@ After migration, every `persist()` call keeps files in sync. Monolithic JSON sta
 ### Risks & Mitigations
 
 - **Filename collisions** — multiple bookmarks with same title. Mitigation: append ` (2)` etc.
-- **Large folder scans** — scanning 1000+ .webloc files on load. Mitigation: sidecar JSON is the fast path, .webloc files only read when sidecar is missing.
-- **Atomic saves** — sidecar must be written atomically to avoid corruption. Use `.atomic` write option.
+- **Large folder scans** — scanning 1000+ `.webloc` files on load. Mitigation: SQLite path tracking and bookmark index caching reduce full rescans.
+- **Artifact/metadata drift** — `.webloc` files and SQLite can diverge if writes bypass services. Mitigation: service-layer writes stay canonical and legacy sidecars no longer mask drift.
 - **Image asset movement** — moving a bookmark between folders must also move thumbnails. Must be transactional.
 
 ---
@@ -400,7 +400,7 @@ BookmarksStorage reads from monolithic `_cider_bookmarks_metadata.json` + `bookm
 1. Write `bookmarks.html`
 2. Write `_cider_bookmarks_metadata.json`
 3. Push to SyncService
-4. Write `.webloc` files + per-folder `_cider_bookmarks.json` sidecars (dual-write)
+4. Write `.webloc` files while SQLite remains the metadata source of truth
 
 ### Known Bugs
 
@@ -418,7 +418,7 @@ BookmarksStorage reads from monolithic `_cider_bookmarks_metadata.json` + `bookm
 | `_cider_bookmarks_metadata.json` | `.cider/bookmarks/` | On load (primary) |
 | `bookmarks.html` | `.cider/bookmarks/` | On load (URL source) |
 | `.webloc` files | vault folders | Only during `adoptOrphanedVaultFiles()` |
-| `_cider_bookmarks.json` sidecars | per-folder | Only during adoption |
+| `_cider_bookmarks.json` sidecars | per-folder | One-time legacy import only |
 
 ### Files the Current System Writes
 
@@ -426,8 +426,8 @@ BookmarksStorage reads from monolithic `_cider_bookmarks_metadata.json` + `bookm
 |------|------|------|
 | `_cider_bookmarks_metadata.json` | `.cider/bookmarks/` | Every persist() |
 | `bookmarks.html` | `.cider/bookmarks/` | Every persist() |
-| `.webloc` plist files | vault folders | Every persist() (dual-write) |
-| `_cider_bookmarks.json` sidecars | per-folder | Every persist() |
+| `.webloc` plist files | vault folders | Every persist() |
+| `_cider_bookmarks.json` sidecars | per-folder | No longer written; only read during one-time legacy import |
 | `.thumbnails/<UUID>.png` | `.cider/bookmarks/.thumbnails/` | Enrichment |
 | `.originals/<UUID>.<ext>` | `.cider/bookmarks/.originals/` | Enrichment |
 
@@ -495,7 +495,7 @@ BookmarksStorage reads from monolithic `_cider_bookmarks_metadata.json` + `bookm
 
 ### What VaultBookmarkService Must Do
 
-1. **Load from files** — scan vault folders for .webloc + read sidecars
+1. **Load from files** — scan vault folders for `.webloc` artifacts and backfill legacy sidecar metadata only when SQLite is missing fields
 2. **Performance cache** — write `_cider_bookmarks_index.json` for fast startup
 3. **Move files on folder assign** — call `BookmarkFileService.move()`
 4. **No legacy folders** — use VaultFolderService exclusively

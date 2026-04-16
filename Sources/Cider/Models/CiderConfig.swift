@@ -182,6 +182,7 @@ struct CiderConfig: Codable {
         case lastSyncTimestamp
         case lastSuccessfulPushAt
         case didMigrateBookmarkFiles
+        case didMigrateBookmarkSidecarsToSQLite
         case didMigrateVaultToCiderDir
         case didMigrateContentToInbox
         case didMigrateContactsToPerFile
@@ -259,6 +260,7 @@ struct CiderConfig: Codable {
     var lastSyncTimestamp: Double  // Server timestamp of last successful pull (ms since epoch)
     var lastSuccessfulPushAt: Double  // Local timestamp of last successful push (seconds since epoch)
     var didMigrateBookmarkFiles: Bool  // Whether one-time .webloc file migration has run
+    var didMigrateBookmarkSidecarsToSQLite: Bool  // Whether legacy bookmark sidecars were imported into SQLite/index state
     var didMigrateVaultToCiderDir: Bool  // Whether one-time vault → .cider/ migration has run
     var didMigrateContentToInbox: Bool  // Whether one-time .cider/ → Inbox/ content migration has run
     var didMigrateContactsToPerFile: Bool  // Whether one-time contacts JSON → .vcf migration has run
@@ -333,6 +335,7 @@ struct CiderConfig: Codable {
             lastSyncTimestamp: 0,
             lastSuccessfulPushAt: 0,
             didMigrateBookmarkFiles: false,
+            didMigrateBookmarkSidecarsToSQLite: false,
             didMigrateVaultToCiderDir: false,
             didMigrateContentToInbox: false,
             didMigrateContactsToPerFile: false,
@@ -544,6 +547,7 @@ struct CiderConfig: Codable {
         lastSyncTimestamp = try container.decodeIfPresent(Double.self, forKey: .lastSyncTimestamp) ?? 0
         lastSuccessfulPushAt = try container.decodeIfPresent(Double.self, forKey: .lastSuccessfulPushAt) ?? 0
         didMigrateBookmarkFiles = try container.decodeIfPresent(Bool.self, forKey: .didMigrateBookmarkFiles) ?? false
+        didMigrateBookmarkSidecarsToSQLite = try container.decodeIfPresent(Bool.self, forKey: .didMigrateBookmarkSidecarsToSQLite) ?? false
         didMigrateVaultToCiderDir = try container.decodeIfPresent(Bool.self, forKey: .didMigrateVaultToCiderDir) ?? false
         didMigrateContentToInbox = try container.decodeIfPresent(Bool.self, forKey: .didMigrateContentToInbox) ?? false
         didMigrateContactsToPerFile = try container.decodeIfPresent(Bool.self, forKey: .didMigrateContactsToPerFile) ?? false
@@ -620,6 +624,7 @@ struct CiderConfig: Codable {
         lastSyncTimestamp: Double = 0,
         lastSuccessfulPushAt: Double = 0,
         didMigrateBookmarkFiles: Bool = false,
+        didMigrateBookmarkSidecarsToSQLite: Bool = false,
         didMigrateVaultToCiderDir: Bool = false,
         didMigrateContentToInbox: Bool = false,
         didMigrateContactsToPerFile: Bool = false,
@@ -694,6 +699,7 @@ struct CiderConfig: Codable {
         self.lastSyncTimestamp = lastSyncTimestamp
         self.lastSuccessfulPushAt = lastSuccessfulPushAt
         self.didMigrateBookmarkFiles = didMigrateBookmarkFiles
+        self.didMigrateBookmarkSidecarsToSQLite = didMigrateBookmarkSidecarsToSQLite
         self.didMigrateVaultToCiderDir = didMigrateVaultToCiderDir
         self.didMigrateContentToInbox = didMigrateContentToInbox
         self.didMigrateContactsToPerFile = didMigrateContactsToPerFile

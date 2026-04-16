@@ -2,8 +2,7 @@ import Foundation
 import os
 
 /// Exports existing Cider data into portable vault files.
-/// Creates `.webloc` files for bookmarks, ensures folders exist as real directories,
-/// and writes legacy sidecar metadata where older file types still rely on it.
+/// Creates `.webloc` files for bookmarks and ensures folders exist as real directories.
 ///
 /// This is a one-time migration tool — safe to run multiple times (idempotent).
 @MainActor
@@ -20,15 +19,32 @@ final class VaultMigrationService {
     struct MigrationResult {
         var foldersCreated = 0
         var weblocFilesCreated = 0
-        var todoSidecarsWritten = 0
         var errors: [String] = []
 
         var summary: String {
             var parts: [String] = []
             if foldersCreated > 0 { parts.append("\(foldersCreated) folders created") }
             if weblocFilesCreated > 0 { parts.append("\(weblocFilesCreated) bookmark files exported") }
-            if todoSidecarsWritten > 0 { parts.append("\(todoSidecarsWritten) todo metadata written") }
             if parts.isEmpty { parts.append("Everything already up to date") }
+            if !errors.isEmpty { parts.append("\(errors.count) errors") }
+            return parts.joined(separator: ", ")
+        }
+    }
+
+    struct LegacySidecarCleanupResult {
+        var noteSidecarFilesDeleted = 0
+        var bookmarkSidecarFilesDeleted = 0
+        var bookmarkSidecarFilesSkipped = 0
+        var errors: [String] = []
+
+        var summary: String {
+            var parts: [String] = []
+            if noteSidecarFilesDeleted > 0 { parts.append("\(noteSidecarFilesDeleted) note sidecars removed") }
+            if bookmarkSidecarFilesDeleted > 0 { parts.append("\(bookmarkSidecarFilesDeleted) bookmark sidecars removed") }
+            if bookmarkSidecarFilesSkipped > 0 {
+                parts.append("\(bookmarkSidecarFilesSkipped) bookmark sidecars left in place until bookmark import runs")
+            }
+            if parts.isEmpty { parts.append("No legacy sidecars found") }
             if !errors.isEmpty { parts.append("\(errors.count) errors") }
             return parts.joined(separator: ", ")
         }
@@ -43,9 +59,47 @@ final class VaultMigrationService {
         migrateFolders(&result)
         migrateBookmarks(&result)
         migrateNotes(&result)
-        migrateTodos(&result)
-
         logger.info("Migration complete: \(result.summary)")
+        return result
+    }
+
+    func removeLegacySidecars() -> LegacySidecarCleanupResult {
+        var result = LegacySidecarCleanupResult()
+        let fm = FileManager.default
+        let config = CiderConfig.load()
+
+        guard let enumerator = fm.enumerator(
+            at: vaultRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        ) else {
+            result.errors.append("Could not enumerate vault for legacy sidecars")
+            return result
+        }
+
+        while let url = enumerator.nextObject() as? URL {
+            let name = url.lastPathComponent
+            guard name == ".cider-meta.json" || name == BookmarkFileService.sidecarFileName else { continue }
+            if shouldSkipLegacySidecar(at: url) { continue }
+
+            if name == BookmarkFileService.sidecarFileName && !config.didMigrateBookmarkSidecarsToSQLite {
+                result.bookmarkSidecarFilesSkipped += 1
+                continue
+            }
+
+            do {
+                try fm.removeItem(at: url)
+                if name == ".cider-meta.json" {
+                    result.noteSidecarFilesDeleted += 1
+                } else {
+                    result.bookmarkSidecarFilesDeleted += 1
+                }
+            } catch {
+                result.errors.append("Failed to remove \(url.path): \(error.localizedDescription)")
+            }
+        }
+
+        logger.info("Legacy sidecar cleanup complete: \(result.summary)")
         return result
     }
 
@@ -130,45 +184,9 @@ final class VaultMigrationService {
 
     // MARK: - Notes
 
-    /// Writes sidecar metadata for all notes.
+    /// Notes no longer need export-time sidecar regeneration.
     private func migrateNotes(_ result: inout MigrationResult) {
         _ = result
-    }
-
-    // MARK: - Todos
-
-    /// Writes sidecar metadata for all todos.
-    private func migrateTodos(_ result: inout MigrationResult) {
-        let todos = TodoCardStorage.shared.todoCards
-
-        for todo in todos {
-            let filename = "\(todo.id).json"
-            let dirRelativePath = "\(StoragePaths.ciderInternalDir)/\(StorageType.todos.ciderSubpath)"
-
-            var meta = SidecarItemMetadata()
-            let labelNames = todo.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
-            meta.tags = labelNames.isEmpty ? nil : labelNames.sorted()
-
-            if let dueDate = todo.dueDate {
-                meta.date = ISO8601DateFormatter().string(from: dueDate)
-            }
-
-            var extra: [String: AnyCodableValue] = [:]
-            extra["title"] = .string(todo.title)
-            if !todo.details.isEmpty {
-                extra["details"] = .string(todo.details)
-            }
-            if let priority = todo.priority {
-                extra["priority"] = .string(priority.rawValue)
-            }
-            extra["isCompleted"] = .bool(todo.isCompleted)
-            meta.extra = extra
-
-            if !meta.isEmpty {
-                SidecarService.shared.setMetadata(meta, for: filename, inDirectory: dirRelativePath)
-                result.todoSidecarsWritten += 1
-            }
-        }
     }
 
     // MARK: - Helpers
@@ -205,5 +223,10 @@ final class VaultMigrationService {
             sanitized = String(sanitized.prefix(200))
         }
         return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func shouldSkipLegacySidecar(at url: URL) -> Bool {
+        let components = url.pathComponents
+        return components.contains(".trash") || components.contains(StoragePaths.ciderInternalDir)
     }
 }

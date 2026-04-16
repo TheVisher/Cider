@@ -9,8 +9,8 @@ import UniformTypeIdentifiers
 
 /// File-based bookmark service that treats `.webloc` files as the durable
 /// artifact and SQLite as the canonical metadata layer.
-/// Legacy sidecars are still read as a fallback during migration, but normal
-/// runtime writes should not depend on them.
+/// Legacy sidecars are imported once during migration, but normal runtime
+/// reads and writes should not depend on them.
 @MainActor
 final class VaultBookmarkService: ObservableObject {
     static let shared = VaultBookmarkService()
@@ -112,7 +112,11 @@ final class VaultBookmarkService: ObservableObject {
         if let db = resolvedDatabase {
             loadBookmarksFromDatabase(db)
             if !bookmarks.isEmpty {
-                backfillLegacySidecarMetadataIfNeeded()
+                let importedLegacySidecars = migrateLegacyBookmarkSidecarsIfNeeded()
+                if importedLegacySidecars {
+                    persistAllBookmarksToDatabase()
+                    writeIndexCache()
+                }
                 pruneMissingBookmarksFromDisk(db)
                 logger.info("Loaded \(self.bookmarks.count) bookmarks from database")
                 Task { @MainActor [weak self] in
@@ -131,17 +135,20 @@ final class VaultBookmarkService: ObservableObject {
                 return FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(path).path)
             }
             bookmarks = cached
-            backfillLegacySidecarMetadataIfNeeded()
+            let importedLegacySidecars = migrateLegacyBookmarkSidecarsIfNeeded()
+            if importedLegacySidecars {
+                writeIndexCache()
+            }
             logger.info("Loaded \(cached.count) bookmarks from index cache")
             // One-time migration: persist JSON bookmarks to SQLite.
             // `persistBookmarkToDatabaseInner` scrubs dangling folder_id /
             // label_id references at the lowest level, so a single stale
             // reference can't abort the whole transaction.
-            if !cached.isEmpty, let db = resolvedDatabase {
-                logger.info("Migrating \(cached.count) bookmarks from JSON to SQLite")
+            if !bookmarks.isEmpty, let db = resolvedDatabase {
+                logger.info("Migrating \(self.bookmarks.count) bookmarks from JSON to SQLite")
                 do {
                     try db.withTransaction {
-                        for bookmark in cached {
+                        for bookmark in self.bookmarks {
                             try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
                         }
                     }
@@ -160,14 +167,14 @@ final class VaultBookmarkService: ObservableObject {
         // Full scan
         let scanned = scanAllVaultFolders()
         bookmarks = scanned
-        backfillLegacySidecarMetadataIfNeeded()
-        logger.info("Scanned \(scanned.count) bookmarks from vault folders")
+        _ = migrateLegacyBookmarkSidecarsIfNeeded()
+        logger.info("Scanned \(self.bookmarks.count) bookmarks from vault folders")
         writeIndexCache()
         // Persist scanned bookmarks to SQLite
         if let db = resolvedDatabase {
             do {
                 try db.withTransaction {
-                    for bookmark in scanned {
+                    for bookmark in self.bookmarks {
                         try persistBookmarkToDatabaseInner(db, bookmark: bookmark)
                     }
                 }
@@ -366,43 +373,91 @@ final class VaultBookmarkService: ObservableObject {
         }
     }
 
-    /// Imports legacy bookmark sidecar metadata into the in-memory bookmarks
-    /// only when SQLite-backed state is missing equivalent information.
-    /// This keeps sidecars as migration input instead of an ongoing source of truth.
+    /// One-time import of legacy bookmark sidecars into SQLite-backed bookmarks.
+    /// Existing bookmarks only merge missing metadata; live `.webloc` files that
+    /// never made it into SQLite are adopted if they are not duplicate URLs.
     @discardableResult
-    func importSidecarMetadataIntoBookmarks() -> Bool {
+    private func migrateLegacyBookmarkSidecarsIfNeeded() -> Bool {
+        var config = CiderConfig.load()
+        guard !config.didMigrateBookmarkSidecarsToSQLite else { return false }
+
         let fileService = BookmarkFileService.shared
-        var sidecarCache: [String: BookmarkFileService.BookmarkFolderSidecar] = [:]
+        let fm = FileManager.default
+        var existingRelativePaths = Set(bookmarks.compactMap(\.relativePath))
+        var existingURLs = Set(bookmarks.compactMap { bookmark -> String? in
+            let url = bookmark.urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return url.isEmpty ? nil : url
+        })
+        var adopted: [Bookmark] = []
         var changed = false
 
-        for i in bookmarks.indices {
-            guard let relativePath = bookmarks[i].relativePath, !relativePath.isEmpty else { continue }
-            let dirPath = (relativePath as NSString).deletingLastPathComponent
-            let filename = (relativePath as NSString).lastPathComponent
+        guard let enumerator = fm.enumerator(
+            at: vaultRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            config.didMigrateBookmarkSidecarsToSQLite = true
+            config.save()
+            return false
+        }
 
-            let sidecar: BookmarkFileService.BookmarkFolderSidecar
-            if let cached = sidecarCache[dirPath] {
-                sidecar = cached
-            } else {
-                let dirURL = vaultRoot.appendingPathComponent(dirPath)
-                let loaded = fileService.loadSidecar(at: dirURL)
-                sidecarCache[dirPath] = loaded
-                sidecar = loaded
-            }
+        while let url = enumerator.nextObject() as? URL {
+            guard url.lastPathComponent == BookmarkFileService.sidecarFileName else { continue }
+            let dirURL = url.deletingLastPathComponent()
+            let dirRelativePath = dirURL.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
+            let normalizedDirRelativePath = dirRelativePath == vaultRoot.path ? "" : dirRelativePath
+            let folderID = normalizedDirRelativePath == inboxRelativePath
+                ? nil
+                : VaultFolderService.shared.folderID(for: normalizedDirRelativePath)
 
-            guard let entry = sidecar.items[filename] else { continue }
-            if Self.mergeLegacySidecarEntry(entry, into: &bookmarks[i], fallbackFilename: filename) {
+            let sidecar = fileService.loadSidecar(at: dirURL)
+            for (filename, entry) in sidecar.items {
+                let relativePath = normalizedDirRelativePath.isEmpty ? filename : "\(normalizedDirRelativePath)/\(filename)"
+                let fileURL = dirURL.appendingPathComponent(filename)
+                guard fm.fileExists(atPath: fileURL.path) else { continue }
+
+                if let idx = bookmarks.firstIndex(where: { $0.relativePath == relativePath }) {
+                    if Self.mergeLegacySidecarEntry(entry, into: &bookmarks[idx], fallbackFilename: filename) {
+                        changed = true
+                    }
+                    continue
+                }
+
+                guard !existingRelativePaths.contains(relativePath),
+                      var bookmark = fileService.read(
+                        filename: filename,
+                        from: dirURL,
+                        dirRelativePath: normalizedDirRelativePath,
+                        includeLegacySidecarMetadata: true
+                      ) else { continue }
+
+                let normalizedURL = bookmark.urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !normalizedURL.isEmpty && existingURLs.contains(normalizedURL) {
+                    continue
+                }
+
+                bookmark.folderID = folderID
+                adopted.append(bookmark)
+                existingRelativePaths.insert(relativePath)
+                if !normalizedURL.isEmpty {
+                    existingURLs.insert(normalizedURL)
+                }
                 changed = true
             }
         }
 
-        return changed
-    }
+        if !adopted.isEmpty {
+            bookmarks.append(contentsOf: adopted)
+        }
 
-    private func backfillLegacySidecarMetadataIfNeeded() {
-        guard importSidecarMetadataIntoBookmarks() else { return }
-        persistAllBookmarksToDatabase()
-        writeIndexCache()
+        config.didMigrateBookmarkSidecarsToSQLite = true
+        config.save()
+
+        if !adopted.isEmpty {
+            logger.info("Imported \(adopted.count) live bookmarks from legacy sidecars")
+        }
+
+        return changed
     }
 
     @discardableResult
@@ -1148,7 +1203,6 @@ final class VaultBookmarkService: ObservableObject {
             if !adopted.isEmpty {
                 logger.info("Adopted \(adopted.count) orphaned .webloc files from vault folders")
                 bookmarks.append(contentsOf: adopted)
-                _ = importSidecarMetadataIntoBookmarks()
             }
             if reassigned > 0 {
                 logger.info("Reassigned \(reassigned) bookmarks to match filesystem folders")

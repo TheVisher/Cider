@@ -476,7 +476,7 @@ extension SettingsView {
                 }
 
                 SettingsSection(title: "Vault Migration") {
-                    Text("Export all Cider data as portable vault files. Creates `.webloc` files for bookmarks and only writes legacy sidecar metadata for item types that still need migration fallback. Safe to run multiple times.")
+                    Text("Export all Cider data as portable vault files. Creates bookmark `.webloc` files and keeps vault folders in sync without recreating legacy sidecars. Safe to run multiple times.")
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
 
@@ -504,6 +504,41 @@ extension SettingsView {
 
                         if let migrationResult {
                             Text(migrationResult)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+                }
+
+                SettingsSection(title: "Legacy Sidecars") {
+                    Text("Remove obsolete `.cider-meta.json` and `_cider_bookmarks.json` files after migration. Bookmark sidecars are only removed once the one-time SQLite import has completed.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    HStack(spacing: Spacing.sm) {
+                        Button {
+                            isCleaningLegacySidecars = true
+                            legacySidecarCleanupResult = nil
+                            Task {
+                                let result = VaultMigrationService.shared.removeLegacySidecars()
+                                await MainActor.run {
+                                    legacySidecarCleanupResult = result.summary
+                                    isCleaningLegacySidecars = false
+                                }
+                            }
+                        } label: {
+                            Label("Remove Legacy Sidecars", systemImage: "trash.slash")
+                        }
+                        .buttonStyle(CiderSecondaryButtonStyle())
+                        .disabled(isCleaningLegacySidecars)
+
+                        if isCleaningLegacySidecars {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if let legacySidecarCleanupResult {
+                            Text(legacySidecarCleanupResult)
                                 .font(CiderFont.caption)
                                 .foregroundColor(CiderColors.tertiary)
                         }

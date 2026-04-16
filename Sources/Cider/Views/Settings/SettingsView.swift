@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State var exportResult: String?
     @State var migrationResult: String?
     @State var isMigrating = false
+    @State var legacySidecarCleanupResult: String?
+    @State var isCleaningLegacySidecars = false
     @State var pendingSubcategory: SettingsSubcategory?
     @State var automaticallyChecksForUpdates = SparkleUpdaterService.shared.automaticallyChecksForUpdates
     @Environment(\.accessibilityReduceMotion) var reduceMotion

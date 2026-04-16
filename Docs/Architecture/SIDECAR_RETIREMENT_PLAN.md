@@ -14,7 +14,7 @@ This plan is intentionally phased. We do not delete sidecars until their respons
 
 ## Current Audit
 
-### 1. Bookmark sidecars are still a hard dependency
+### 1. Bookmark sidecars are now one-time migration input
 
 Primary code:
 
@@ -45,7 +45,7 @@ What it stores today:
 
 Current risk:
 
-- removing bookmark sidecars today would drop most bookmark metadata from normal reads and rebuilds
+- removing bookmark sidecars before the one-time import runs would strand some metadata in older vaults
 - `.webloc` alone only carries the URL
 
 Replacement path:
@@ -53,16 +53,17 @@ Replacement path:
 - move all bookmark metadata and stable identity into SQLite
 - keep `.webloc` as the artifact
 - reconcile moved/renamed files using SQLite path tracking plus artifact discovery
+- import any remaining legacy sidecar metadata once, then stop consulting sidecars during normal load
 
 Removal status:
 
-- blocked until SQLite fully replaces bookmark sidecar reads and backfill is complete
+- normal runtime reads no longer depend on bookmark sidecars
+- one-time legacy import still exists for older vaults
 
-### 2. Note sidecars are now migration-only metadata import
+### 2. Note sidecars are retired from runtime
 
 Primary code:
 
-- `Sources/Cider/Services/SidecarService.swift`
 - `Sources/Cider/Services/NotesStorage.swift`
 - `Sources/Cider/Views/Notes/NoteCardView.swift`
 - `Sources/Cider/Views/Notes/NoteListRow.swift`
@@ -78,45 +79,43 @@ What it stores today for notes:
 
 Current risk:
 
-- some legacy note tags/summary may remain stranded in sidecars until those notes are loaded
-- the legacy `.cider-meta.json` format still exists even though normal note runtime no longer depends on it
+- any leftover note-only metadata that still exists only in legacy sidecars is now intentionally abandoned
+- stale `.cider-meta.json` files may still exist on disk until cleanup tooling removes them
 
 Replacement path:
 
-- keep opportunistic import of legacy note tags/summary into SQLite-backed notes
-- decide when to remove note-sidecar fallback reads entirely
-- retire `SidecarService` once remaining non-note uses are gone
+- keep note content and metadata in `.md` plus SQLite only
+- remove obsolete `.cider-meta.json` files during final cleanup
 
 Removal status:
 
-- note identity/runtime dependence has been removed
-- remaining work is full sidecar retirement, not note identity preservation
+- note sidecar reads and writes have been removed from runtime
+- remaining work is deleting obsolete files from existing vaults
 
-### 3. App startup still loads sidecar metadata globally
+### 3. Generic sidecar support has been removed
 
 Primary code:
 
-- `Sources/Cider/App/AppDelegate.swift`
+- no generic sidecar service remains in the app runtime
 
 Current behavior:
 
-- `SidecarService.shared.loadAll()` runs on launch before vault reconciliation
+- no generic `.cider-meta.json` reader remains in normal runtime
 
 Current risk:
 
-- sidecar loading remains part of app boot behavior
-- this reinforces sidecars as a first-class runtime dependency
+- old sidecar files may still be present in user vaults until cleanup tooling removes them
 
 Replacement path:
 
-- remove launch-time sidecar loading once note-sidecar readers are gone
-- keep any temporary migration import path explicit and one-time
+- treat any remaining sidecars as removable legacy files, not data sources
 
 Removal status:
 
-- blocked by note sidecar usage and any remaining migration-only readers
+- completed in runtime
+- remaining work is cleanup tooling and user messaging
 
-### 4. Migration/export tooling still assumes sidecars are part of portability
+### 4. Migration/export tooling still has sidecar-era assumptions in docs and helpers
 
 Primary code:
 
@@ -125,11 +124,11 @@ Primary code:
 
 Current behavior:
 
-- exports `.webloc` files and still writes sidecar metadata for remaining legacy item types
+- exports `.webloc` files without recreating bookmark, note, or todo sidecars
 
 Current risk:
 
-- docs and migration tooling still encode sidecars as part of the intended storage design
+- docs and helper text can still encode sidecars as part of the intended storage design
 
 Replacement path:
 
@@ -138,7 +137,7 @@ Replacement path:
 
 Removal status:
 
-- update after replacement architecture is in place
+- runtime export behavior is aligned; remaining work is doc/helper cleanup
 
 ### 5. Docs still describe a conflicting hybrid model
 
@@ -223,13 +222,12 @@ Exit criteria:
 Order:
 
 1. notes
-2. generic `SidecarService` note readers
-3. launch-time sidecar loading
-4. bookmark sidecar readers
+2. bookmark sidecar readers
 
 Exit criteria:
 
 - normal reads no longer depend on sidecars
+  Status: completed for notes and for normal bookmark runtime; only one-time bookmark import remains
 
 ### Phase 5: Remove sidecar writes
 
@@ -238,8 +236,9 @@ Deliverables:
 - stop writing note sidecars
   Status: completed for normal runtime and migration export
 - stop writing bookmark sidecars
+- stop writing todo sidecars
 - stop using sidecars in migration/export flows
-  Status: bookmark and note export paths no longer regenerate their legacy sidecars
+  Status: bookmark, note, and todo export paths no longer regenerate their legacy sidecars
 
 Exit criteria:
 
@@ -272,7 +271,7 @@ First concrete tasks:
 2. migrate note sidecar metadata into SQLite
 3. update note card/list UI to read that metadata from SQLite-backed state
 4. remove note UUID recovery dependence on sidecars
-5. stop loading note sidecars on startup
+5. remove the last note-sidecar runtime reads
 
 ## Bookmark-Specific Warning
 

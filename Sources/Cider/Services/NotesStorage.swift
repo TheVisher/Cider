@@ -80,9 +80,6 @@ final class NotesStorage: ObservableObject {
             loadNotesFromDatabase(db)
             if !notes.isEmpty {
                 loadVaultFolderNotes()
-                if importSidecarMetadataIntoNotes() {
-                    persistNotesToDatabaseIfNeeded()
-                }
                 return
             }
         }
@@ -108,7 +105,6 @@ final class NotesStorage: ObservableObject {
             // content service touches .shared.
             self.discoverVaultFolderNoteFiles()
             self.loadVaultFolderNotes()
-            let importedSidecarMetadata = self.importSidecarMetadataIntoNotes()
 
             // One-time migration: persist JSON notes to SQLite
             if !self.notes.isEmpty, let db = self.resolvedDatabase {
@@ -122,8 +118,6 @@ final class NotesStorage: ObservableObject {
                 } catch {
                     self.logger.error("Failed to migrate JSON notes to SQLite: \(error.localizedDescription)")
                 }
-            } else if importedSidecarMetadata {
-                self.persistNotesToDatabaseIfNeeded()
             }
         }
     }
@@ -172,9 +166,6 @@ final class NotesStorage: ObservableObject {
             loadNotesFromDatabase(db)
             if !notes.isEmpty {
                 loadVaultFolderNotes()
-                if importSidecarMetadataIntoNotes() {
-                    persistNotesToDatabaseIfNeeded()
-                }
                 return
             }
         }
@@ -193,9 +184,6 @@ final class NotesStorage: ObservableObject {
         notes = scanNotes
         if result.needsSave || scanIndex != result.index { saveIndex() }
         loadVaultFolderNotes()
-        if importSidecarMetadataIntoNotes() {
-            persistNotesToDatabaseIfNeeded()
-        }
     }
 
     private func ensureDirectory() {
@@ -212,10 +200,9 @@ final class NotesStorage: ObservableObject {
     }
 
     // Task 13: JSON index persistence removed. The in-memory `index` dict is
-    // rebuilt on launch from SQLite (`loadNotesFromDatabase`) and from .md
-    // scan (`scanNotes`/`loadAndScan`). Legacy note sidecars are still read as
-    // a fallback during migration, but the runtime no longer depends on
-    // writing them. Stubs retained so the mutation call sites stay put.
+    // rebuilt on launch from SQLite (`loadNotesFromDatabase`) and from `.md`
+    // scans (`scanNotes`/`loadAndScan`). Stubs are retained so older mutation
+    // call sites stay put while SQLite-backed indexing remains canonical.
     private func saveIndex() { /* no-op */ }
 
     // MARK: - Scanning
@@ -400,8 +387,6 @@ final class NotesStorage: ObservableObject {
                     notes[i].summary = existingSummary
                 }
             }
-            _ = importSidecarMetadataIntoNotes()
-
             try db.withTransaction {
                 for note in self.notes {
                     try self.persistNoteToDatabaseInner(db, note: note)
@@ -1806,53 +1791,6 @@ final class NotesStorage: ObservableObject {
                 insItemTag.bind(itemID, at: 1).bind(tagID, at: 2)
                 try insItemTag.step()
             }
-        }
-    }
-
-    @discardableResult
-    private func importSidecarMetadataIntoNotes() -> Bool {
-        var changed = false
-
-        for i in notes.indices {
-            let note = notes[i]
-            guard note.relativePath.contains("/") else { continue }
-
-            let filename = (note.relativePath as NSString).lastPathComponent
-            let directoryPath = (note.relativePath as NSString).deletingLastPathComponent
-            guard let meta = SidecarService.shared.metadata(for: filename, inDirectory: directoryPath) else { continue }
-
-            if let summary = meta.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !summary.isEmpty,
-               (notes[i].summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                notes[i].summary = summary
-                changed = true
-            }
-
-            let labelNames = Set(notes[i].labelIDs.compactMap { id in
-                CardLabelStorage.shared.label(for: id)?.name.lowercased()
-            })
-            let importedTags = (meta.tags ?? []).filter { !labelNames.contains($0.lowercased()) }
-            for importedTag in importedTags {
-                if !notes[i].tags.contains(where: { $0.caseInsensitiveCompare(importedTag) == .orderedSame }) {
-                    notes[i].tags.append(importedTag)
-                    changed = true
-                }
-            }
-        }
-
-        return changed
-    }
-
-    private func persistNotesToDatabaseIfNeeded() {
-        guard let db = resolvedDatabase else { return }
-        do {
-            try db.withTransaction {
-                for note in self.notes {
-                    try self.persistNoteToDatabaseInner(db, note: note)
-                }
-            }
-        } catch {
-            logger.error("Failed to persist imported note metadata to SQLite: \(error.localizedDescription)")
         }
     }
 

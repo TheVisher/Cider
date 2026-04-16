@@ -33,6 +33,7 @@ struct CiderConfigBackwardCompatTests {
         #expect(config.syncURL == "")
         #expect(config.hasCompletedOnboarding == false)
         #expect(config.didMigrateBookmarkFiles == false)
+        #expect(config.didMigrateBookmarkSidecarsToSQLite == false)
         #expect(config.lastReconciliationAt == 0)
     }
 
@@ -117,6 +118,7 @@ struct CiderConfigBackwardCompatTests {
         let config = try JSONDecoder().decode(CiderConfig.self, from: data)
 
         #expect(config.didMigrateBookmarkFiles == false)
+        #expect(config.didMigrateBookmarkSidecarsToSQLite == false)
         #expect(config.didMigrateVaultToCiderDir == false)
         #expect(config.didMigrateContentToInbox == false)
         #expect(config.didMigrateContactsToPerFile == false)

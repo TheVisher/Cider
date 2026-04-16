@@ -1158,7 +1158,7 @@ final class BookmarksStorage: ObservableObject {
             let found = fileService.readAll(
                 from: dirURL,
                 dirRelativePath: dirRelativePath,
-                includeLegacySidecarMetadata: true
+                includeLegacySidecarMetadata: false
             )
             for var bookmark in found {
                 let url = bookmark.urlString.lowercased()

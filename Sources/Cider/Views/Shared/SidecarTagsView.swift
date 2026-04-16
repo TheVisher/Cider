@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Displays sidecar metadata tags as lightweight text pills.
-/// Visually distinct from Cider labels — these come from AI tools
-/// or `.cider-meta.json` files in the vault.
+/// Displays lightweight imported metadata tags.
+/// These are visually distinct from Cider labels and currently appear when
+/// legacy sidecar tags have been absorbed into the item model.
 struct SidecarTagsView: View {
     let tags: [String]
 

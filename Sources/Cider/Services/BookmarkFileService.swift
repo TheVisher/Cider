@@ -9,7 +9,7 @@ import os
 ///
 /// This service handles:
 /// - Writing/reading `.webloc` files
-/// - Per-folder sidecar persistence
+/// - Legacy per-folder sidecar reads and cleanup
 /// - Filename sanitization and collision handling
 /// - Moving bookmarks between folders (files + image assets)
 /// - Deleting bookmarks (files + image assets + sidecar cleanup)
@@ -239,7 +239,7 @@ final class BookmarkFileService {
         logger.info("Deleted bookmark file: \(filename)")
     }
 
-    // MARK: - Sidecar I/O
+    // MARK: - Legacy Sidecar I/O
 
     func loadSidecar(at dirURL: URL) -> BookmarkFolderSidecar {
         let fileURL = dirURL.appendingPathComponent(Self.sidecarFileName)
@@ -266,6 +266,7 @@ final class BookmarkFileService {
         try? data.write(to: fileURL, options: .atomic)
     }
 
+    /// Test/migration helper for seeding a specific legacy sidecar entry.
     func updateSidecar(at dirURL: URL, setting filename: String, to entry: BookmarkSidecarEntry) {
         var sidecar = loadSidecar(at: dirURL)
         sidecar.items[filename] = entry
