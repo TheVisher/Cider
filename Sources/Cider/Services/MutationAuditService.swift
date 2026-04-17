@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-enum MutationAuditSource: String, Codable {
+enum MutationAuditSource: String, Codable, CaseIterable {
     case ui
     case cli
     case agent
