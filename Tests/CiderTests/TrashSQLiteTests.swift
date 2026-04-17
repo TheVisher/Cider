@@ -637,6 +637,7 @@ struct TrashSQLiteTests {
         #expect(entries.count == 1)
         #expect(entries[0].action == "purge_expired")
         #expect(entries[0].itemID == expiredItem.itemID)
+        #expect(entries[0].source == .cleanup)
     }
 
     @Test("permanentlyDelete removes row and records an audit entry")

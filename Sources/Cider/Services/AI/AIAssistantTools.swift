@@ -654,7 +654,7 @@ struct ApplyTagTool: Tool {
         var tagName: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let tagName = arguments.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tagName.isEmpty else { return "Tag name cannot be empty." }
@@ -687,7 +687,7 @@ struct ApplyTagTool: Tool {
             return "No untagged items found matching \"\(query)\"."
         }
         return "Tagged \(tagged.count) item(s) with \"\(label.name)\":\n" + tagged.joined(separator: "\n")
-    } }
+    } } }
 }
 
 // MARK: - Remove Tag Tool
@@ -706,7 +706,7 @@ struct RemoveTagTool: Tool {
         var tagName: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let tagName = arguments.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -740,7 +740,7 @@ struct RemoveTagTool: Tool {
             return "No items matching \"\(query)\" have the tag \"\(label.name)\"."
         }
         return "Removed tag \"\(label.name)\" from \(untagged.count) item(s):\n" + untagged.joined(separator: "\n")
-    } }
+    } } }
 }
 
 // MARK: - Rename Bookmark Tool
@@ -759,7 +759,7 @@ struct RenameBookmarkTool: Tool {
         var newTitle: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let newTitle = arguments.newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newTitle.isEmpty else { return "New title cannot be empty." }
@@ -786,7 +786,7 @@ struct RenameBookmarkTool: Tool {
             labelIDs: bookmark.labelIDs
         )
         return "Renamed \"\(oldTitle)\" → \"\(newTitle)\"."
-    } }
+    } } }
 }
 
 // MARK: - Find Similar Tool
@@ -857,7 +857,7 @@ struct CreateNoteTool: Tool {
         var folderName: String?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let content = arguments.content.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -880,7 +880,7 @@ struct CreateNoteTool: Tool {
         }
 
         return "Created note \"\(note.title)\"."
-    } }
+    } } }
 }
 
 // MARK: - Summarize Text Tool
@@ -1242,7 +1242,7 @@ struct CreateReminderTool: Tool {
         var details: String?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return "Reminder title cannot be empty." }
 
@@ -1302,7 +1302,7 @@ struct CreateReminderTool: Tool {
             .map { $0 == 0 ? "at time" : "\($0) min before" }
             .joined(separator: ", ")
         return "Created reminder: \"\(title)\" on \(arguments.date)\(recurring). Reminders: \(remindDesc)."
-    } }
+    } } }
 }
 
 // MARK: - Cancel Reminder Tool
@@ -1324,7 +1324,7 @@ struct CancelReminderTool: Tool {
         var deleteEntirely: Bool?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return "Reminder title cannot be empty." }
 
@@ -1351,5 +1351,5 @@ struct CancelReminderTool: Tool {
         _ = storage.updateDateCard(card)
         DateCardNotificationService.shared.cancelNotification(for: card.id)
         return "Disabled reminders for \"\(card.title)\". The event still exists but won't send notifications."
-    } }
+    } } }
 }

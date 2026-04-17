@@ -750,36 +750,38 @@ final class TrashStorage {
 
     func purgeExpired(olderThan days: Int) {
         guard days > 0 else { return }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
-        let expired = allTrashItems().filter { $0.deletedAt < cutoff }
-        guard !expired.isEmpty else { return }
+        MutationAuditContext.withSource(.cleanup) {
+            let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 3600)
+            let expired = allTrashItems().filter { $0.deletedAt < cutoff }
+            guard !expired.isEmpty else { return }
 
-        for item in expired {
-            let trashDir = resolveTrashDir(for: item)
-            deleteFilesForItem(item, trashDir: trashDir)
-        }
-
-        if let db = resolvedDatabase {
-            do {
-                try db.withTransaction {
-                    for item in expired {
-                        deleteTrashItemFromDatabase(db, trashItemID: item.id)
-                    }
-                }
-            } catch {
-                Self.logger.error("purgeExpired: SQLite batch delete failed: \(error.localizedDescription)")
+            for item in expired {
+                let trashDir = resolveTrashDir(for: item)
+                deleteFilesForItem(item, trashDir: trashDir)
             }
-        }
 
-        for item in expired {
-            recordTrashRemoval(
-                action: "purge_expired",
-                trashItem: item,
-                metadata: ["cutoff": String(cutoff.timeIntervalSince1970)]
-            )
-        }
+            if let db = resolvedDatabase {
+                do {
+                    try db.withTransaction {
+                        for item in expired {
+                            deleteTrashItemFromDatabase(db, trashItemID: item.id)
+                        }
+                    }
+                } catch {
+                    Self.logger.error("purgeExpired: SQLite batch delete failed: \(error.localizedDescription)")
+                }
+            }
 
-        NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
+            for item in expired {
+                recordTrashRemoval(
+                    action: "purge_expired",
+                    trashItem: item,
+                    metadata: ["cutoff": String(cutoff.timeIntervalSince1970)]
+                )
+            }
+
+            NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
+        }
     }
 
     // Internal for testing
@@ -788,36 +790,38 @@ final class TrashStorage {
     /// compatibility but is no longer used to scope the purge — SQLite is the
     /// source of truth.
     func purgeExpired(olderThan cutoff: Date, in trashDir: URL) {
-        let all = allTrashItems()
-        let expired = all.filter { $0.deletedAt < cutoff }
-        guard !expired.isEmpty else { return }
+        MutationAuditContext.withSource(.cleanup) {
+            let all = allTrashItems()
+            let expired = all.filter { $0.deletedAt < cutoff }
+            guard !expired.isEmpty else { return }
 
-        for item in expired {
-            let dir = resolveTrashDir(for: item)
-            deleteFilesForItem(item, trashDir: dir)
-        }
-
-        if let db = resolvedDatabase {
-            do {
-                try db.withTransaction {
-                    for item in expired {
-                        deleteTrashItemFromDatabase(db, trashItemID: item.id)
-                    }
-                }
-            } catch {
-                Self.logger.error("purgeExpired: SQLite batch delete failed: \(error.localizedDescription)")
+            for item in expired {
+                let dir = resolveTrashDir(for: item)
+                deleteFilesForItem(item, trashDir: dir)
             }
-        }
 
-        for item in expired {
-            recordTrashRemoval(
-                action: "purge_expired",
-                trashItem: item,
-                metadata: ["cutoff": String(cutoff.timeIntervalSince1970)]
-            )
-        }
+            if let db = resolvedDatabase {
+                do {
+                    try db.withTransaction {
+                        for item in expired {
+                            deleteTrashItemFromDatabase(db, trashItemID: item.id)
+                        }
+                    }
+                } catch {
+                    Self.logger.error("purgeExpired: SQLite batch delete failed: \(error.localizedDescription)")
+                }
+            }
 
-        NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
+            for item in expired {
+                recordTrashRemoval(
+                    action: "purge_expired",
+                    trashItem: item,
+                    metadata: ["cutoff": String(cutoff.timeIntervalSince1970)]
+                )
+            }
+
+            NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
+        }
     }
 
     // MARK: - Permanent Delete

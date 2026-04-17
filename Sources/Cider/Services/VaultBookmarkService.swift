@@ -966,19 +966,38 @@ final class VaultBookmarkService: ObservableObject {
     func assignLabel(_ bookmarkID: UUID, labelID: UUID) -> Bool {
         guard let idx = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
         guard !bookmarks[idx].labelIDs.contains(labelID) else { return true }
+        let before = MutationAuditSnapshots.bookmark(bookmarks[idx])
         bookmarks[idx].labelIDs.append(labelID)
         persist()
+        MutationAuditService.shared.record(
+            action: "assign_label",
+            itemType: "bookmark",
+            itemID: bookmarkID,
+            before: before,
+            after: MutationAuditSnapshots.bookmark(bookmarks[idx]),
+            metadata: ["labelID": labelID.uuidString]
+        )
         return true
     }
 
     @discardableResult
     func removeLabel(_ bookmarkID: UUID, labelID: UUID) -> Bool {
         guard let idx = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        guard bookmarks[idx].labelIDs.contains(labelID) else { return true }
+        let before = MutationAuditSnapshots.bookmark(bookmarks[idx])
         bookmarks[idx].labelIDs.removeAll { $0 == labelID }
         if !bookmarks[idx].dismissedLabelIDs.contains(labelID) {
             bookmarks[idx].dismissedLabelIDs.append(labelID)
         }
         persist()
+        MutationAuditService.shared.record(
+            action: "remove_label",
+            itemType: "bookmark",
+            itemID: bookmarkID,
+            before: before,
+            after: MutationAuditSnapshots.bookmark(bookmarks[idx]),
+            metadata: ["labelID": labelID.uuidString]
+        )
         return true
     }
 

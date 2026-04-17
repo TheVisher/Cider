@@ -561,6 +561,7 @@ enum MLXToolExecutor {
     }
 
     private static func applyTag(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let tagName = string("tagName", from: args)
         guard !tagName.isEmpty else { return "Tag name cannot be empty." }
@@ -585,9 +586,11 @@ enum MLXToolExecutor {
 
         if tagged.isEmpty { return "No untagged items found matching \"\(query)\"." }
         return "Tagged \(tagged.count) item(s) with \"\(label.name)\":\n" + tagged.joined(separator: "\n")
+        }
     }
 
     private static func removeTag(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let tagName = string("tagName", from: args)
 
@@ -616,6 +619,7 @@ enum MLXToolExecutor {
 
         if untagged.isEmpty { return "No items matching \"\(query)\" have the tag \"\(label.name)\"." }
         return "Removed tag \"\(label.name)\" from \(untagged.count) item(s):\n" + untagged.joined(separator: "\n")
+        }
     }
 
     private static func renameBookmark(_ args: [String: Any]) -> String {

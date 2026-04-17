@@ -968,6 +968,7 @@ final class NotesStorage: ObservableObject {
     func assignLabel(_ noteID: UUID, labelID: UUID) -> Bool {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
         guard !notes[idx].labelIDs.contains(labelID) else { return true }
+        let before = MutationAuditSnapshots.note(notes[idx])
         notes[idx].labelIDs.append(labelID)
         if var entry = index[noteID] {
             entry.labelIDs = notes[idx].labelIDs
@@ -975,12 +976,22 @@ final class NotesStorage: ObservableObject {
         }
         saveIndex()
         persistNoteToDatabase(notes[idx])
+        MutationAuditService.shared.record(
+            action: "assign_label",
+            itemType: "note",
+            itemID: noteID,
+            before: before,
+            after: MutationAuditSnapshots.note(notes[idx]),
+            metadata: ["labelID": labelID.uuidString]
+        )
         return true
     }
 
     @discardableResult
     func removeLabel(_ noteID: UUID, labelID: UUID) -> Bool {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        guard notes[idx].labelIDs.contains(labelID) else { return true }
+        let before = MutationAuditSnapshots.note(notes[idx])
         notes[idx].labelIDs.removeAll { $0 == labelID }
         if var entry = index[noteID] {
             entry.labelIDs = notes[idx].labelIDs
@@ -988,6 +999,14 @@ final class NotesStorage: ObservableObject {
         }
         saveIndex()
         persistNoteToDatabase(notes[idx])
+        MutationAuditService.shared.record(
+            action: "remove_label",
+            itemType: "note",
+            itemID: noteID,
+            before: before,
+            after: MutationAuditSnapshots.note(notes[idx]),
+            metadata: ["labelID": labelID.uuidString]
+        )
         return true
     }
 
