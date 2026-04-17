@@ -249,12 +249,18 @@ final class FoundationModelsProvider: AIAssistantProvider {
         - Use markdown formatting (bold, lists) for readability.
         """
 
+        instructions += "\n\n\(AgentRoutingInstructions.vaultSaveRoutingDoctrine)"
+
         let contextDesc = context.contextDescription
         if !contextDesc.isEmpty {
             instructions += "\n\nThe user is currently viewing:\n\(contextDesc)"
         }
 
         return instructions
+    }
+
+    func _buildInstructionsForTesting(context: AIAssistantContext) -> String {
+        buildInstructions(context: context)
     }
 }
 

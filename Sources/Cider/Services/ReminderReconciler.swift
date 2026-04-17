@@ -145,7 +145,8 @@ final class ReminderReconciler {
         let dateCards = DateCardStorage.shared.dateCards
         let todos = TodoCardStorage.shared.todoCards
         let config = CiderConfig.load()
-        let telegramRemindersEnabled = telegramReminderSchedulingEnabled()
+        let telegramConfig = loadTelegramConfiguration()
+        let telegramRemindersEnabled = telegramReminderSchedulingEnabled(telegramConfig)
         let agentRemindersEnabled = config.enableAgentReminders
         let calendar = Calendar.current
         let horizon = calendar.date(byAdding: .day, value: 14, to: now) ?? now.addingTimeInterval(14 * 24 * 60 * 60)
@@ -202,10 +203,19 @@ final class ReminderReconciler {
             }
         }
 
+        if let telegramConfig,
+           let telegramDigestFireDate = Self.nextTelegramDigestFireDate(
+                after: now,
+                configuration: telegramConfig,
+                calendar: calendar
+           ) {
+            earliest = minOptional(earliest, telegramDigestFireDate)
+        }
+
         return earliest
     }
 
-    private func telegramReminderSchedulingEnabled() -> Bool {
+    private func loadTelegramConfiguration() -> TelegramBridgeConfiguration? {
         let configURL = StoragePaths.cachedVaultDirectoryURL
             .appendingPathComponent(StoragePaths.ciderInternalDir)
             .appendingPathComponent("telegram")
@@ -214,9 +224,14 @@ final class ReminderReconciler {
         guard let data = try? Data(contentsOf: configURL),
               let config = try? JSONDecoder().decode(TelegramBridgeConfiguration.self, from: data)
         else {
-            return false
+            return nil
         }
 
+        return config
+    }
+
+    private func telegramReminderSchedulingEnabled(_ config: TelegramBridgeConfiguration?) -> Bool {
+        guard let config else { return false }
         return config.isEnabled && config.sendReminders && !config.allowedChatIDs.isEmpty
     }
 
@@ -228,5 +243,78 @@ final class ReminderReconciler {
     private func todoHasExplicitTime(_ date: Date) -> Bool {
         let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
         return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
+    }
+
+    static func nextTelegramDigestFireDate(
+        after now: Date,
+        configuration: TelegramBridgeConfiguration,
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard configuration.isEnabled, !configuration.allowedChatIDs.isEmpty else { return nil }
+
+        let daily = nextDailyDigestFireDate(after: now, configuration: configuration, calendar: calendar)
+        let weekly = nextWeeklyDigestFireDate(after: now, configuration: configuration, calendar: calendar)
+
+        switch (daily, weekly) {
+        case let (lhs?, rhs?):
+            return min(lhs, rhs)
+        case let (lhs?, nil):
+            return lhs
+        case let (nil, rhs?):
+            return rhs
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private static func nextDailyDigestFireDate(
+        after now: Date,
+        configuration: TelegramBridgeConfiguration,
+        calendar: Calendar
+    ) -> Date? {
+        guard configuration.sendDailyDigest else { return nil }
+
+        let hour = min(max(configuration.dailyDigestHour, 0), 23)
+        var day = calendar.startOfDay(for: now)
+
+        for _ in 0..<8 {
+            let weekday = calendar.component(.weekday, from: day)
+            if !configuration.dailyDigestWeekdaysOnly || (2...6).contains(weekday) {
+                if let candidate = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day),
+                   candidate > now {
+                    return candidate
+                }
+            }
+
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = nextDay
+        }
+
+        return nil
+    }
+
+    private static func nextWeeklyDigestFireDate(
+        after now: Date,
+        configuration: TelegramBridgeConfiguration,
+        calendar: Calendar
+    ) -> Date? {
+        guard configuration.sendWeeklyDigest else { return nil }
+
+        let weeklyHour = 8
+        var day = calendar.startOfDay(for: now)
+
+        for _ in 0..<14 {
+            let weekday = calendar.component(.weekday, from: day)
+            if weekday == 2,
+               let candidate = calendar.date(bySettingHour: weeklyHour, minute: 0, second: 0, of: day),
+               candidate > now {
+                return candidate
+            }
+
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = nextDay
+        }
+
+        return nil
     }
 }

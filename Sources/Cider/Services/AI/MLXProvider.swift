@@ -278,11 +278,17 @@ final class MLXProvider: AIAssistantProvider {
         - Do NOT include raw JSON in your final response to the user.
         """
 
+        prompt += "\n\n\(AgentRoutingInstructions.vaultSaveRoutingDoctrine)"
+
         let contextDesc = context.contextDescription
         if !contextDesc.isEmpty {
             prompt += "\n\nThe user is currently viewing:\n\(contextDesc)"
         }
 
         return prompt
+    }
+
+    func _buildSystemPromptForTesting(context: AIAssistantContext) -> String {
+        buildSystemPrompt(context: context)
     }
 }
