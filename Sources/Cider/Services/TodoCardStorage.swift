@@ -229,6 +229,12 @@ final class TodoCardStorage: ObservableObject {
         todoCards.append(todoCard)
         sortCards()
         persistTodoToDatabase(todoCard)
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "todo",
+            itemID: todoCard.id,
+            after: MutationAuditSnapshots.todo(todoCard)
+        )
         return todoCard
     }
 
@@ -258,6 +264,8 @@ final class TodoCardStorage: ObservableObject {
     @discardableResult
     func updateTodoCard(_ updated: TodoCard) -> Bool {
         guard let idx = todoCards.firstIndex(where: { $0.id == updated.id }) else { return false }
+        let beforeCard = todoCards[idx]
+        let before = MutationAuditSnapshots.todo(beforeCard)
         var copy = updated
         copy.updatedAt = Date()
 
@@ -294,12 +302,22 @@ final class TodoCardStorage: ObservableObject {
         saveIndex()
         sortCards()
         persistTodoToDatabase(copy)
+        if beforeCard.title != copy.title {
+            MutationAuditService.shared.record(
+                action: "rename",
+                itemType: "todo",
+                itemID: copy.id,
+                before: before,
+                after: MutationAuditSnapshots.todo(copy)
+            )
+        }
         return true
     }
 
     @discardableResult
     func deleteTodoCard(_ id: UUID) -> TrashItem? {
         guard let todoCard = todoCards.first(where: { $0.id == id }) else { return nil }
+        let before = MutationAuditSnapshots.todo(todoCard)
 
         let icsFileURL = resolveFileURL(for: id)
         let trashItem = TrashStorage.shared.trashTodoCard(
@@ -312,6 +330,13 @@ final class TodoCardStorage: ObservableObject {
         index.removeValue(forKey: id)
         saveIndex()
         deleteTodoFromDatabase(id)
+        MutationAuditService.shared.record(
+            action: "delete",
+            itemType: "todo",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.trashItem(trashItem)
+        )
         return trashItem
     }
 
@@ -372,6 +397,7 @@ final class TodoCardStorage: ObservableObject {
         guard todoCards[idx].folderID != folderID else { return true }
 
         let todoCard = todoCards[idx]
+        let before = MutationAuditSnapshots.todo(todoCard)
         guard let entry = index[id] else { return false }
 
         let oldDirURL = resolveDirectoryURL(folderID: todoCard.folderID)
@@ -400,6 +426,13 @@ final class TodoCardStorage: ObservableObject {
         index[id] = updatedEntry
         saveIndex()
         persistTodoToDatabase(todoCards[idx])
+        MutationAuditService.shared.record(
+            action: "reassign_folder",
+            itemType: "todo",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.todo(todoCards[idx])
+        )
         return true
     }
 
@@ -497,6 +530,20 @@ final class TodoCardStorage: ObservableObject {
         todoCards.append(todoCard)
         sortCards()
         persistTodoToDatabase(todoCard)
+        MutationAuditService.shared.record(
+            action: "restore",
+            itemType: "todo",
+            itemID: todoCard.id,
+            before: MutationAuditSnapshots.trashItem(
+                TrashItem(
+                    itemID: todoCard.id,
+                    itemType: .todo,
+                    title: todoCard.title,
+                    originalFolderID: todoCard.folderID
+                )
+            ),
+            after: MutationAuditSnapshots.todo(todoCard)
+        )
     }
 
     // MARK: - File I/O

@@ -45,6 +45,10 @@ final class TrashStorage {
         database ?? (CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil)
     }
 
+    private var resolvedAuditService: MutationAuditService {
+        MutationAuditService(database: resolvedDatabase)
+    }
+
     private init() {}
 
     /// Testing-only initializer with an explicit database.
@@ -591,6 +595,7 @@ final class TrashStorage {
         let trashDir = vaultFilesTrashDir
         let fm = FileManager.default
         try? fm.createDirectory(at: trashDir, withIntermediateDirectories: true)
+        let before = MutationAuditSnapshots.vaultFile(file)
 
         var trashFilename: String?
         if fm.fileExists(atPath: file.absoluteURL.path) {
@@ -611,6 +616,13 @@ final class TrashStorage {
         addToManifest(trashItem, trashDir: trashDir)
         VaultFileStorage.shared.removeMetadata(for: file.id)
         VaultFileService.shared.scan()
+        resolvedAuditService.record(
+            action: "delete",
+            itemType: "vaultFile",
+            itemID: file.id,
+            before: before,
+            after: MutationAuditSnapshots.trashItem(trashItem)
+        )
         return trashItem
     }
 
@@ -689,6 +701,13 @@ final class TrashStorage {
         removeFromManifest(trashItem.id, trashDir: trashDir)
         VaultFileStorage.shared.restoreMetadata(from: payload.vaultFile)
         VaultFileService.shared.scan()
+        resolvedAuditService.record(
+            action: "restore",
+            itemType: "vaultFile",
+            itemID: payload.vaultFile.id,
+            before: MutationAuditSnapshots.trashItem(trashItem),
+            after: MutationAuditSnapshots.vaultFile(payload.vaultFile)
+        )
     }
 
     // MARK: - Generic Restore
@@ -752,6 +771,14 @@ final class TrashStorage {
             }
         }
 
+        for item in expired {
+            recordTrashRemoval(
+                action: "purge_expired",
+                trashItem: item,
+                metadata: ["cutoff": String(cutoff.timeIntervalSince1970)]
+            )
+        }
+
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
@@ -782,6 +809,14 @@ final class TrashStorage {
             }
         }
 
+        for item in expired {
+            recordTrashRemoval(
+                action: "purge_expired",
+                trashItem: item,
+                metadata: ["cutoff": String(cutoff.timeIntervalSince1970)]
+            )
+        }
+
         NotificationCenter.default.post(name: .trashContentsChanged, object: nil)
     }
 
@@ -793,10 +828,12 @@ final class TrashStorage {
             let trashDir = resolveTrashDir(for: trashItem)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         case .note:
             let trashDir = resolveTrashDir(for: trashItem)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         case .folder:
             for content in trashItem.folderContents ?? [] {
                 permanentlyDelete(content)
@@ -805,10 +842,12 @@ final class TrashStorage {
             let trashDir = StoragePaths.directoryURL(for: .dateCards).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         case .todo:
             let trashDir = StoragePaths.directoryURL(for: .todos).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         case .contact:
             let trashDir = StoragePaths.directoryURL(for: .contacts).appendingPathComponent(trashDirName)
             deleteFilesForItem(trashItem, trashDir: trashDir)
@@ -822,6 +861,7 @@ final class TrashStorage {
                 }
             }
             removeFromManifest(trashItem.id, trashDir: trashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         case .vaultFolder:
             // Vault folder trash is managed by VaultFolderService
             if let payload = trashItem.vaultFolderPayload {
@@ -830,17 +870,20 @@ final class TrashStorage {
                 let trashFolderURL = trashDir.appendingPathComponent(payload.folder.id.uuidString)
                 try? FileManager.default.removeItem(at: trashFolderURL)
                 removeFromManifest(trashItem.id, trashDir: trashDir)
+                recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
             }
         case .session:
             break // Sessions feature removed
         case .kanbanBoard:
             let trashDir = StoragePaths.directoryURL(for: .kanbanBoards).appendingPathComponent(trashDirName)
             removeFromManifest(trashItem.id, trashDir: trashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         case .vaultFile:
             if let payload = trashItem.vaultFilePayload, let trashFilename = payload.trashFilename {
                 try? FileManager.default.removeItem(at: vaultFilesTrashDir.appendingPathComponent(trashFilename))
             }
             removeFromManifest(trashItem.id, trashDir: vaultFilesTrashDir)
+            recordTrashRemoval(action: "permanently_delete", trashItem: trashItem)
         }
     }
 
@@ -858,6 +901,10 @@ final class TrashStorage {
         deleteAllTrashItemsFromDatabase()
         // Clear any pending undo action that references trashed items — prevents ghost restores
         CiderUndoManager.shared.discard()
+
+        for item in items {
+            recordTrashRemoval(action: "empty_trash_delete", trashItem: item)
+        }
     }
 
     // MARK: - Private Helpers
@@ -970,6 +1017,23 @@ final class TrashStorage {
                 try? fm.removeItem(at: trashDir.appendingPathComponent(trashFilename))
             }
         }
+    }
+
+    private func recordTrashRemoval(
+        action: String,
+        trashItem: TrashItem,
+        metadata: [String: String] = [:]
+    ) {
+        var finalMetadata = metadata
+        finalMetadata["trashItemID"] = trashItem.id.uuidString
+        resolvedAuditService.record(
+            action: action,
+            itemType: trashItem.itemType.rawValue,
+            itemID: trashItem.itemID,
+            before: MutationAuditSnapshots.trashItem(trashItem),
+            after: ["state": "removed_from_trash"],
+            metadata: finalMetadata
+        )
     }
 
     // Task 13: Per-directory JSON trash manifests removed. SQLite `trash` table

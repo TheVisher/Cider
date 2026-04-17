@@ -634,6 +634,12 @@ final class VaultBookmarkService: ObservableObject {
 
         bookmarks.insert(bookmark, at: 0)
         persist()
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "bookmark",
+            itemID: bookmark.id,
+            after: MutationAuditSnapshots.bookmark(bookmark)
+        )
         startEnrichmentIfNeeded(for: bookmark.id)
         return bookmark
     }
@@ -657,6 +663,12 @@ final class VaultBookmarkService: ObservableObject {
 
         bookmarks.insert(bookmark, at: 0)
         persist()
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "bookmark",
+            itemID: bookmark.id,
+            after: MutationAuditSnapshots.bookmark(bookmark)
+        )
         return bookmark
     }
 
@@ -681,6 +693,7 @@ final class VaultBookmarkService: ObservableObject {
 
     @discardableResult
     func remove(_ bookmark: Bookmark) -> TrashItem {
+        let before = MutationAuditSnapshots.bookmark(bookmark)
         cancelEnrichment(for: bookmark.id)
         SyncService.shared.trackDeletion(of: bookmark.id)
         // Track deleted URL so adoption doesn't re-adopt duplicate files
@@ -693,12 +706,20 @@ final class VaultBookmarkService: ObservableObject {
         bookmarks.removeAll { $0.id == bookmark.id }
         deleteBookmarkFromDatabase(bookmark.id)
         persist()
+        MutationAuditService.shared.record(
+            action: "delete",
+            itemType: "bookmark",
+            itemID: bookmark.id,
+            before: before,
+            after: MutationAuditSnapshots.trashItem(trashItem)
+        )
         return trashItem
     }
 
     @discardableResult
     func removeAll(_ bookmarksToDelete: [Bookmark]) -> [TrashItem] {
         var trashItems: [TrashItem] = []
+        var deletedPairs: [(Bookmark, TrashItem)] = []
         for bookmark in bookmarksToDelete {
             cancelEnrichment(for: bookmark.id)
             SyncService.shared.trackDeletion(of: bookmark.id)
@@ -709,6 +730,7 @@ final class VaultBookmarkService: ObservableObject {
             let item = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
             deleteWeblocFileOnly(for: bookmark)
             trashItems.append(item)
+            deletedPairs.append((bookmark, item))
         }
         let ids = Set(bookmarksToDelete.map(\.id))
         bookmarks.removeAll { ids.contains($0.id) }
@@ -716,6 +738,15 @@ final class VaultBookmarkService: ObservableObject {
             deleteBookmarkFromDatabase(id)
         }
         persist()
+        for (bookmark, trashItem) in deletedPairs {
+            MutationAuditService.shared.record(
+                action: "delete",
+                itemType: "bookmark",
+                itemID: bookmark.id,
+                before: MutationAuditSnapshots.bookmark(bookmark),
+                after: MutationAuditSnapshots.trashItem(trashItem)
+            )
+        }
         return trashItems
     }
 
@@ -763,6 +794,20 @@ final class VaultBookmarkService: ObservableObject {
 
         bookmarks.insert(restored, at: 0)
         persist()
+        MutationAuditService.shared.record(
+            action: "restore",
+            itemType: "bookmark",
+            itemID: restored.id,
+            before: MutationAuditSnapshots.trashItem(
+                TrashItem(
+                    itemID: restored.id,
+                    itemType: .bookmark,
+                    title: restored.title,
+                    originalFolderID: restored.folderID
+                )
+            ),
+            after: MutationAuditSnapshots.bookmark(restored)
+        )
     }
 
     // MARK: - Update Details
@@ -779,6 +824,8 @@ final class VaultBookmarkService: ObservableObject {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
 
         var bookmark = bookmarks[index]
+        let before = MutationAuditSnapshots.bookmark(bookmark)
+        let oldTitle = bookmark.title
         let resolvedURL = URL(string: bookmark.urlString)
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedTitleValue: String
@@ -815,6 +862,15 @@ final class VaultBookmarkService: ObservableObject {
             bookmark.updatedAt = Date()
             bookmarks[index] = bookmark
             persist()
+            if oldTitle != bookmark.title {
+                MutationAuditService.shared.record(
+                    action: "rename",
+                    itemType: "bookmark",
+                    itemID: bookmarkID,
+                    before: before,
+                    after: MutationAuditSnapshots.bookmark(bookmark)
+                )
+            }
         }
 
         return true
@@ -865,6 +921,7 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         let bookmark = bookmarks[index]
+        let before = MutationAuditSnapshots.bookmark(bookmark)
 
         // PHYSICALLY MOVE the .webloc file
         if let relativePath = bookmark.relativePath, !relativePath.isEmpty {
@@ -893,6 +950,13 @@ final class VaultBookmarkService: ObservableObject {
         bookmarks[index].folderID = folderID
         bookmarks[index].updatedAt = Date()
         persist()
+        MutationAuditService.shared.record(
+            action: "reassign_folder",
+            itemType: "bookmark",
+            itemID: bookmarkID,
+            before: before,
+            after: MutationAuditSnapshots.bookmark(bookmarks[index])
+        )
         return true
     }
 
@@ -1030,21 +1094,42 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     func removeSynced(_ bookmark: Bookmark) {
-        cancelEnrichment(for: bookmark.id)
-        deleteWeblocFile(for: bookmark)
-        bookmarks.removeAll { $0.id == bookmark.id }
-        deleteBookmarkFromDatabase(bookmark.id)
-        persist()
+        MutationAuditContext.withSource(.cleanup) {
+            let before = MutationAuditSnapshots.bookmark(bookmark)
+            cancelEnrichment(for: bookmark.id)
+            deleteWeblocFile(for: bookmark)
+            bookmarks.removeAll { $0.id == bookmark.id }
+            deleteBookmarkFromDatabase(bookmark.id)
+            persist()
+            MutationAuditService.shared.record(
+                action: "delete",
+                itemType: "bookmark",
+                itemID: bookmark.id,
+                before: before,
+                after: ["state": "removed_by_sync"],
+                metadata: ["reason": "sync_remove"]
+            )
+        }
     }
 
     func trashFromSync(_ bookmark: Bookmark) {
-        cancelEnrichment(for: bookmark.id)
-        let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
-        _ = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
-        deleteWeblocFile(for: bookmark)
-        bookmarks.removeAll { $0.id == bookmark.id }
-        deleteBookmarkFromDatabase(bookmark.id)
-        persist()
+        MutationAuditContext.withSource(.cleanup) {
+            cancelEnrichment(for: bookmark.id)
+            let (bookmarkDir, _) = resolveBookmarkDirectory(bookmark.folderID)
+            let trashItem = TrashStorage.shared.trashBookmark(bookmark, bookmarksDir: bookmarkDir, bookmarksMetaDir: bookmarksMetaDir)
+            deleteWeblocFile(for: bookmark)
+            bookmarks.removeAll { $0.id == bookmark.id }
+            deleteBookmarkFromDatabase(bookmark.id)
+            persist()
+            MutationAuditService.shared.record(
+                action: "delete",
+                itemType: "bookmark",
+                itemID: bookmark.id,
+                before: MutationAuditSnapshots.bookmark(bookmark),
+                after: MutationAuditSnapshots.trashItem(trashItem),
+                metadata: ["reason": "sync_trash"]
+            )
+        }
     }
 
     // MARK: - Import/Export

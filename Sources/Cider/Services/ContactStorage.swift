@@ -213,12 +213,20 @@ final class ContactStorage: ObservableObject {
         contacts.append(contact)
         sortContacts()
         persistContactToDatabase(contact)
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "contact",
+            itemID: contact.id,
+            after: MutationAuditSnapshots.contact(contact)
+        )
         return contact
     }
 
     @discardableResult
     func updateContact(_ updated: ContactCard) -> Bool {
         guard let idx = contacts.firstIndex(where: { $0.id == updated.id }) else { return false }
+        let beforeContact = contacts[idx]
+        let before = MutationAuditSnapshots.contact(beforeContact)
         var copy = updated
         copy.updatedAt = Date()
 
@@ -256,12 +264,22 @@ final class ContactStorage: ObservableObject {
         saveIndex()
         sortContacts()
         persistContactToDatabase(copy)
+        if beforeContact.displayName != copy.displayName {
+            MutationAuditService.shared.record(
+                action: "rename",
+                itemType: "contact",
+                itemID: copy.id,
+                before: before,
+                after: MutationAuditSnapshots.contact(copy)
+            )
+        }
         return true
     }
 
     @discardableResult
     func deleteContact(_ id: UUID) -> TrashItem? {
         guard let contact = contacts.first(where: { $0.id == id }) else { return nil }
+        let before = MutationAuditSnapshots.contact(contact)
 
         // Resolve the .vcf file URL so TrashStorage can move it
         let vcfFileURL = resolveFileURL(for: id)
@@ -275,6 +293,13 @@ final class ContactStorage: ObservableObject {
         index.removeValue(forKey: id)
         saveIndex()
         deleteContactFromDatabase(id)
+        MutationAuditService.shared.record(
+            action: "delete",
+            itemType: "contact",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.trashItem(trashItem)
+        )
         return trashItem
     }
 
@@ -284,6 +309,7 @@ final class ContactStorage: ObservableObject {
         guard contacts[idx].folderID != folderID else { return true }
 
         let contact = contacts[idx]
+        let before = MutationAuditSnapshots.contact(contact)
         guard let entry = index[id] else { return false }
         let filename = entry.filename
 
@@ -315,6 +341,13 @@ final class ContactStorage: ObservableObject {
         index[id] = updatedEntry
         saveIndex()
         persistContactToDatabase(contacts[idx])
+        MutationAuditService.shared.record(
+            action: "reassign_folder",
+            itemType: "contact",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.contact(contacts[idx])
+        )
         return true
     }
 
@@ -405,6 +438,20 @@ final class ContactStorage: ObservableObject {
         contacts.append(contact)
         sortContacts()
         persistContactToDatabase(contact)
+        MutationAuditService.shared.record(
+            action: "restore",
+            itemType: "contact",
+            itemID: contact.id,
+            before: MutationAuditSnapshots.trashItem(
+                TrashItem(
+                    itemID: contact.id,
+                    itemType: .contact,
+                    title: contact.displayName,
+                    originalFolderID: contact.folderID
+                )
+            ),
+            after: MutationAuditSnapshots.contact(contact)
+        )
     }
 
     // MARK: - Avatar Storage

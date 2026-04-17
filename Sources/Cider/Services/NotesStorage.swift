@@ -645,6 +645,12 @@ final class NotesStorage: ObservableObject {
         let note = Note(id: uuid, title: title, content: initialContent, createdAt: now, modifiedAt: now, relativePath: inboxRelativePath)
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "note",
+            itemID: note.id,
+            after: MutationAuditSnapshots.note(note)
+        )
         return note
     }
 
@@ -728,6 +734,13 @@ final class NotesStorage: ObservableObject {
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "note",
+            itemID: note.id,
+            after: MutationAuditSnapshots.note(note),
+            metadata: sourceURL.map { ["sourceURL": $0] }
+        )
         return note
     }
 
@@ -801,6 +814,7 @@ final class NotesStorage: ObservableObject {
     }
 
     func rename(note: Note, to newTitle: String) {
+        let before = MutationAuditSnapshots.note(note)
         let sanitized = newTitle.replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
         guard !sanitized.isEmpty else { return }
@@ -838,6 +852,13 @@ final class NotesStorage: ObservableObject {
                 notes[idx].relativePath = newRelativePath
                 notes[idx].modifiedAt = Date()
                 persistNoteToDatabase(notes[idx])
+                MutationAuditService.shared.record(
+                    action: "rename",
+                    itemType: "note",
+                    itemID: note.id,
+                    before: before,
+                    after: MutationAuditSnapshots.note(notes[idx])
+                )
             }
             SyncService.shared.pushAfterLocalChange()
         } catch {
@@ -873,6 +894,7 @@ final class NotesStorage: ObservableObject {
         guard notes[idx].folderID != folderID else { return true }
 
         let note = notes[idx]
+        let before = MutationAuditSnapshots.note(note)
         let filename = (note.relativePath as NSString).lastPathComponent
         let oldFileURL = noteFileURL(for: note)
 
@@ -931,6 +953,13 @@ final class NotesStorage: ObservableObject {
         }
         saveIndex()
         persistNoteToDatabase(notes[idx])
+        MutationAuditService.shared.record(
+            action: "reassign_folder",
+            itemType: "note",
+            itemID: noteID,
+            before: before,
+            after: MutationAuditSnapshots.note(notes[idx])
+        )
         SyncService.shared.pushAfterLocalChange()
         return true
     }
@@ -1021,6 +1050,7 @@ final class NotesStorage: ObservableObject {
 
     @discardableResult
     func delete(note: Note, trackSync: Bool = true) -> TrashItem {
+        let before = MutationAuditSnapshots.note(note)
         contentCache.removeValue(forKey: note.id)
 
         // For notes in vault/Inbox folders, move the file to Inbox/Notes/ first so trash works correctly
@@ -1068,6 +1098,14 @@ final class NotesStorage: ObservableObject {
                 SyncService.shared.trackNoteDeletion(of: note.id)
             }
         }
+
+        MutationAuditService.shared.record(
+            action: "delete",
+            itemType: "note",
+            itemID: note.id,
+            before: before,
+            after: MutationAuditSnapshots.trashItem(trashItem)
+        )
 
         return trashItem
     }
@@ -1203,8 +1241,10 @@ final class NotesStorage: ObservableObject {
     /// Routes through TrashStorage so the note can be recovered locally.
     /// Does NOT re-report to SyncService to avoid deletion ping-pong.
     func deleteFromSync(_ note: Note) {
-        contentCache.removeValue(forKey: note.id)
-        let _ = delete(note: note, trackSync: false)
+        MutationAuditContext.withSource(.cleanup) {
+            contentCache.removeValue(forKey: note.id)
+            let _ = delete(note: note, trackSync: false)
+        }
     }
 
     func restoreFromTrash(noteID: UUID, filename: String, folderID: UUID?, createdAt: Date) {
@@ -1218,6 +1258,17 @@ final class NotesStorage: ObservableObject {
         // Persist restored note to the database
         if let restoredNote = notes.first(where: { $0.id == noteID }) {
             persistNoteToDatabase(restoredNote)
+            var before: [String: String] = ["trashFilename": filename]
+            if let folderID {
+                before["folderID"] = folderID.uuidString
+            }
+            MutationAuditService.shared.record(
+                action: "restore",
+                itemType: "note",
+                itemID: noteID,
+                before: before,
+                after: MutationAuditSnapshots.note(restoredNote)
+            )
         }
         // Cancel pending sync deletion and push so the note reappears on web
         SyncService.shared.cancelNoteDeletion(of: noteID)

@@ -222,6 +222,20 @@ enum CiderSchema {
         );
         """
 
+    static let createMutationAudit = """
+        CREATE TABLE IF NOT EXISTS mutation_audit (
+            id           TEXT PRIMARY KEY,
+            occurred_at  REAL NOT NULL,
+            item_type    TEXT NOT NULL,
+            item_id      TEXT NOT NULL,
+            action       TEXT NOT NULL,
+            source       TEXT NOT NULL,
+            before_state TEXT,
+            after_state  TEXT,
+            metadata     TEXT
+        );
+        """
+
     // MARK: - Indexes
 
     static let createIndexes: [String] = [
@@ -237,6 +251,8 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_enrich  ON bookmarks(enrichment_status);",
         "CREATE INDEX IF NOT EXISTS idx_todos_completed   ON todos(is_completed);",
         "CREATE INDEX IF NOT EXISTS idx_events_start      ON events(start_at);",
+        "CREATE INDEX IF NOT EXISTS idx_mutation_audit_time ON mutation_audit(occurred_at);",
+        "CREATE INDEX IF NOT EXISTS idx_mutation_audit_item ON mutation_audit(item_type, item_id, occurred_at);",
     ]
 
     // MARK: - All Tables in Dependency Order
@@ -259,6 +275,7 @@ enum CiderSchema {
         createItemTags,
         createItemLinks,
         createTrash,
+        createMutationAudit,
         createSchemaMigrations,
     ]
 }

@@ -217,12 +217,20 @@ final class DateCardStorage: ObservableObject {
         dateCards.append(dateCard)
         sortCards()
         persistEventToDatabase(dateCard)
+        MutationAuditService.shared.record(
+            action: "create",
+            itemType: "dateCard",
+            itemID: dateCard.id,
+            after: MutationAuditSnapshots.dateCard(dateCard)
+        )
         return dateCard
     }
 
     @discardableResult
     func updateDateCard(_ updated: DateCard) -> Bool {
         guard let idx = dateCards.firstIndex(where: { $0.id == updated.id }) else { return false }
+        let beforeCard = dateCards[idx]
+        let before = MutationAuditSnapshots.dateCard(beforeCard)
         var copy = updated
         copy.updatedAt = Date()
 
@@ -258,12 +266,41 @@ final class DateCardStorage: ObservableObject {
         saveIndex()
         sortCards()
         persistEventToDatabase(copy)
+        if beforeCard.title != copy.title {
+            MutationAuditService.shared.record(
+                action: "rename",
+                itemType: "dateCard",
+                itemID: copy.id,
+                before: before,
+                after: MutationAuditSnapshots.dateCard(copy)
+            )
+        }
+        let beforeHasReminder = beforeCard.rules.contains { $0.type == .remindBeforeMinutes && $0.isEnabled }
+        let afterHasReminder = copy.rules.contains { $0.type == .remindBeforeMinutes && $0.isEnabled }
+        if !beforeHasReminder && afterHasReminder {
+            MutationAuditService.shared.record(
+                action: "create_reminder",
+                itemType: "dateCard",
+                itemID: copy.id,
+                before: before,
+                after: MutationAuditSnapshots.dateCard(copy)
+            )
+        } else if beforeHasReminder && !afterHasReminder {
+            MutationAuditService.shared.record(
+                action: "cancel_reminder",
+                itemType: "dateCard",
+                itemID: copy.id,
+                before: before,
+                after: MutationAuditSnapshots.dateCard(copy)
+            )
+        }
         return true
     }
 
     @discardableResult
     func deleteDateCard(_ id: UUID) -> TrashItem? {
         guard let dateCard = dateCards.first(where: { $0.id == id }) else { return nil }
+        let before = MutationAuditSnapshots.dateCard(dateCard)
 
         let icsFileURL = resolveFileURL(for: id)
         let trashItem = TrashStorage.shared.trashDateCard(
@@ -276,6 +313,13 @@ final class DateCardStorage: ObservableObject {
         index.removeValue(forKey: id)
         saveIndex()
         deleteEventFromDatabase(id)
+        MutationAuditService.shared.record(
+            action: "delete",
+            itemType: "dateCard",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.trashItem(trashItem)
+        )
         return trashItem
     }
 
@@ -295,6 +339,7 @@ final class DateCardStorage: ObservableObject {
         guard dateCards[idx].folderID != folderID else { return true }
 
         let dateCard = dateCards[idx]
+        let before = MutationAuditSnapshots.dateCard(dateCard)
         guard let entry = index[id] else { return false }
 
         let oldDirURL = resolveDirectoryURL(folderID: dateCard.folderID)
@@ -323,6 +368,13 @@ final class DateCardStorage: ObservableObject {
         index[id] = updatedEntry
         saveIndex()
         persistEventToDatabase(dateCards[idx])
+        MutationAuditService.shared.record(
+            action: "reassign_folder",
+            itemType: "dateCard",
+            itemID: id,
+            before: before,
+            after: MutationAuditSnapshots.dateCard(dateCards[idx])
+        )
         return true
     }
 
@@ -420,6 +472,20 @@ final class DateCardStorage: ObservableObject {
         dateCards.append(dateCard)
         sortCards()
         persistEventToDatabase(dateCard)
+        MutationAuditService.shared.record(
+            action: "restore",
+            itemType: "dateCard",
+            itemID: dateCard.id,
+            before: MutationAuditSnapshots.trashItem(
+                TrashItem(
+                    itemID: dateCard.id,
+                    itemType: .dateCard,
+                    title: dateCard.title,
+                    originalFolderID: dateCard.folderID
+                )
+            ),
+            after: MutationAuditSnapshots.dateCard(dateCard)
+        )
     }
 
     // MARK: - File I/O

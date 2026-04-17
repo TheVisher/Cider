@@ -597,6 +597,7 @@ struct TrashSQLiteTests {
         defer { db.close(); cleanup(url) }
 
         let service = makeService(db)
+        let audit = MutationAuditService(database: db)
 
         // Build a temp trash dir with a manifest containing one expired + one fresh item.
         let tmpTrashDir = FileManager.default.temporaryDirectory
@@ -631,5 +632,35 @@ struct TrashSQLiteTests {
         let remaining = service.loadTrashItemsFromDatabase(db)
         #expect(remaining.count == 1)
         #expect(remaining.first?.title == "Fresh")
+
+        let entries = audit.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries[0].action == "purge_expired")
+        #expect(entries[0].itemID == expiredItem.itemID)
+    }
+
+    @Test("permanentlyDelete removes row and records an audit entry")
+    func permanentlyDeleteRecordsAuditEntry() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+        let audit = MutationAuditService(database: db)
+        let item = makeBookmarkTrashItem(
+            bookmark: makeBookmark(title: "Disposable"),
+            deletedAt: Date(timeIntervalSince1970: 1_700_000_111)
+        )
+
+        service.persistTrashItemToDatabase(db, item: item)
+        #expect(service.loadTrashItemsFromDatabase(db).count == 1)
+
+        service.permanentlyDelete(item)
+
+        #expect(service.loadTrashItemsFromDatabase(db).isEmpty)
+        let entries = audit.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries[0].action == "permanently_delete")
+        #expect(entries[0].itemID == item.itemID)
+        #expect(entries[0].beforeState["trashItemID"] == item.id.uuidString)
     }
 }
