@@ -117,25 +117,40 @@ actor TelegramBridge: ChannelBridge {
 
     func processReminders() async {
         loadConfiguration()
-        guard configuration.isEnabled, configuration.sendReminders, !configuration.allowedChatIDs.isEmpty else {
+        let shouldProcessReminders = configuration.sendReminders
+        let shouldProcessDigests = configuration.sendDailyDigest || configuration.sendWeeklyDigest
+        guard configuration.isEnabled, !configuration.allowedChatIDs.isEmpty, shouldProcessReminders || shouldProcessDigests else {
             return
         }
 
-        let (dateCards, todos) = await MainActor.run {
-            (DateCardStorage.shared.dateCards, TodoCardStorage.shared.todoCards)
+        let (dateCards, todos, bookmarks, notes) = await MainActor.run {
+            (
+                DateCardStorage.shared.dateCards,
+                TodoCardStorage.shared.todoCards,
+                VaultBookmarkService.shared.bookmarks,
+                NotesStorage.shared.notes
+            )
         }
         let now = Date()
 
-        for card in dateCards {
-            await processReminder(card, now: now)
-        }
+        if configuration.sendReminders {
+            for card in dateCards {
+                await processReminder(card, now: now)
+            }
 
-        for todo in todos {
-            await processTodoReminder(todo, now: now)
+            for todo in todos {
+                await processTodoReminder(todo, now: now)
+            }
         }
 
         if configuration.sendDailyDigest {
-            await processDailyDigest(dateCards: dateCards, now: now)
+            await processDailyDigest(
+                dateCards: dateCards,
+                todos: todos,
+                bookmarks: bookmarks,
+                notes: notes,
+                now: now
+            )
         }
 
         if configuration.sendWeeklyDigest {
@@ -717,40 +732,64 @@ actor TelegramBridge: ChannelBridge {
         }
     }
 
-    private func processDailyDigest(dateCards: [DateCard], now: Date) async {
+    private func processDailyDigest(
+        dateCards: [DateCard],
+        todos: [TodoCard],
+        bookmarks: [Bookmark],
+        notes: [Note],
+        now: Date
+    ) async {
         let calendar = Calendar.current
-        let digestHour = 8
+        let digestHour = min(max(configuration.dailyDigestHour, 0), 23)
         let currentHour = calendar.component(.hour, from: now)
         guard currentHour >= digestHour else { return }
+        if configuration.dailyDigestWeekdaysOnly {
+            let weekday = calendar.component(.weekday, from: now)
+            guard (2...6).contains(weekday) else { return }
+        }
 
         let dayKey = dayDigestKey(for: now)
         guard !state.deliveredDailyDigestKeys.contains(dayKey) else { return }
 
-        let startOfToday = calendar.startOfDay(for: now)
-        guard let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) else { return }
-
-        let dueToday = upcomingOccurrences(
-            for: dateCards,
-            from: startOfToday,
-            to: startOfTomorrow.addingTimeInterval(-1),
-            now: now
+        state.resurfacedItemDates = DailyVaultReminderService.pruneResurfacedHistory(
+            state.resurfacedItemDates,
+            now: now,
+            config: DailyVaultReminderService.Config(
+                resurfacingItemCount: configuration.dailyDigestResurfaceCount,
+                resurfacingMinAgeDays: configuration.dailyDigestResurfaceMinAgeDays,
+                resurfacingCooldownDays: configuration.dailyDigestResurfaceCooldownDays
+            )
         )
 
-        guard !dueToday.isEmpty else {
+        guard let reminder = DailyVaultReminderService.buildReminder(
+            now: now,
+            dateCards: dateCards,
+            todos: todos,
+            bookmarks: bookmarks,
+            notes: notes,
+            resurfacedAt: state.resurfacedItemDates,
+            config: DailyVaultReminderService.Config(
+                resurfacingItemCount: configuration.dailyDigestResurfaceCount,
+                resurfacingMinAgeDays: configuration.dailyDigestResurfaceMinAgeDays,
+                resurfacingCooldownDays: configuration.dailyDigestResurfaceCooldownDays
+            )
+        ) else {
             state.deliveredDailyDigestKeys.insert(dayKey)
             return
         }
 
-        let message = dailyDigestMessage(for: dueToday, now: now)
         for chatID in configuration.allowedChatIDs {
             do {
-                try await sendMessage(message, to: chatID)
+                try await sendMessage(reminder.message, to: chatID)
             } catch {
                 logger.error("Failed to deliver Telegram daily digest: \(error.localizedDescription, privacy: .public)")
             }
         }
         logger.info("Delivered Telegram daily digest \(dayKey, privacy: .public)")
         state.deliveredDailyDigestKeys.insert(dayKey)
+        for key in reminder.resurfacedItemKeys {
+            state.resurfacedItemDates[key] = now
+        }
     }
 
     private func processWeeklyDigest(dateCards: [DateCard], now: Date) async {

@@ -8,6 +8,11 @@ struct TelegramBridgeConfiguration: Codable, Sendable {
     var sendReminders: Bool
     var sendDailyDigest: Bool
     var sendWeeklyDigest: Bool
+    var dailyDigestHour: Int
+    var dailyDigestWeekdaysOnly: Bool
+    var dailyDigestResurfaceCount: Int
+    var dailyDigestResurfaceMinAgeDays: Int
+    var dailyDigestResurfaceCooldownDays: Int
     var pollingTimeoutSeconds: Int
 
     static let `default` = TelegramBridgeConfiguration(
@@ -18,6 +23,11 @@ struct TelegramBridgeConfiguration: Codable, Sendable {
         sendReminders: false,
         sendDailyDigest: true,
         sendWeeklyDigest: true,
+        dailyDigestHour: 6,
+        dailyDigestWeekdaysOnly: true,
+        dailyDigestResurfaceCount: 3,
+        dailyDigestResurfaceMinAgeDays: 30,
+        dailyDigestResurfaceCooldownDays: 14,
         pollingTimeoutSeconds: 30
     )
 
@@ -29,6 +39,11 @@ struct TelegramBridgeConfiguration: Codable, Sendable {
         sendReminders: Bool,
         sendDailyDigest: Bool,
         sendWeeklyDigest: Bool,
+        dailyDigestHour: Int,
+        dailyDigestWeekdaysOnly: Bool,
+        dailyDigestResurfaceCount: Int,
+        dailyDigestResurfaceMinAgeDays: Int,
+        dailyDigestResurfaceCooldownDays: Int,
         pollingTimeoutSeconds: Int
     ) {
         self.isEnabled = isEnabled
@@ -38,6 +53,11 @@ struct TelegramBridgeConfiguration: Codable, Sendable {
         self.sendReminders = sendReminders
         self.sendDailyDigest = sendDailyDigest
         self.sendWeeklyDigest = sendWeeklyDigest
+        self.dailyDigestHour = dailyDigestHour
+        self.dailyDigestWeekdaysOnly = dailyDigestWeekdaysOnly
+        self.dailyDigestResurfaceCount = dailyDigestResurfaceCount
+        self.dailyDigestResurfaceMinAgeDays = dailyDigestResurfaceMinAgeDays
+        self.dailyDigestResurfaceCooldownDays = dailyDigestResurfaceCooldownDays
         self.pollingTimeoutSeconds = pollingTimeoutSeconds
     }
 
@@ -50,6 +70,11 @@ struct TelegramBridgeConfiguration: Codable, Sendable {
         sendReminders = try container.decodeIfPresent(Bool.self, forKey: .sendReminders) ?? false
         sendDailyDigest = try container.decodeIfPresent(Bool.self, forKey: .sendDailyDigest) ?? true
         sendWeeklyDigest = try container.decodeIfPresent(Bool.self, forKey: .sendWeeklyDigest) ?? true
+        dailyDigestHour = try container.decodeIfPresent(Int.self, forKey: .dailyDigestHour) ?? 6
+        dailyDigestWeekdaysOnly = try container.decodeIfPresent(Bool.self, forKey: .dailyDigestWeekdaysOnly) ?? true
+        dailyDigestResurfaceCount = try container.decodeIfPresent(Int.self, forKey: .dailyDigestResurfaceCount) ?? 3
+        dailyDigestResurfaceMinAgeDays = try container.decodeIfPresent(Int.self, forKey: .dailyDigestResurfaceMinAgeDays) ?? 30
+        dailyDigestResurfaceCooldownDays = try container.decodeIfPresent(Int.self, forKey: .dailyDigestResurfaceCooldownDays) ?? 14
         pollingTimeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .pollingTimeoutSeconds) ?? 30
     }
 }
@@ -59,24 +84,28 @@ struct TelegramBridgeState: Codable, Sendable {
     var deliveredReminderIDs: Set<String>
     var deliveredDailyDigestKeys: Set<String>
     var deliveredWeeklyDigestKeys: Set<String>
+    var resurfacedItemDates: [String: Date]
 
     static let `default` = TelegramBridgeState(
         lastProcessedUpdateID: 0,
         deliveredReminderIDs: [],
         deliveredDailyDigestKeys: [],
-        deliveredWeeklyDigestKeys: []
+        deliveredWeeklyDigestKeys: [],
+        resurfacedItemDates: [:]
     )
 
     init(
         lastProcessedUpdateID: Int,
         deliveredReminderIDs: Set<String>,
         deliveredDailyDigestKeys: Set<String>,
-        deliveredWeeklyDigestKeys: Set<String>
+        deliveredWeeklyDigestKeys: Set<String>,
+        resurfacedItemDates: [String: Date]
     ) {
         self.lastProcessedUpdateID = lastProcessedUpdateID
         self.deliveredReminderIDs = deliveredReminderIDs
         self.deliveredDailyDigestKeys = deliveredDailyDigestKeys
         self.deliveredWeeklyDigestKeys = deliveredWeeklyDigestKeys
+        self.resurfacedItemDates = resurfacedItemDates
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +114,7 @@ struct TelegramBridgeState: Codable, Sendable {
         deliveredReminderIDs = try container.decodeIfPresent(Set<String>.self, forKey: .deliveredReminderIDs) ?? []
         deliveredDailyDigestKeys = try container.decodeIfPresent(Set<String>.self, forKey: .deliveredDailyDigestKeys) ?? []
         deliveredWeeklyDigestKeys = try container.decodeIfPresent(Set<String>.self, forKey: .deliveredWeeklyDigestKeys) ?? []
+        resurfacedItemDates = try container.decodeIfPresent([String: Date].self, forKey: .resurfacedItemDates) ?? [:]
     }
 }
 
