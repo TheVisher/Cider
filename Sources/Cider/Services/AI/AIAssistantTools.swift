@@ -18,7 +18,7 @@ struct CountItemsTool: Tool {
         var itemType: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let type = arguments.itemType.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch type {
@@ -73,7 +73,7 @@ struct CountItemsTool: Tool {
         default:
             return ("Unknown item type '\(type)'. Valid types: bookmarks, notes, events, todos, contacts, folders, tags, clipboard, all.")
         }
-    } }
+    } } }
 }
 
 // MARK: - Search Items Tool
@@ -96,7 +96,7 @@ struct SearchItemsTool: Tool {
         var itemType: String?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.query.lowercased()
         var results: [String] = []
 
@@ -182,7 +182,7 @@ struct SearchItemsTool: Tool {
             return ("No items found matching \"\(arguments.query)\".")
         }
         return ("Found \(results.count) results:\n" + results.joined(separator: "\n"))
-    } }
+    } } }
 }
 
 // MARK: - List Folders Tool
@@ -198,7 +198,7 @@ struct ListFoldersTool: Tool {
     @Generable
     struct Arguments {}
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let folders = VaultFolderService.shared.folders
         if folders.isEmpty {
             return ("No folders exist yet.")
@@ -225,7 +225,7 @@ struct ListFoldersTool: Tool {
             lines.append("\(prefix)📁 \(folder.name) (\(total) items: \(bCount) bookmarks, \(nCount) notes, \(eCount) events, \(tCount) todos, \(cCount) contacts)")
         }
         return ("Folders:\n" + lines.joined(separator: "\n"))
-    } }
+    } } }
 }
 
 // MARK: - List Tags Tool
@@ -238,7 +238,7 @@ struct ListTagsTool: Tool {
     @Generable
     struct Arguments {}
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let labels = CardLabelStorage.shared.labels
         if labels.isEmpty {
             return ("No tags/labels exist yet.")
@@ -250,7 +250,7 @@ struct ListTagsTool: Tool {
             lines.append("🏷 \(label.name) (\(count) items)")
         }
         return ("Tags:\n" + lines.joined(separator: "\n"))
-    } }
+    } } }
 }
 
 // MARK: - Get Recent Items Tool
@@ -654,7 +654,7 @@ struct ApplyTagTool: Tool {
         var tagName: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let tagName = arguments.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tagName.isEmpty else { return "Tag name cannot be empty." }
@@ -687,7 +687,7 @@ struct ApplyTagTool: Tool {
             return "No untagged items found matching \"\(query)\"."
         }
         return "Tagged \(tagged.count) item(s) with \"\(label.name)\":\n" + tagged.joined(separator: "\n")
-    } }
+    } } }
 }
 
 // MARK: - Remove Tag Tool
@@ -706,7 +706,7 @@ struct RemoveTagTool: Tool {
         var tagName: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let tagName = arguments.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -740,7 +740,7 @@ struct RemoveTagTool: Tool {
             return "No items matching \"\(query)\" have the tag \"\(label.name)\"."
         }
         return "Removed tag \"\(label.name)\" from \(untagged.count) item(s):\n" + untagged.joined(separator: "\n")
-    } }
+    } } }
 }
 
 // MARK: - Rename Bookmark Tool
@@ -759,7 +759,7 @@ struct RenameBookmarkTool: Tool {
         var newTitle: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let newTitle = arguments.newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newTitle.isEmpty else { return "New title cannot be empty." }
@@ -786,7 +786,7 @@ struct RenameBookmarkTool: Tool {
             labelIDs: bookmark.labelIDs
         )
         return "Renamed \"\(oldTitle)\" → \"\(newTitle)\"."
-    } }
+    } } }
 }
 
 // MARK: - Find Similar Tool
@@ -857,7 +857,7 @@ struct CreateNoteTool: Tool {
         var folderName: String?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let content = arguments.content.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -880,7 +880,7 @@ struct CreateNoteTool: Tool {
         }
 
         return "Created note \"\(note.title)\"."
-    } }
+    } } }
 }
 
 // MARK: - Summarize Text Tool
@@ -918,7 +918,7 @@ struct SummarizeTextTool: Tool {
         }
 
         if arguments.saveAsNote == true {
-            return await MainActor.run {
+            return await MainActor.run { MutationAuditContext.withSource(.agent) {
                 let title = arguments.noteTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Summary"
                 var note = NotesStorage.shared.createNew(initialContent: summary)
                 note.title = title
@@ -933,7 +933,7 @@ struct SummarizeTextTool: Tool {
                     return "Summary saved as note \"\(title)\" in folder \"\(folder.name)\":\n\n\(summary)"
                 }
                 return "Summary saved as note \"\(title)\":\n\n\(summary)"
-            }
+            } }
         }
 
         return "Summary:\n\n\(summary)"
@@ -964,7 +964,7 @@ struct AddBookmarkTool: Tool {
         var tagName: String?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let urlString = arguments.url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
@@ -994,7 +994,7 @@ struct AddBookmarkTool: Tool {
         }
 
         return actions.joined(separator: ", ") + "."
-    } }
+    } } }
 }
 
 // MARK: - Get Current Item Tool
@@ -1011,7 +1011,7 @@ struct GetCurrentItemTool: Tool {
     @Generable
     struct Arguments {}
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let context = AIAssistantViewModel.shared.context
 
         if let bookmark = context.currentBookmark {
@@ -1063,7 +1063,7 @@ struct GetCurrentItemTool: Tool {
         }
 
         return "The user is not currently viewing any specific item. They may be on the home screen or library view."
-    } }
+    } } }
 }
 
 // MARK: - Delete Item Tool
@@ -1085,7 +1085,7 @@ struct DeleteItemTool: Tool {
         var itemType: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let type = arguments.itemType.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1122,7 +1122,7 @@ struct DeleteItemTool: Tool {
         }
 
         return "Unknown item type '\(type)'. Use 'bookmark' or 'note'."
-    } }
+    } } }
 }
 
 // MARK: - Rename Folder Tool
@@ -1141,7 +1141,7 @@ struct RenameFolderTool: Tool {
         var newName: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let current = arguments.currentName.trimmingCharacters(in: .whitespacesAndNewlines)
         let newName = arguments.newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newName.isEmpty else { return "New name cannot be empty." }
@@ -1158,7 +1158,7 @@ struct RenameFolderTool: Tool {
             return "Renamed folder \"\(current)\" → \"\(newName)\"."
         }
         return "Failed to rename folder \"\(current)\". The name \"\(newName)\" may already be taken."
-    } }
+    } } }
 }
 
 // MARK: - Unfile Items Tool
@@ -1177,7 +1177,7 @@ struct UnfileItemsTool: Tool {
         var searchQuery: String
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         var unfiled: [String] = []
 
@@ -1201,7 +1201,7 @@ struct UnfileItemsTool: Tool {
             return "No filed items found matching \"\(query)\"."
         }
         return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
-    } }
+    } } }
 }
 
 // MARK: - Create Reminder Tool
@@ -1242,7 +1242,7 @@ struct CreateReminderTool: Tool {
         var details: String?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let title = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return "Reminder title cannot be empty." }
 
@@ -1302,7 +1302,7 @@ struct CreateReminderTool: Tool {
             .map { $0 == 0 ? "at time" : "\($0) min before" }
             .joined(separator: ", ")
         return "Created reminder: \"\(title)\" on \(arguments.date)\(recurring). Reminders: \(remindDesc)."
-    } }
+    } } }
 }
 
 // MARK: - Cancel Reminder Tool
@@ -1324,7 +1324,7 @@ struct CancelReminderTool: Tool {
         var deleteEntirely: Bool?
     }
 
-    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run {
+    nonisolated func call(arguments: Arguments) async throws -> String { await MainActor.run { MutationAuditContext.withSource(.agent) {
         let query = arguments.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return "Reminder title cannot be empty." }
 
@@ -1351,5 +1351,5 @@ struct CancelReminderTool: Tool {
         _ = storage.updateDateCard(card)
         DateCardNotificationService.shared.cancelNotification(for: card.id)
         return "Disabled reminders for \"\(card.title)\". The event still exists but won't send notifications."
-    } }
+    } } }
 }

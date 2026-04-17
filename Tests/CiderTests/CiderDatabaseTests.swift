@@ -70,7 +70,7 @@ struct CiderDatabaseTests {
             "folders", "labels", "items", "bookmarks", "notes", "todos",
             "events", "contacts", "vault_files", "sessions",
             "item_labels", "dismissed_labels", "tags", "item_tags",
-            "item_links", "trash", "schema_version", "schema_migrations",
+            "item_links", "trash", "mutation_audit", "schema_version", "schema_migrations",
         ]
 
         for table in expectedTables {

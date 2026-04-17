@@ -507,6 +507,7 @@ enum MLXToolExecutor {
     // MARK: - Mutating tools
 
     private static func createFolder(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let name = string("folderName", from: args)
         guard !name.isEmpty else { return "Folder name cannot be empty." }
 
@@ -525,9 +526,11 @@ enum MLXToolExecutor {
         }
         let location = parentID != nil ? "inside \"\(optString("parentFolderName", from: args) ?? "")\"" : "at root level"
         return "Created folder \"\(folder.name)\" \(location)."
+        }
     }
 
     private static func moveToFolder(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let folderName = string("folderName", from: args)
 
@@ -554,9 +557,11 @@ enum MLXToolExecutor {
 
         if moved.isEmpty { return "No items found matching \"\(query)\" to move." }
         return "Moved \(moved.count) item(s) to \"\(folder.name)\":\n" + moved.joined(separator: "\n")
+        }
     }
 
     private static func applyTag(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let tagName = string("tagName", from: args)
         guard !tagName.isEmpty else { return "Tag name cannot be empty." }
@@ -581,9 +586,11 @@ enum MLXToolExecutor {
 
         if tagged.isEmpty { return "No untagged items found matching \"\(query)\"." }
         return "Tagged \(tagged.count) item(s) with \"\(label.name)\":\n" + tagged.joined(separator: "\n")
+        }
     }
 
     private static func removeTag(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let tagName = string("tagName", from: args)
 
@@ -612,9 +619,11 @@ enum MLXToolExecutor {
 
         if untagged.isEmpty { return "No items matching \"\(query)\" have the tag \"\(label.name)\"." }
         return "Removed tag \"\(label.name)\" from \(untagged.count) item(s):\n" + untagged.joined(separator: "\n")
+        }
     }
 
     private static func renameBookmark(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("currentTitle", from: args)
         let newTitle = string("newTitle", from: args)
         guard !newTitle.isEmpty else { return "New title cannot be empty." }
@@ -632,9 +641,11 @@ enum MLXToolExecutor {
             tags: bookmark.tags, labelIDs: bookmark.labelIDs
         )
         return "Renamed \"\(oldTitle)\" to \"\(newTitle)\"."
+        }
     }
 
     private static func createNote(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let title = string("title", from: args)
         let content = string("content", from: args)
 
@@ -652,9 +663,11 @@ enum MLXToolExecutor {
             return "Created note \"\(note.title)\" (folder \"\(folderName)\" not found — saved to root)."
         }
         return "Created note \"\(note.title)\"."
+        }
     }
 
     private static func addBookmark(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let urlString = string("url", from: args)
         guard !urlString.isEmpty else { return "URL cannot be empty." }
 
@@ -679,9 +692,11 @@ enum MLXToolExecutor {
         }
 
         return actions.joined(separator: ", ") + "."
+        }
     }
 
     private static func deleteItem(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         let type = string("itemType", from: args).lowercased()
 
@@ -710,9 +725,11 @@ enum MLXToolExecutor {
         }
 
         return "Unknown item type '\(type)'. Use 'bookmark' or 'note'."
+        }
     }
 
     private static func renameFolder(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let current = string("currentName", from: args)
         let newName = string("newName", from: args)
         guard !newName.isEmpty else { return "New name cannot be empty." }
@@ -726,9 +743,11 @@ enum MLXToolExecutor {
         let success = VaultFolderService.shared.renameFolder(folder.id, to: newName)
         if success { return "Renamed folder \"\(current)\" to \"\(newName)\"." }
         return "Failed to rename folder \"\(current)\". The name \"\(newName)\" may already be taken."
+        }
     }
 
     private static func unfileItems(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("searchQuery", from: args)
         var unfiled: [String] = []
 
@@ -747,11 +766,13 @@ enum MLXToolExecutor {
 
         if unfiled.isEmpty { return "No filed items found matching \"\(query)\"." }
         return "Unfiled \(unfiled.count) item(s) (moved to root):\n" + unfiled.joined(separator: "\n")
+        }
     }
 
     // MARK: - Create Reminder
 
     private static func createReminder(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let title = string("title", from: args)
         guard !title.isEmpty else {
             return "Reminder title is required."
@@ -807,11 +828,13 @@ enum MLXToolExecutor {
 
         let recurring = card.recurrenceRule != nil ? " (recurring \(card.recurrenceRule!.frequency.rawValue))" : ""
         return "Created reminder: \"\(title)\" on \(dateStr)\(recurring)."
+        }
     }
 
     // MARK: - Cancel Reminder
 
     private static func cancelReminder(_ args: [String: Any]) -> String {
+        MutationAuditContext.withSource(.agent) {
         let query = string("title", from: args).lowercased()
         guard !query.isEmpty else {
             return "Reminder title is required."
@@ -841,5 +864,6 @@ enum MLXToolExecutor {
         _ = storage.updateDateCard(card)
         DateCardNotificationService.shared.cancelNotification(for: card.id)
         return "Disabled reminders for \"\(card.title)\". The event still exists but won't send notifications."
+        }
     }
 }

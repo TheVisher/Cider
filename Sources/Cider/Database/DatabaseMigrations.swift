@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 5
+    static let latestVersion: Int = 6
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -47,7 +47,27 @@ enum DatabaseMigrations {
         }
         if currentVersion < 5 {
             try migrateToV5(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 6 {
+            try migrateToV6(db)
+        }
+    }
+
+    // MARK: - V5 -> V6: mutation audit log
+
+    private static func migrateToV6(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 6...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createMutationAudit)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_mutation_audit_time ON mutation_audit(occurred_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_mutation_audit_item ON mutation_audit(item_type, item_id, occurred_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (6);")
+        }
+
+        logger.info("Migration to v6 complete")
     }
 
     // MARK: - V4 -> V5: Note summaries move into SQLite

@@ -3320,6 +3320,59 @@ struct CiderCLI {
                 print("Error running SQLite integrity check: \(error.localizedDescription)")
             }
 
+        case "audit", "log":
+            let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 50
+            let itemTypeFilter = parseFlag("--type", from: args)?.lowercased()
+            let actionFilter = parseFlag("--action", from: args)?.lowercased()
+            let sourceFilter = parseFlag("--source", from: args)?.lowercased()
+            let itemPrefixFilter = parseFlag("--item", from: args)?.lowercased()
+
+            let auditService = MutationAuditService.shared
+            let sourceSet = Set(MutationAuditSource.allCases.map(\.rawValue))
+            if let sourceFilter, !sourceSet.contains(sourceFilter) {
+                print("Error: Unknown source '\(sourceFilter)'. Valid sources: \(MutationAuditSource.allCases.map(\.rawValue).joined(separator: ", "))")
+                return
+            }
+
+            let entries = auditService.loadEntries().filter { entry in
+                if let itemTypeFilter, entry.itemType.lowercased() != itemTypeFilter {
+                    return false
+                }
+                if let actionFilter, entry.action.lowercased() != actionFilter {
+                    return false
+                }
+                if let sourceFilter, entry.source.rawValue != sourceFilter {
+                    return false
+                }
+                if let itemPrefixFilter, !entry.itemID.uuidString.lowercased().hasPrefix(itemPrefixFilter) {
+                    return false
+                }
+                return true
+            }
+
+            let limitedEntries = limit > 0 ? Array(entries.prefix(limit)) : entries
+            if jsonOutput {
+                outputJSON(limitedEntries.map(mutationAuditEntryToDict))
+            } else if limitedEntries.isEmpty {
+                print("No mutation audit entries found.")
+            } else {
+                print("Mutation audit entries (\(limitedEntries.count)\(entries.count > limitedEntries.count ? " of \(entries.count)" : "")):")
+                for entry in limitedEntries {
+                    let timestamp = entry.occurredAt.formatted(date: .abbreviated, time: .standard)
+                    let itemID = String(entry.itemID.uuidString.prefix(8))
+                    print("  [\(timestamp)] \(entry.source.rawValue) \(entry.action) \(entry.itemType) \(itemID)")
+                    if !entry.beforeState.isEmpty {
+                        print("    before: \(formatAuditState(entry.beforeState))")
+                    }
+                    if !entry.afterState.isEmpty {
+                        print("    after:  \(formatAuditState(entry.afterState))")
+                    }
+                    if !entry.metadata.isEmpty {
+                        print("    meta:   \(formatAuditState(entry.metadata))")
+                    }
+                }
+            }
+
         case "restore":
             guard let selector = args.first else {
                 print("Error: Usage: cider-cli db restore <index|filename|latest> [--yes]")
@@ -3379,7 +3432,7 @@ struct CiderCLI {
             }
 
         default:
-            print("Commands: backups, backup, integrity, restore")
+            print("Commands: backups, backup, integrity, audit, restore")
         }
     }
 
@@ -3877,6 +3930,24 @@ struct CiderCLI {
             "createdAt": backup.createdAt.timeIntervalSince1970,
             "byteSize": backup.byteSize,
         ]
+    }
+
+    static func mutationAuditEntryToDict(_ entry: MutationAuditEntry) -> [String: Any] {
+        [
+            "id": entry.id.uuidString,
+            "occurredAt": entry.occurredAt.timeIntervalSince1970,
+            "itemType": entry.itemType,
+            "itemID": entry.itemID.uuidString,
+            "action": entry.action,
+            "source": entry.source.rawValue,
+            "before": entry.beforeState,
+            "after": entry.afterState,
+            "metadata": entry.metadata,
+        ]
+    }
+
+    static func formatAuditState(_ state: [String: String]) -> String {
+        state.keys.sorted().map { "\($0)=\(state[$0] ?? "")" }.joined(separator: ", ")
     }
 
     static func isCiderAppRunning() -> Bool {
@@ -4491,6 +4562,7 @@ struct CiderCLI {
           cider-cli db backups
           cider-cli db backup
           cider-cli db integrity
+          cider-cli db audit [--limit <n>] [--type <item-type>] [--action <action>] [--source <ui|cli|agent|migration|cleanup>] [--item <id-prefix>]
           cider-cli db restore <index|filename|latest> --yes
 
         QUERY (natural language search)
