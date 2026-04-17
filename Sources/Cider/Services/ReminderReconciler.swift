@@ -15,9 +15,14 @@ final class ReminderReconciler {
     private var wakeObserver: NSObjectProtocol?
     private var screenWakeObserver: NSObjectProtocol?
     private var timeZoneObserver: NSObjectProtocol?
+    private var telegramConfigurationObserver: NSObjectProtocol?
+    private var reconcileHookForTesting: (() -> Void)?
+    private var skipReconcileWorkForTesting = false
 
     /// Call on app launch, wake-from-sleep, time zone change, vault changes, and day rollover.
     func reconcile() {
+        reconcileHookForTesting?()
+        if skipReconcileWorkForTesting { return }
         let now = Date()
         Self.logger.debug("Reconciling reminders")
 
@@ -78,6 +83,17 @@ final class ReminderReconciler {
             }
         }
 
+        telegramConfigurationObserver = NotificationCenter.default.addObserver(
+            forName: .telegramBridgeConfigurationChanged,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Self.logger.debug("Telegram configuration changed — reconciling")
+            Task { @MainActor in
+                ReminderReconciler.shared.reconcile()
+            }
+        }
+
         // Initial reconcile
         reconcile()
     }
@@ -96,9 +112,13 @@ final class ReminderReconciler {
         if let timeZoneObserver {
             NotificationCenter.default.removeObserver(timeZoneObserver)
         }
+        if let telegramConfigurationObserver {
+            NotificationCenter.default.removeObserver(telegramConfigurationObserver)
+        }
         wakeObserver = nil
         screenWakeObserver = nil
         timeZoneObserver = nil
+        telegramConfigurationObserver = nil
     }
 
     private func scheduleDayRolloverTimer() {
@@ -243,6 +263,18 @@ final class ReminderReconciler {
     private func todoHasExplicitTime(_ date: Date) -> Bool {
         let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
         return (components.hour ?? 0) != 0 || (components.minute ?? 0) != 0 || (components.second ?? 0) != 0
+    }
+
+    func _setReconcileHookForTesting(_ hook: @escaping () -> Void) {
+        reconcileHookForTesting = hook
+    }
+
+    func _resetReconcileHookForTesting() {
+        reconcileHookForTesting = nil
+    }
+
+    func _setSkipReconcileWorkForTesting(_ skip: Bool) {
+        skipReconcileWorkForTesting = skip
     }
 
     static func nextTelegramDigestFireDate(

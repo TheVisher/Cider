@@ -216,6 +216,7 @@ actor TelegramBridge: ChannelBridge {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(configuration)
             try data.write(to: configurationURL, options: .atomic)
+            NotificationCenter.default.post(name: .telegramBridgeConfigurationChanged, object: nil)
         } catch {
             logger.error("Failed to save Telegram config: \(error.localizedDescription, privacy: .public)")
         }

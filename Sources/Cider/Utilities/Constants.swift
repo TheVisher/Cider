@@ -58,6 +58,7 @@ extension Notification.Name {
     static let settingsNavigate = Notification.Name("cider.settingsNavigate")
     static let dismissSettings = Notification.Name("cider.dismissSettings")
     static let ciderConfigChanged = Notification.Name("cider.ciderConfigChanged")
+    static let telegramBridgeConfigurationChanged = Notification.Name("cider.telegramBridgeConfigurationChanged")
     static let showBookmarkCaptureToast = Notification.Name("cider.showBookmarkCaptureToast")
     static let showBookmarkClipboardReviewToast = Notification.Name("cider.showBookmarkClipboardReviewToast")
     static let showImageClipboardReviewToast = Notification.Name("cider.showImageClipboardReviewToast")

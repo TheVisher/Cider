@@ -219,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AIAssistantViewModel.shared.enableOrchestrator()
             await TelegramBridge.shared.startIfConfigured()
             self.telegramBridgeStarted = true
+            ReminderReconciler.shared.reconcile()
 
             // Re-reconcile on vault changes (debounced)
             self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards

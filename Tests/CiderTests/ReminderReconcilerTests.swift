@@ -4,6 +4,31 @@ import Testing
 
 @MainActor
 struct ReminderReconcilerTests {
+    @Test("telegram configuration changes trigger a follow-up reconcile")
+    func telegramConfigurationChangesTriggerFollowUpReconcile() async throws {
+        let reconciler = ReminderReconciler.shared
+        var reconcileCount = 0
+
+        reconciler.stop()
+        reconciler._setSkipReconcileWorkForTesting(true)
+        reconciler._setReconcileHookForTesting {
+            reconcileCount += 1
+        }
+        defer {
+            reconciler.stop()
+            reconciler._resetReconcileHookForTesting()
+            reconciler._setSkipReconcileWorkForTesting(false)
+        }
+
+        reconciler.start()
+        #expect(reconcileCount == 1)
+
+        NotificationCenter.default.post(name: .telegramBridgeConfigurationChanged, object: nil)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(reconcileCount == 2)
+    }
+
     @Test("daily digest scheduler wakes at configured hour on weekdays")
     func dailyDigestSchedulesSameWeekdayMorning() {
         var calendar = Calendar(identifier: .gregorian)
