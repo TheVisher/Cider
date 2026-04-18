@@ -289,7 +289,7 @@ private struct BookmarkTableIcon: View {
         let modifiedAt = bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
 
         if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
-            return cached
+            return cached.image
         }
 
         let result: NSImage? = await Task.detached(priority: .utility) {

@@ -20,6 +20,7 @@ struct BookmarkCard: View {
     var searchText: String
     let mode: CardMode
     let cardSizing: CardSizing
+    var masonryCardWidth: CGFloat? = nil
     var folders: [Folder] = []
     var dragProvider: (() -> NSItemProvider)? = nil
     var dragPreviewOverride: AnyView? = nil
@@ -156,17 +157,19 @@ struct BookmarkCard: View {
                     .padding(Spacing.sm)
             }
         }
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        updateCardWidth(proxy.size.width)
-                    }
-                    .onChange(of: proxy.size.width) { _, width in
-                        updateCardWidth(width)
-                    }
+        .background {
+            if masonryCardWidth == nil {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear {
+                            updateCardWidth(proxy.size.width)
+                        }
+                        .onChange(of: proxy.size.width) { _, width in
+                            updateCardWidth(width)
+                        }
+                }
             }
-        )
+        }
         .hoverState($isHovered, animation: .snappy)
         .bookmarkContextMenu(
             bookmark: bookmark,
@@ -201,18 +204,22 @@ struct BookmarkCard: View {
     }
 
     private var resolvedThumbnailHeight: CGFloat {
+        let effectiveCardWidth = max(
+            masonryCardWidth.map { $0 - (Spacing.sm * 2) } ?? cardWidth,
+            1
+        )
         let idealWidth = max(cardSizing.cardMinWidth, 1)
-        let widthScale = cardWidth / idealWidth
+        let widthScale = effectiveCardWidth / idealWidth
 
         switch mode {
         case .grid:
-            return cardWidth * (cardSizing.gridThumbnailHeight / idealWidth)
+            return effectiveCardWidth * (cardSizing.gridThumbnailHeight / idealWidth)
         case .masonry:
             guard let aspectRatio = resolvedThumbnailAspectRatio else {
                 return cardSizing.masonryThumbnailHeightFallback * widthScale
             }
 
-            return cardWidth * aspectRatio
+            return effectiveCardWidth * aspectRatio
         }
     }
 

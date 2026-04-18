@@ -193,14 +193,9 @@ struct BookmarkThumbnailView: View {
 
         // Check shared cache first
         if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
-            let width = cached.size.width
-            let height = cached.size.height
-            let isIcon = Self.shouldRenderAsIconOverlay(
-                width: width, height: height, remoteURLString: remoteURLString
-            )
-            thumbnailImage = cached
-            rendersAsIconOverlay = isIcon
-            onAspectRatioResolved?(isIcon ? nil : height / width)
+            thumbnailImage = cached.image
+            rendersAsIconOverlay = cached.isIconOverlay
+            onAspectRatioResolved?(cached.aspectRatio)
             return
         }
 
@@ -229,7 +224,11 @@ struct BookmarkThumbnailView: View {
         guard !Task.isCancelled else { return }
 
         if let (image, isIcon, aspectRatio) = result, !shouldSuppressDownloadedThumbnail {
-            BookmarkThumbnailCache.shared.set(image, for: cacheKey, modifiedAt: modifiedAt)
+            BookmarkThumbnailCache.shared.set(
+                .init(image: image, aspectRatio: aspectRatio, isIconOverlay: isIcon),
+                for: cacheKey,
+                modifiedAt: modifiedAt
+            )
             thumbnailImage = image
             rendersAsIconOverlay = isIcon
             onAspectRatioResolved?(aspectRatio)
@@ -398,7 +397,7 @@ struct CarouselPageImage: View {
         let modifiedAt = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
 
         if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
-            return cached
+            return cached.image
         }
 
         let result: NSImage? = await Task.detached(priority: .userInitiated) {

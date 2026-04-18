@@ -576,14 +576,19 @@ struct FolderDetailView: View {
             }
 
         case .masonry:
-            MasonryLayout(
+            LazyMasonryView(
+                items: folderItems,
                 minimumColumnWidth: cardSizing.cardMinWidth,
-                itemSpacing: Spacing.md
-            ) {
-                ForEach(folderItems) { item in
-                    libraryCard(item, mode: .masonry)
-                        .id(item.id)
+                itemSpacing: Spacing.md,
+                estimatedHeight: { item, columnWidth in
+                    LibraryItemMasonryMetrics.estimatedHeight(
+                        for: item,
+                        columnWidth: columnWidth,
+                        cardSizing: cardSizing
+                    )
                 }
+            ) { item, columnWidth in
+                libraryCard(item, mode: .masonry, masonryCardWidth: columnWidth)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, Spacing.xs)
@@ -600,7 +605,11 @@ struct FolderDetailView: View {
     // MARK: - Card (Grid / Masonry)
 
     @ViewBuilder
-    private func libraryCard(_ item: LibraryItemV2, mode: BookmarkCard.CardMode) -> some View {
+    private func libraryCard(
+        _ item: LibraryItemV2,
+        mode: BookmarkCard.CardMode,
+        masonryCardWidth: CGFloat? = nil
+    ) -> some View {
         switch item {
         case .bookmark(let bookmark):
             BookmarkCard(
@@ -608,6 +617,7 @@ struct FolderDetailView: View {
                 searchText: "",
                 mode: mode == .grid ? .grid : .masonry,
                 cardSizing: cardSizing.bookmarkSizing,
+                masonryCardWidth: masonryCardWidth,
                 folders: bookmarksViewModel.folders,
                 dragProvider: bookmarkDragProvider(for: bookmark),
                 dragPreviewOverride: multiDragPreview(for: item),

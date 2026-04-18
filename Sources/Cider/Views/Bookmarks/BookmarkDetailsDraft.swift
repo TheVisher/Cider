@@ -902,7 +902,7 @@ struct BookmarkDetailsHeroPreview: View {
         let modifiedAt = bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
 
         if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
-            thumbnailImage = cached
+            thumbnailImage = cached.image
             return
         }
 
