@@ -791,6 +791,20 @@ struct BookmarkDetailsHeroPreview: View {
     @Environment(\.textScale) private var textScale
     @State private var thumbnailImage: NSImage?
 
+    init(bookmark: Bookmark?, draft: BookmarkDetailsDraft, isPageMode: Bool = false) {
+        self.bookmark = bookmark
+        self.draft = draft
+        self.isPageMode = isPageMode
+        let filePath = bookmark?.thumbnailFileURL?.path
+        let modifiedAt = bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
+        _thumbnailImage = State(
+            initialValue: DetailHeroPreviewImageBootstrap.cachedThumbnailImage(
+                filePath: filePath,
+                modifiedAt: modifiedAt
+            )
+        )
+    }
+
     private var palette: (Color, Color) {
         let seed = bookmark?.urlString ?? draft.originalURLString
         let pairs: [(NSColor, NSColor)] = [
@@ -902,7 +916,11 @@ struct BookmarkDetailsHeroPreview: View {
         let modifiedAt = bookmark?.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
 
         if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
-            thumbnailImage = cached
+            var transaction = Transaction(animation: .none)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                thumbnailImage = cached.image
+            }
             return
         }
 
@@ -919,9 +937,17 @@ struct BookmarkDetailsHeroPreview: View {
         guard !Task.isCancelled else { return }
         if let image {
             BookmarkThumbnailCache.shared.set(image, for: cacheKey, modifiedAt: modifiedAt)
-            thumbnailImage = image
+            var transaction = Transaction(animation: .none)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                thumbnailImage = image
+            }
         } else {
-            thumbnailImage = nil
+            var transaction = Transaction(animation: .none)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                thumbnailImage = nil
+            }
         }
     }
 }

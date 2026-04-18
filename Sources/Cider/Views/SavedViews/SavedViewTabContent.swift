@@ -571,16 +571,22 @@ struct SavedViewTabContent: View {
                     }
                 }
             case .masonry:
-                MasonryLayout(
+                LazyMasonryView(
+                    items: filteredItems,
                     minimumColumnWidth: cardSizing.cardMinWidth,
-                    itemSpacing: Spacing.md
-                ) {
-                    ForEach(filteredItems) { item in
-                        itemCard(item)
-                            .modifier(CardContextMenuModifier {
-                                contextMenuItems(for: item)
-                            })
+                    itemSpacing: Spacing.md,
+                    estimatedHeight: { item, columnWidth in
+                        LibraryItemMasonryMetrics.estimatedHeight(
+                            for: item,
+                            columnWidth: columnWidth,
+                            cardSizing: cardSizing
+                        )
                     }
+                ) { item, columnWidth in
+                    itemCard(item, masonryCardWidth: columnWidth)
+                        .modifier(CardContextMenuModifier {
+                            contextMenuItems(for: item)
+                        })
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -600,7 +606,7 @@ struct SavedViewTabContent: View {
     }
 
     @ViewBuilder
-    private func itemCard(_ item: LibraryItemV2) -> some View {
+    private func itemCard(_ item: LibraryItemV2, masonryCardWidth: CGFloat? = nil) -> some View {
         switch item {
         case .bookmark(let bookmark):
             BookmarkCard(
@@ -608,6 +614,7 @@ struct SavedViewTabContent: View {
                 searchText: "",
                 mode: savedView.layoutSpec.displayMode == .grid ? .grid : .masonry,
                 cardSizing: cardSizing.bookmarkSizing,
+                masonryCardWidth: masonryCardWidth,
                 folders: folders,
                 onShowDetails: { onOpenBookmark?(bookmark) },
                 onOpen: { onOpenBookmark?(bookmark) },
@@ -962,4 +969,3 @@ private struct GenericLibraryItemCard: View {
         }
     }
 }
-
