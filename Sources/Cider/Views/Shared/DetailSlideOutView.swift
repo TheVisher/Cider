@@ -26,11 +26,8 @@ struct DetailSlideOutView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
-    // Sidebar's own move transition is suppressed on first appearance to prevent
-    // it from compounding with the parent panel's slide-in transition. Enabled
-    // after first render so the info-button toggle animates correctly.
-    @State private var sidebarTransitionEnabled: Bool = false
     @State private var webViewIsLoading: Bool = false
+    @State private var preloadTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -47,6 +44,11 @@ struct DetailSlideOutView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.xxs)
                         .padding(.bottom, Spacing.xs + 1)
+                        .transaction { transaction in
+                            if detailViewMode == .slideOut {
+                                transaction.animation = nil
+                            }
+                        }
 
                     Divider()
                         .background(CiderColors.separator)
@@ -64,6 +66,7 @@ struct DetailSlideOutView: View {
                                     .font(CiderFont.heroTitle(scale: textScale))
                                     .foregroundColor(CiderColors.primary)
                                     .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
 
                                 HStack(spacing: Spacing.xs) {
                                     if draft.hasURL {
@@ -77,6 +80,11 @@ struct DetailSlideOutView: View {
                                     Text(draft.updatedAt.formatted(.relative(presentation: .named)))
                                         .font(CiderFont.label(scale: textScale))
                                         .foregroundColor(CiderColors.tertiary)
+                                }
+                            }
+                            .transaction { transaction in
+                                if detailViewMode == .slideOut {
+                                    transaction.animation = nil
                                 }
                             }
                         }
@@ -154,9 +162,11 @@ struct DetailSlideOutView: View {
                             CiderColors.separator
                                 .frame(width: Spacing.hairline)
                         }
-                        .transition(sidebarTransitionEnabled
-                            ? .move(edge: .trailing).combined(with: .opacity)
-                            : .identity)
+                        .transition(
+                            .detailSlideOutSidebar(
+                                style: DetailSlideOutMotionPolicy.sidebarTransitionStyle()
+                            )
+                        )
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -164,6 +174,7 @@ struct DetailSlideOutView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .compositingGroup()
         .onChange(of: heroMode) { _, newMode in
             // Persist per-bookmark hero mode preference
             if let id = bookmark?.id {
@@ -183,32 +194,19 @@ struct DetailSlideOutView: View {
                 let isReaderUnavailable = bm.readerUnavailable == true
                 let restored = bm.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
                 heroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
-                // Defer preload until after slideout animation settles
-                if bm.hasURL, let url = bm.url {
-                    let bookmarkID = bm.id
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(350))
-                        guard !Task.isCancelled else { return }
-                        webViewStore.preload(url: url, bookmarkID: bookmarkID)
-                    }
-                }
+                schedulePreload(for: bm)
             } else {
                 heroMode = .thumbnail
+                preloadTask?.cancel()
             }
         }
         .onAppear {
-            // Deferred preload on first appear (onChange may not fire on nil → value in all cases)
-            if let bm = bookmark, bm.hasURL, let url = bm.url {
-                let bookmarkID = bm.id
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(350))
-                    guard !Task.isCancelled else { return }
-                    webViewStore.preload(url: url, bookmarkID: bookmarkID)
-                }
+            if let bm = bookmark, bm.hasURL {
+                schedulePreload(for: bm)
             }
-            // Enable the sidebar's own transition only after the first render,
-            // so it doesn't compound with the parent panel's slide-in animation.
-            DispatchQueue.main.async { sidebarTransitionEnabled = true }
+        }
+        .onDisappear {
+            preloadTask?.cancel()
         }
         .background {
             if detailViewMode != .page {
@@ -239,6 +237,21 @@ struct DetailSlideOutView: View {
         if webViewStore.readerFailed { return "Reader content not available for this page" }
         if !webViewStore.readerReady { return "Extracting reader content..." }
         return "Reader view"
+    }
+
+    private func schedulePreload(for bookmark: Bookmark) {
+        preloadTask?.cancel()
+        guard bookmark.hasURL, let url = bookmark.url else { return }
+
+        let bookmarkID = bookmark.id
+        let delay = DetailSlideOutMotionPolicy.preloadDelay(for: detailViewMode)
+        preloadTask = Task { @MainActor in
+            if delay != .zero {
+                try? await Task.sleep(for: delay)
+            }
+            guard !Task.isCancelled else { return }
+            webViewStore.preload(url: url, bookmarkID: bookmarkID)
+        }
     }
 
     // MARK: - Hero Mode Button
