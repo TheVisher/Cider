@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LazyMasonryView<Item: Identifiable, Content: View>: View {
     let items: [Item]
+    let viewportWidth: CGFloat?
     let minimumColumnWidth: CGFloat
     let itemSpacing: CGFloat
     let estimatedHeight: (Item, CGFloat) -> CGFloat
@@ -12,7 +13,8 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
 
     var body: some View {
         let layout = LazyMasonryColumnPlanner.layout(
-            containerWidth: max(containerWidth, minimumColumnWidth),
+            containerWidth: containerWidth,
+            viewportWidth: viewportWidth,
             minimumColumnWidth: minimumColumnWidth,
             itemSpacing: itemSpacing
         )
@@ -46,14 +48,16 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
             syncPlan(with: resolvedPlan)
         }
         .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        updateContainerWidth(proxy.size.width)
-                    }
-                    .onChange(of: proxy.size.width) { _, width in
-                        updateContainerWidth(width)
-                    }
+            if viewportWidth == nil {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear {
+                            updateContainerWidth(proxy.size.width)
+                        }
+                        .onChange(of: proxy.size.width) { _, width in
+                            updateContainerWidth(width)
+                        }
+                }
             }
         }
     }
@@ -95,10 +99,16 @@ enum LazyMasonryColumnPlanner {
 
     static func layout(
         containerWidth: CGFloat,
+        viewportWidth: CGFloat? = nil,
         minimumColumnWidth: CGFloat,
         itemSpacing: CGFloat
     ) -> LayoutMetrics {
-        let resolvedWidth = max(containerWidth, minimumColumnWidth)
+        let preferredWidth = if let viewportWidth, viewportWidth.isFinite, viewportWidth > 0 {
+            viewportWidth
+        } else {
+            containerWidth
+        }
+        let resolvedWidth = max(preferredWidth, minimumColumnWidth)
         let denominator = max(minimumColumnWidth + itemSpacing, 1)
         let rawColumnCount = Int(((resolvedWidth + itemSpacing) / denominator).rounded(.down))
         let columnCount = max(1, rawColumnCount)

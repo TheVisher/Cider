@@ -114,56 +114,62 @@ struct FolderDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            if coverImage != nil {
-                                folderCoverBanner
-                            }
-
-                            folderHeaderSection
-
-                            if !folderItems.isEmpty {
-                                if displayMode == .list {
-                                    LibraryTableHeader(
-                                        columnConfig: $tableColumnConfig,
-                                        allSelected: !folderItems.isEmpty && folderItems.allSatisfy { selectedItemIDs.contains($0.id) },
-                                        onToggleSelectAll: {
-                                            if folderItems.allSatisfy({ selectedItemIDs.contains($0.id) }) {
-                                                selectedItemIDs.removeAll()
-                                            } else {
-                                                selectedItemIDs = Set(folderItems.map(\.id))
-                                            }
-                                        }
-                                    )
-                                    .onChange(of: tableColumnConfig) { _, newConfig in
-                                        folderConfig.tableColumnConfig = newConfig
-                                        folderConfig.save()
-                                    }
+                GeometryReader { contentProxy in
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                if coverImage != nil {
+                                    folderCoverBanner
                                 }
-                                let noPadding = displayMode == .list || displayMode == .kanban
-                                libraryFeed
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(noPadding ? 0 : Spacing.xxs)
-                                    .padding(.horizontal, noPadding ? 0 : Spacing.md)
-                                    .padding(.vertical, noPadding ? 0 : Spacing.md)
-                            } else {
-                                EmptyStateView(
-                                    icon: "tray",
-                                    title: "No items yet",
-                                    subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
-                                )
-                                .frame(minHeight: BookmarksDesign.detailsSheetNotesHeight)
+
+                                folderHeaderSection
+
+                                if !folderItems.isEmpty {
+                                    if displayMode == .list {
+                                        LibraryTableHeader(
+                                            columnConfig: $tableColumnConfig,
+                                            allSelected: !folderItems.isEmpty && folderItems.allSatisfy { selectedItemIDs.contains($0.id) },
+                                            onToggleSelectAll: {
+                                                if folderItems.allSatisfy({ selectedItemIDs.contains($0.id) }) {
+                                                    selectedItemIDs.removeAll()
+                                                } else {
+                                                    selectedItemIDs = Set(folderItems.map(\.id))
+                                                }
+                                            }
+                                        )
+                                        .onChange(of: tableColumnConfig) { _, newConfig in
+                                            folderConfig.tableColumnConfig = newConfig
+                                            folderConfig.save()
+                                        }
+                                    }
+                                    let noPadding = displayMode == .list || displayMode == .kanban
+                                    let viewportWidth = max(
+                                        0,
+                                        contentProxy.size.width - (noPadding ? 0 : (Spacing.xxs * 2) + (Spacing.md * 2))
+                                    )
+                                    libraryFeed(viewportWidth: viewportWidth)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(noPadding ? 0 : Spacing.xxs)
+                                        .padding(.horizontal, noPadding ? 0 : Spacing.md)
+                                        .padding(.vertical, noPadding ? 0 : Spacing.md)
+                                } else {
+                                    EmptyStateView(
+                                        icon: "tray",
+                                        title: "No items yet",
+                                        subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
+                                    )
+                                    .frame(minHeight: BookmarksDesign.detailsSheetNotesHeight)
+                                }
                             }
                         }
-                    }
-                    .scrollIndicators(.hidden)
-                    .onChange(of: scrollToItemID) { _, id in
-                        if let id {
-                            withAnimation(reduceMotion ? .none : .snappy) {
-                                proxy.scrollTo(id, anchor: .center)
+                        .scrollIndicators(.hidden)
+                        .onChange(of: scrollToItemID) { _, id in
+                            if let id {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    proxy.scrollTo(id, anchor: .center)
+                                }
+                                scrollToItemID = nil
                             }
-                            scrollToItemID = nil
                         }
                     }
                 }
@@ -551,7 +557,7 @@ struct FolderDetailView: View {
     // MARK: - Library Feed
 
     @ViewBuilder
-    private var libraryFeed: some View {
+    private func libraryFeed(viewportWidth: CGFloat? = nil) -> some View {
         switch displayMode {
         case .list:
             LibraryTableRows(
@@ -578,6 +584,7 @@ struct FolderDetailView: View {
         case .masonry:
             LazyMasonryView(
                 items: folderItems,
+                viewportWidth: viewportWidth,
                 minimumColumnWidth: cardSizing.cardMinWidth,
                 itemSpacing: Spacing.md,
                 estimatedHeight: { item, columnWidth in

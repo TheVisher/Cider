@@ -57,33 +57,37 @@ struct SavedViewTabContent: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                headerRow
-                filterChipsRow
+        GeometryReader { contentProxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                    headerRow
+                    filterChipsRow
 
-                if savedView.layoutSpec.showsCalendarProjection {
-                    calendarControlsRow
-                    CalendarProjectionView(
-                        items: filteredItems,
-                        mode: calendarMode,
-                        anchorDate: calendarAnchorDate,
-                        showsGhostCells: savedView.layoutSpec.showsGhostCells,
-                        onSelectDay: { day in
-                            editorContext = DateCardEditorContext(existingCard: nil, defaultDate: day)
-                        },
-                        onSelectDateCard: { dateCard in
-                            editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
-                        }
-                    )
-                } else {
-                    listGridMasonryContent
+                    if savedView.layoutSpec.showsCalendarProjection {
+                        calendarControlsRow
+                        CalendarProjectionView(
+                            items: filteredItems,
+                            mode: calendarMode,
+                            anchorDate: calendarAnchorDate,
+                            showsGhostCells: savedView.layoutSpec.showsGhostCells,
+                            onSelectDay: { day in
+                                editorContext = DateCardEditorContext(existingCard: nil, defaultDate: day)
+                            },
+                            onSelectDateCard: { dateCard in
+                                editorContext = DateCardEditorContext(existingCard: dateCard, defaultDate: dateCard.startAt)
+                            }
+                        )
+                    } else {
+                        listGridMasonryContent(
+                            viewportWidth: max(0, contentProxy.size.width - (Spacing.md * 2))
+                        )
+                    }
                 }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.md)
             }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.md)
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
         .sheet(item: $editorContext) { context in
             DateCardEditorSheet(
                 existingCard: context.existingCard,
@@ -535,7 +539,7 @@ struct SavedViewTabContent: View {
     }
 
     @ViewBuilder
-    private var listGridMasonryContent: some View {
+    private func listGridMasonryContent(viewportWidth: CGFloat? = nil) -> some View {
         if filteredItems.isEmpty {
             emptyStateInline
         } else {
@@ -573,6 +577,7 @@ struct SavedViewTabContent: View {
             case .masonry:
                 LazyMasonryView(
                     items: filteredItems,
+                    viewportWidth: viewportWidth,
                     minimumColumnWidth: cardSizing.cardMinWidth,
                     itemSpacing: Spacing.md,
                     estimatedHeight: { item, columnWidth in
