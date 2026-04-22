@@ -150,10 +150,10 @@ enum MLXToolDefinitions {
             ),
             tool(
                 name: "addBookmark",
-                description: "Save a new bookmark from a URL. Can optionally set a title, folder, and tags.",
+                description: "Save a new bookmark from a URL. Can optionally set a folder and tags. Only provide a title when the user explicitly gave the final title to preserve; otherwise omit it so Cider can enrich the bookmark title natively.",
                 properties: [
                     "url": prop("string", "The URL to bookmark"),
-                    "title": prop("string", "Optional: title for the bookmark"),
+                    "title": prop("string", "Optional: final title to preserve verbatim, only when the user explicitly supplied it"),
                     "folderName": prop("string", "Optional: folder name to save the bookmark in"),
                     "tagName": prop("string", "Optional: tag name to apply to the bookmark")
                 ],

@@ -35,7 +35,7 @@ struct CiderCLI {
         let remaining = Array(args.dropFirst(2))
 
         // Initialize storage services
-        _ = StoragePaths.ensureVaultStructure()
+        StoragePaths.ensureVaultStructure()
 
         // Open SQLite before any storage service is touched — services check
         // CiderDatabase.shared.isOpen and use it as the primary store when available.
@@ -539,7 +539,7 @@ struct CiderCLI {
                 return
             }
             if let note = findNote(idPrefix, in: storage) {
-                let content = storage.loadContent(for: note) ?? ""
+                let content = storage.loadContent(for: note)
                 if jsonOutput {
                     var dict = noteToDict(note)
                     dict["content"] = content
@@ -3016,7 +3016,6 @@ struct CiderCLI {
         let files = VaultFileService.shared.files
         let folders = VaultFolderService.shared.folders
         let labels = CardLabelStorage.shared.labels
-        let boards = KanbanStorage.shared.boards
         let trash = TrashStorage.shared.allTrashItems()
 
         let now = Date()
@@ -4254,6 +4253,7 @@ struct CiderCLI {
                 for (idx, view) in views.enumerated() {
                     let kind: String
                     switch view.kind {
+                    case .dashboard: kind = "dashboard"
                     case .library: kind = "library"
                     case .kanban: kind = "kanban"
                     }
@@ -4280,6 +4280,7 @@ struct CiderCLI {
                 print("Saved view: \(view.name)")
                 print("  ID:      \(view.id.uuidString)")
                 switch view.kind {
+                case .dashboard: print("  Kind:    dashboard")
                 case .library: print("  Kind:    library")
                 case .kanban(let bid): print("  Kind:    kanban (board: \(bid))")
                 }

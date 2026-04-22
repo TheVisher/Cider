@@ -141,6 +141,7 @@ actor AgentOrchestrator {
         let systemPrompt = buildSystemPrompt(
             thread: thread,
             runtime: runtime,
+            channel: envelope.channel,
             allowedTools: allowedTools,
             routingDecision: routingDecision
         )
@@ -339,9 +340,16 @@ actor AgentOrchestrator {
     private func buildSystemPrompt(
         thread: AgentThread,
         runtime: any AgentRuntime,
+        channel: AgentChannel,
         allowedTools: [AgentToolDefinition],
         routingDecision: ProcessRuntimeRoutingDecision?
     ) -> String {
+        if runtime.kind == .process,
+           channel == .telegram,
+           routingDecision?.route == "bookmark-capture" {
+            return buildTelegramBookmarkCapturePrompt(thread: thread, routingDecision: routingDecision)
+        }
+
         var prompt = """
         You are Cider's AI assistant. Cider is a native macOS personal knowledge management app \
         that manages bookmarks, notes, todos, events, contacts, and files in a local vault.
@@ -389,6 +397,48 @@ actor AgentOrchestrator {
 
         if let restoredTurns = restoredTurnsDescription(for: thread), !restoredTurns.isEmpty {
             prompt += "\n\nRecent prior turns:\n\(restoredTurns)"
+        }
+
+        return prompt
+    }
+
+    private func buildTelegramBookmarkCapturePrompt(
+        thread: AgentThread,
+        routingDecision: ProcessRuntimeRoutingDecision?
+    ) -> String {
+        var prompt = """
+        You are Cider's Telegram bookmark capture fast path.
+
+        Keep this turn boring, fast, and minimal.
+
+        This runtime has direct access to the mounted vault on disk and can run local shell commands.
+        Prefer `cider-cli` for this entire turn.
+        Do not invoke external skills or read skill docs.
+        Do not read vault docs, memory files, `.cider` indexes, or random vault files unless the direct CLI path fails.
+        Do not fetch raw page HTML or call manual web scraping helpers before save.
+        Do not narrate your process, do not emit commentary, and do not explain intermediate steps.
+        """
+
+        if let routingHints = routingDecision?.hints, !routingHints.isEmpty {
+            prompt += "\n\nCLI routing for this request:\n\(routingHints)"
+        }
+
+        prompt += """
+
+
+        Additional Telegram fast-path rules:
+        - Default to `Inbox/Bookmarks` if routing is not obvious within one quick check.
+        - Reuse an obvious existing folder pattern if one is immediately confirmed by a direct CLI lookup.
+        - Do not spend multiple exploratory steps deciding on a folder for a single URL.
+        - Save first, wait for Cider enrichment, then re-read the bookmark.
+        - Only add AI-owned enrichment with `cider-cli bookmark update <id> --ai-summary "<text>"` when the extra context is clearly useful and can be inferred quickly from the saved bookmark or the user's message.
+        - If extra AI enrichment is not clearly useful, skip it.
+        - Final reply style: one short paragraph or 2-4 short lines with the saved title and folder only. Include the bookmark id only when it helps.
+        """
+
+        let contextDesc = thread.context.contextDescription
+        if !contextDesc.isEmpty {
+            prompt += "\n\nCurrent context:\n\(contextDesc)"
         }
 
         return prompt
@@ -614,11 +664,12 @@ actor AgentOrchestrator {
             detail = "url capture"
             hints.append("- This looks like a bookmark capture. Duplicate-check the URL first with `cider-cli duplicate-check \"<url>\" --json`.")
             hints.append("- Keep this turn on the fast path: `duplicate-check -> bookmark add -> bookmark get`. If the duplicate check finds an existing bookmark, report that result and stop.")
-            hints.append("- Decide the destination path before saving when confidence is high enough. Use folder-aware CLI lookups if needed, then save directly with `cider-cli bookmark add \"<url>\" --title \"<title>\" --path \"<vault-path>\"`.")
+            hints.append("- Decide the destination path before saving when confidence is high enough. Use folder-aware CLI lookups if needed, then save directly with `cider-cli bookmark add \"<url>\" --path \"<vault-path>\"`.")
+            hints.append("- Let Cider own the native bookmark title and thumbnail scraping. Do not pass `--title` unless the user explicitly gave the final title or Cider already exposed a trustworthy title that should be preserved verbatim.")
             hints.append("- Do not save to Inbox first and move it later unless routing is genuinely unclear.")
             hints.append("- Let Cider do the native scraping/enrichment pass after save. Save first, then re-read the bookmark with `cider-cli bookmark get <id-prefix> --json` and report the stored result.")
             hints.append("- Do not fetch raw page HTML, do not manually call oEmbed or WebView, do not read `.cider` indexes or `_cider_bookmarks.json`, and do not scan random vault files before saving unless the direct CLI path failed.")
-            hints.append("- Only add extra AI enrichment after the bookmark already exists and only by writing AI-owned fields such as `--ai-summary` when that extra context is genuinely useful.")
+            hints.append("- Only add extra AI enrichment after the bookmark already exists and only by writing AI-owned fields such as `--ai-summary` when that extra context is genuinely useful, for example store location, hours, product context, or movie notes.")
         }
 
         if asksToCreateEvent {

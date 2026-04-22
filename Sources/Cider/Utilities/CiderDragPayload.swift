@@ -22,7 +22,9 @@ enum BookmarkDragPayload {
         provider.registerDataRepresentation(
             forTypeIdentifier: UTType.url.identifier, visibility: .all
         ) { completion in
-            completion(url.dataRepresentation, nil)
+            Task { @MainActor in
+                completion(url.dataRepresentation, nil)
+            }
             return nil
         }
     }
@@ -41,7 +43,9 @@ enum BookmarkDragPayload {
             provider.registerDataRepresentation(
                 forTypeIdentifier: uti, visibility: .all
             ) { completion in
-                completion(data, nil)
+                Task { @MainActor in
+                    completion(data, nil)
+                }
                 return nil
             }
         }
@@ -70,7 +74,9 @@ enum NoteDragPayload {
         provider.registerDataRepresentation(
             forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
         ) { completion in
-            completion(fileURL.dataRepresentation, nil)
+            Task { @MainActor in
+                completion(fileURL.dataRepresentation, nil)
+            }
             return nil
         }
     }
@@ -136,7 +142,9 @@ enum CiderMultiDrag {
                 forTypeIdentifier: MultiDragPayload.typeIdentifier,
                 visibility: .all
             ) { completion in
-                completion(data, nil)
+                Task { @MainActor in
+                    completion(data, nil)
+                }
                 return nil
             }
         }

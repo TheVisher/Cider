@@ -946,7 +946,7 @@ struct SummarizeTextTool: Tool {
 struct AddBookmarkTool: Tool {
     let name = "addBookmark"
     let description = """
-    Save a new bookmark from a URL. Can optionally set a title, folder, and tags.
+    Save a new bookmark from a URL. Can optionally set a folder and tags. Only provide a title when the user explicitly gave the final title to preserve; otherwise omit it so Cider can enrich the bookmark title natively.
     """
 
     @Generable
@@ -954,7 +954,7 @@ struct AddBookmarkTool: Tool {
         @Guide(description: "The URL to bookmark")
         var url: String
 
-        @Guide(description: "Optional: title for the bookmark")
+        @Guide(description: "Optional: final title to preserve verbatim, only when the user explicitly supplied it")
         var title: String?
 
         @Guide(description: "Optional: folder name to save the bookmark in")

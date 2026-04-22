@@ -264,6 +264,8 @@ func outputJSON(_ value: Any) {
         "updatedAt": ISO8601DateFormatter().string(from: view.updatedAt),
     ]
     switch view.kind {
+    case .dashboard:
+        d["kind"] = "dashboard"
     case .library:
         d["kind"] = "library"
     case .kanban(let boardID):

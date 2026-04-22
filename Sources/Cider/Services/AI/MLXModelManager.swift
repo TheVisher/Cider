@@ -145,14 +145,19 @@ final class MLXModelManager: ObservableObject {
             let input = try await context.processor.prepare(
                 input: .init(messages: messages)
             )
-            let result = try MLXLMCommon.generate(
+            let stream = try MLXLMCommon.generate(
                 input: input,
-                parameters: .init(temperature: 0.7, topP: 0.9),
+                parameters: .init(maxTokens: 2048, temperature: 0.7, topP: 0.9),
                 context: context
-            ) { tokens in
-                tokens.count < 2048 ? .more : .stop
+            )
+
+            var output = ""
+            for try await generation in stream {
+                if let chunk = generation.chunk {
+                    output += chunk
+                }
             }
-            return result.output
+            return output
         }
 
         return output

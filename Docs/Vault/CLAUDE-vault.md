@@ -16,7 +16,7 @@ You may be invoked from Cider's AI Chat panel (one-shot `-p` mode) or via an iMe
 CLI="/Users/minivish/Cider/.build/arm64-apple-macosx/debug/cider-cli"
 
 # Bookmarks
-$CLI bookmark add "https://example.com" --title "Example" --folder "Work"
+$CLI bookmark add "https://example.com" --folder "Work"
 $CLI bookmark list --json
 $CLI bookmark search "recipe" --json
 $CLI bookmark get 5B6D --json
@@ -389,8 +389,8 @@ Follow the Vault Behavior Contract sequence:
    - Tech tutorial → `Tech/{Topic}/{Name}.webloc`
    - Unknown → `Inbox/Bookmarks/{Name}.webloc`
 5. **Ensure folder exists** — If the target folder doesn't exist, create it: `mkdir -p ~/CiderVault/{full/path}` (e.g., `mkdir -p ~/CiderVault/Food/Restaurants/Taiwanese`).
-6. **Save directly to folder** — Use `$CLI bookmark add "{url}" --title "{Descriptive Title}" --folder "{Folder Name}"`. The `--folder` flag matches by leaf folder name (e.g., `--folder "Taiwanese"`). **Always include --folder.** Bookmarks should NEVER land in Inbox when the agent is processing them. Use a descriptive title — "Dumpling World - Everett WA" not "TikTok". For TikTok/Instagram, name it after the actual content (the place, product, recipe), not the creator.
-7. **Metadata** — Update the bookmark's notes with extracted info: `$CLI bookmark update {ID} --notes "{summary with key details}"`. Add tags if relevant.
+6. **Save directly to folder** — Use `$CLI bookmark add "{url}" --folder "{Folder Name}"`. The `--folder` flag matches by leaf folder name (e.g., `--folder "Taiwanese"`). **Always include --folder.** Bookmarks should NEVER land in Inbox when the agent is processing them. Let Cider derive the bookmark title and thumbnail through its native enrichment pipeline after save. Only pass `--title` when the user explicitly gave the final title or you already have a trustworthy title that must be preserved verbatim.
+7. **Metadata** — Update AI-owned fields with extracted info after the bookmark exists: `$CLI bookmark update {ID} --ai-summary "{summary with key details}" --enrichment-status complete`. Add tags if relevant. Write store location, hours, product context, movie context, and similar AI-owned enrichment into `--ai-summary`, never `--notes`.
 8. **Respond** — Tell the user what you saved, where, and key details.
 
 ### Someone tells you a fact about a person

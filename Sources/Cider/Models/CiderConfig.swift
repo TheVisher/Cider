@@ -505,7 +505,7 @@ struct CiderConfig: Codable {
             LibrarySortMode.self,
             forKey: .homeSort
         ) ?? .createdDescending
-        var decodedFilter = try container.decodeIfPresent(
+        let decodedFilter = try container.decodeIfPresent(
             Set<LibraryEntityType>.self,
             forKey: .homeEntityFilter
         ) ?? LibraryEntityType.activeCases
