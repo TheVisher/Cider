@@ -4,12 +4,14 @@ import Foundation
 /// `.library` is the default (existing behavior),
 /// `.kanban` links to a YAML-backed Kanban board.
 enum SavedViewKind: Codable, Hashable {
+    case dashboard
     case library
     case kanban(boardID: String)
 
     /// SF Symbol for this tab kind.
     var systemImage: String {
         switch self {
+        case .dashboard: "gauge.medium"
         case .library: "square.grid.2x2"
         case .kanban: "square.split.2x1"
         }
@@ -26,6 +28,8 @@ enum SavedViewKind: Codable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(String.self, forKey: .type)
         switch type {
+        case "dashboard":
+            self = .dashboard
         case "kanban":
             let boardID = try container.decode(String.self, forKey: .boardID)
             self = .kanban(boardID: boardID)
@@ -37,6 +41,8 @@ enum SavedViewKind: Codable, Hashable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .dashboard:
+            try container.encode("dashboard", forKey: .type)
         case .library:
             try container.encode("library", forKey: .type)
         case .kanban(let boardID):

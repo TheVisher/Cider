@@ -116,6 +116,15 @@ extension CiderPanelView {
     }
 
     func ensureDefaultTabs() {
+        if savedViewStorage.savedViews.contains(where: { $0.kind == .dashboard }) == false {
+            let dashboard = savedViewStorage.createDashboardView()
+            savedViewStorage.removeFromTabOrder(dashboard.id)
+            savedViewStorage.insertInTabOrder(dashboard.id, at: 0)
+            if selectedTab == nil {
+                selectedTab = .savedView(id: dashboard.id, name: dashboard.name)
+            }
+        }
+
         guard savedViewStorage.tabOrder.isEmpty else {
             // Tabs exist — just select the first one if nothing is selected
             if selectedTab == nil {

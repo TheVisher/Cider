@@ -274,7 +274,9 @@ extension CiderPanelView {
                         showCardDetailsOnHover: $showCardDetailsOnHover
                     )
                 }
-        } else if let savedViewID = selectedTab?.savedViewID {
+        } else if let savedViewID = selectedTab?.savedViewID,
+                  let savedView = savedViewStorage.savedView(for: savedViewID),
+                  savedView.kind != .dashboard {
             Image(systemName: "slider.horizontal.3")
                 .font(CiderFont.bodySemibold)
                 .foregroundColor(isHomeViewOptionsVisible ? CiderColors.controlAccent : CiderColors.secondary)

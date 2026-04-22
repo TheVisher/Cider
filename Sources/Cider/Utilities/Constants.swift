@@ -688,6 +688,40 @@ enum HomeDesign {
     static let comingUpCardMinWidth: CGFloat = BookmarksDesign.cardMinWidth
 }
 
+enum HomeOverviewDesign {
+    static let maxContentWidth: CGFloat = 1560
+    static let telemetryTopPadding: CGFloat = Spacing.xs
+    static let rowSpacing: CGFloat = Spacing.md
+    static let columnSpacing: CGFloat = Spacing.md
+    static let fullLayoutTrackWeights: [CGFloat] = [1.2, 2.55, 1.9, 1.35]
+    static let fullLayoutTopRowHeight: CGFloat = 270
+    static let fullLayoutMiddleRowHeight: CGFloat = 460
+    static let fullLayoutBottomRowHeight: CGFloat = 292
+    static let topRowMinHeight: CGFloat = 160
+    static let overviewPanelFixedHeight: CGFloat = 270
+    static let profilePanelFixedHeight: CGFloat = 222
+    static let attentionMetricTileHeight: CGFloat = 76
+    static let embeddedAttentionMetricTileHeight: CGFloat = 72
+    static let quickActionButtonHeight: CGFloat = 36
+    static let recentActivityBaseHeight: CGFloat = 160
+    static let recentActivityRowHeightEstimate: CGFloat = 34
+    static let upcomingPanelFixedHeight: CGFloat = 244
+    static let closedTabsBaseMinHeight: CGFloat = 124
+    static let closedTabsPanelMinHeight: CGFloat = 292
+    static let closedTabsVisibleRowCount: Int = 2
+    static let closedTabsFullColumnCount: Int = 4
+    static let closedTabsCompactColumnCount: Int = 3
+    static let closedTabsSingleColumnCount: Int = 2
+    static let closedTabCardHeight: CGFloat = 102
+    static let resurfacePanelMinHeight: CGFloat = 208
+    static let resurfacePanelRowHeightEstimate: CGFloat = 120
+    static let resurfaceCardHeight: CGFloat = 72
+    static let telemetryInset: CGFloat = Spacing.sm
+    static let dayChipMinWidth: CGFloat = 58
+    static let compactLayoutThreshold: CGFloat = 1120
+    static let singleColumnLayoutThreshold: CGFloat = 760
+}
+
 enum AIAssistantPanelDesign {
     static let defaultWidth: CGFloat = 380
     static let defaultHeight: CGFloat = 520

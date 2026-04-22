@@ -116,6 +116,29 @@ extension CiderPanelView {
                 if let savedView = savedViewStorage.savedView(for: id) {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID)
+                    } else if case .dashboard = savedView.kind {
+                        HomeOverviewDashboardView(
+                            snapshot: HomeOverviewDataProvider.makeSnapshot(
+                                items: libraryViewModel.items,
+                                recentItems: libraryViewModel.recentItems,
+                                folders: bookmarksViewModel.folders,
+                                savedViews: savedViewStorage.savedViews,
+                                tabOrder: savedViewStorage.tabOrder,
+                                surfacingDays: CiderConfig.load().dateCardSurfacingDays
+                            ),
+                            onOpenItem: { item in openDashboardItem(item) },
+                            onOpenTarget: { target in openDashboardTarget(target) },
+                            onOpenTab: { tab in openDashboardTab(tab) },
+                            onOpenSettings: {
+                                NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+                            },
+                            onSyncNow: {
+                                SyncService.shared.syncNow()
+                            },
+                            onCreateNew: {
+                                showNewItemPicker = true
+                            }
+                        )
                     } else if savedView.isOnboarding {
                         OnboardingTabView(onDismiss: {
                             dismissOnboardingTab(id: id)
@@ -385,6 +408,70 @@ extension CiderPanelView {
                 .buttonStyle(CiderAccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    func openDashboardItem(_ item: LibraryItemV2) {
+        switch item {
+        case .bookmark(let bookmark):
+            openBookmarkDetails(bookmark)
+        case .note(let note):
+            openNoteDetail(note)
+        case .dateCard(let dateCard):
+            openDateCardDetail(dateCard)
+        case .contact(let contact):
+            openContactDetail(contact)
+        case .todo(let todoCard):
+            openTodoDetail(todoCard)
+        case .vaultFile(let file):
+            openVaultFileDetail(file)
+        }
+    }
+
+    func openDashboardTab(_ tab: HomeOverviewClosedTabSummary) {
+        reopenTab(tab.id)
+    }
+
+    func openDashboardTarget(_ target: HomeOverviewActionTarget) {
+        switch target {
+        case .inbox:
+            if let inbox = savedViewStorage.savedViews.first(where: {
+                $0.kind == .library && $0.filterSpec.onlyUnassigned
+            }) {
+                selectedFolderID = nil
+                selectedTab = .savedView(id: inbox.id, name: inbox.name)
+            } else {
+                let inbox = savedViewStorage.createSavedView(
+                    name: "Inbox",
+                    filterSpec: SavedViewFilterSpec(onlyUnassigned: true)
+                )
+                selectedFolderID = nil
+                selectedTab = .savedView(id: inbox.id, name: inbox.name)
+            }
+        case .savedView(let name, let filterSpec, let sortMode):
+            openDashboardLibraryView(named: name, filterSpec: filterSpec, sortMode: sortMode)
+        }
+    }
+
+    private func openDashboardLibraryView(
+        named name: String,
+        filterSpec: SavedViewFilterSpec,
+        sortMode: LibrarySortMode = .createdDescending
+    ) {
+        if let existing = savedViewStorage.savedViews.first(where: {
+            $0.kind == .library && $0.name == name && $0.filterSpec == filterSpec
+        }) {
+            selectedFolderID = nil
+            selectedTab = .savedView(id: existing.id, name: existing.name)
+            return
+        }
+
+        let savedView = savedViewStorage.createSavedView(
+            name: name,
+            filterSpec: filterSpec,
+            sortSpec: SavedViewSortSpec(mode: sortMode)
+        )
+        selectedFolderID = nil
+        selectedTab = .savedView(id: savedView.id, name: savedView.name)
     }
 }
 
