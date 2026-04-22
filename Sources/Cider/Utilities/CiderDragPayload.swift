@@ -17,14 +17,13 @@ enum BookmarkDragPayload {
         return UUID(uuidString: trimmed)
     }
 
+    @MainActor
     static func registerPublicURL(on provider: NSItemProvider, urlString: String) {
         guard let url = URL(string: urlString) else { return }
         provider.registerDataRepresentation(
             forTypeIdentifier: UTType.url.identifier, visibility: .all
         ) { completion in
-            Task { @MainActor in
-                completion(url.dataRepresentation, nil)
-            }
+            completion(url.dataRepresentation, nil)
             return nil
         }
     }
@@ -34,6 +33,7 @@ enum BookmarkDragPayload {
     /// Safe to use on providers that also carry text/internal types — does NOT use
     /// `registerFileRepresentation` or `public.file-url` which break SwiftUI's `.onDrop`.
     /// However, Finder may not create a file from raw data alone.
+    @MainActor
     static func registerPublicImage(on provider: NSItemProvider, bookmark: Bookmark) {
         guard let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL,
               FileManager.default.fileExists(atPath: fileURL.path) else { return }
@@ -43,9 +43,7 @@ enum BookmarkDragPayload {
             provider.registerDataRepresentation(
                 forTypeIdentifier: uti, visibility: .all
             ) { completion in
-                Task { @MainActor in
-                    completion(data, nil)
-                }
+                completion(data, nil)
                 return nil
             }
         }
@@ -68,15 +66,14 @@ enum NoteDragPayload {
         return UUID(uuidString: trimmed)
     }
 
+    @MainActor
     static func registerPublicFileURL(on provider: NSItemProvider, note: Note) {
         guard !note.relativePath.isEmpty else { return }
         let fileURL = StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(note.relativePath)
         provider.registerDataRepresentation(
             forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
         ) { completion in
-            Task { @MainActor in
-                completion(fileURL.dataRepresentation, nil)
-            }
+            completion(fileURL.dataRepresentation, nil)
             return nil
         }
     }
@@ -126,6 +123,7 @@ enum MultiDragPayload {
 // MARK: - Multi-Drag Helper
 
 enum CiderMultiDrag {
+    @MainActor
     static func makeProvider(
         primaryType: String,
         primaryID: UUID,
@@ -142,9 +140,7 @@ enum CiderMultiDrag {
                 forTypeIdentifier: MultiDragPayload.typeIdentifier,
                 visibility: .all
             ) { completion in
-                Task { @MainActor in
-                    completion(data, nil)
-                }
+                completion(data, nil)
                 return nil
             }
         }
