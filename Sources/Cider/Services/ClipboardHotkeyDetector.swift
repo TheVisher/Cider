@@ -38,7 +38,7 @@ final class ClipboardHotkeyDetector: @unchecked Sendable {
 
         guard let tap = eventTap else {
             if registerHotKeyFallback() {
-                logger.info("Started (Carbon hotkey fallback)")
+                logger.info("Clipboard hotkey detector started (Carbon hotkey fallback)")
             } else {
                 logger.error("Failed to create event tap or fallback hotkey")
             }
@@ -53,7 +53,7 @@ final class ClipboardHotkeyDetector: @unchecked Sendable {
             CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
-        logger.info("Started")
+        logger.info("Clipboard hotkey detector started")
     }
 
     func stop() {

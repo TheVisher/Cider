@@ -219,15 +219,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AIAssistantViewModel.shared.enableOrchestrator()
             await TelegramBridge.shared.startIfConfigured()
             self.telegramBridgeStarted = true
-            ReminderReconciler.shared.reconcile()
 
             // Re-reconcile on vault changes (debounced)
             self.dateCardNotificationCancellable = DateCardStorage.shared.$dateCards
+                .dropFirst()
                 .debounce(for: .seconds(2), scheduler: RunLoop.main)
                 .sink { _ in
                     ReminderReconciler.shared.reconcile()
                 }
             self.todoReminderCancellable = TodoCardStorage.shared.$todoCards
+                .dropFirst()
                 .debounce(for: .seconds(2), scheduler: RunLoop.main)
                 .sink { _ in
                     ReminderReconciler.shared.reconcile()

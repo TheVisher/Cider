@@ -16,37 +16,54 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
     /// Mutable state guarded by MainActor access.
     @MainActor private var session: LanguageModelSession?
     @MainActor private var contextUsage: Double = 0
+    @MainActor private var sessionConfiguration: SessionConfiguration?
 
     private let contextWindowSize = 4096
     private let summarizationThreshold = 0.70
 
-    /// Same tools as the original FoundationModelsProvider.
-    @MainActor private let tools: [any Tool] = [
-        CountItemsTool(),
-        SearchItemsTool(),
-        ListFoldersTool(),
-        ListTagsTool(),
-        GetRecentItemsTool(),
-        GetItemsByTagTool(),
-        GetUpcomingEventsTool(),
-        GetOverdueTodosTool(),
-        GetFolderContentsTool(),
-        FindSimilarTool(),
-        CreateFolderTool(),
-        MoveToFolderTool(),
-        ApplyTagTool(),
-        RemoveTagTool(),
-        RenameBookmarkTool(),
-        CreateNoteTool(),
-        SummarizeTextTool(),
-        AddBookmarkTool(),
-        GetCurrentItemTool(),
-        DeleteItemTool(),
-        RenameFolderTool(),
-        UnfileItemsTool(),
-        CreateReminderTool(),
-        CancelReminderTool()
+    private struct SessionConfiguration: Equatable {
+        let systemPrompt: String
+        let allowedToolNames: Set<String>
+    }
+
+    /// Foundation Models tool inventory in stable order. The active session uses
+    /// only the subset permitted by the orchestrator for the current channel.
+    private static let toolInventory: [(name: String, tool: any Tool)] = [
+        ("countItems", CountItemsTool()),
+        ("searchItems", SearchItemsTool()),
+        ("listFolders", ListFoldersTool()),
+        ("listTags", ListTagsTool()),
+        ("getRecentItems", GetRecentItemsTool()),
+        ("getItemsByTag", GetItemsByTagTool()),
+        ("getUpcomingEvents", GetUpcomingEventsTool()),
+        ("getOverdueTodos", GetOverdueTodosTool()),
+        ("getFolderContents", GetFolderContentsTool()),
+        ("findSimilar", FindSimilarTool()),
+        ("createFolder", CreateFolderTool()),
+        ("moveToFolder", MoveToFolderTool()),
+        ("applyTag", ApplyTagTool()),
+        ("removeTag", RemoveTagTool()),
+        ("renameBookmark", RenameBookmarkTool()),
+        ("createNote", CreateNoteTool()),
+        ("summarizeText", SummarizeTextTool()),
+        ("addBookmark", AddBookmarkTool()),
+        ("getCurrentItem", GetCurrentItemTool()),
+        ("deleteItem", DeleteItemTool()),
+        ("renameFolder", RenameFolderTool()),
+        ("unfileItems", UnfileItemsTool()),
+        ("createReminder", CreateReminderTool()),
+        ("cancelReminder", CancelReminderTool())
     ]
+
+    static func configuredToolNames(for allowedTools: [AgentToolDefinition]) -> [String] {
+        let allowedNames = Set(allowedTools.map(\.name))
+        return toolInventory.compactMap { allowedNames.contains($0.name) ? $0.name : nil }
+    }
+
+    private static func configuredTools(for allowedTools: [AgentToolDefinition]) -> [any Tool] {
+        let allowedNames = Set(allowedTools.map(\.name))
+        return toolInventory.compactMap { allowedNames.contains($0.name) ? $0.tool : nil }
+    }
 
     // MARK: - AgentProvider
 
@@ -63,13 +80,18 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
         messages: [AgentMessage],
         tools toolDefinitions: [AgentToolDefinition]
     ) async throws -> AgentProviderResponse {
-        try await generateOnMainActor(systemPrompt: systemPrompt, messages: messages)
+        try await generateOnMainActor(
+            systemPrompt: systemPrompt,
+            messages: messages,
+            toolDefinitions: toolDefinitions
+        )
     }
 
     @MainActor
     private func generateOnMainActor(
         systemPrompt: String,
-        messages: [AgentMessage]
+        messages: [AgentMessage],
+        toolDefinitions: [AgentToolDefinition]
     ) async throws -> AgentProviderResponse {
         guard isAvailable else { throw AgentError.providerUnavailable }
 
@@ -77,11 +99,18 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
             return .text("No message to respond to.")
         }
 
-        var activeSession = getOrCreateSession(systemPrompt: systemPrompt)
+        var activeSession = getOrCreateSession(
+            systemPrompt: systemPrompt,
+            toolDefinitions: toolDefinitions
+        )
 
         if contextUsage >= summarizationThreshold {
             logger.info("Context at \(Int(self.contextUsage * 100))% — summarizing")
-            if let refreshed = await summarizeAndReset(messages: messages, systemPrompt: systemPrompt) {
+            if let refreshed = await summarizeAndReset(
+                messages: messages,
+                systemPrompt: systemPrompt,
+                toolDefinitions: toolDefinitions
+            ) {
                 activeSession = refreshed
             }
         }
@@ -93,7 +122,11 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
         } catch {
             if "\(error)".contains("exceededContextWindowSize") {
                 logger.warning("Context exceeded — resetting session")
-                if let refreshed = await summarizeAndReset(messages: messages, systemPrompt: systemPrompt) {
+                if let refreshed = await summarizeAndReset(
+                    messages: messages,
+                    systemPrompt: systemPrompt,
+                    toolDefinitions: toolDefinitions
+                ) {
                     let retryResponse = try await refreshed.respond(to: lastUserMessage.content)
                     await updateContextUsage()
                     return .text(retryResponse.content)
@@ -120,13 +153,17 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
                     return
                 }
 
-                var activeSession = self.getOrCreateSession(systemPrompt: systemPrompt)
+                var activeSession = self.getOrCreateSession(
+                    systemPrompt: systemPrompt,
+                    toolDefinitions: toolDefinitions
+                )
 
                 if self.contextUsage >= self.summarizationThreshold {
                     self.logger.info("Context at \(Int(self.contextUsage * 100))% — summarizing")
                     if let refreshed = await self.summarizeAndReset(
                         messages: messages,
-                        systemPrompt: systemPrompt
+                        systemPrompt: systemPrompt,
+                        toolDefinitions: toolDefinitions
                     ) {
                         activeSession = refreshed
                     }
@@ -151,7 +188,8 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
                         self.logger.warning("Context exceeded during stream — resetting")
                         if let refreshed = await self.summarizeAndReset(
                             messages: messages,
-                            systemPrompt: systemPrompt
+                            systemPrompt: systemPrompt,
+                            toolDefinitions: toolDefinitions
                         ) {
                             do {
                                 let retryStream = refreshed.streamResponse(to: lastUserMessage.content)
@@ -185,16 +223,32 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
         Task { @MainActor in
             session = nil
             contextUsage = 0
+            sessionConfiguration = nil
         }
     }
 
     // MARK: - Session Management
 
     @MainActor
-    private func getOrCreateSession(systemPrompt: String) -> LanguageModelSession {
-        if let existing = session { return existing }
-        let s = LanguageModelSession(tools: tools, instructions: systemPrompt)
+    private func getOrCreateSession(
+        systemPrompt: String,
+        toolDefinitions: [AgentToolDefinition]
+    ) -> LanguageModelSession {
+        let configuration = SessionConfiguration(
+            systemPrompt: systemPrompt,
+            allowedToolNames: Set(Self.configuredToolNames(for: toolDefinitions))
+        )
+
+        if let existing = session, sessionConfiguration == configuration {
+            return existing
+        }
+
+        let s = LanguageModelSession(
+            tools: Self.configuredTools(for: toolDefinitions),
+            instructions: systemPrompt
+        )
         session = s
+        sessionConfiguration = configuration
         contextUsage = 0
         return s
     }
@@ -233,7 +287,8 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
     @MainActor
     private func summarizeAndReset(
         messages: [AgentMessage],
-        systemPrompt: String
+        systemPrompt: String,
+        toolDefinitions: [AgentToolDefinition]
     ) async -> LanguageModelSession? {
         let conversationText = messages.map { msg in
             let role = msg.role == .user ? "User" : "AI"
@@ -253,12 +308,23 @@ final class FoundationModelsAgentProvider: @unchecked Sendable, AgentProvider {
             logger.error("Summarization failed: \(error.localizedDescription, privacy: .public)")
             session = nil
             contextUsage = 0
-            return getOrCreateSession(systemPrompt: systemPrompt)
+            sessionConfiguration = nil
+            return getOrCreateSession(
+                systemPrompt: systemPrompt,
+                toolDefinitions: toolDefinitions
+            )
         }
 
         let extendedPrompt = systemPrompt + "\n\nConversation summary so far:\n\(summary)"
-        let freshSession = LanguageModelSession(tools: tools, instructions: extendedPrompt)
+        let freshSession = LanguageModelSession(
+            tools: Self.configuredTools(for: toolDefinitions),
+            instructions: extendedPrompt
+        )
         session = freshSession
+        sessionConfiguration = SessionConfiguration(
+            systemPrompt: extendedPrompt,
+            allowedToolNames: Set(Self.configuredToolNames(for: toolDefinitions))
+        )
         contextUsage = 0.15
         logger.info("Session refreshed with conversation summary")
         return freshSession

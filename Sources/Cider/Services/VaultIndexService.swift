@@ -3,7 +3,7 @@ import Foundation
 import os
 
 /// An entry in the vault index — tracks where an item lives on disk and its key metadata.
-struct VaultIndexEntry: Codable {
+struct VaultIndexEntry: Codable, Equatable {
     var type: String          // "bookmark", "note", "todo", "dateCard", "contact"
     var path: String          // relative to vault root, e.g. "Work/meeting-notes.md"
     var title: String
@@ -290,6 +290,8 @@ final class VaultIndexService {
                 updatedAt: contact.updatedAt
             )
         }
+
+        guard rebuilt != entries else { return }
 
         entries = rebuilt
         saveIndex()

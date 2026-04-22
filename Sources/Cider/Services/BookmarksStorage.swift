@@ -1368,7 +1368,8 @@ final class BookmarksStorage: ObservableObject {
 
             // WebView screenshot fallback — if thumbnail URL was found but download
             // failed (e.g., Cloudflare blocking image requests), capture a screenshot
-            if imageAssets == nil, payload?.thumbnailURL != nil {
+            if imageAssets == nil, payload?.thumbnailURL != nil,
+               !Self.shouldSkipWebViewFallback(for: url) {
                 let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
                 enrichLog.info("Thumbnail download failed, trying WebView screenshot for \(url.host ?? "?", privacy: .public)")
                 let extracted = await WebViewMetadataExtractor.extract(from: url)
@@ -1997,7 +1998,8 @@ final class BookmarksStorage: ObservableObject {
         }
 
         // WebView fallback — renders JS-heavy pages (IMDB WAF, Booking, etc.)
-        let needsWebView = htmlResult?.title == nil || !hasRealThumbnail
+        let needsWebView = (htmlResult?.title == nil || !hasRealThumbnail)
+            && !shouldSkipWebViewFallback(for: pageURL)
         if needsWebView {
             enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
@@ -2160,6 +2162,22 @@ final class BookmarksStorage: ObservableObject {
     private static func isFaviconURL(_ url: URL?) -> Bool {
         guard let path = url?.path.lowercased() else { return false }
         return path.contains("favicon") || path.contains("apple-touch-icon")
+    }
+
+    private static func shouldSkipWebViewFallback(for url: URL) -> Bool {
+        let host = normalizedHost(for: url)
+        return host == "x.com" || host == "twitter.com"
+    }
+
+    private static func normalizedHost(for url: URL) -> String {
+        let host = url.host?.lowercased() ?? ""
+        if host.hasPrefix("www.") {
+            return String(host.dropFirst(4))
+        }
+        if host.hasPrefix("m.") {
+            return String(host.dropFirst(2))
+        }
+        return host
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
