@@ -149,25 +149,18 @@ struct HomeDashboardView: View {
                         config.save()
                     }
                 } else {
-                    GeometryReader { contentProxy in
-                        ScrollViewReader { proxy in
-                            ScrollView {
-                                libraryFeed(
-                                    viewportWidth: max(
-                                        0,
-                                        contentProxy.size.width - (Spacing.xxs * 2) - (Spacing.md * 2)
-                                    )
-                                )
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            libraryFeed
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .scrollIndicators(.hidden)
-                            .onChange(of: scrollToItemID) { _, id in
-                                if let id {
-                                    withAnimation(reduceMotion ? .none : .snappy) {
-                                        proxy.scrollTo(id, anchor: .center)
-                                    }
-                                    scrollToItemID = nil
+                        }
+                        .scrollIndicators(.hidden)
+                        .onChange(of: scrollToItemID) { _, id in
+                            if let id {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    proxy.scrollTo(id, anchor: .center)
                                 }
+                                scrollToItemID = nil
                             }
                         }
                     }
@@ -183,7 +176,7 @@ struct HomeDashboardView: View {
     // MARK: - Library Feed
 
     @ViewBuilder
-    private func libraryFeed(viewportWidth: CGFloat? = nil) -> some View {
+    private var libraryFeed: some View {
         switch displayMode {
         case .list:
             // Handled separately in body — this branch should not be reached
@@ -201,7 +194,6 @@ struct HomeDashboardView: View {
         case .masonry:
             LazyMasonryView(
                 items: libraryItems,
-                viewportWidth: viewportWidth,
                 minimumColumnWidth: cardSizing.cardMinWidth,
                 itemSpacing: Spacing.md,
                 estimatedHeight: { item, columnWidth in

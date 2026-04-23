@@ -39,19 +39,6 @@ struct LazyMasonryViewTests {
         #expect(layout.columnWidth == 256)
     }
 
-    @Test("lazy masonry prefers explicit viewport width over stale measured width")
-    func plannerPrefersExplicitViewportWidth() {
-        let layout = LazyMasonryColumnPlanner.layout(
-            containerWidth: 1_200,
-            viewportWidth: 640,
-            minimumColumnWidth: 240,
-            itemSpacing: 16
-        )
-
-        #expect(layout.columnCount == 2)
-        #expect(layout.columnWidth == 312)
-    }
-
     @Test("lazy masonry keeps a stable column plan while estimates change")
     func plannerKeepsStableColumnsForSameItemsAndLayout() {
         let items = [

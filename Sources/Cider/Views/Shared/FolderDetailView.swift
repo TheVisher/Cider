@@ -152,33 +152,31 @@ struct FolderDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                GeometryReader { contentProxy in
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                if coverImage != nil {
-                                    folderCoverBanner
-                                }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            if coverImage != nil {
+                                folderCoverBanner
+                            }
 
-                                folderHeaderSection
+                            folderHeaderSection
 
-                                if !folderItems.isEmpty {
-                                    if displayMode == .list {
-                                        LibraryTableHeader(
-                                            columnConfig: $tableColumnConfig,
-                                            allSelected: !folderItems.isEmpty && folderItems.allSatisfy { selectedItemIDs.contains($0.id) },
-                                            onToggleSelectAll: {
-                                                if folderItems.allSatisfy({ selectedItemIDs.contains($0.id) }) {
-                                                    selectedItemIDs.removeAll()
-                                                } else {
-                                                    selectedItemIDs = Set(folderItems.map(\.id))
-                                                }
+                            if !folderItems.isEmpty {
+                                if displayMode == .list {
+                                    LibraryTableHeader(
+                                        columnConfig: $tableColumnConfig,
+                                        allSelected: !folderItems.isEmpty && folderItems.allSatisfy { selectedItemIDs.contains($0.id) },
+                                        onToggleSelectAll: {
+                                            if folderItems.allSatisfy({ selectedItemIDs.contains($0.id) }) {
+                                                selectedItemIDs.removeAll()
+                                            } else {
+                                                selectedItemIDs = Set(folderItems.map(\.id))
                                             }
-                                        )
-                                        .onChange(of: tableColumnConfig) { _, newConfig in
-                                            folderConfig.tableColumnConfig = newConfig
-                                            folderConfig.save()
                                         }
+                                    )
+                                    .onChange(of: tableColumnConfig) { _, newConfig in
+                                        folderConfig.tableColumnConfig = newConfig
+                                        folderConfig.save()
                                     }
                                     let noPadding = displayMode == .list || displayMode == .kanban
                                     let viewportWidth = max(
@@ -205,15 +203,14 @@ struct FolderDetailView: View {
                                     childOverviewFeed(contentWidth: contentProxy.size.width)
                                 }
                             }
-                        }
-                        .scrollIndicators(.hidden)
-                        .onChange(of: scrollToItemID) { _, id in
-                            if let id {
-                                withAnimation(reduceMotion ? .none : .snappy) {
-                                    proxy.scrollTo(id, anchor: .center)
-                                }
-                                scrollToItemID = nil
+                    }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: scrollToItemID) { _, id in
+                        if let id {
+                            withAnimation(reduceMotion ? .none : .snappy) {
+                                proxy.scrollTo(id, anchor: .center)
                             }
+                            scrollToItemID = nil
                         }
                     }
                 }
