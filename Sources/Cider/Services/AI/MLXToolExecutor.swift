@@ -227,6 +227,7 @@ enum MLXToolExecutor {
         let events = DateCardStorage.shared.dateCards
         let todos = TodoCardStorage.shared.todoCards
         let contacts = ContactStorage.shared.contacts
+        let files = VaultFileService.shared.files
 
         var lines: [String] = []
         for folder in folders.sorted(by: { $0.relativePath < $1.relativePath }) {
@@ -236,8 +237,13 @@ enum MLXToolExecutor {
             let eCount = events.filter { $0.folderID == fid }.count
             let tCount = todos.filter { $0.folderID == fid }.count
             let cCount = contacts.filter { $0.folderID == fid }.count
-            let total = bCount + nCount + eCount + tCount + cCount
-            lines.append("\(folder.name) (\(total) items)")
+            let fCount = files.filter { $0.folderID == fid }.count
+            let childFolderCount = folders.filter { $0.parentRelativePath == folder.relativePath }.count
+            let summary = FolderCardSummary.build(
+                directItemCount: bCount + nCount + eCount + tCount + cCount + fCount,
+                childFolderCount: childFolderCount
+            )
+            lines.append("\(folder.name) (\(summary.contentDescription))")
         }
         return "Folders:\n" + lines.joined(separator: "\n")
     }
@@ -477,7 +483,11 @@ enum MLXToolExecutor {
             return "Currently viewing todo: \"\(todo.title)\" (\(todo.status))"
         }
         if let folder = context.currentFolder {
-            return "Currently browsing folder: \"\(folder.name)\" containing \(folder.itemCount) items."
+            let summary = FolderCardSummary.build(
+                directItemCount: folder.directItemCount,
+                childFolderCount: folder.childFolderCount
+            )
+            return "Currently browsing folder: \"\(folder.name)\" containing \(summary.contentDescription)."
         }
         return "The user is not currently viewing any specific item."
     }

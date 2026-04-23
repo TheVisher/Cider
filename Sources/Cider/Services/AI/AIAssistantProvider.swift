@@ -24,7 +24,7 @@ struct AIAssistantMessage: Identifiable, Codable {
 struct AIAssistantContext {
     var currentBookmark: (title: String, url: String, summary: String?)?
     var currentNote: (title: String, excerpt: String)?
-    var currentFolder: (name: String, itemCount: Int)?
+    var currentFolder: (name: String, directItemCount: Int, childFolderCount: Int)?
     var currentEvent: (title: String, date: String, location: String)?
     var currentContact: (name: String, email: String)?
     var currentTodo: (title: String, status: String)?
@@ -48,7 +48,11 @@ struct AIAssistantContext {
             parts.append("The user is viewing a note: \"\(note.title)\" — Content: \(note.excerpt)")
         }
         if let folder = currentFolder {
-            parts.append("The user is browsing folder \"\(folder.name)\" containing \(folder.itemCount) items.")
+            let summary = FolderCardSummary.build(
+                directItemCount: folder.directItemCount,
+                childFolderCount: folder.childFolderCount
+            )
+            parts.append("The user is browsing folder \"\(folder.name)\" containing \(summary.contentDescription).")
         }
         if let event = currentEvent {
             var desc = "The user is viewing an event: \"\(event.title)\" on \(event.date)"

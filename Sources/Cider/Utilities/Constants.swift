@@ -593,6 +593,8 @@ enum FolderDetailDesign {
     static let subFolderCardMinWidth: CGFloat = 140
     /// Maximum card width in the sub-folder grid
     static let subFolderCardMaxWidth: CGFloat = 200
+    /// Fixed width for the child-folder label column in the Subfolders preview rows
+    static let subfolderPreviewLabelWidth: CGFloat = 168
 }
 
 enum TagColorPickerDesign {

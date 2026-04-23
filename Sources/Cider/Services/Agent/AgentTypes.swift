@@ -62,7 +62,11 @@ struct AgentContext: Sendable {
 
     struct BookmarkContext: Sendable { let title: String; let url: String; let summary: String? }
     struct NoteContext: Sendable { let title: String; let excerpt: String }
-    struct FolderContext: Sendable { let name: String; let itemCount: Int }
+    struct FolderContext: Sendable {
+        let name: String
+        let directItemCount: Int
+        let childFolderCount: Int
+    }
     struct EventContext: Sendable { let title: String; let date: String; let location: String }
     struct ContactContext: Sendable { let name: String; let email: String }
     struct TodoContext: Sendable { let title: String; let status: String }
@@ -97,7 +101,11 @@ struct AgentContext: Sendable {
             parts.append("The user is viewing a note: \"\(note.title)\" — Content: \(note.excerpt)")
         }
         if let folder = currentFolder {
-            parts.append("The user is browsing folder \"\(folder.name)\" containing \(folder.itemCount) items.")
+            let summary = FolderCardSummary.build(
+                directItemCount: folder.directItemCount,
+                childFolderCount: folder.childFolderCount
+            )
+            parts.append("The user is browsing folder \"\(folder.name)\" containing \(summary.contentDescription).")
         }
         if let event = currentEvent {
             var desc = "The user is viewing an event: \"\(event.title)\" on \(event.date)"

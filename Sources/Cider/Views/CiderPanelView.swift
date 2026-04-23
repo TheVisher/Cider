@@ -214,14 +214,8 @@ struct CiderPanelView: View {
             sidebarSearchText = ""
             debouncedSearchText = ""
             closeAllDetails()
-            // Update AI context with folder info
-            if let fid = newFolderID,
-               let folder = VaultFolderService.shared.folder(for: fid) {
-                let itemCount = VaultBookmarkService.shared.bookmarks.filter { $0.folderID == fid }.count
-                    + NotesStorage.shared.notes.filter { $0.folderID == fid }.count
-                AIAssistantViewModel.shared.updateContext(
-                    folder: (name: folder.name, itemCount: itemCount)
-                )
+            if let folderContext = aiFolderContext(for: newFolderID) {
+                AIAssistantViewModel.shared.updateContext(folder: folderContext)
             } else {
                 AIAssistantViewModel.shared.clearContext()
             }
@@ -451,5 +445,29 @@ struct CiderPanelView: View {
             .keyboardShortcut(.escape, modifiers: [])
             .hidden()
         }
+    }
+
+    private func aiFolderContext(for folderID: UUID?) -> (name: String, directItemCount: Int, childFolderCount: Int)? {
+        guard let folderID,
+              let folder = VaultFolderService.shared.folder(for: folderID) else {
+            return nil
+        }
+
+        let bookmarkCount = VaultBookmarkService.shared.bookmarks.filter { $0.folderID == folderID }.count
+        let noteCount = NotesStorage.shared.notes.filter { $0.folderID == folderID }.count
+        let todoCount = TodoCardStorage.shared.todoCards.filter { $0.folderID == folderID }.count
+        let eventCount = DateCardStorage.shared.dateCards.filter { $0.folderID == folderID }.count
+        let contactCount = ContactStorage.shared.contacts.filter { $0.folderID == folderID }.count
+        let fileCount = VaultFileService.shared.files.filter { $0.folderID == folderID }.count
+        let directItemCount = bookmarkCount + noteCount + todoCount + eventCount + contactCount + fileCount
+        let childFolderCount = VaultFolderService.shared.folders.filter {
+            $0.parentRelativePath == folder.relativePath
+        }.count
+
+        return (
+            name: folder.name,
+            directItemCount: directItemCount,
+            childFolderCount: childFolderCount
+        )
     }
 }

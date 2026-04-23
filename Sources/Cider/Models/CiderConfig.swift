@@ -146,6 +146,7 @@ struct CiderConfig: Codable {
         case showContinueSection
         case continueSectionCollapsed
         case subFoldersCollapsed
+        case folderOverviewCollapsedByParentID
         case homeDisplayMode
         case homeCardSizeScale
         case tagsCollapsed
@@ -222,6 +223,7 @@ struct CiderConfig: Codable {
     var showContinueSection: Bool  // Show the Continue section on the Home tab
     var continueSectionCollapsed: Bool  // Whether the Continue section is collapsed
     var subFoldersCollapsed: Bool  // Whether sub-folder cards are collapsed in folder view
+    var folderOverviewCollapsedByParentID: [String: Bool]  // Per-parent folder state for the lower Subfolders preview section
     var homeDisplayMode: LibraryDisplayMode  // Home tab library feed layout mode
     var homeCardSizeScale: Double?  // Continuous card size scale (0.0–3.0) for home library feed
     var tagsCollapsed: Bool  // Whether the sidebar tags section is collapsed
@@ -300,6 +302,7 @@ struct CiderConfig: Codable {
             showContinueSection: true,
             continueSectionCollapsed: false,
             subFoldersCollapsed: false,
+            folderOverviewCollapsedByParentID: [:],
             homeDisplayMode: .list,
             tagsCollapsed: false,
             enableLinkedSources: false,
@@ -479,6 +482,10 @@ struct CiderConfig: Codable {
             Bool.self,
             forKey: .subFoldersCollapsed
         ) ?? false
+        folderOverviewCollapsedByParentID = try container.decodeIfPresent(
+            [String: Bool].self,
+            forKey: .folderOverviewCollapsedByParentID
+        ) ?? [:]
         homeDisplayMode = try container.decodeIfPresent(
             LibraryDisplayMode.self,
             forKey: .homeDisplayMode
@@ -588,6 +595,7 @@ struct CiderConfig: Codable {
         showContinueSection: Bool = true,
         continueSectionCollapsed: Bool = false,
         subFoldersCollapsed: Bool = false,
+        folderOverviewCollapsedByParentID: [String: Bool] = [:],
         homeDisplayMode: LibraryDisplayMode = .list,
         homeCardSizeScale: Double? = nil,
         tagsCollapsed: Bool = false,
@@ -663,6 +671,7 @@ struct CiderConfig: Codable {
         self.showContinueSection = showContinueSection
         self.continueSectionCollapsed = continueSectionCollapsed
         self.subFoldersCollapsed = subFoldersCollapsed
+        self.folderOverviewCollapsedByParentID = folderOverviewCollapsedByParentID
         self.homeDisplayMode = homeDisplayMode
         self.homeCardSizeScale = homeCardSizeScale
         self.tagsCollapsed = tagsCollapsed

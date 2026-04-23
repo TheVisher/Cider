@@ -209,6 +209,7 @@ struct ListFoldersTool: Tool {
         let events = DateCardStorage.shared.dateCards
         let todos = TodoCardStorage.shared.todoCards
         let contacts = ContactStorage.shared.contacts
+        let files = VaultFileService.shared.files
 
         var lines: [String] = []
         for folder in folders.sorted(by: { $0.relativePath < $1.relativePath }) {
@@ -218,11 +219,25 @@ struct ListFoldersTool: Tool {
             let eCount = events.filter { $0.folderID == fid }.count
             let tCount = todos.filter { $0.folderID == fid }.count
             let cCount = contacts.filter { $0.folderID == fid }.count
-            let total = bCount + nCount + eCount + tCount + cCount
+            let fCount = files.filter { $0.folderID == fid }.count
+            let directItemCount = bCount + nCount + eCount + tCount + cCount + fCount
+            let childFolderCount = folders.filter { $0.parentRelativePath == folder.relativePath }.count
+            let summary = FolderCardSummary.build(
+                directItemCount: directItemCount,
+                childFolderCount: childFolderCount
+            )
 
             let indent = folder.relativePath.components(separatedBy: "/").count - 1
             let prefix = String(repeating: "  ", count: indent)
-            lines.append("\(prefix)📁 \(folder.name) (\(total) items: \(bCount) bookmarks, \(nCount) notes, \(eCount) events, \(tCount) todos, \(cCount) contacts)")
+            var breakdown: [String] = []
+            if bCount > 0 { breakdown.append("\(bCount) bookmarks") }
+            if nCount > 0 { breakdown.append("\(nCount) notes") }
+            if eCount > 0 { breakdown.append("\(eCount) events") }
+            if tCount > 0 { breakdown.append("\(tCount) todos") }
+            if cCount > 0 { breakdown.append("\(cCount) contacts") }
+            if fCount > 0 { breakdown.append("\(fCount) files") }
+            if childFolderCount > 0 { breakdown.append("\(childFolderCount) subfolders") }
+            lines.append("\(prefix)📁 \(folder.name) (\(summary.contentDescription)\(breakdown.isEmpty ? "" : ": \(breakdown.joined(separator: ", "))"))")
         }
         return ("Folders:\n" + lines.joined(separator: "\n"))
     } } }
@@ -1059,7 +1074,11 @@ struct GetCurrentItemTool: Tool {
         }
 
         if let folder = context.currentFolder {
-            return "Currently browsing folder: \"\(folder.name)\" containing \(folder.itemCount) items."
+            let summary = FolderCardSummary.build(
+                directItemCount: folder.directItemCount,
+                childFolderCount: folder.childFolderCount
+            )
+            return "Currently browsing folder: \"\(folder.name)\" containing \(summary.contentDescription)."
         }
 
         return "The user is not currently viewing any specific item. They may be on the home screen or library view."

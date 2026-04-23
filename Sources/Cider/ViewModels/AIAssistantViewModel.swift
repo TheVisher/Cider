@@ -352,7 +352,11 @@ final class AIAssistantViewModel: ObservableObject {
             agentCtx.currentNote = .init(title: note.title, excerpt: note.excerpt)
         }
         if let folder = context.currentFolder {
-            agentCtx.currentFolder = .init(name: folder.name, itemCount: folder.itemCount)
+            agentCtx.currentFolder = .init(
+                name: folder.name,
+                directItemCount: folder.directItemCount,
+                childFolderCount: folder.childFolderCount
+            )
         }
         if let event = context.currentEvent {
             agentCtx.currentEvent = .init(title: event.title, date: event.date, location: event.location)
@@ -490,7 +494,7 @@ final class AIAssistantViewModel: ObservableObject {
 
     func updateContext(bookmark: (title: String, url: String, summary: String?)? = nil,
                        note: (title: String, excerpt: String)? = nil,
-                       folder: (name: String, itemCount: Int)? = nil,
+                       folder: (name: String, directItemCount: Int, childFolderCount: Int)? = nil,
                        event: (title: String, date: String, location: String)? = nil,
                        contact: (name: String, email: String)? = nil,
                        todo: (title: String, status: String)? = nil,

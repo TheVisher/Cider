@@ -27,6 +27,10 @@ struct FolderSidebarView: View {
 
     @Environment(\.textScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var dateCardStorage = DateCardStorage.shared
+    @ObservedObject private var contactStorage = ContactStorage.shared
+    @ObservedObject private var todoCardStorage = TodoCardStorage.shared
+    @ObservedObject private var vaultFileService = VaultFileService.shared
 
     @State private var isFolderCreationFieldVisible = false
     @State private var draftFolderName = ""
@@ -46,6 +50,16 @@ struct FolderSidebarView: View {
     private static let multiDragTypeIdentifier = "com.cider.multi-drag"
     private static let bookmarkDragTypeIdentifier = "com.cider.bookmark-id"
     private static let noteDragTypeIdentifier = "com.cider.note-id"
+
+    private var allFolderContentItems: [LibraryItemV2] {
+        let bookmarks = bookmarks.map { LibraryItemV2.bookmark($0) }
+        let notes = notes.map { LibraryItemV2.note($0) }
+        let dateCards = dateCardStorage.dateCards.map { LibraryItemV2.dateCard($0) }
+        let contacts = contactStorage.contacts.map { LibraryItemV2.contact($0) }
+        let todos = todoCardStorage.todoCards.map { LibraryItemV2.todo($0) }
+        let vaultFiles = vaultFileService.files.map { LibraryItemV2.vaultFile($0) }
+        return bookmarks + notes + dateCards + contacts + todos + vaultFiles
+    }
 
     private var folderDropTypeIdentifiers: [String] {
         [
@@ -566,9 +580,15 @@ struct FolderSidebarView: View {
     }
 
     func itemsInFolder(_ folderID: UUID) -> Int {
-        let bookmarkCount = bookmarks.filter { $0.folderID == folderID }.count
-        let noteCount = notes.filter { $0.folderID == folderID }.count
-        return bookmarkCount + noteCount
+        folderSummary(for: folderID).totalCount
+    }
+
+    private func folderSummary(for folderID: UUID) -> FolderCardSummary {
+        FolderCardSummary.build(
+            folderID: folderID,
+            folders: folders,
+            items: allFolderContentItems
+        )
     }
 
     private func expandPath(to folderID: UUID) {

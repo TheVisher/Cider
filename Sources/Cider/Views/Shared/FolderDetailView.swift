@@ -25,6 +25,7 @@ struct FolderDetailView: View {
 
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
+    @ObservedObject private var todoCardStorage = TodoCardStorage.shared
     @ObservedObject private var vaultFileService = VaultFileService.shared
     @State private var selectionAnchorID: String?
     @State private var coverImage: NSImage?
@@ -48,18 +49,25 @@ struct FolderDetailView: View {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    private var folderItems: [LibraryItemV2] {
-        let bookmarks = bookmarksViewModel.bookmarks.filter { $0.folderID == folderID }
+    private var allFolderContentItems: [LibraryItemV2] {
+        let bookmarks = bookmarksViewModel.bookmarks
             .map { LibraryItemV2.bookmark($0) }
-        let notes = notesViewModel.notes.filter { $0.folderID == folderID }
+        let notes = notesViewModel.notes
             .map { LibraryItemV2.note($0) }
-        let dateCards = dateCardStorage.dateCards.filter { $0.folderID == folderID }
+        let dateCards = dateCardStorage.dateCards
             .map { LibraryItemV2.dateCard($0) }
-        let contacts = contactStorage.contacts.filter { $0.folderID == folderID }
+        let contacts = contactStorage.contacts
             .map { LibraryItemV2.contact($0) }
-        let vaultFiles = vaultFileService.files(inFolder: folderID)
+        let todos = todoCardStorage.todoCards
+            .map { LibraryItemV2.todo($0) }
+        let vaultFiles = vaultFileService.files
             .map { LibraryItemV2.vaultFile($0) }
-        var all = (bookmarks + notes + dateCards + contacts + vaultFiles)
+        return (bookmarks + notes + dateCards + contacts + todos + vaultFiles)
+            .sorted { $0.createdDate > $1.createdDate }
+    }
+
+    private var allScopedItems: [LibraryItemV2] {
+        var all = allFolderContentItems
             .sorted { $0.createdDate > $1.createdDate }
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,8 +96,24 @@ struct FolderDetailView: View {
         return all
     }
 
+    private var folderItems: [LibraryItemV2] {
+        allScopedItems.filter { $0.folderID == folderID }
+    }
+
+    private var childOverviewSections: [FolderOverviewSection] {
+        FolderOverviewSection.buildSections(
+            parentFolderID: folderID,
+            folders: bookmarksViewModel.folders,
+            items: allScopedItems
+        )
+    }
+
     private var cardSizing: LibraryCardSizing {
         LibraryCardSizing(scale: cardSizeScale)
+    }
+
+    private var subfolderPreviewCardWidth: CGFloat {
+        min(max(cardSizing.cardMinWidth * 0.78, 170), 220)
     }
 
     private var foldersByID: [UUID: Folder] {
@@ -100,6 +124,20 @@ struct FolderDetailView: View {
     private var breadcrumbPath: [Folder] {
         let fullPath = bookmarksViewModel.folderPath(to: folderID)
         return Array(fullPath.dropLast())
+    }
+
+    private var isSubfolderOverviewCollapsed: Bool {
+        folderConfig.folderOverviewCollapsedByParentID[folderID.uuidString] ?? !folderItems.isEmpty
+    }
+
+    private var subfolderOverviewCollapsedBinding: Binding<Bool> {
+        Binding(
+            get: { isSubfolderOverviewCollapsed },
+            set: { isCollapsed in
+                folderConfig.folderOverviewCollapsedByParentID[folderID.uuidString] = isCollapsed
+                folderConfig.save()
+            }
+        )
     }
 
     // MARK: - Body
@@ -147,18 +185,24 @@ struct FolderDetailView: View {
                                         0,
                                         contentProxy.size.width - (noPadding ? 0 : (Spacing.xxs * 2) + (Spacing.md * 2))
                                     )
-                                    libraryFeed(viewportWidth: viewportWidth)
+                                    libraryFeed(items: folderItems, folderID: folderID, viewportWidth: viewportWidth)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(noPadding ? 0 : Spacing.xxs)
                                         .padding(.horizontal, noPadding ? 0 : Spacing.md)
                                         .padding(.vertical, noPadding ? 0 : Spacing.md)
-                                } else {
+                                } else if childOverviewSections.isEmpty {
                                     EmptyStateView(
                                         icon: "tray",
                                         title: "No items yet",
                                         subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
                                     )
                                     .frame(minHeight: BookmarksDesign.detailsSheetNotesHeight)
+                                } else {
+                                    noDirectItemsHint
+                                }
+
+                                if !childOverviewSections.isEmpty {
+                                    childOverviewFeed(contentWidth: contentProxy.size.width)
                                 }
                             }
                         }
@@ -408,23 +452,23 @@ struct FolderDetailView: View {
     ]
 
     private func subFolderCard(_ folder: Folder) -> some View {
-        let bookmarkCount = bookmarksViewModel.bookmarks.filter { $0.folderID == folder.id }.count
-        let noteCount = notesViewModel.notes.filter { $0.folderID == folder.id }.count
-        let totalItems = bookmarkCount + noteCount
+        let summary = FolderCardSummary.build(
+            folderID: folder.id,
+            folders: bookmarksViewModel.folders,
+            items: allFolderContentItems
+        )
 
         return Button {
             onSelectSubFolder?(folder.id)
         } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack(spacing: Spacing.xs) {
-                    Image(systemName: "folder.fill")
-                        .font(CiderFont.display)
-                        .foregroundColor(CiderColors.controlAccent)
+                    folderIconView(for: folder, filled: true)
 
                     Spacer()
 
-                    if totalItems > 0 {
-                        Text("\(totalItems)")
+                    if let badgeCount = summary.badgeCount {
+                        Text("\(badgeCount)")
                             .font(CiderFont.captionMedium)
                             .foregroundColor(CiderColors.tertiary)
                             .padding(.horizontal, Spacing.xs)
@@ -442,17 +486,12 @@ struct FolderDetailView: View {
                     .lineLimit(2)
 
                 HStack(spacing: Spacing.sm) {
-                    if bookmarkCount > 0 {
-                        Label("\(bookmarkCount)", systemImage: "bookmark")
+                    ForEach(summary.metrics, id: \.systemImage) { metric in
+                        Label("\(metric.count)", systemImage: metric.systemImage)
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.quaternary)
                     }
-                    if noteCount > 0 {
-                        Label("\(noteCount)", systemImage: "note.text")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.quaternary)
-                    }
-                    if totalItems == 0 {
+                    if summary.isEmpty {
                         Text("Empty")
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.quaternary)
@@ -557,11 +596,15 @@ struct FolderDetailView: View {
     // MARK: - Library Feed
 
     @ViewBuilder
-    private func libraryFeed(viewportWidth: CGFloat? = nil) -> some View {
+    private func libraryFeed(
+        items: [LibraryItemV2],
+        folderID: UUID,
+        viewportWidth: CGFloat? = nil
+    ) -> some View {
         switch displayMode {
         case .list:
             LibraryTableRows(
-                items: folderItems,
+                items: items,
                 labels: labelStorage.labels,
                 folders: bookmarksViewModel.folders,
                 columnConfig: tableColumnConfig,
@@ -569,21 +612,21 @@ struct FolderDetailView: View {
                 focusedItemID: focusedItemID,
                 onOpen: { item in handleNormalAction { openItem(item) } },
                 onSelect: { item in handleSelect(item: item) },
-                onShiftSelect: { item in handleShiftSelect(item: item) }
+                onShiftSelect: { item in handleShiftSelect(item: item, within: items) }
             )
 
         case .grid:
             let columns = [GridItem(.adaptive(minimum: cardSizing.cardMinWidth), spacing: Spacing.md)]
             LazyVGrid(columns: columns, spacing: Spacing.md) {
-                ForEach(folderItems) { item in
-                    libraryCard(item, mode: .grid)
+                ForEach(items) { item in
+                    libraryCard(item, mode: .grid, selectionItems: items)
                         .id(item.id)
                 }
             }
 
         case .masonry:
             LazyMasonryView(
-                items: folderItems,
+                items: items,
                 viewportWidth: viewportWidth,
                 minimumColumnWidth: cardSizing.cardMinWidth,
                 itemSpacing: Spacing.md,
@@ -595,7 +638,7 @@ struct FolderDetailView: View {
                     )
                 }
             ) { item, columnWidth in
-                libraryCard(item, mode: .masonry, masonryCardWidth: columnWidth)
+                libraryCard(item, mode: .masonry, selectionItems: items, masonryCardWidth: columnWidth)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, Spacing.xs)
@@ -603,9 +646,197 @@ struct FolderDetailView: View {
         case .kanban:
             FolderKanbanView(
                 folderID: folderID,
-                items: folderItems,
+                items: items,
                 onOpen: { item in handleNormalAction { openItem(item) } }
             )
+        }
+    }
+
+    // MARK: - Child Overview Feed
+
+    private var noDirectItemsHint: some View {
+        Text("No items directly in this folder yet")
+            .font(CiderFont.caption)
+            .foregroundColor(CiderColors.tertiary)
+            .padding(.horizontal, Spacing.md + Spacing.xxs)
+            .padding(.top, Spacing.sm)
+    }
+
+    private func childOverviewFeed(contentWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Divider()
+                HStack(alignment: .center, spacing: Spacing.sm) {
+                    Text("Subfolders")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.tertiary)
+                        .textCase(.uppercase)
+
+                    Spacer()
+
+                    SectionCollapseToggle(
+                        label: "Preview",
+                        isCollapsed: subfolderOverviewCollapsedBinding,
+                        collapsedHelp: "Show subfolder previews",
+                        expandedHelp: "Hide subfolder previews"
+                    )
+                }
+            }
+            .padding(.horizontal, Spacing.md + Spacing.xxs)
+            .padding(.top, Spacing.md)
+
+            if !isSubfolderOverviewCollapsed {
+                ForEach(childOverviewSections) { section in
+                    childOverviewSection(section, contentWidth: contentWidth)
+                        .padding(.horizontal, Spacing.md + Spacing.xxs)
+                }
+            }
+        }
+        .padding(.bottom, Spacing.md)
+    }
+
+    private func childOverviewSection(_ section: FolderOverviewSection, contentWidth: CGFloat) -> some View {
+        let summary = FolderCardSummary.build(
+            folderID: section.folder.id,
+            folders: bookmarksViewModel.folders,
+            items: allFolderContentItems
+        )
+        let previewWidth = childOverviewPreviewWidth(contentWidth: contentWidth)
+        let previewLayout = FolderOverviewSection.previewLayout(
+            items: section.items,
+            availableWidth: previewWidth,
+            preferredCardWidth: subfolderPreviewCardWidth,
+            itemSpacing: Spacing.sm
+        )
+        let previewItems = Array(section.items.prefix(previewLayout.visibleItemCount))
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(alignment: .top, spacing: Spacing.xs) {
+                        folderIconView(for: section.folder, filled: false)
+                            .padding(.top, 1)
+
+                        Button {
+                            onSelectSubFolder?(section.folder.id)
+                        } label: {
+                            Text(section.folder.name)
+                                .font(CiderFont.labelMedium)
+                                .foregroundColor(CiderColors.primary)
+                                .lineLimit(2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    HStack(spacing: Spacing.sm) {
+                        ForEach(summary.metrics, id: \.systemImage) { metric in
+                            Label("\(metric.count)", systemImage: metric.systemImage)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                        if summary.isEmpty {
+                            Text("Empty")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                    }
+                }
+                .frame(width: FolderDetailDesign.subfolderPreviewLabelWidth, alignment: .leading)
+
+                if section.items.isEmpty {
+                    HStack {
+                        if summary.childFolderCount > 0 {
+                            Label(
+                                "\(summary.childFolderCount) subfolder\(summary.childFolderCount == 1 ? "" : "s")",
+                                systemImage: "folder"
+                            )
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                        } else {
+                            Text("Empty")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                } else {
+                    HStack(alignment: .top, spacing: Spacing.sm) {
+                        ForEach(previewItems) { item in
+                            libraryCard(item, mode: .grid, selectionItems: previewItems)
+                                .frame(width: subfolderPreviewCardWidth, alignment: .topLeading)
+                                .id(item.id)
+                        }
+
+                        if previewLayout.showsMoreCard {
+                            childOverviewMoreCard(
+                                remainingItemCount: previewLayout.remainingItemCount,
+                                folder: section.folder
+                            )
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .padding(Spacing.md)
+        }
+        .sectionContainer()
+    }
+
+    private func childOverviewMoreCard(remainingItemCount: Int, folder: Folder) -> some View {
+        Button {
+            onSelectSubFolder?(folder.id)
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Image(systemName: "arrow.right.circle")
+                    .font(CiderFont.titleMedium)
+                    .foregroundColor(CiderColors.controlAccent)
+
+                Spacer(minLength: 0)
+
+                Text("+\(remainingItemCount) more")
+                    .font(CiderFont.labelMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+
+                Text("Open \(folder.name)")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(2)
+            }
+            .padding(Spacing.sm)
+            .frame(width: subfolderPreviewCardWidth, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .leading)
+            .sectionContainer()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func childOverviewPreviewWidth(contentWidth: CGFloat) -> CGFloat {
+        let outerSectionPadding = (Spacing.md + Spacing.xxs) * 2
+        let sectionContentPadding = Spacing.md * 2
+        let labelColumnWidth = FolderDetailDesign.subfolderPreviewLabelWidth
+        let interColumnSpacing = Spacing.md
+        return max(
+            0,
+            contentWidth - outerSectionPadding - sectionContentPadding - labelColumnWidth - interColumnSpacing
+        )
+    }
+
+    @ViewBuilder
+    private func folderIconView(for folder: Folder, filled: Bool) -> some View {
+        if let icon = folder.icon, folder.iconIsEmoji {
+            Text(icon)
+                .font(CiderFont.titleMedium)
+        } else if let icon = folder.icon {
+            Image(systemName: icon)
+                .font(CiderFont.titleMedium)
+                .foregroundColor(CiderColors.controlAccent)
+        } else {
+            Image(systemName: filled ? "folder.fill" : "folder")
+                .font(CiderFont.titleMedium)
+                .foregroundColor(CiderColors.controlAccent)
         }
     }
 
@@ -615,6 +846,7 @@ struct FolderDetailView: View {
     private func libraryCard(
         _ item: LibraryItemV2,
         mode: BookmarkCard.CardMode,
+        selectionItems: [LibraryItemV2],
         masonryCardWidth: CGFloat? = nil
     ) -> some View {
         switch item {
@@ -627,7 +859,7 @@ struct FolderDetailView: View {
                 masonryCardWidth: masonryCardWidth,
                 folders: bookmarksViewModel.folders,
                 dragProvider: bookmarkDragProvider(for: bookmark),
-                dragPreviewOverride: multiDragPreview(for: item),
+                dragPreviewOverride: multiDragPreview(for: item, in: selectionItems),
                 onShowDetails: { handleNormalAction { onShowBookmarkDetails?(bookmark) } },
                 onOpen: { handleNormalAction { bookmarksViewModel.open(bookmark) } },
                 onDelete: { handleContextMenuDelete(item: item) { bookmarksViewModel.deleteBookmarks([bookmark]) } },
@@ -635,7 +867,7 @@ struct FolderDetailView: View {
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item, within: selectionItems) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
         case .note(let note):
@@ -657,11 +889,11 @@ struct FolderDetailView: View {
                     _ = notesViewModel.assignNote(note, toFolder: folderID)
                 },
                 dragProvider: noteDragProvider(for: note),
-                dragPreviewOverride: multiDragPreview(for: item),
+                dragPreviewOverride: multiDragPreview(for: item, in: selectionItems),
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item, within: selectionItems) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
         case .dateCard(let dateCard):
@@ -690,7 +922,7 @@ struct FolderDetailView: View {
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item, within: selectionItems) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
         case .contact(let contact):
@@ -717,7 +949,7 @@ struct FolderDetailView: View {
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item, within: selectionItems) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
         case .todo(let todoCard):
@@ -746,7 +978,7 @@ struct FolderDetailView: View {
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item, within: selectionItems) },
                 onToggleLabelBulk: onToggleLabelBulk
             )
         case .vaultFile(let file):
@@ -773,7 +1005,7 @@ struct FolderDetailView: View {
                 isSelected: isItemSelected(item),
                 isFocused: focusedItemID == item.id,
                 onSelect: { handleSelect(item: item) },
-                onShiftSelect: { handleShiftSelect(item: item) }
+                onShiftSelect: { handleShiftSelect(item: item, within: selectionItems) }
             )
         }
     }
@@ -857,8 +1089,11 @@ struct FolderDetailView: View {
     }
 
     private func handleShiftSelect(item: LibraryItemV2) {
+        handleShiftSelect(item: item, within: folderItems)
+    }
+
+    private func handleShiftSelect(item: LibraryItemV2, within items: [LibraryItemV2]) {
         let id = item.id
-        let items = folderItems
         guard let anchorID = selectionAnchorID,
               let anchorIndex = items.firstIndex(where: { $0.id == anchorID }),
               let clickedIndex = items.firstIndex(where: { $0.id == id }) else {
@@ -995,12 +1230,12 @@ struct FolderDetailView: View {
 
     // MARK: - Multi-Drag Preview
 
-    private func multiDragPreview(for item: LibraryItemV2) -> AnyView? {
+    private func multiDragPreview(for item: LibraryItemV2, in items: [LibraryItemV2]) -> AnyView? {
         let id = item.id
         guard selectedItemIDs.contains(id), selectedItemIDs.count > 1 else { return nil }
 
         var previewItems: [MultiDragPreviewItem] = [multiDragPreviewItem(from: item)].compactMap { $0 }
-        for libraryItem in folderItems where isItemSelected(libraryItem) && libraryItem.id != id {
+        for libraryItem in items where isItemSelected(libraryItem) && libraryItem.id != id {
             if let preview = multiDragPreviewItem(from: libraryItem) {
                 previewItems.append(preview)
             }
