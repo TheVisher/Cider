@@ -1,6 +1,33 @@
 import AppKit
 import SwiftUI
 
+enum BookmarkThumbnailDecodePolicy {
+    static let listMaxPixelSize: CGFloat = 160
+    static let gridMaxPixelSize: CGFloat = 512
+    static let masonryMaxPixelSize: CGFloat = 640
+    static let carouselMaxPixelSize: CGFloat = 640
+
+    static func cardMaxPixelSize(for mode: BookmarkThumbnailView.ThumbnailMode) -> CGFloat {
+        switch mode {
+        case .list:
+            return listMaxPixelSize
+        case .grid:
+            return gridMaxPixelSize
+        case .masonry:
+            return masonryMaxPixelSize
+        }
+    }
+
+    static func thumbnailOptions(maxPixelSize: CGFloat) -> CFDictionary {
+        [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ] as CFDictionary
+    }
+}
+
 struct BookmarkThumbnailView: View {
     enum ThumbnailMode {
         case list
@@ -190,9 +217,14 @@ struct BookmarkThumbnailView: View {
         let remoteURLString = bookmark.thumbnailRemoteURLString
         let cacheKey = fileURL.path
         let modifiedAt = bookmark.metadataUpdatedAt?.timeIntervalSince1970 ?? -1
+        let minPixelSize = BookmarkThumbnailDecodePolicy.cardMaxPixelSize(for: mode)
 
         // Check shared cache first
-        if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
+        if let cached = BookmarkThumbnailCache.shared.get(
+            cacheKey,
+            modifiedAt: modifiedAt,
+            minPixelSize: minPixelSize
+        ) {
             thumbnailImage = cached.image
             rendersAsIconOverlay = cached.isIconOverlay
             onAspectRatioResolved?(cached.aspectRatio)
@@ -201,11 +233,10 @@ struct BookmarkThumbnailView: View {
 
         let result: (NSImage, Bool, CGFloat?)? = await Task.detached(priority: .userInitiated) {
             guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceShouldCacheImmediately: true,
-            ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            let options = BookmarkThumbnailDecodePolicy.thumbnailOptions(
+                maxPixelSize: BookmarkThumbnailDecodePolicy.cardMaxPixelSize(for: mode)
+            )
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
 
             let width = CGFloat(cgImage.width)
             let height = CGFloat(cgImage.height)
@@ -395,18 +426,22 @@ struct CarouselPageImage: View {
     private func loadImage() async -> NSImage? {
         let cacheKey = url.path
         let modifiedAt = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let minPixelSize = BookmarkThumbnailDecodePolicy.carouselMaxPixelSize
 
-        if let cached = BookmarkThumbnailCache.shared.get(cacheKey, modifiedAt: modifiedAt) {
+        if let cached = BookmarkThumbnailCache.shared.get(
+            cacheKey,
+            modifiedAt: modifiedAt,
+            minPixelSize: minPixelSize
+        ) {
             return cached.image
         }
 
         let result: NSImage? = await Task.detached(priority: .userInitiated) {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceShouldCacheImmediately: true,
-            ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            let options = BookmarkThumbnailDecodePolicy.thumbnailOptions(
+                maxPixelSize: BookmarkThumbnailDecodePolicy.carouselMaxPixelSize
+            )
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
             let w = CGFloat(cgImage.width)
             let h = CGFloat(cgImage.height)
             guard w > 0, h > 0 else { return nil }

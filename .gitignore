@@ -2,6 +2,7 @@
 .DS_Store
 build/
 DerivedData/
+.deriveddata/
 *.xcuserstate
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
@@ -21,5 +22,6 @@ package-lock.json
 *.log
 *.tmp
 .claude/
+.superpowers/
 .cache/
 .research/
