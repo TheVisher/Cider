@@ -38,7 +38,7 @@ final class AIAssistantHotkeyDetector: @unchecked Sendable {
 
         guard let tap = eventTap else {
             if registerHotKeyFallback() {
-                logger.info("AI assistant hotkey detector started (Carbon hotkey fallback)")
+                logger.info("Started (Carbon hotkey fallback)")
             } else {
                 logger.error("Failed to create event tap or fallback hotkey")
             }
@@ -53,7 +53,7 @@ final class AIAssistantHotkeyDetector: @unchecked Sendable {
             CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
-        logger.info("AI assistant hotkey detector started")
+        logger.info("Started")
     }
 
     func stop() {

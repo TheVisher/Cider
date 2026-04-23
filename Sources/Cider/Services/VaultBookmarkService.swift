@@ -276,10 +276,11 @@ final class VaultBookmarkService: ObservableObject {
     private func scanAllVaultFolders() -> [Bookmark] {
         let fileService = BookmarkFileService.shared
         var result: [Bookmark] = []
+        var seenURLs = Set<String>()
 
-        // We still treat non-empty URLs as unique during a raw scan, but the winning
-        // bookmark must be deterministic. Otherwise the chosen folder can change
-        // based on directory traversal order.
+        // TODO: URL-based dedup can flip-flop when the same URL exists in different folders,
+        // keeping whichever folder is scanned first. Known issue — matches BookmarksStorage behavior,
+        // not a regression. Fix properly with UUID-based dedup in a future pass.
 
         // Helper to process a single directory
         func processDirectory(dirURL: URL, dirRelativePath: String, folderID: UUID?) {
@@ -289,6 +290,9 @@ final class VaultBookmarkService: ObservableObject {
                 includeLegacySidecarMetadata: false
             )
             for var bookmark in found {
+                let urlKey = bookmark.urlString.lowercased()
+                // Skip duplicates by URL
+                guard urlKey.isEmpty || seenURLs.insert(urlKey).inserted else { continue }
                 bookmark.folderID = folderID
 
                 result.append(bookmark)
@@ -304,54 +308,9 @@ final class VaultBookmarkService: ObservableObject {
         // Scan Inbox/Bookmarks (unfiled)
         processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
 
-        result = Self.deduplicateScannedBookmarks(result)
-
         // Sort by creation date descending (newest first)
         result.sort { $0.createdAt > $1.createdAt }
         return result
-    }
-
-    nonisolated static func deduplicateScannedBookmarks(_ bookmarks: [Bookmark]) -> [Bookmark] {
-        var chosenByURL: [String: Bookmark] = [:]
-        var urlOrder: [String] = []
-        var uniqueBookmarks: [Bookmark] = []
-
-        for bookmark in bookmarks {
-            let urlKey = bookmark.urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !urlKey.isEmpty else {
-                uniqueBookmarks.append(bookmark)
-                continue
-            }
-
-            if let existing = chosenByURL[urlKey] {
-                chosenByURL[urlKey] = preferredScannedBookmark(existing, bookmark)
-            } else {
-                chosenByURL[urlKey] = bookmark
-                urlOrder.append(urlKey)
-            }
-        }
-
-        uniqueBookmarks.append(contentsOf: urlOrder.compactMap { chosenByURL[$0] })
-        return uniqueBookmarks
-    }
-
-    nonisolated static func preferredScannedBookmark(_ lhs: Bookmark, _ rhs: Bookmark) -> Bookmark {
-        switch (lhs.folderID != nil, rhs.folderID != nil) {
-        case (true, false):
-            return lhs
-        case (false, true):
-            return rhs
-        default:
-            break
-        }
-
-        let lhsPath = lhs.relativePath ?? ""
-        let rhsPath = rhs.relativePath ?? ""
-        if lhsPath != rhsPath {
-            return lhsPath.localizedStandardCompare(rhsPath) == .orderedAscending ? lhs : rhs
-        }
-
-        return lhs.title.localizedStandardCompare(rhs.title) == .orderedDescending ? rhs : lhs
     }
 
     private func pruneMissingBookmarksFromDisk(_ db: CiderDatabase) {
@@ -1758,8 +1717,7 @@ final class VaultBookmarkService: ObservableObject {
             }
 
             // WebView screenshot fallback
-            if imageAssets == nil, payload?.thumbnailURL != nil,
-               !Self.shouldSkipWebViewFallback(for: url) {
+            if imageAssets == nil, payload?.thumbnailURL != nil {
                 let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
                 enrichLog.info("Thumbnail download failed, trying WebView screenshot for \(url.host ?? "?", privacy: .public)")
                 let extracted = await WebViewMetadataExtractor.extract(from: url)
@@ -2171,8 +2129,7 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         // WebView fallback
-        let needsWebView = (htmlResult?.title == nil || !hasRealThumbnail)
-            && !shouldSkipWebViewFallback(for: pageURL)
+        let needsWebView = htmlResult?.title == nil || !hasRealThumbnail
         if needsWebView {
             enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
@@ -2345,22 +2302,6 @@ final class VaultBookmarkService: ObservableObject {
     private static func isFaviconURL(_ url: URL?) -> Bool {
         guard let path = url?.path.lowercased() else { return false }
         return path.contains("favicon") || path.contains("apple-touch-icon")
-    }
-
-    private static func shouldSkipWebViewFallback(for url: URL) -> Bool {
-        let host = normalizedHost(for: url)
-        return host == "x.com" || host == "twitter.com"
-    }
-
-    private static func normalizedHost(for url: URL) -> String {
-        let host = url.host?.lowercased() ?? ""
-        if host.hasPrefix("www.") {
-            return String(host.dropFirst(4))
-        }
-        if host.hasPrefix("m.") {
-            return String(host.dropFirst(2))
-        }
-        return host
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {

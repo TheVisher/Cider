@@ -104,14 +104,12 @@ final class AIConversationStorage: ObservableObject {
     /// Save a full conversation (overwrites existing file if same ID).
     func save(id: UUID, title: String, messages: [AIAssistantMessage], model: String) {
         ensureDirectory()
-        let existingMeta = existingMeta(for: id)
-        var updatedMeta = existingMeta?.meta ?? AIConversationMeta(
+        let meta = AIConversationMeta(
             id: id,
             title: title,
             model: model
         )
-        updatedMeta.title = title
-        updatedMeta.model = model
+        var updatedMeta = meta
         updatedMeta.updated = Date()
         updatedMeta.messageCount = messages.count
 
@@ -131,16 +129,14 @@ final class AIConversationStorage: ObservableObject {
             }
         }
 
-        let filename = filenameFo(id: id, title: title, date: updatedMeta.created)
+        let filename = filenameFo(id: id, title: title, date: meta.created)
         let fileURL = conversationsDir.appendingPathComponent(filename)
-        let content = lines.joined(separator: "\n") + "\n"
 
-        do {
-            try content.write(to: fileURL, atomically: true, encoding: .utf8)
-            cleanupOldFile(for: id, except: filename)
-        } catch {
-            logger.error("Failed to save conversation \(id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
-        }
+        // Remove old file with same ID but different name
+        cleanupOldFile(for: id, except: filename)
+
+        let content = lines.joined(separator: "\n") + "\n"
+        try? content.write(to: fileURL, atomically: true, encoding: .utf8)
 
         loadConversationList()
     }
@@ -210,30 +206,6 @@ final class AIConversationStorage: ObservableObject {
         let firstLine = content.components(separatedBy: "\n").first ?? ""
         guard let lineData = firstLine.data(using: .utf8) else { return nil }
         return try? decoder.decode(AIConversationMeta.self, from: lineData)
-    }
-
-    private func existingMeta(for id: UUID) -> (meta: AIConversationMeta, fileURL: URL)? {
-        if let summary = conversations.first(where: { $0.id == id }) {
-            let fileURL = conversationsDir.appendingPathComponent(summary.filename)
-            if let meta = readMeta(from: fileURL) {
-                return (meta, fileURL)
-            }
-        }
-
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: conversationsDir,
-            includingPropertiesForKeys: nil,
-            options: .skipsHiddenFiles
-        ) else {
-            return nil
-        }
-
-        for file in files where file.pathExtension == "jsonl" {
-            if let meta = readMeta(from: file), meta.id == id {
-                return (meta, file)
-            }
-        }
-        return nil
     }
 
     private func filenameFo(id: UUID, title: String, date: Date) -> String {

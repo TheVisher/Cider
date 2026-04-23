@@ -228,11 +228,11 @@ Vault images are now served via a `cider-vault://` custom URL scheme (`CiderVaul
 
 - File refs: `Sources/Cider/Services/CiderVaultSchemeHandler.swift`, `Sources/Cider/Services/NotesMarkdownPathCodec.swift`, `Sources/Cider/ViewModels/NotesViewModel.swift`
 
-### ~~CH-C23 — Sync-driven note deletes bypass orphan attachment cleanup~~ ✅ Fixed 2026-04-22
+### CH-C23 — Sync-driven note deletes bypass orphan attachment cleanup
 
 **Severity:** Medium
 
-`deleteFromSync(_:)` now routes through `delete(note:trackSync:)`, which already schedules orphan attachment cleanup after removing the note from disk, snapshots, and SQLite. The prior review note was stale.
+`deleteFromSync(_:)` removes the note file and snapshots but does not schedule orphan attachment cleanup. Attachments referenced only by remotely deleted notes can therefore persist indefinitely until some unrelated local edit triggers cleanup.
 
 - File refs: `Sources/Cider/Services/NotesStorage.swift`
 
@@ -589,6 +589,7 @@ These items remain unresolved from prior code reviews:
 |---|---|---|
 | CH-C18 | Medium | Folder parent resolution during pull is order-dependent (deferred — sync protocol) |
 | CH-C21 | Medium | Web/iOS-created items without `ciderSyncId` skipped on desktop pull (deferred — sync protocol) |
+| CH-C23 | Medium | Sync-driven note deletes bypass orphan attachment cleanup |
 | CH-D16 | Medium | List view and display modes inconsistent across card types |
 | CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
 
@@ -768,6 +769,7 @@ These items remain unresolved from prior code reviews:
 |---|---|---|
 | CH-C18 | Medium | Folder parent resolution during pull is order-dependent (deferred — sync protocol) |
 | CH-C21 | Medium | Web/iOS-created items without `ciderSyncId` skipped on desktop pull (deferred — sync protocol) |
+| CH-C23 | Medium | Sync-driven note deletes bypass orphan attachment cleanup |
 | CH-D16 | Medium | List view and display modes inconsistent across card types |
 | CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
 
@@ -970,6 +972,7 @@ These items remain unresolved from prior code reviews:
 |---|---|---|
 | CH-C18 | Medium | Folder parent resolution during pull is order-dependent (deferred — sync protocol) |
 | CH-C21 | Medium | Web/iOS-created items without `ciderSyncId` skipped on desktop pull (deferred — sync protocol) |
+| CH-C23 | Medium | Sync-driven note deletes bypass orphan attachment cleanup |
 | CH-D16 | Medium | List view and display modes inconsistent across card types |
 | CH-D17 | Medium | Per-display panel position memory keyed only by resolution |
 

@@ -8,22 +8,6 @@ enum BookmarkDragPayload {
     static let typeIdentifier = "com.cider.bookmark-id"
     static let textPrefix = "cider-bookmark-id:"
 
-    nonisolated private static func registerData(
-        on provider: NSItemProvider,
-        typeIdentifier: String,
-        data: Data
-    ) {
-        provider.registerDataRepresentation(
-            forTypeIdentifier: typeIdentifier,
-            visibility: .all
-        ) { completion in
-            MainActor.assumeIsolated {
-                completion(data, nil)
-            }
-            return nil
-        }
-    }
-
     static func bookmarkID(from raw: String) -> UUID? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix(textPrefix) {
@@ -36,7 +20,12 @@ enum BookmarkDragPayload {
     @MainActor
     static func registerPublicURL(on provider: NSItemProvider, urlString: String) {
         guard let url = URL(string: urlString) else { return }
-        registerData(on: provider, typeIdentifier: UTType.url.identifier, data: url.dataRepresentation)
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.url.identifier, visibility: .all
+        ) { completion in
+            completion(url.dataRepresentation, nil)
+            return nil
+        }
     }
 
     /// Register image data for drag-out using `registerDataRepresentation`.
@@ -51,7 +40,12 @@ enum BookmarkDragPayload {
 
         if let data = try? Data(contentsOf: fileURL) {
             let uti = UTType(filenameExtension: fileURL.pathExtension)?.identifier ?? UTType.png.identifier
-            registerData(on: provider, typeIdentifier: uti, data: data)
+            provider.registerDataRepresentation(
+                forTypeIdentifier: uti, visibility: .all
+            ) { completion in
+                completion(data, nil)
+                return nil
+            }
         }
     }
 
@@ -62,22 +56,6 @@ enum BookmarkDragPayload {
 enum NoteDragPayload {
     static let typeIdentifier = "com.cider.note-id"
     static let textPrefix = "cider-note-id:"
-
-    nonisolated private static func registerData(
-        on provider: NSItemProvider,
-        typeIdentifier: String,
-        data: Data
-    ) {
-        provider.registerDataRepresentation(
-            forTypeIdentifier: typeIdentifier,
-            visibility: .all
-        ) { completion in
-            MainActor.assumeIsolated {
-                completion(data, nil)
-            }
-            return nil
-        }
-    }
 
     static func noteID(from raw: String) -> UUID? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,7 +70,12 @@ enum NoteDragPayload {
     static func registerPublicFileURL(on provider: NSItemProvider, note: Note) {
         guard !note.relativePath.isEmpty else { return }
         let fileURL = StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(note.relativePath)
-        registerData(on: provider, typeIdentifier: UTType.fileURL.identifier, data: fileURL.dataRepresentation)
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
+        ) { completion in
+            completion(fileURL.dataRepresentation, nil)
+            return nil
+        }
     }
 }
 
@@ -140,22 +123,6 @@ enum MultiDragPayload {
 // MARK: - Multi-Drag Helper
 
 enum CiderMultiDrag {
-    nonisolated private static func registerData(
-        on provider: NSItemProvider,
-        typeIdentifier: String,
-        data: Data
-    ) {
-        provider.registerDataRepresentation(
-            forTypeIdentifier: typeIdentifier,
-            visibility: .all
-        ) { completion in
-            MainActor.assumeIsolated {
-                completion(data, nil)
-            }
-            return nil
-        }
-    }
-
     @MainActor
     static func makeProvider(
         primaryType: String,
@@ -169,7 +136,13 @@ enum CiderMultiDrag {
         let provider = NSItemProvider(object: textPayload as NSString)
 
         if let data = MultiDragPayload.encode(items: items) {
-            registerData(on: provider, typeIdentifier: MultiDragPayload.typeIdentifier, data: data)
+            provider.registerDataRepresentation(
+                forTypeIdentifier: MultiDragPayload.typeIdentifier,
+                visibility: .all
+            ) { completion in
+                completion(data, nil)
+                return nil
+            }
         }
 
         // Register external types for the primary item so external apps get useful data.

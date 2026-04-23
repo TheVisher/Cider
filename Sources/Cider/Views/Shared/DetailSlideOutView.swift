@@ -180,9 +180,6 @@ struct DetailSlideOutView: View {
             if let id = bookmark?.id {
                 VaultBookmarkService.shared.setPreferredHeroMode(newMode.rawValue, for: id)
             }
-            if let bookmark {
-                scheduleContentLoad(for: bookmark, mode: newMode)
-            }
         }
         .onChange(of: webViewStore.readerFailed) { _, failed in
             if failed, heroMode == .reader {
@@ -191,13 +188,13 @@ struct DetailSlideOutView: View {
         }
         .onChange(of: bookmark?.id) { _, newID in
             webViewIsLoading = false
-            webViewStore.prepareForBookmarkChange()
+            webViewStore.reset()
             // Restore per-bookmark hero mode and reader availability
             if let bm = newID.flatMap({ id in VaultBookmarkService.shared.bookmarks.first { $0.id == id } }) {
                 let isReaderUnavailable = bm.readerUnavailable == true
                 let restored = bm.preferredHeroMode.flatMap(BookmarkHeroMode.init(rawValue:)) ?? .thumbnail
                 heroMode = (restored == .reader && isReaderUnavailable) ? .thumbnail : restored
-                scheduleContentLoad(for: bm, mode: heroMode)
+                schedulePreload(for: bm)
             } else {
                 heroMode = .thumbnail
                 preloadTask?.cancel()
@@ -205,7 +202,7 @@ struct DetailSlideOutView: View {
         }
         .onAppear {
             if let bm = bookmark, bm.hasURL {
-                scheduleContentLoad(for: bm, mode: heroMode)
+                schedulePreload(for: bm)
             }
         }
         .onDisappear {
@@ -233,19 +230,18 @@ struct DetailSlideOutView: View {
     // MARK: - Button State
 
     private var readerButtonDisabled: Bool {
-        webViewStore.readerFailed
+        webViewStore.readerFailed || (!webViewStore.readerReady && heroMode != .reader)
     }
 
     private var readerButtonHelp: String {
         if webViewStore.readerFailed { return "Reader content not available for this page" }
-        if heroMode == .reader && !webViewStore.readerReady { return "Extracting reader content..." }
+        if !webViewStore.readerReady { return "Extracting reader content..." }
         return "Reader view"
     }
 
-    private func scheduleContentLoad(for bookmark: Bookmark, mode: BookmarkHeroMode) {
+    private func schedulePreload(for bookmark: Bookmark) {
         preloadTask?.cancel()
         guard bookmark.hasURL, let url = bookmark.url else { return }
-        guard mode == .web || mode == .reader else { return }
 
         let bookmarkID = bookmark.id
         let delay = DetailSlideOutMotionPolicy.preloadDelay(for: detailViewMode)
@@ -255,14 +251,6 @@ struct DetailSlideOutView: View {
             }
             guard !Task.isCancelled else { return }
             webViewStore.preload(url: url, bookmarkID: bookmarkID)
-            switch mode {
-            case .web:
-                webViewStore.ensureWebViewLoaded(url: url)
-            case .reader:
-                webViewStore.ensureReaderLoaded(url: url, bookmarkID: bookmarkID)
-            case .thumbnail:
-                break
-            }
         }
     }
 
@@ -340,7 +328,7 @@ struct DetailSlideOutView: View {
                 heroModeButton(
                     symbol: "doc.richtext",
                     mode: .reader,
-                    isLoading: heroMode == .reader && !webViewStore.readerReady && !webViewStore.readerFailed,
+                    isLoading: !webViewStore.readerReady && !webViewStore.readerFailed,
                     isDisabled: readerButtonDisabled,
                     help: readerButtonHelp
                 )
@@ -348,9 +336,9 @@ struct DetailSlideOutView: View {
                 heroModeButton(
                     symbol: "globe",
                     mode: .web,
-                    isLoading: heroMode == .web && !webViewStore.webViewReady,
-                    isDisabled: false,
-                    help: webViewStore.webViewReady ? "View live page" : "Load live page"
+                    isLoading: !webViewStore.webViewReady,
+                    isDisabled: !webViewStore.webViewReady && heroMode != .web,
+                    help: webViewStore.webViewReady ? "View live page" : "Loading page..."
                 )
             }
 
@@ -391,12 +379,12 @@ struct BookmarkPageToolbar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var readerDisabled: Bool {
-        readerFailed
+        readerFailed || (!readerReady && heroMode != .reader)
     }
 
     private var readerHelp: String {
         if readerFailed { return "Reader content not available for this page" }
-        if heroMode == .reader && !readerReady { return "Extracting reader content..." }
+        if !readerReady { return "Extracting reader content..." }
         return "Reader view"
     }
 
@@ -406,12 +394,12 @@ struct BookmarkPageToolbar: View {
                 toolbarButton("photo", active: heroMode == .thumbnail, help: "Preview") {
                     withAnimation(reduceMotion ? .none : .snappy) { heroMode = .thumbnail }
                 }
-                toolbarButton("doc.richtext", active: heroMode == .reader, disabled: readerDisabled, loading: heroMode == .reader && !readerReady && !readerFailed, help: readerHelp) {
+                toolbarButton("doc.richtext", active: heroMode == .reader, disabled: readerDisabled, loading: !readerReady && !readerFailed, help: readerHelp) {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         heroMode = heroMode == .reader ? .thumbnail : .reader
                     }
                 }
-                toolbarButton("globe", active: heroMode == .web, disabled: false, loading: heroMode == .web && !webViewReady, help: webViewReady ? "View live page" : "Load live page") {
+                toolbarButton("globe", active: heroMode == .web, disabled: !webViewReady && heroMode != .web, loading: !webViewReady, help: webViewReady ? "View live page" : "Loading page...") {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         heroMode = heroMode == .web ? .thumbnail : .web
                     }

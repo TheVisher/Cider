@@ -39,7 +39,7 @@ final class NotesHotkeyDetector: @unchecked Sendable {
 
         guard let eventTap else {
             if registerHotKeyFallback() {
-                logger.info("Notes hotkey detector started (Carbon hotkey fallback)")
+                logger.info("Started (Carbon hotkey fallback)")
             } else {
                 logger.error("Failed to create event tap or fallback hotkey")
             }
@@ -56,7 +56,7 @@ final class NotesHotkeyDetector: @unchecked Sendable {
         }
 
         CGEvent.tapEnable(tap: eventTap, enable: true)
-        logger.info("Notes hotkey detector started")
+        logger.info("Started")
     }
 
     func stop() {

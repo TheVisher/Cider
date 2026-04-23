@@ -4,6 +4,7 @@ import os
 
 /// Holds persistent WKWebView instances so they survive SwiftUI view hierarchy
 /// changes (e.g. switching between slide-out, full panel, and page detail modes).
+/// Also eagerly preloads web and reader content when a bookmark detail opens.
 @MainActor
 final class DetailWebViewStore: ObservableObject {
     private static let logger = Logger(subsystem: "com.cider.app", category: "DetailWebViewStore")
@@ -32,88 +33,55 @@ final class DetailWebViewStore: ObservableObject {
     // Background extraction state
     private var extractionWebView: WKWebView?
     private var extractionDelegate: ReaderExtractionDelegate?
-    private var extractingURL: URL?
-    private var extractedArticleURL: URL?
     private var currentBookmarkID: UUID?
 
+    // MARK: - Eager Preload
+
+    /// Call when a bookmark detail opens. Eagerly starts loading both the live
+    /// web page and reader extraction so content is ready when the user switches.
     func preload(url: URL, bookmarkID: UUID) {
         currentBookmarkID = bookmarkID
 
-        if Self.shouldSkipReaderMode(for: url) {
+        // Check persisted reader availability
+        if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmarkID }),
+           bm.readerUnavailable == true {
             readerFailed = true
-            VaultBookmarkService.shared.setReaderUnavailable(true, for: bookmarkID)
-        } else if let bm = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmarkID }),
-                  bm.readerUnavailable == true {
-            readerFailed = true
+            // Skip reader extraction, still preload web view
+        } else {
+            // Start background reader extraction
+            startReaderExtraction(url: url, bookmarkID: bookmarkID)
         }
-    }
 
-    func ensureWebViewLoaded(url: URL) {
+        // Start preloading the live web view
         startWebViewPreload(url: url)
-    }
-
-    func ensureReaderLoaded(url: URL, bookmarkID: UUID) {
-        guard !readerFailed else { return }
-        if readerReady, extractedArticleURL == url { return }
-        if extractingURL == url, extractionWebView != nil { return }
-        startReaderExtraction(url: url, bookmarkID: bookmarkID)
     }
 
     // MARK: - Web View Preload
 
     private func startWebViewPreload(url: URL) {
-        if loadedURL == url, webView != nil {
+        guard webView == nil || loadedURL != url else {
             webViewReady = true
             return
         }
+        let config = WKWebViewConfiguration()
+        config.mediaTypesRequiringUserActionForPlayback = .all
+        let wv = WKWebView(frame: .zero, configuration: config)
         let delegate = WebLoadDelegate { [weak self] in
             self?.webViewReady = true
         }
-        let wv: WKWebView
-        if let existing = webView {
-            existing.stopLoading()
-            wv = existing
-        } else {
-            let config = WKWebViewConfiguration()
-            config.mediaTypesRequiringUserActionForPlayback = .all
-            let created = WKWebView(frame: .zero, configuration: config)
-            created.setValue(false, forKey: "drawsBackground")
-            webView = created
-            wv = created
-        }
-        webViewReady = false
         wv.navigationDelegate = delegate
         wv.uiDelegate = Self.suppressingUIDelegate
+        wv.setValue(false, forKey: "drawsBackground")
         wv.load(URLRequest(url: url))
+        webView = wv
         loadedURL = url
         // Store the delegate so it stays alive
         objc_setAssociatedObject(wv, &AssociatedKeys.webDelegate, delegate, .OBJC_ASSOCIATION_RETAIN)
     }
 
-    private static func shouldSkipReaderMode(for url: URL) -> Bool {
-        let host = normalizedHost(for: url)
-        return host == "x.com" || host == "twitter.com"
-    }
-
-    private static func normalizedHost(for url: URL) -> String {
-        let host = url.host?.lowercased() ?? ""
-        if host.hasPrefix("www.") {
-            return String(host.dropFirst(4))
-        }
-        if host.hasPrefix("m.") {
-            return String(host.dropFirst(2))
-        }
-        return host
-    }
-
     /// Returns the preloaded WKWebView, reassigning its delegate for interactive use.
     func getWebView(for url: URL, delegate: WKNavigationDelegate) -> WKWebView {
-        if let existing = webView {
-            if loadedURL != url {
-                loadedURL = url
-                webViewReady = false
-                existing.load(URLRequest(url: url))
-            }
+        if let existing = webView, loadedURL == url {
             existing.navigationDelegate = delegate
             return existing
         }
@@ -140,20 +108,13 @@ final class DetailWebViewStore: ObservableObject {
     }()
 
     private func startReaderExtraction(url: URL, bookmarkID: UUID) {
-        if extractingURL == url, extractionWebView != nil {
-            return
-        }
-
-        cancelReaderExtraction()
         let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: WKWebViewConfiguration())
         wv.setValue(false, forKey: "drawsBackground")
-        extractingURL = url
         let delegate = ReaderExtractionDelegate(bookmarkID: bookmarkID) { [weak self] result in
             guard let self, self.currentBookmarkID == bookmarkID else { return }
             switch result {
             case .success(let article):
                 self.cachedArticle = article
-                self.extractedArticleURL = url
                 self.readerReady = true
                 VaultBookmarkService.shared.setReaderUnavailable(false, for: bookmarkID)
                 Self.logger.debug("Reader content extracted for \(bookmarkID)")
@@ -162,7 +123,6 @@ final class DetailWebViewStore: ObservableObject {
                 VaultBookmarkService.shared.setReaderUnavailable(true, for: bookmarkID)
                 Self.logger.debug("Reader extraction failed for \(bookmarkID)")
             }
-            self.extractingURL = nil
             self.extractionWebView = nil
             self.extractionDelegate = nil
         }
@@ -204,7 +164,7 @@ final class DetailWebViewStore: ObservableObject {
     /// Returns a WKWebView for displaying cached reader content.
     /// The reader HTML is loaded directly from the cache — no raw page content ever touches this view.
     func getReaderWebView(for url: URL, delegate: WKNavigationDelegate) -> WKWebView {
-        if let existing = readerWebView {
+        if let existing = readerWebView, readerLoadedURL == url {
             existing.navigationDelegate = delegate
             return existing
         }
@@ -218,28 +178,20 @@ final class DetailWebViewStore: ObservableObject {
 
     // MARK: - Lifecycle
 
-    func prepareForBookmarkChange() {
+    func reset() {
         pauseMedia(in: webView)
         pauseMedia(in: readerWebView)
-        webView?.stopLoading()
-        readerWebView?.stopLoading()
-        cancelReaderExtraction()
-        clearReusableContent(in: webView)
-        clearReusableContent(in: readerWebView)
+        webView = nil
+        readerWebView = nil
         loadedURL = nil
         readerLoadedURL = nil
+        extractionWebView = nil
+        extractionDelegate = nil
         cachedArticle = nil
-        extractedArticleURL = nil
         currentBookmarkID = nil
         webViewReady = false
         readerReady = false
         readerFailed = false
-    }
-
-    func reset() {
-        prepareForBookmarkChange()
-        webView = nil
-        readerWebView = nil
     }
 
     func pauseAllMedia() {
@@ -251,18 +203,6 @@ final class DetailWebViewStore: ObservableObject {
         wv?.evaluateJavaScript(
             "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause();}catch(e){}})"
         )
-    }
-
-    private func cancelReaderExtraction() {
-        extractionWebView?.stopLoading()
-        extractionWebView?.navigationDelegate = nil
-        extractionWebView = nil
-        extractionDelegate = nil
-        extractingURL = nil
-    }
-
-    private func clearReusableContent(in wv: WKWebView?) {
-        wv?.loadHTMLString("", baseURL: nil)
     }
 
     /// Shared UI delegate that suppresses window.open() during preload.
