@@ -30,35 +30,45 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
             columnIDs.compactMap { itemLookup[$0] }
         }
 
-        HStack(alignment: .top, spacing: itemSpacing) {
-            ForEach(Array(columns.enumerated()), id: \.offset) { _, columnItems in
-                LazyVStack(spacing: itemSpacing) {
-                    ForEach(columnItems) { item in
-                        content(item, layout.columnWidth)
-                            .frame(width: layout.columnWidth, alignment: .topLeading)
+        ZStack(alignment: .topLeading) {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                updateContainerWidth(parentWidth: proxy.size.width)
+                            }
+                            .onChange(of: proxy.size.width) { _, width in
+                                updateContainerWidth(parentWidth: width)
+                            }
                     }
                 }
-                .frame(width: layout.columnWidth, alignment: .top)
+
+            HStack(alignment: .top, spacing: itemSpacing) {
+                ForEach(Array(columns.enumerated()), id: \.offset) { _, columnItems in
+                    LazyVStack(spacing: itemSpacing) {
+                        ForEach(columnItems) { item in
+                            content(item, layout.columnWidth)
+                                .frame(width: layout.columnWidth, alignment: .topLeading)
+                        }
+                    }
+                    .frame(width: layout.columnWidth, alignment: .top)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: resolvedPlan.key) {
             syncPlan(with: resolvedPlan)
         }
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        updateContainerWidth(proxy.size.width)
-                    }
-                    .onChange(of: proxy.size.width) { _, width in
-                        updateContainerWidth(width)
-                    }
-            }
-        }
     }
 
-    private func updateContainerWidth(_ width: CGFloat) {
+    private func updateContainerWidth(parentWidth: CGFloat) {
+        let width = LazyMasonryColumnPlanner.resolvedContainerWidth(
+            parentWidth: parentWidth,
+            measuredContentWidth: containerWidth,
+            minimumColumnWidth: minimumColumnWidth
+        )
         guard width.isFinite, width > 0 else { return }
         guard abs(width - containerWidth) > 0.5 else { return }
         containerWidth = width
@@ -105,6 +115,20 @@ enum LazyMasonryColumnPlanner {
         let totalSpacing = itemSpacing * CGFloat(columnCount - 1)
         let columnWidth = max(1, (resolvedWidth - totalSpacing) / CGFloat(columnCount))
         return LayoutMetrics(columnCount: columnCount, columnWidth: columnWidth)
+    }
+
+    static func resolvedContainerWidth(
+        parentWidth: CGFloat,
+        measuredContentWidth: CGFloat,
+        minimumColumnWidth: CGFloat
+    ) -> CGFloat {
+        if parentWidth.isFinite, parentWidth > 0 {
+            return max(parentWidth, minimumColumnWidth)
+        }
+        if measuredContentWidth.isFinite, measuredContentWidth > 0 {
+            return max(measuredContentWidth, minimumColumnWidth)
+        }
+        return minimumColumnWidth
     }
 
     static func plan<Item: Identifiable>(

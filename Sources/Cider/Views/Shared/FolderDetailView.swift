@@ -181,8 +181,12 @@ struct FolderDetailView: View {
                                         }
                                     }
                                     let noPadding = displayMode == .list || displayMode == .kanban
-                                    libraryFeed(items: folderItems, folderID: folderID)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    let feedWidth = FolderDetailFeedLayout.availableWidth(
+                                        contentWidth: contentProxy.size.width,
+                                        appliesCardPadding: !noPadding
+                                    )
+                                    libraryFeed(items: folderItems, folderID: folderID, availableWidth: feedWidth)
+                                        .frame(width: feedWidth, alignment: .leading)
                                         .padding(noPadding ? 0 : Spacing.xxs)
                                         .padding(.horizontal, noPadding ? 0 : Spacing.md)
                                         .padding(.vertical, noPadding ? 0 : Spacing.md)
@@ -201,6 +205,7 @@ struct FolderDetailView: View {
                                     childOverviewFeed(contentWidth: contentProxy.size.width)
                                 }
                             }
+                            .frame(width: contentProxy.size.width, alignment: .leading)
                         }
                         .scrollIndicators(.hidden)
                         .onChange(of: scrollToItemID) { _, id in
@@ -594,7 +599,8 @@ struct FolderDetailView: View {
     @ViewBuilder
     private func libraryFeed(
         items: [LibraryItemV2],
-        folderID: UUID
+        folderID: UUID,
+        availableWidth: CGFloat
     ) -> some View {
         switch displayMode {
         case .list:
@@ -618,6 +624,12 @@ struct FolderDetailView: View {
                         .id(item.id)
                 }
             }
+            .frame(width: availableWidth, alignment: .leading)
+            .id(FolderDetailFeedLayout.layoutIdentity(
+                displayMode: displayMode,
+                availableWidth: availableWidth,
+                minimumCardWidth: cardSizing.cardMinWidth
+            ))
 
         case .masonry:
             LazyMasonryView(
@@ -634,7 +646,12 @@ struct FolderDetailView: View {
             ) { item, columnWidth in
                 libraryCard(item, mode: .masonry, selectionItems: items, masonryCardWidth: columnWidth)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: availableWidth, alignment: .leading)
+            .id(FolderDetailFeedLayout.layoutIdentity(
+                displayMode: displayMode,
+                availableWidth: availableWidth,
+                minimumCardWidth: cardSizing.cardMinWidth
+            ))
             .padding(.bottom, Spacing.xs)
 
         case .kanban:
@@ -1245,6 +1262,24 @@ struct FolderDetailView: View {
         case .note(let n): return .note(n)
         case .dateCard, .contact, .todo, .vaultFile: return nil
         }
+    }
+}
+
+enum FolderDetailFeedLayout {
+    static func availableWidth(contentWidth: CGFloat, appliesCardPadding: Bool) -> CGFloat {
+        guard contentWidth.isFinite, contentWidth > 0 else { return 1 }
+        let horizontalPadding = appliesCardPadding ? (Spacing.md + Spacing.xxs) * 2 : 0
+        return max(contentWidth - horizontalPadding, 1)
+    }
+
+    static func layoutIdentity(
+        displayMode: LibraryDisplayMode,
+        availableWidth: CGFloat,
+        minimumCardWidth: CGFloat
+    ) -> String {
+        let widthBucket = Int(max(availableWidth, 1).rounded(.down))
+        let cardWidthBucket = Int(max(minimumCardWidth, 1).rounded(.down))
+        return "\(displayMode.rawValue)-\(widthBucket)-\(cardWidthBucket)"
     }
 }
 

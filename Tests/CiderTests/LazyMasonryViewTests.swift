@@ -39,6 +39,17 @@ struct LazyMasonryViewTests {
         #expect(layout.columnWidth == 256)
     }
 
+    @Test("lazy masonry prefers parent width when measured content is stale and wider")
+    func plannerPrefersParentWidthOverStaleMeasuredContentWidth() {
+        let width = LazyMasonryColumnPlanner.resolvedContainerWidth(
+            parentWidth: 760,
+            measuredContentWidth: 1_240,
+            minimumColumnWidth: 240
+        )
+
+        #expect(width == 760)
+    }
+
     @Test("lazy masonry keeps a stable column plan while estimates change")
     func plannerKeepsStableColumnsForSameItemsAndLayout() {
         let items = [

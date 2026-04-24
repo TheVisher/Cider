@@ -1,6 +1,21 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct FolderSidebarExpansion {
+    static func expandableFolderIDs(in folders: [Folder]) -> Set<UUID> {
+        let parentIDs = Set(folders.compactMap(\.parentID))
+        return Set(folders.map(\.id)).intersection(parentIDs)
+    }
+
+    static func toggledExpandedFolderIDs(currentExpandedIDs: Set<UUID>, folders: [Folder]) -> Set<UUID> {
+        let expandableIDs = expandableFolderIDs(in: folders)
+        if currentExpandedIDs.isDisjoint(with: expandableIDs) {
+            return expandableIDs
+        }
+        return []
+    }
+}
+
 struct FolderSidebarView: View {
     let folders: [Folder]
     let bookmarks: [Bookmark]
@@ -45,6 +60,22 @@ struct FolderSidebarView: View {
 
     private var topLevelFolders: [Folder] {
         childFolders(of: nil)
+    }
+
+    private var expandableFolderIDs: Set<UUID> {
+        FolderSidebarExpansion.expandableFolderIDs(in: folders)
+    }
+
+    private var hasExpandedFolders: Bool {
+        !expandedFolderIDs.isDisjoint(with: expandableFolderIDs)
+    }
+
+    private var folderExpansionToggleIcon: String {
+        hasExpandedFolders ? "line.3.horizontal.decrease" : "line.3.horizontal"
+    }
+
+    private var folderExpansionToggleHelp: String {
+        hasExpandedFolders ? "Collapse all folders" : "Expand all folders"
     }
 
     private static let multiDragTypeIdentifier = "com.cider.multi-drag"
@@ -115,34 +146,56 @@ struct FolderSidebarView: View {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     // MARK: Folders
                     HStack(spacing: Spacing.xs) {
-                        ZStack {
-                            Image(systemName: "folder")
+                        HStack(spacing: Spacing.xs) {
+                            ZStack {
+                                Image(systemName: "folder")
+                                    .font(CiderFont.bodySemibold)
+                                    .foregroundColor(CiderColors.secondary)
+                                    .opacity(foldersHeaderHovered ? 0 : 1)
+
+                                Image(systemName: "chevron.down")
+                                    .font(CiderFont.captionBold)
+                                    .foregroundColor(CiderColors.secondary)
+                                    .rotationEffect(.degrees(foldersCollapsed ? -90 : 0))
+                                    .opacity(foldersHeaderHovered ? 1 : 0)
+                            }
+                            .animation(reduceMotion ? .none : .smooth, value: foldersHeaderHovered)
+
+                            Text("Folders")
                                 .font(CiderFont.bodySemibold)
                                 .foregroundColor(CiderColors.secondary)
-                                .opacity(foldersHeaderHovered ? 0 : 1)
 
-                            Image(systemName: "chevron.down")
-                                .font(CiderFont.captionBold)
-                                .foregroundColor(CiderColors.secondary)
-                                .rotationEffect(.degrees(foldersCollapsed ? -90 : 0))
-                                .opacity(foldersHeaderHovered ? 1 : 0)
+                            Spacer(minLength: 0)
                         }
-                        .animation(reduceMotion ? .none : .smooth, value: foldersHeaderHovered)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(reduceMotion ? .none : .snappy) {
+                                foldersCollapsed.toggle()
+                            }
+                        }
+                        .hoverState($foldersHeaderHovered)
 
-                        Text("Folders")
-                            .font(CiderFont.bodySemibold)
-                            .foregroundColor(CiderColors.secondary)
-
-                        Spacer(minLength: 0)
+                        if !expandableFolderIDs.isEmpty {
+                            Button {
+                                withAnimation(reduceMotion ? .none : .snappy) {
+                                    expandedFolderIDs = FolderSidebarExpansion.toggledExpandedFolderIDs(
+                                        currentExpandedIDs: expandedFolderIDs,
+                                        folders: folders
+                                    )
+                                }
+                            } label: {
+                                Image(systemName: folderExpansionToggleIcon)
+                                    .font(CiderFont.captionMedium)
+                                    .foregroundColor(CiderColors.tertiary)
+                                    .frame(width: 20, height: 20)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(folderExpansionToggleHelp)
+                            .accessibilityLabel(folderExpansionToggleHelp)
+                        }
                     }
                     .padding(.top, Spacing.xs)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(reduceMotion ? .none : .snappy) {
-                            foldersCollapsed.toggle()
-                        }
-                    }
-                    .hoverState($foldersHeaderHovered)
 
                     if !foldersCollapsed {
                         if topLevelFolders.isEmpty {
