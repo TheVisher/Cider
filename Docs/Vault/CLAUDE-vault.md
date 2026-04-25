@@ -155,7 +155,7 @@ X-CIDER-UPDATED:20260312T150000Z   # Cider update timestamp
 Read `.cider/index.json` for a complete inventory of everything in the vault — paths, types, titles, timestamps. This is the fastest way to answer "what do I have?"
 
 ### Bookmarks
-The master index at `.cider/bookmarks/_cider_bookmarks_index.json` has all bookmark data in one array: title, URL, tags, labels, folder, AI summary, thumbnail path, dominant colors. Each entry has a `relativePath` pointing to the `.webloc` file.
+Use `cider-cli bookmark ...` commands for bookmark reads and writes. SQLite is the canonical bookmark metadata store; `.webloc` files are durable URL artifacts. `.cider/bookmarks/_cider_bookmarks_index.json` is cache-only and must not be edited or treated as source of truth.
 
 ### Notes
 Read `.md` files directly — the filename is the title. Metadata (labels, folder, pinned status) is in `.cider/notes/_cider_notes_index.json` keyed by UUID.
@@ -416,8 +416,8 @@ Follow the Vault Behavior Contract sequence:
 5. **Respond** — Confirm what was saved and where.
 
 ### Someone asks "what bookmarks do I have about X?"
-1. Read `.cider/bookmarks/_cider_bookmarks_index.json`
-2. Filter by title, URL, tags, or AI summary containing X
+1. Use `cider-cli bookmark search "X"` or `cider-cli query "bookmarks about X"`
+2. Filter the CLI results by title, URL, tags, or AI summary if needed
 3. Respond with a concise list
 
 ### Someone asks to create a todo
@@ -439,9 +439,8 @@ Follow the Vault Behavior Contract sequence:
 
 ## What You CAN Edit
 
-These are source-of-truth files — Cider reads them directly and reflects changes live:
+These user-facing files can be edited directly when needed, but prefer CLI commands for metadata mutations so SQLite stays canonical:
 
-- `.cider/bookmarks/_cider_bookmarks_index.json` — bookmark metadata (notes, tags, labels, title). Update the `notes` field to add enrichment info (hours, location, description, etc.)
 - `.cider/notes/_cider_notes_index.json` — note metadata (labels, folder, pinned)
 - `.cider/todos/_cider_todos_index.json` — todo metadata
 - `.cider/date-cards/_cider_date_cards_index.json` — event metadata

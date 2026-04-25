@@ -132,6 +132,8 @@ This was confirmed during testing: Telegram was answering through Qwen 2.5.
 
 ## Current Telegram Config
 
+> First-user beta scope, 2026-04-24: Telegram is experimental and deferred. Keep it disabled unless a developer is intentionally running the Telegram regression set with a rotated bot token.
+
 The config file path is:
 
 - `~/CiderVault/.cider/telegram/config.json`
@@ -143,9 +145,9 @@ Current expected shape:
   "allowFirstChatToPair": true,
   "allowedChatIDs": [],
   "botToken": "YOUR_TOKEN",
-  "isEnabled": true,
+  "isEnabled": false,
   "pollingTimeoutSeconds": 30,
-  "sendReminders": true
+  "sendReminders": false
 }
 ```
 
@@ -153,6 +155,7 @@ Notes:
 
 - `allowFirstChatToPair: true` means the first DM can be auto-added to `allowedChatIDs`
 - after pairing, the config is rewritten with the paired chat ID
+- Telegram chat, Telegram reminders, and image attachment ingestion are not part of the first-user release promise
 
 ## Important Security Note
 
@@ -188,13 +191,18 @@ No blocking compile errors remained after the Telegram changes.
 Still missing:
 
 - Telegram settings UI inside Cider
-- explicit runtime visibility command like `/runtime`
+- full scheduled reminder reliability
+- reliable image attachment ingestion
 - runtime selection UI/config
 - first-party iOS chat interface
 - Share Sheet ingress bridge
 - CLI-backed subscription runtime
 - richer auth/pairing UX
 - group chat / attachment-heavy Telegram behavior
+
+Already present:
+
+- `/runtime` command support in `TelegramBridge` for active runtime visibility and switching
 
 ## Recommended Next Step
 

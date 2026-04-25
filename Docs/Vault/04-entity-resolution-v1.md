@@ -38,7 +38,7 @@ This catches items that exist but might be in a different folder or have a sligh
 $CLI snapshot --json | grep -i "ashley"
 ```
 
-Or read `.cider/bookmarks/_cider_bookmarks_index.json` directly for URL matching.
+For URL matching, prefer `$CLI bookmark search` / `$CLI duplicate-check`; the bookmark JSON index is cache-only.
 
 ## Match Types
 
@@ -122,7 +122,7 @@ For v1, the lookup process uses:
 - `ls` / `find` for folder checks (fast, no dependencies)
 - `$CLI search` for content matching
 - `$CLI duplicate-check` for URL dedup
-- `.cider/bookmarks/_cider_bookmarks_index.json` for direct URL lookup
+- `$CLI bookmark search` for direct bookmark lookup
 
 Future versions may add:
 - Dedicated entity index files per domain

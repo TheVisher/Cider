@@ -166,8 +166,10 @@ final class SyncService: ObservableObject {
 
         // Authenticate first, then subscribe to changeSignal with userId.
         // This avoids the subscription depending on the syncTokens table.
-        // Capture client before Task to avoid main-actor-isolation send warning.
-        let authClient = client
+        // ConvexClient is owned by this service session, but the SDK action
+        // method is nonisolated. Treat the reference as a stable session handle
+        // when crossing from MainActor into the SDK call.
+        nonisolated(unsafe) let authClient = client
         authTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -412,7 +414,7 @@ final class SyncService: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                var args: [String: ConvexEncodable?] = [
+                nonisolated(unsafe) var args: [String: ConvexEncodable?] = [
                     "token": token,
                     "bookmarks": bookmarkArgs as [ConvexEncodable?],
                 ]
@@ -423,7 +425,9 @@ final class SyncService: ObservableObject {
                     args["notes"] = noteArgs as [ConvexEncodable?]
                 }
 
-                let result: SyncPushResponse = try await client.action("sync:push", with: args)
+                nonisolated(unsafe) let pushClient = client
+                nonisolated(unsafe) let pushArgs: [String: ConvexEncodable?]? = args
+                let result: SyncPushResponse = try await pushClient.action("sync:push", with: pushArgs)
 
                 // Clear pending deletions after successful push
                 self.pendingDeletions.removeAll()
@@ -492,12 +496,14 @@ final class SyncService: ObservableObject {
             guard let self else { return }
             do {
                 let config = CiderConfig.load()
-                let args: [String: ConvexEncodable?] = [
+                nonisolated(unsafe) let args: [String: ConvexEncodable?] = [
                     "token": token,
                     "since": config.lastSyncTimestamp,
                 ]
 
-                let result: SyncPullResponse = try await client.action("sync:pull", with: args)
+                nonisolated(unsafe) let pullClient = client
+                nonisolated(unsafe) let pullArgs: [String: ConvexEncodable?]? = args
+                let result: SyncPullResponse = try await pullClient.action("sync:pull", with: pullArgs)
 
                 self.isApplyingRemoteChanges = true
                 self.applyPullResult(result)
@@ -723,11 +729,13 @@ final class SyncService: ObservableObject {
 
             do {
                 // Full pull (since: 0) to get complete server state
-                let args: [String: ConvexEncodable?] = [
+                nonisolated(unsafe) let args: [String: ConvexEncodable?] = [
                     "token": token,
                     "since": 0.0,
                 ]
-                let result: SyncPullResponse = try await client.action("sync:pull", with: args)
+                nonisolated(unsafe) let reconcileClient = client
+                nonisolated(unsafe) let reconcileArgs: [String: ConvexEncodable?]? = args
+                let result: SyncPullResponse = try await reconcileClient.action("sync:pull", with: reconcileArgs)
 
                 // Apply the pull result first — this creates local rows for any
                 // server items that aren't present locally (via addFromSync) and
@@ -844,8 +852,9 @@ final class SyncService: ObservableObject {
                     nonisolated(unsafe) let bookmarksCopy = corrections
                     nonisolated(unsafe) let foldersCopy = folderCorrections
                     nonisolated(unsafe) let notesCopy = noteCorrections
+                    nonisolated(unsafe) let correctionClient = client
                     try await self.pushReconciliationCorrections(
-                        client: client, token: token,
+                        client: correctionClient, token: token,
                         bookmarks: bookmarksCopy, folders: foldersCopy, notes: notesCopy
                     )
                     self.logger.info("Reconcile: corrections pushed successfully")

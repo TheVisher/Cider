@@ -263,7 +263,7 @@ On first launch after the update, `VaultStructureMigration.migrateIfNeeded()` mo
 All storage services watch their Inbox directories for external changes using `FSEventsWatcher` (wrapper over the FSEvents C API). When files are created, modified, or deleted externally — by Claude via iMessage, Finder, Apple Contacts, or any other tool — Cider detects the change and reloads live.
 
 **Services with file watchers:**
-- `VaultBookmarkService` — watches `.cider/bookmarks/` for index file changes (external edits from Claude)
+- `VaultBookmarkService` — scans vault folders for added or moved `.webloc` files; the JSON index is cache-only and is not watched as an edit API
 - `VaultFileService` — watches vault root for new images/PDFs/videos (filters out `.cider/` metadata writes)
 - `TodoCardStorage` — watches `Inbox/Todos/` for new `.ics` VTODO files
 - `DateCardStorage` — watches `Inbox/Date Cards/` for new `.ics` VEVENT files
@@ -275,12 +275,11 @@ All storage services watch their Inbox directories for external changes using `F
 **Key patterns:**
 - All watchers use `MainActor.assumeIsolated` in callbacks (FSEventsWatcher dispatches to main queue)
 - `pendingRescan` flag prevents dropped events during active scans
-- `isWritingIndex` / write generation counter prevents reload-from-own-write loops
-- 10-second `externalEditCooldown` suppresses adoption after Claude edits the bookmark index
+- Bookmark mutations should go through app services or `cider-cli`; agents should not edit cache JSON
 
 ### Vault File Adoption (Live)
 
-`BookmarksStorage.adoptOrphanedVaultFiles()` runs on every load (debounced to at most once per 5 seconds). It scans vault folders **first** (authoritative for folder assignment), then `Inbox/Bookmarks/`, for `.webloc` files not already tracked in the bookmarks array. Orphaned files are adopted as new bookmarks with the correct `folderID` based on their directory location. Files that have moved between folders also get their `folderID` updated. This means files created by agents, Finder drag-and-drop, or any external tool are picked up automatically.
+`VaultBookmarkService.adoptOrphanedVaultFiles()` runs on load and after file movement flows (debounced to at most once per 5 seconds). It scans vault folders **first** (authoritative for folder assignment), then `Inbox/Bookmarks/`, for `.webloc` files not already tracked in SQLite-backed state. Orphaned files are adopted as new bookmarks with the correct `folderID` based on their directory location. Files that have moved between folders also get their `folderID` updated. This means files created by agents, Finder drag-and-drop, or any external tool are picked up automatically.
 
 URLs that were recently deleted (within the last 30 seconds) are skipped during adoption to prevent "zombie re-adoption" from duplicate `.webloc` files that haven't been cleaned up yet. This is tracked via `VaultBookmarkService.recentlyDeletedURLs`.
 
@@ -345,9 +344,9 @@ The original bookmark storage used a single monolithic JSON file (`_cider_bookma
 - Collision handling: append ` (2)`, ` (3)`, etc.
 - UUID stays in SQLite, not the filename (human-readable filenames)
 
-**5. `bookmarks.html` still generated**
-- Written to vault root on demand (export feature)
-- Not part of the live storage cycle — just for browser import/export
+**5. Browser bookmark export is explicit**
+- Netscape HTML is generated only by import/export flows
+- It is not part of the live storage cycle
 
 ### Migration Phases
 
@@ -355,12 +354,12 @@ The original bookmark storage used a single monolithic JSON file (`_cider_bookma
 |-------|-------------|--------|
 | 1 | Add `relativePath` to Bookmark model (`decodeIfPresent` + nil fallback) | Complete |
 | 2 | `BookmarkFileService.swift` — per-file I/O for `.webloc` artifacts plus legacy sidecar cleanup/backfill helpers | Complete |
-| 3 | Dual-write in `persist()` — monolithic JSON (existing) + `.webloc` files while SQLite becomes canonical for metadata | Complete |
+| 3 | Service writes `.webloc` artifacts while SQLite remains canonical for metadata | Complete |
 | 4 | One-time migration on first launch (`runBookmarkFileMigrationIfNeeded()`) — creates vault directories, writes `.webloc` artifacts, sets `didMigrateBookmarkFiles` flag | Complete |
-| 5 | Wire up FSEvents for live folder watching — detect new .webloc files dropped in, auto-enrich, detect moved/deleted files | Future |
-| 6 | Clean up — remove monolithic JSON write path, remove legacy `Folder` model from JSON, update VaultIndexService to use real file paths, update AI Chat CLAUDE.md | Future |
+| 5 | Reconcile `.webloc` artifacts — adopt new files, update tracked URLs, and prune missing files | Complete |
+| 6 | Clean up — remove monolithic JSON write path and make bookmark index cache-only | Complete |
 
-After migration, every `persist()` call keeps files in sync. Monolithic JSON stays as primary load source (safe fallback). Image assets stay in `Bookmarks/.thumbnails/` and `.originals/` for now.
+After migration, service-layer writes keep SQLite metadata and `.webloc` artifacts in sync. `_cider_bookmarks_index.json` is cache-only output, not an external edit API. Image assets stay in `.cider/bookmarks/.thumbnails/` and `.originals/` for now.
 
 ### What Changes for Users
 
@@ -386,47 +385,42 @@ After migration, every `persist()` call keeps files in sync. Monolithic JSON sta
 
 ### The Problem
 
-BookmarksStorage reads from monolithic `_cider_bookmarks_metadata.json` + `bookmarks.html`. Since the file migration, it dual-writes to `.webloc` files but never reads them as primary source. When agents/Finder move files, the JSON doesn't know.
+`VaultBookmarkService` is the active bookmark runtime path. It loads bookmark metadata from SQLite, treats `.webloc` files as durable URL artifacts, and writes `_cider_bookmarks_index.json` only as a performance cache. Agents and automation should use `cider-cli` or app services for bookmark mutations rather than editing cache JSON.
 
 ### Current Load Path
 
-1. Read `_cider_bookmarks_metadata.json` (all metadata)
-2. Read `bookmarks.html` (URL list, dates)
-3. Merge: HTML provides URLs, JSON provides metadata
-4. Run `adoptOrphanedVaultFiles()` as band-aid for .webloc files
+1. Read SQLite bookmark metadata first
+2. Reconcile missing/deleted `.webloc` artifacts
+3. Adopt externally added `.webloc` files as new bookmarks
+4. Write `_cider_bookmarks_index.json` as cache-only output
 
 ### Current Write Path (persist)
 
-1. Write `bookmarks.html`
-2. Write `_cider_bookmarks_metadata.json`
-3. Push to SyncService
-4. Write `.webloc` files while SQLite remains the metadata source of truth
+1. Write SQLite metadata
+2. Write or update `.webloc` artifacts when the URL/file location changes
+3. Write `_cider_bookmarks_index.json` as cache-only output
+4. Push to SyncService
 
 ### Known Bugs
 
-1. **`.webloc` not moved on folder reassign** — `assignBookmark()` updates folderID in memory but doesn't call `BookmarkFileService.move()`. File stays in old location.
-2. **URL-based dedup in adoption** — duplicate bookmarks with same URL but different metadata silently lost
-3. **Folder ID mismatch** — legacy `Folder` UUIDs vs `VaultFolder` UUIDs, bridged by `reconcileJSONFoldersWithVaultFolders()`
-4. **Thumbnail paths hardcoded** — resolve against `.cider/bookmarks/`, not per-folder
-5. **Carousel images not trashed** — left as orphans when bookmark deleted
-6. **VaultMigrationService reads legacy folders** — tied to old system
+1. **URL-based dedup in adoption** — duplicate bookmarks with the same URL are not adopted as separate live bookmarks; duplicate files are left on disk instead of deleted.
+2. **Thumbnail paths centralized** — bookmark media assets still resolve under `.cider/bookmarks/`.
 
 ### Files the Current System Reads
 
 | File | Path | When |
 |------|------|------|
-| `_cider_bookmarks_metadata.json` | `.cider/bookmarks/` | On load (primary) |
-| `bookmarks.html` | `.cider/bookmarks/` | On load (URL source) |
-| `.webloc` files | vault folders | Only during `adoptOrphanedVaultFiles()` |
+| SQLite `cider.db` | `.cider/` | On load and metadata queries |
+| `.webloc` files | vault folders | Artifact reconciliation and orphan adoption |
 | `_cider_bookmarks.json` sidecars | per-folder | One-time legacy import only |
 
 ### Files the Current System Writes
 
 | File | Path | When |
 |------|------|------|
-| `_cider_bookmarks_metadata.json` | `.cider/bookmarks/` | Every persist() |
-| `bookmarks.html` | `.cider/bookmarks/` | Every persist() |
-| `.webloc` plist files | vault folders | Every persist() |
+| SQLite `cider.db` | `.cider/` | Every bookmark metadata mutation |
+| `_cider_bookmarks_index.json` | `.cider/bookmarks/` | Cache-only output after service mutations |
+| `.webloc` plist files | vault folders | Bookmark create, URL update, restore, sync add, or repair |
 | `_cider_bookmarks.json` sidecars | per-folder | No longer written; only read during one-time legacy import |
 | `.thumbnails/<UUID>.png` | `.cider/bookmarks/.thumbnails/` | Enrichment |
 | `.originals/<UUID>.<ext>` | `.cider/bookmarks/.originals/` | Enrichment |
@@ -478,30 +472,18 @@ BookmarksStorage reads from monolithic `_cider_bookmarks_metadata.json` + `bookm
 - `adoptOrphanedVaultFiles()`
 - `previewNormalizedURLString(from:) -> String?`
 
-### Consumers (files referencing BookmarksStorage.shared)
+### Former BookmarksStorage Consumer List
 
-~30 files, ~63 call sites. Key ones:
-- BookmarksViewModel.swift — main UI wrapper
-- SyncService.swift — push/pull
-- TrashStorage.swift — trash/restore
-- AppDelegate.swift + AppDelegate+Toasts.swift — capture flows
-- SpotlightIndexer.swift — search index
-- CardLabelStorage.swift — label operations
-- CiderUndoManager.swift — undo
-- VaultIndexService.swift — vault index
-- BookmarkAIEnrichment.swift — AI summaries
-- MLXToolExecutor.swift — local AI tool calls
-- Multiple view files for display/actions
+This section used to track the migration off `BookmarksStorage.shared`. Runtime consumers now use `VaultBookmarkService`; direct `BookmarksStorage.shared` use is limited to the retired legacy storage implementation and historical docs.
 
-### What VaultBookmarkService Must Do
+### Current VaultBookmarkService Duties
 
-1. **Load from files** — scan vault folders for `.webloc` artifacts and backfill legacy sidecar metadata only when SQLite is missing fields
-2. **Performance cache** — write `_cider_bookmarks_index.json` for fast startup
-3. **Move files on folder assign** — call `BookmarkFileService.move()`
-4. **No legacy folders** — use VaultFolderService exclusively
-5. **No monolithic JSON** — stop reading/writing `_cider_bookmarks_metadata.json` and `bookmarks.html`
-6. **Per-folder thumbnails** — store in folder's `.thumbnails/` dir
-7. **Proper trash** — move .webloc + all assets including carousel images
-8. **Same public API** — consumers just swap `BookmarksStorage.shared` -> `VaultBookmarkService.shared`
-9. **FSEvents adoption** — debounced scan for externally added/moved files
-10. **Update vault CLAUDE.md** — tell agents to work with files, not JSON
+1. **Load from SQLite** — use the database as canonical bookmark metadata
+2. **Adopt files** — scan vault folders for externally added or moved `.webloc` artifacts
+3. **Backfill legacy metadata once** — import `_cider_bookmarks.json` sidecars only during the guarded migration path
+4. **Performance cache** — write `_cider_bookmarks_index.json` as cache-only output
+5. **Move files on folder assign** — call `BookmarkFileService.move()`
+6. **No legacy folders** — use `VaultFolderService` exclusively
+7. **No monolithic JSON** — do not read or write `_cider_bookmarks_metadata.json`; browser `bookmarks.html` is explicit import/export only
+8. **Proper trash** — move `.webloc` plus all bookmark assets
+9. **Agent contract** — tell agents to use `cider-cli`/services, not cache JSON

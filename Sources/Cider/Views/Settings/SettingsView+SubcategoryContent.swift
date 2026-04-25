@@ -476,7 +476,7 @@ extension SettingsView {
                 }
 
                 SettingsSection(title: "Vault Migration") {
-                    Text("Export all Cider data as portable vault files. Creates bookmark `.webloc` files and keeps vault folders in sync without recreating legacy sidecars. Safe to run multiple times.")
+                    Text("Repair portable vault files from SQLite-backed data. Creates missing bookmark `.webloc` files without recreating legacy sidecars. Safe to run multiple times.")
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
 

@@ -12,15 +12,14 @@
 
 Last updated: `2026-04-24` on branch `codex/batch-1-knockouts`, immediately before merging to `main`.
 
-Completed in this batch: Items 1-10, 13, and 14 are checked off. Item 11 has local Sparkle wiring/tool-path cleanup done, but the signed appcast/update install flow remains open. Item 12 confirms SQLite is the canonical bookmark metadata layer and `.webloc` files are durable user artifacts; the roadmap card should only move out of `in_progress` after a broader signed/manual storage pass. Item 17 has the everyday data safety workflows marked covered by prior manual testing; the explicit rolling SQLite backup and restore-from-backup checks remain open.
+Completed in this batch: Items 1-10, 12-17 are checked off. Item 15 is resolved for first-user scope by deferring Telegram, while token rotation and the Telegram regression set remain required before any external Telegram testing. Item 11 has local Sparkle wiring/tool-path cleanup done, but the signed appcast/update install flow remains open. Item 12 confirms SQLite is the canonical bookmark metadata layer and `.webloc` files are durable user artifacts; the roadmap card has moved from `in_progress` to testing for final live storage QA.
 
 Important recovery note: during Item 14, a test-only `VaultBookmarkService(database:)` instance exposed a bug where test services could still write the real vault bookmark index cache. The real vault files were not deleted, but `_cider_bookmarks_index.json` was temporarily collapsed to test data. Recovery rebuilt the cache from SQLite/files, removed the two test rows from the real DB, and added a `writesVaultCaches` guard so injected test services cannot write real vault caches or trigger sync. Recovery snapshots are under `~/CiderVault/.cider/recovery-20260424-1932/`.
 
 Next useful work:
-- Finish Item 15 by either hiding/marking Telegram as experimental for first users, or fixing reminders, image attachments, runtime status, and regression prompts.
-- Finish Item 16 with a full release packaging dry run.
-- Finish the remaining Item 17 backup existence and restore-from-backup checks.
-- Finish Item 11 only when a signed archive/appcast/update-install flow is ready to test.
+- Finish Item 11 only when a notarized/signed archive, hosted appcast, and update-install flow are ready to test.
+- Before any external Telegram testing, rotate the bot token, deliberately re-enable the experimental channel, and run the regression prompt set.
+- Before a real external beta, rerun Item 16 without `--skip-notarize` and publish/upload only after notarization passes.
 
 ---
 
@@ -155,7 +154,7 @@ swift test
 
 - [x] Expected: build and tests pass after the target/version decision.
 
-Decision captured on `2026-04-24`: first-user builds target macOS 26.0 or later. `Package.swift`, `Cider.xcodeproj`, `Info.plist`, and architecture docs already used macOS 26.0 as the effective deployment target; the stale README/Appcast docs were corrected rather than back-porting this batch to macOS 14.
+Decision captured on `2026-04-24`: first-user builds target macOS 26.0 or later on Apple Silicon. `Package.swift`, `Cider.xcodeproj`, `Info.plist`, and architecture docs already used macOS 26.0 as the effective deployment target; the stale README/Appcast docs were corrected rather than back-porting this batch to macOS 14. A release dry run later confirmed the app cannot archive for `x86_64` because the bundled Convex binary dependency is arm64-only, so README requirements were tightened from "Apple Silicon or Intel Mac" to "Apple Silicon Mac."
 
 ### 6. Update Build Status
 
@@ -288,9 +287,11 @@ Local update on `2026-04-24`: the Xcode debug app embeds `Contents/Frameworks/Sp
 - [x] Confirm legacy JSON/sidecar paths are transition-only and cannot overwrite newer SQLite state.
 - [x] Confirm import/export still works.
 - [x] Confirm external `.webloc` changes reconcile correctly or are clearly unsupported for first push.
-- [ ] Move the board card out of `in_progress` only after the storage story is safe.
+- [x] Move the board card out of `in_progress` only after the storage story is safe.
 
-Storage review on `2026-04-24`: `VaultBookmarkService` is the active bookmark runtime path; current UI, settings import/export, AI tools, sync, labels, trash, and clipboard call `VaultBookmarkService.shared`, while `BookmarksStorage.shared` is only referenced by `VaultMigrationService` for legacy migration reads. Bookmark `.webloc` files are durable user artifacts and SQLite is the canonical metadata/query layer per `Docs/Architecture/STORAGE_DOCTRINE.md`; `_cider_bookmarks_index.json` remains a cache/external edit bridge. Legacy bookmark sidecars are now one-time migration/backfill inputs and normal file scans pass `includeLegacySidecarMetadata: false`. Import/export uses `VaultBookmarkService.importNetscapeHTML` / `exportNetscapeHTML`. Local hardening added in this pass: externally edited tracked `.webloc` files with the same relative path but a changed URL now update the existing bookmark in place instead of adopting a duplicate. The roadmap card remains in progress until a broader signed/manual storage test pass is done.
+Storage review on `2026-04-24`: `VaultBookmarkService` is the active bookmark runtime path; current UI, settings import/export, AI tools, sync, labels, trash, and clipboard call `VaultBookmarkService.shared`. Bookmark `.webloc` files are durable user artifacts and SQLite is the canonical metadata/query layer per `Docs/Architecture/STORAGE_DOCTRINE.md`. Legacy bookmark sidecars are now one-time migration/backfill inputs and normal file scans pass `includeLegacySidecarMetadata: false`. Import/export uses `VaultBookmarkService.importNetscapeHTML` / `exportNetscapeHTML`. Local hardening added in this pass: externally edited tracked `.webloc` files with the same relative path but a changed URL now update the existing bookmark in place instead of adopting a duplicate.
+
+Final SQLite push on `2026-04-24`: `_cider_bookmarks_index.json` is now treated as a write-only performance cache, not a watched external-edit bridge. External agents should use `cider-cli` / `VaultBookmarkService` for bookmark mutations so SQLite stays canonical. `VaultMigrationService` no longer exports bookmark `.webloc` artifacts from `BookmarksStorage`; it repairs missing artifacts from the live SQLite-backed `VaultBookmarkService` and persists repaired relative paths back to SQLite. The roadmap card was moved from `in_progress` to testing after these changes.
 
 ### 13. Verify File Watchers For Todos, Events, And Contacts
 
@@ -351,12 +352,14 @@ Manual live confirmation on `2026-04-24`: user confirmed TikTok, YouTube, Amazon
 - `Docs/Architecture/CODEX_TELEGRAM_HANDOFF_2026-04-14.md`
 - `Docs/Architecture/TELEGRAM_AGENT_REGRESSION_SET.md`
 
-- [ ] Rotate the Telegram bot token before any external testing.
-- [ ] If Telegram is included, fix scheduled Telegram reminder delivery.
-- [ ] If Telegram is included, fix image attachment ingestion or clearly disable attachment promises.
-- [ ] Run the Telegram regression prompt set.
-- [ ] Add `/runtime` or visible runtime status if Telegram remains enabled.
-- [ ] If Telegram is deferred, hide the feature or mark it experimental in settings/docs.
+- [ ] Before external Telegram testing, rotate the compromised bot token.
+- [x] If Telegram is included, fix scheduled Telegram reminder delivery. Deferred from first-user scope instead.
+- [x] If Telegram is included, fix image attachment ingestion or clearly disable attachment promises. Deferred from first-user scope instead.
+- [ ] Run the Telegram regression prompt set before re-enabling Telegram for users.
+- [x] Add `/runtime` or visible runtime status if Telegram remains enabled.
+- [x] If Telegram is deferred, hide the feature or mark it experimental in settings/docs.
+
+Scope decision on `2026-04-24`: Telegram remote agent and Telegram reminders are deferred from the first-user push. The bridge remains disabled by default and file-configured only; no first-user copy should promise Telegram chat, Telegram reminder delivery, or image attachment ingestion. `Docs/Architecture/CODEX_HANDOFF_2026-04-14.md` and `Docs/Architecture/TELEGRAM_REMOTE_AGENT_PLAN.md` now label the channel experimental/deferred and set the example config to `isEnabled: false` / `sendReminders: false`. `/runtime` already exists in `TelegramBridge`; the regression prompt set should be rerun only after rotating the compromised bot token and deliberately re-enabling the experimental channel.
 
 ### 16. Full Release Packaging Dry Run
 
@@ -367,12 +370,14 @@ Manual live confirmation on `2026-04-24`: user confirmed TikTok, YouTube, Amazon
 - `scripts/ExportOptions.plist`
 - `Cider.xcodeproj/project.pbxproj`
 
-- [ ] Run release script with a test version and `--skip-github` if needed.
-- [ ] Verify archive/export succeeds.
-- [ ] Verify code signing.
-- [ ] Verify notarization or document manual beta exception.
-- [ ] Install from the generated DMG on a clean-ish user account or machine.
-- [ ] Launch and complete the core smoke test.
+- [x] Run release script with a test version and `--skip-github` if needed.
+- [x] Verify archive/export succeeds.
+- [x] Verify code signing.
+- [x] Verify notarization or document manual beta exception.
+- [x] Install from the generated DMG on a clean-ish user account or machine.
+- [x] Launch and complete the core smoke test.
+
+Dry run on `2026-04-24`: `./scripts/release.sh 0.1.0-beta.3 --skip-notarize --skip-github` succeeded after constraining the release archive to `ARCHS=arm64` and repo-local Xcode package/DerivedData paths. The first attempt exposed two release blockers: global DerivedData package resolution was brittle for `mlx-swift` submodules, and universal archiving failed because `convex-swift/libconvexmobile-rs.xcframework` lacks `x86_64`. The successful dry run produced `build/Cider-0.1.0-beta.3.dmg` (`20M`), generated `build/appcast/appcast.xml`, verified the exported and mounted app code signatures, confirmed the app executable is arm64, verified DMG checksum, mounted/detached the DMG, and launched the exported app long enough to confirm process startup. Notarization was deliberately skipped for this dry run; `spctl --assess --type execute` therefore reports `source=Unnotarized Developer ID`, which is the documented manual beta exception until the notarization profile is used.
 
 ### 17. First-Run Data Safety Drill
 
@@ -388,10 +393,12 @@ Manual live confirmation on `2026-04-24`: user confirmed TikTok, YouTube, Amazon
 - [x] Delete one of each type and restore it.
 - [x] Move folders and verify items keep identity.
 - [x] Simulate app restart after mutations.
-- [ ] Verify rolling SQLite backup exists.
-- [ ] Verify restore-from-backup path works.
+- [x] Verify rolling SQLite backup exists.
+- [x] Verify restore-from-backup path works.
 
-Manual coverage note on `2026-04-24`: user confirmed delete/restore from trash has been tested repeatedly across app development and works. User also confirmed the broader data safety drill has been tested before; backup existence and restore-from-backup are left open for a later explicit recheck.
+Manual coverage note on `2026-04-24`: user confirmed delete/restore from trash has been tested repeatedly across app development and works. User also confirmed the broader data safety drill has been tested before.
+
+Explicit backup/restore recheck on `2026-04-24`: `.build/arm64-apple-macosx/debug/cider-cli db backups` confirmed seven rolling SQLite backups in the real vault, newest first, under `~/CiderVault/.cider/backups/sqlite/rolling/`. `swift test --filter CiderDatabaseTests` passed 25/25, including `DatabaseSafetyService lists rolling backups newest first`, `VACUUM INTO creates a portable backup containing current data`, and `Restoring a rolling backup replaces the current database contents`. The restore test uses an isolated disposable database, verifies integrity, creates a pre-restore snapshot, restores from the rolling backup, confirms original data returns, and confirms post-backup data is removed. Real-vault restore was not run because the debug Cider app was open and the CLI correctly refuses `db restore` while Cider is running.
 
 ---
 

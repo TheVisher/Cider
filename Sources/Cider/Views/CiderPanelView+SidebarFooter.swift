@@ -13,6 +13,19 @@ extension CiderPanelView {
 
     var sidebarFooterView: some View {
         VStack(spacing: Spacing.sm) {
+            SidebarProfilePanel(
+                onOpenSettings: {
+                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+                },
+                onSyncNow: {
+                    SyncService.shared.syncNow()
+                },
+                onCreateNew: {
+                    showNewItemPicker.toggle()
+                }
+            )
+            .padding(.horizontal, Spacing.sm)
+
             // AI Quick Actions + Assistant button
             aiSidebarSection
 
@@ -373,4 +386,109 @@ extension CiderPanelView {
         )
     }
 
+}
+
+private struct SidebarProfilePanel: View {
+    @ObservedObject private var authService = AuthService.shared
+    @ObservedObject private var syncService = SyncService.shared
+
+    let onOpenSettings: () -> Void
+    let onSyncNow: () -> Void
+    let onCreateNew: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("PROFILE")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .tracking(2)
+
+            HStack(alignment: .center, spacing: Spacing.sm) {
+                Circle()
+                    .fill(authService.isLoggedIn ? CiderColors.controlAccent.opacity(0.18) : CiderColors.surfaceInput)
+                    .frame(width: 34, height: 34)
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(authService.isLoggedIn ? CiderColors.controlAccent : CiderColors.tertiary)
+                    }
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(authService.isLoggedIn ? authService.accountEmail : "Sign In")
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text(authService.isLoggedIn ? "Signed in" : "Sync across devices")
+                        .font(CiderFont.caption)
+                        .foregroundColor(authService.isLoggedIn ? CiderColors.success : CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            syncStatusBadge
+
+            VStack(spacing: Spacing.xs) {
+                HomeOverviewQuickActionButton(
+                    title: "Settings",
+                    systemImage: "gearshape",
+                    action: onOpenSettings
+                )
+                HomeOverviewQuickActionButton(
+                    title: authService.isLoggedIn ? "Sync Now" : "Sign In",
+                    systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
+                    detail: authService.isLoggedIn && syncService.isSyncing ? "Working" : nil,
+                    disabled: authService.isLoggedIn && syncService.isSyncing,
+                    action: {
+                        if authService.isLoggedIn {
+                            onSyncNow()
+                        } else {
+                            onOpenSettings()
+                        }
+                    }
+                )
+                HomeOverviewQuickActionButton(
+                    title: "New",
+                    systemImage: "plus",
+                    action: onCreateNew
+                )
+            }
+        }
+        .padding(Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                .fill(CiderColors.surfaceElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                        .stroke(CiderColors.borderDefault, lineWidth: 1)
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var syncStatusBadge: some View {
+        HStack(spacing: Spacing.xs) {
+            if syncService.isSyncing {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Syncing now")
+            } else if let lastSync = syncService.lastSyncedAt, authService.isLoggedIn {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(CiderColors.success)
+                Text("Synced \(lastSync.formatted(.relative(presentation: .named)))")
+            } else if authService.isLoggedIn {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundColor(CiderColors.tertiary)
+                Text("Sync is active")
+            } else {
+                Image(systemName: "icloud.slash")
+                    .foregroundColor(CiderColors.tertiary)
+                Text("Not signed in")
+            }
+        }
+        .font(CiderFont.caption)
+        .foregroundColor(CiderColors.tertiary)
+        .lineLimit(1)
+    }
 }

@@ -1,8 +1,8 @@
 import Foundation
 import os
 
-/// Exports existing Cider data into portable vault files.
-/// Creates `.webloc` files for bookmarks and ensures folders exist as real directories.
+/// Ensures existing Cider data has portable vault files.
+/// Creates missing `.webloc` artifacts for SQLite-backed bookmarks.
 ///
 /// This is a one-time migration tool — safe to run multiple times (idempotent).
 @MainActor
@@ -56,7 +56,6 @@ final class VaultMigrationService {
         var result = MigrationResult()
         logger.info("Starting vault migration…")
 
-        migrateFolders(&result)
         migrateBookmarks(&result)
         migrateNotes(&result)
         logger.info("Migration complete: \(result.summary)")
@@ -103,80 +102,34 @@ final class VaultMigrationService {
         return result
     }
 
-    // MARK: - Folders
-
-    /// Ensures every legacy Folder has a corresponding real vault directory.
-    private func migrateFolders(_ result: inout MigrationResult) {
-        let legacyFolders = BookmarksStorage.shared.folders
-        let vaultFolderService = VaultFolderService.shared
-        let existingPaths = Set(vaultFolderService.folders.map(\.relativePath))
-
-        for folder in legacyFolders {
-            // Check if a VaultFolder already exists with the same name
-            let name = VaultFolderService.sanitizeDirectoryName(folder.name)
-            guard !name.isEmpty else { continue }
-
-            // Check by folder name (not ID — legacy and vault folders have different IDs)
-            if existingPaths.contains(name) { continue }
-
-            // Also check if the folder is nested
-            let parentPath: String?
-            if let parentID = folder.parentID,
-               let parent = legacyFolders.first(where: { $0.id == parentID }) {
-                parentPath = VaultFolderService.sanitizeDirectoryName(parent.name)
-            } else {
-                parentPath = nil
-            }
-
-            let fullPath = parentPath.map { "\($0)/\(name)" } ?? name
-            if existingPaths.contains(fullPath) { continue }
-
-            // Create the vault folder
-            if vaultFolderService.createFolder(name: folder.name, parentID: parentID(for: folder.parentID, in: vaultFolderService)) != nil {
-                result.foldersCreated += 1
-                logger.info("Created vault directory for legacy folder: \(folder.name)")
-            } else {
-                result.errors.append("Failed to create folder: \(folder.name)")
-            }
-        }
-    }
-
-    /// Resolves a legacy folder parent ID to a VaultFolder parent ID.
-    private func parentID(for legacyParentID: UUID?, in service: VaultFolderService) -> UUID? {
-        guard let legacyParentID else { return nil }
-        guard let legacyParent = BookmarksStorage.shared.folders.first(where: { $0.id == legacyParentID }) else { return nil }
-        let name = VaultFolderService.sanitizeDirectoryName(legacyParent.name)
-        return service.folders.first(where: { $0.relativePath == name })?.id
-    }
-
     // MARK: - Bookmarks
 
-    /// Exports each bookmark as a `.webloc` file.
+    /// Ensures each live SQLite-backed bookmark has a `.webloc` file.
     private func migrateBookmarks(_ result: inout MigrationResult) {
-        let bookmarks = BookmarksStorage.shared.bookmarks
+        let bookmarks = VaultBookmarkService.shared.bookmarks
         let fm = FileManager.default
 
-        for bookmark in bookmarks {
+        for var bookmark in bookmarks {
+            if let relativePath = bookmark.relativePath,
+               fm.fileExists(atPath: vaultRoot.appendingPathComponent(relativePath).path) {
+                continue
+            }
+
             // Determine target directory
-            let (dirURL, _) = resolveDirectory(for: bookmark.folderID, fallback: StorageType.bookmarks.ciderSubpath)
+            let (dirURL, dirRelativePath) = resolveDirectory(for: bookmark.folderID)
 
             // Create .webloc file if bookmark has a URL
-            if bookmark.hasURL, let url = bookmark.url {
-                let baseName = sanitizeFilename(bookmark.title.isEmpty ? "Untitled" : bookmark.title)
-                let filename = BookmarkFileService.shared.uniqueFilename(for: baseName, extension: "webloc", in: dirURL)
-                let fileURL = dirURL.appendingPathComponent(filename)
-
-                if !fm.fileExists(atPath: fileURL.path) {
-                    let plist: [String: String] = ["URL": url.absoluteString]
-                    if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
-                        do {
-                            try fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
-                            try data.write(to: fileURL, options: .atomic)
-                            result.weblocFilesCreated += 1
-                        } catch {
-                            result.errors.append("Failed to write \(filename): \(error.localizedDescription)")
-                        }
-                    }
+            if bookmark.hasURL {
+                do {
+                    bookmark.relativePath = try BookmarkFileService.shared.write(
+                        bookmark: bookmark,
+                        toDirectory: dirURL,
+                        dirRelativePath: dirRelativePath
+                    )
+                    VaultBookmarkService.shared.persistBookmarkToDatabase(bookmark)
+                    result.weblocFilesCreated += 1
+                } catch {
+                    result.errors.append("Failed to write \(bookmark.title): \(error.localizedDescription)")
                 }
             }
         }
@@ -192,37 +145,16 @@ final class VaultMigrationService {
     // MARK: - Helpers
 
     /// Resolves a folder ID to a real directory URL and its vault-relative path.
-    private func resolveDirectory(for folderID: UUID?, fallback: String) -> (URL, String) {
+    private func resolveDirectory(for folderID: UUID?) -> (URL, String) {
         if let folderID {
-            // Try VaultFolder first
             if let vaultFolder = VaultFolderService.shared.folders.first(where: { $0.id == folderID }) {
                 let dirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
                 return (dirURL, vaultFolder.relativePath)
             }
-            // Try legacy folder → find matching VaultFolder by name
-            if let legacyFolder = BookmarksStorage.shared.folders.first(where: { $0.id == folderID }) {
-                let name = VaultFolderService.sanitizeDirectoryName(legacyFolder.name)
-                if let vaultFolder = VaultFolderService.shared.folders.first(where: { $0.relativePath == name }) {
-                    let dirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
-                    return (dirURL, vaultFolder.relativePath)
-                }
-            }
         }
-        // Fallback to type directory inside .cider/
-        let ciderPath = "\(StoragePaths.ciderInternalDir)/\(fallback)"
-        let dirURL = vaultRoot.appendingPathComponent(ciderPath)
-        return (dirURL, ciderPath)
-    }
-
-    /// Sanitizes a string for use as a filename (removes invalid characters).
-    private func sanitizeFilename(_ name: String) -> String {
-        let invalid = CharacterSet(charactersIn: ":/\\?*\"<>|")
-        var sanitized = name.components(separatedBy: invalid).joined(separator: "-")
-        // Trim to reasonable length
-        if sanitized.count > 200 {
-            sanitized = String(sanitized.prefix(200))
-        }
-        return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dirURL = StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
+        let relativePath = "\(StoragePaths.inboxDir)/\(StorageType.bookmarks.inboxSubfolderName ?? "Bookmarks")"
+        return (dirURL, relativePath)
     }
 
     private func shouldSkipLegacySidecar(at url: URL) -> Bool {

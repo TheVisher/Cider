@@ -109,6 +109,8 @@ It should reuse:
 
 ## Telegram v1 Scope
 
+Status for first-user beta, `2026-04-24`: Telegram is experimental and deferred. The local-first desktop beta should not promise Telegram chat, Telegram reminders, or image attachment ingestion. Re-enable this scope only after rotating the bot token, running the regression prompt set, and fixing the tracked reminder and attachment bugs.
+
 ### Must ship
 
 - authenticated Telegram bot link to one or more allowed users

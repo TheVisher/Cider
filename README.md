@@ -69,7 +69,7 @@ No Electron. No subscriptions. Just a native Swift app that stays out of your wa
 ## Requirements
 
 - macOS 26.0 or later
-- Apple Silicon or Intel Mac
+- Apple Silicon Mac
 
 ## Install
 

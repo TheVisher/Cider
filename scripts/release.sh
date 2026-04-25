@@ -35,6 +35,8 @@ BUILD_DIR="$ROOT_DIR/build"
 ARCHIVE_PATH="$BUILD_DIR/Cider.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export"
 DMG_DIR="$BUILD_DIR/dmg"
+XCODE_DERIVED_DATA_DIR="$ROOT_DIR/.build/xcode/DerivedData"
+XCODE_PACKAGE_DIR="$ROOT_DIR/.build/xcode/SourcePackages"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -142,16 +144,22 @@ success "Clean"
 # --- Step 3: Archive ---
 step "Building release archive (this may take a minute)"
 
+mkdir -p "$XCODE_DERIVED_DATA_DIR" "$XCODE_PACKAGE_DIR"
+
 xcodebuild archive \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
+    -derivedDataPath "$XCODE_DERIVED_DATA_DIR" \
+    -clonedSourcePackagesDirPath "$XCODE_PACKAGE_DIR" \
     -destination "generic/platform=macOS" \
     CODE_SIGN_IDENTITY="Developer ID Application" \
     DEVELOPMENT_TEAM="$TEAM_ID" \
     CODE_SIGN_STYLE=Manual \
     ENABLE_HARDENED_RUNTIME=YES \
+    ARCHS=arm64 \
+    ONLY_ACTIVE_ARCH=NO \
     OTHER_CODE_SIGN_FLAGS="--options=runtime" \
     2>&1 | tail -5
 
@@ -312,7 +320,8 @@ Download **$DMG_NAME**, open it, and drag Cider to your Applications folder.
 - First public beta release
 
 ### Requirements
-- macOS 26.0 or later" \
+- macOS 26.0 or later
+- Apple Silicon Mac" \
         --prerelease
 
     success "GitHub Release created: $TAG"

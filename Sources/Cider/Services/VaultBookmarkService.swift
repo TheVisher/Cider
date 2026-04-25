@@ -34,16 +34,10 @@ final class VaultBookmarkService: ObservableObject {
     private var recentlyDeletedURLs: [String: Date] = [:]
     private let recentlyDeletedTTL: TimeInterval = 30
 
-    // MARK: - External Edit Watching
+    // MARK: - Index Cache Contract
 
-    /// Watches `.cider/bookmarks/` for external edits to the index file (e.g. from Claude via iMessage).
-    private var indexWatcher: FSEventsWatcher?
-    /// Monotonic generation counter — incremented on every write, used to suppress reload from own writes.
-    private var writeGeneration: UInt64 = 0
-    private var isWritingIndex = false
-    /// Timestamp of last external index edit — adoption is suppressed for a few seconds after.
-    private var lastExternalEditAt: Date = .distantPast
-    private let externalEditCooldown: TimeInterval = 10
+    /// The JSON index is a cache only. External agents must mutate bookmarks
+    /// through `VaultBookmarkService`/`cider-cli`, not by editing this file.
 
     // MARK: - Computed Paths
 
@@ -95,7 +89,6 @@ final class VaultBookmarkService: ObservableObject {
         writesVaultCaches = true
         ensureDirectories()
         loadBookmarks()
-        startIndexWatcher()
     }
 
     /// Testing-only initializer with an explicit database.
@@ -203,9 +196,6 @@ final class VaultBookmarkService: ObservableObject {
     /// Writes the current bookmarks array as the index cache.
     private func writeIndexCache() {
         guard writesVaultCaches else { return }
-        writeGeneration += 1
-        let gen = writeGeneration
-        isWritingIndex = true
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
@@ -214,66 +204,6 @@ final class VaultBookmarkService: ObservableObject {
         } catch {
             logger.error("Failed to write index cache: \(error.localizedDescription)")
         }
-        // Reset after delay — only if no newer write has occurred (generation check prevents race)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, self.writeGeneration == gen else { return }
-            self.isWritingIndex = false
-        }
-    }
-
-    // MARK: - Index File Watching
-
-    /// Watches the bookmarks metadata directory for external edits to the index file.
-    private func startIndexWatcher() {
-        indexWatcher = FSEventsWatcher(path: bookmarksMetaDir.path, latency: 0.5) { [weak self] paths in
-            MainActor.assumeIsolated {
-                guard let self, !self.isWritingIndex else { return }
-                let indexPath = self.indexFileURL.path
-                guard paths.contains(where: { $0 == indexPath }) else { return }
-                self.reloadFromExternalEdit()
-            }
-        }
-        indexWatcher?.start()
-    }
-
-    /// Reloads the bookmarks array from the index file after an external edit.
-    /// Detects title/notes changes and marks them as manually set so enrichment won't overwrite.
-    private func reloadFromExternalEdit() {
-        guard var updated = loadFromIndexCache() else { return }
-        let oldCount = bookmarks.count
-
-        // Build lookup of current bookmarks by ID
-        let oldByID = Dictionary(uniqueKeysWithValues: bookmarks.map { ($0.id, $0) })
-
-        // Detect externally changed titles/notes and mark as manually set.
-        // Accept external edits as authoritative (CLI, iMessage bot, etc. write the index).
-        for i in updated.indices {
-            guard let old = oldByID[updated[i].id] else { continue }
-            // Preserve in-memory manual flags — don't let external file clear them
-            if old.titleManuallySet { updated[i].titleManuallySet = true }
-            if old.notesManuallySet { updated[i].notesManuallySet = true }
-            // Detect new external changes and mark as manually set
-            if updated[i].title != old.title && !updated[i].titleManuallySet {
-                updated[i].titleManuallySet = true
-            }
-            if updated[i].notes != old.notes && !updated[i].notesManuallySet {
-                updated[i].notesManuallySet = true
-            }
-            // Note: we intentionally accept the on-disk title/notes as authoritative.
-            // External processes (CLI, iMessage bot) write the index through proper code
-            // paths that set titleManuallySet. Reverting to old in-memory values would
-            // fight those edits.
-        }
-
-        bookmarks = updated
-        // Suppress adoption for a few seconds — the external agent (Claude) moved files
-        // and updated the index simultaneously. Adoption would fight with the new state.
-        lastExternalEditAt = Date()
-        // Persist the merged state so manual title/notes overrides survive cold restarts
-        persist()
-        // Schedule enrichment for any new bookmarks added by the external editor
-        scheduleEnrichmentForIncompleteBookmarks()
-        logger.info("Reloaded \(updated.count) bookmarks from external index edit (was \(oldCount))")
     }
 
     /// Full scan of all vault folders + Inbox/Bookmarks for .webloc files.
@@ -1213,9 +1143,6 @@ final class VaultBookmarkService: ObservableObject {
     func adoptOrphanedVaultFiles() {
         guard !isAdopting else { return }
         guard Date().timeIntervalSince(lastAdoptionScan) >= adoptionDebounceInterval else { return }
-        // Skip adoption if index was recently edited externally (e.g. Claude moved files + updated index).
-        // The external edit is authoritative; adoption would fight it.
-        guard Date().timeIntervalSince(lastExternalEditAt) >= externalEditCooldown else { return }
         isAdopting = true
         defer {
             isAdopting = false
@@ -1367,9 +1294,18 @@ final class VaultBookmarkService: ObservableObject {
     /// Re-scans vault folders and rebuilds the bookmarks array from disk.
     func reloadFromDisk() {
         cancelAllEnrichmentTasks()
+        if let db = resolvedDatabase {
+            loadBookmarksFromDatabase(db)
+            pruneMissingBookmarksFromDisk(db)
+            adoptOrphanedVaultFiles()
+            scheduleEnrichmentForIncompleteBookmarks()
+            return
+        }
+
         let scanned = scanAllVaultFolders()
         bookmarks = scanned
         writeIndexCache()
+        persistAllBookmarksToDatabase()
         scheduleEnrichmentForIncompleteBookmarks()
     }
 
