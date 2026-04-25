@@ -1,6 +1,83 @@
 import AppKit
 import SwiftUI
 
+// MARK: - File Export
+
+@MainActor
+enum CiderFileExporter {
+    static func exportFile(sourceURL: URL, suggestedFileName: String, helpText: String? = nil) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFileName
+        panel.canCreateDirectories = true
+        panel.prompt = "Export"
+        if let helpText {
+            panel.accessoryView = helpAccessoryView(text: helpText)
+        }
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        do {
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        } catch {
+            NSSound.beep()
+            print("Export failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func helpAccessoryView(text: String) -> NSView {
+        SavePanelHintView(text: text)
+    }
+}
+
+private final class SavePanelHintView: NSView {
+    private let text: String
+
+    init(text: String) {
+        self.text = text
+        super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 34))
+        autoresizingMask = [.width]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 360, height: 34)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let availableWidth = max(intrinsicContentSize.width, bounds.width)
+        let pillWidth = min(availableWidth - 56, 240)
+        let pillRect = NSRect(
+            x: (bounds.width - pillWidth) / 2,
+            y: 4,
+            width: pillWidth,
+            height: bounds.height - 8
+        )
+        NSColor.controlAccentColor.withAlphaComponent(0.14).setFill()
+        NSBezierPath(roundedRect: pillRect, xRadius: 8, yRadius: 8).fill()
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraph
+        ]
+        let textRect = pillRect.insetBy(dx: 10, dy: 6)
+        (text as NSString).draw(in: textRect, withAttributes: attributes)
+    }
+}
+
 // MARK: - Menu Item Model
 
 /// Describes a single item in a card context menu.
@@ -8,7 +85,36 @@ enum CardMenuItem {
     case action(title: String, image: NSImage? = nil, callback: () -> Void)
     case submenu(title: String, children: [CardMenuItem])
     case separator
+    case disabled(title: String)
+    case hint(title: String)
     case destructive(title: String, callback: () -> Void)
+}
+
+// MARK: - Export Submenu Builder
+
+enum ExportMenuBuilder {
+    static let bookmarkImageMenuHint = "Opt-drag to Finder to export image"
+    static let noteMarkdownMenuHint = "Opt-drag to Finder to export Markdown"
+    static let bookmarkImageSavePanelHint = "Opt-drag to export image"
+    static let noteMarkdownSavePanelHint = "Opt-drag to export Markdown"
+
+    static func bookmarkImageExportMenuItems(exportAction: @escaping () -> Void) -> [CardMenuItem] {
+        [
+            .submenu(title: "Export", children: [
+                .action(title: "Image\u{2026}", callback: exportAction),
+                .hint(title: bookmarkImageMenuHint)
+            ])
+        ]
+    }
+
+    static func noteMarkdownExportMenuItems(exportAction: @escaping () -> Void) -> [CardMenuItem] {
+        [
+            .submenu(title: "Export", children: [
+                .action(title: "Markdown\u{2026}", callback: exportAction),
+                .hint(title: noteMarkdownMenuHint)
+            ])
+        ]
+    }
 }
 
 // MARK: - View Modifier
@@ -69,12 +175,48 @@ private struct CardContextMenuHelper: NSViewRepresentable {
         case .separator:
             return NSMenuItem.separator()
 
+        case .disabled(let title):
+            let mi = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            mi.isEnabled = false
+            return mi
+
+        case .hint(let title):
+            let mi = NSMenuItem()
+            mi.isEnabled = false
+            mi.view = MenuHintView(text: title)
+            return mi
+
         case .destructive(let title, let callback):
             let mi = NSMenuItem(title: title, action: #selector(MenuActionTarget.runAction), keyEquivalent: "")
             mi.representedObject = callback
             mi.target = MenuActionTarget.shared
             return mi
         }
+    }
+}
+
+private final class MenuHintView: NSView {
+    init(text: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 210, height: 22))
+
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .tertiaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
     }
 }
 
@@ -145,23 +287,58 @@ private func tagMenuItems(
     return [.submenu(title: "Tags", children: children)]
 }
 
-// MARK: - Folder Submenu Helper
+// MARK: - Folder Submenu Builder
 
 /// Builds standard "Move to Folder" menu items from a folder list.
-private func folderMenuItems(
-    folders: [Folder],
-    onMoveToFolder: @escaping (UUID?) -> Void
-) -> [CardMenuItem] {
-    guard !folders.isEmpty else { return [] }
-    var children: [CardMenuItem] = [
-        .action(title: "No Folder") { onMoveToFolder(nil) },
-        .separator
-    ]
-    for folder in folders {
-        let id = folder.id
-        children.append(.action(title: folder.name) { onMoveToFolder(id) })
+enum FolderMenuBuilder {
+    static func moveToFolderMenuItems(
+        folders: [Folder],
+        onMoveToFolder: @escaping (UUID?) -> Void
+    ) -> [CardMenuItem] {
+        guard !folders.isEmpty else { return [] }
+        let folderIDs = Set(folders.map(\.id))
+        var children: [CardMenuItem] = [
+            .action(title: "No Folder") { onMoveToFolder(nil) },
+            .separator
+        ]
+        children += folderMenuBranch(
+            parentID: nil,
+            folders: folders,
+            folderIDs: folderIDs,
+            onMoveToFolder: onMoveToFolder
+        )
+        return [.submenu(title: "Move to Folder", children: children)]
     }
-    return [.submenu(title: "Move to Folder", children: children)]
+
+    private static func folderMenuBranch(
+        parentID: UUID?,
+        folders: [Folder],
+        folderIDs: Set<UUID>,
+        onMoveToFolder: @escaping (UUID?) -> Void
+    ) -> [CardMenuItem] {
+        folders
+            .filter { folder in
+                if parentID == nil, let parent = folder.parentID, !folderIDs.contains(parent) {
+                    return false
+                }
+                return folder.parentID == parentID
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .map { folder in
+                let folderID = folder.id
+                let children = folderMenuBranch(
+                    parentID: folderID,
+                    folders: folders,
+                    folderIDs: folderIDs,
+                    onMoveToFolder: onMoveToFolder
+                )
+                if children.isEmpty {
+                    return .action(title: folder.name) { onMoveToFolder(folderID) }
+                } else {
+                    return .submenu(title: folder.name, children: children)
+                }
+            }
+    }
 }
 
 // MARK: - View Extensions
@@ -186,10 +363,19 @@ extension View {
                 .action(title: "Rename", callback: onRename),
                 .action(title: note.isPinned ? "Unpin Note" : "Pin Note", callback: onTogglePin)
             ]
+            if let fileURL = NoteDragPayload.markdownExportURL(for: note) {
+                items += ExportMenuBuilder.noteMarkdownExportMenuItems {
+                    CiderFileExporter.exportFile(
+                        sourceURL: fileURL,
+                        suggestedFileName: NoteDragPayload.markdownExportFileName(for: note, fileURL: fileURL),
+                        helpText: ExportMenuBuilder.noteMarkdownSavePanelHint
+                    )
+                }
+            }
             if let onToggleLabel {
                 items += tagMenuItems(itemLabelIDs: note.labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
-            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += FolderMenuBuilder.moveToFolderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
             return items
         })
@@ -216,7 +402,7 @@ extension View {
             if let onToggleLabel {
                 items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
-            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += FolderMenuBuilder.moveToFolderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
             return items
         })
@@ -240,7 +426,7 @@ extension View {
             if let onToggleLabel {
                 items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
-            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += FolderMenuBuilder.moveToFolderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
             return items
         })
@@ -267,7 +453,7 @@ extension View {
             if let onToggleLabel {
                 items += tagMenuItems(itemLabelIDs: labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
-            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += FolderMenuBuilder.moveToFolderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
             return items
         })
@@ -292,10 +478,22 @@ extension View {
                 .action(title: "Show Details", callback: onShowDetails),
                 .action(title: "Refetch Metadata", callback: onRefetchMetadata)
             ]
+            if let fileURL = BookmarkDragPayload.imageExportURL(for: bookmark) {
+                items += ExportMenuBuilder.bookmarkImageExportMenuItems {
+                    CiderFileExporter.exportFile(
+                        sourceURL: fileURL,
+                        suggestedFileName: BookmarkDragPayload.suggestedImageExportFileName(
+                            title: bookmark.title,
+                            fileURL: fileURL
+                        ),
+                        helpText: ExportMenuBuilder.bookmarkImageSavePanelHint
+                    )
+                }
+            }
             if let onToggleLabel {
                 items += tagMenuItems(itemLabelIDs: bookmark.labelIDs, onToggleLabel: onToggleLabel, isSelected: isSelected, onToggleLabelBulk: onToggleLabelBulk)
             }
-            items += folderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
+            items += FolderMenuBuilder.moveToFolderMenuItems(folders: folders, onMoveToFolder: onMoveToFolder)
             items += [.separator, .destructive(title: "Delete", callback: onDelete)]
             return items
         })

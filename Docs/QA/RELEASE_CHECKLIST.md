@@ -62,7 +62,7 @@
 - [ ] Grid thumbnails scale proportionally with card width.
 - [ ] Cards resize as unified units (thumbnail + card shrink/grow together).
 - [ ] Panel can shrink to minimum width even with large card sizes.
-- [ ] Drag-and-drop URL to add bookmark works.
+- [x] Drag-and-drop URL to add bookmark works.
 - [ ] Folder sidebar: create, select, assign bookmarks.
 - [ ] Bookmark detail modal opens correctly.
 - [ ] Bookmark enrichment (metadata fetch) works.
@@ -170,6 +170,30 @@ Run this checklist before shipping any notes/editor changes.
 
 **Created:** 2026-03-16
 **Tester:** minivish
+
+---
+
+### Fresh Core Desktop QA Pass - 2026-04-24
+
+**Tester:** Codex via Computer Use, with user confirmations for modifier-key, multi-monitor, trash/restore, import, and deeper note-editor flows.
+
+| Area | Result | Notes |
+|---|---|---|
+| Launch + visible panel state | `[x]` | Fresh debug Cider process launched. Dashboard, Inbox, Library, folders, counts, recent activity, and profile/status panels rendered without visible layout breakage. |
+| Settings | `[x]` | Settings opened and Startup, Activation, Panel, and Shortcuts panes rendered. Activation was intentionally set to `Single tap`; shortcuts copy still says `Option double-tap`, which should become dynamic/helpful copy but is not a release blocker. |
+| Panel navigation | `[x]` | Dashboard, Inbox, Library/search results, folder detail, tags view, settings, note editor, bookmark detail, and clipboard panel opened and returned without crash. |
+| Search | `[x]` | Sidebar search for `landsat` filtered to the expected bookmark; search for `Test Drag` found the existing note. Clearing search restored the main item grid. |
+| Bookmarks | `[x]` | Existing bookmark grid rendered with thumbnails and tags. Bookmark detail opened, metadata/sidebar rendered, preview mode rendered, Reader/live web mode toggled. X.com live page showed a site privacy-extension error, but the Cider detail container stayed stable. |
+| Notes | `[x]` | Existing `Test Drag` note opened in the TipTap editor. Title, toolbar, body content, character count, and `Saved` status rendered. No destructive edits made during this pass. |
+| Folders + Tags | `[x]` | Folder tree expanded, nested `Food` folder rendered with subfolders and items. Tags view opened and displayed tag cards/counts. |
+| Clipboard | `[x]` | Clipboard panel opened, showed current/today/yesterday grouping and mixed image/text entries. Clipboard actions were not executed in this pass. |
+| Import/export | `[x]` | Export UI had been manually verified immediately before this pass with the visible `Opt-drag to export Markdown` save-panel hint. User confirmed import was tested previously and does not need a fresh retest. |
+| Clipboard/screen capture | `[x]` | Clipboard panel visibility tested through Computer Use. Screen capture is accepted based on prior manual testing; not re-executed in this pass. |
+| Trash/restore | `[x]` | User confirmed trash/restore works; not re-executed through Computer Use because deleting local user data requires action-time confirmation. |
+| Resize/focus/multi-monitor | `[x]` | User confirmed activation/dismiss, focus behavior, and moving the panel between monitors with Option activation work acceptably. A stale debug instance briefly failed horizontal resize; restarting from Xcode resized correctly, and `CiderPanel` now defensively excludes resize edge bands from panel-drag hit testing. |
+| URL drag-drop visible target | `[x]` | Fixed and retested on `2026-04-24`: dragging a browser URL over empty panel space shows a clear drop indicator and saves acceptably for this pass. |
+
+**Result:** Core manual QA accepted for first-push purposes. No crash found in covered areas. The visible URL drop area gap was fixed and retested on `2026-04-24`.
 
 ---
 
@@ -485,7 +509,7 @@ Track everything found during QA here. Reference the test step number.
 | 9.7b | Cmd+K search doesn't filter the current tab — sidebar search does. Cmd+K should do the same when there's no scope modifier. | Low | Open | |
 | 9.11a | `@folder:Name` uses colon syntax, inconsistent with `@b`, `@n`, `@t` shorthands. Should support `@f FolderName` (space-separated) to match the pattern. Same likely applies to `@tag:Name` -> `@tag Name`. | Low | Open | |
 | 10.4 | Vault location change has no confirmation dialog — moves immediately after folder selection | Medium | Open | Should show a confirmation sheet: "Move vault to X? This cannot be undone." |
-| 10.13 | Option+drag bookmark image to Finder produces doubled file extension (e.g. "title.jpg.jpeg") | Low | Open | Cosmetic — the file is usable but the name is wrong. |
+| 10.13 | Option+drag bookmark image to Finder produces doubled file extension (e.g. "title.jpg.jpeg") | Low | Fixed | Normalizes `.jpg` and `.jpeg` as equivalent when deriving the exported image filename. Needs visual Finder retest after rebuild. |
 | 11.1 | Sources folder -> normal folder navigation stuck — selecting a sources folder then clicking a normal folder highlights both blue, doesn't switch. Must click a tab first to leave sources, then can enter normal folder. | Medium | Open | Sidebar selection state gets stuck when transitioning from linked source to regular folder. |
 
 **Severity:** Critical / High / Medium / Low
@@ -503,26 +527,17 @@ Track everything found during QA here. Reference the test step number.
 
 #### Open Items (post-QA, pre-release)
 
-| # | Issue | Severity |
-|---|-------|----------|
-| 3.4 | Drag-drop image onto bookmark crashes app (threading bug in image drop handler) | High |
-| 3.3 | Drag-drop URL into panel doesn't create bookmark — no drop zone overlay | Medium |
-| 3.13 | Amazon enrichment doesn't work — likely blocks metadata scraping | Medium |
-| 4.10 | Reddit gallery carousel only shows first image | Medium |
-| 5.7 | Note pinning doesn't sort pinned notes to top | Medium |
-| 6.7b | "New Tag" creates literal "new tag" instead of prompting for name | Medium |
-| 7.6b | Todo cards don't conform to grid card size — smaller than other cards | Medium |
-| 8.1 | Browser session capture doesn't work with Zen (Firefox-based) | Medium |
-| 8.6 | Browser picker stuck on "Default" — can't select other browsers | Medium |
-| 9.7a | Search tab (from Cmd+K "Create tab") uses stripped-down view instead of regular library view | Medium |
-| 10.4 | Vault move has no confirmation dialog — moves immediately | Medium |
-| 2.5 | Quick click-drag on tab drags window instead of reordering tab | Low |
-| 6.7a | "New Tag" option at bottom of tag list instead of top | Low |
-| 6.11b | Note cards with tags have extra bottom gap below tag pills | Low |
-| 7.5 | List view column header dividers misaligned with row content | Low |
-| 7.6a | Todo subtask checkboxes not clickable on card preview | Low |
-| 7.10 | Single todo quick-create has no due date field | Low |
-| 8.2 | Session card caps at 3 tabs — doesn't fill available card height | Low |
-| 9.7b | Cmd+K search doesn't filter the current tab | Low |
-| 9.11a | `@folder:Name` / `@tag:Name` should use space syntax to match other shorthands | Low |
-| 10.13 | Option+drag produces doubled file extension (e.g. title.jpg.jpeg) | Low (Cosmetic) |
+Reconciled against `/Users/minivish/CiderVault/.cider/boards/d4e5f6.yaml` on `2026-04-24`. Historical issue rows above are preserved as QA notes; the current pre-release bug source of truth is the live Cidervault bug board.
+
+| Board ID | Issue | Severity | Notes |
+|----------|-------|----------|-------|
+| 0085e7 | Telegram reminder did not fire at scheduled time | Medium | Scheduled Telegram reminder delivery failed in practical runtime testing. |
+| 33914b | Telegram agent does not receive image attachments | Medium | Agent receives text/URLs, but image attachments are not reliably surfaced. |
+| bug002 | Vault Move No Confirmation | Low | Downgraded on board: move has undo support and is working as intended. |
+| bug013 | Quick Tab Drag | Low | Quick click-drag drags the window instead of reordering the tab; slow click-hold-drag works. |
+| bug016 | Doubled File Extension | Low | Fixed in code, but still needs visual Finder testing. |
+| bug018 | Cmd+K Tab Filter | Low | Feature request; global search is currently by design. |
+
+Current board summary after the local Item 8 and Item 9 fixes: no open Critical/High bugs, two open Medium bugs, and four Low items or deferrals. Items previously listed here but now in the board's Fixed column should not be treated as active release blockers unless rediscovered during fresh QA.
+
+Fixed locally on `2026-04-24`: `bug003` Drag-Drop URL No Drop Zone and `bug022` Carousel Arrows Blocked by Hover Overlay. User also confirmed internal Cider bookmark drags no longer trigger the panel URL drop zone after the internal-drag guard. No Cidervault board YAML was modified in this pass.

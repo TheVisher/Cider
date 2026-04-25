@@ -2,6 +2,23 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - Internal Drag State
+
+@MainActor
+enum CiderInternalDragState {
+    private static let activeWindow: TimeInterval = 20
+    private static var lastStartedAt: Date?
+
+    static func markStarted() {
+        lastStartedAt = Date()
+    }
+
+    static var isActive: Bool {
+        guard let lastStartedAt else { return false }
+        return Date().timeIntervalSince(lastStartedAt) < activeWindow
+    }
+}
+
 // MARK: - Bookmark Drag Payload
 
 enum BookmarkDragPayload {
@@ -17,38 +34,46 @@ enum BookmarkDragPayload {
         return UUID(uuidString: trimmed)
     }
 
-    @MainActor
-    static func registerPublicURL(on provider: NSItemProvider, urlString: String) {
-        guard let url = URL(string: urlString) else { return }
-        provider.registerDataRepresentation(
-            forTypeIdentifier: UTType.url.identifier, visibility: .all
-        ) { completion in
-            completion(url.dataRepresentation, nil)
-            return nil
-        }
-    }
-
-    /// Register image data for drag-out using `registerDataRepresentation`.
-    ///
-    /// Safe to use on providers that also carry text/internal types — does NOT use
-    /// `registerFileRepresentation` or `public.file-url` which break SwiftUI's `.onDrop`.
-    /// However, Finder may not create a file from raw data alone.
-    @MainActor
-    static func registerPublicImage(on provider: NSItemProvider, bookmark: Bookmark) {
-        guard let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL,
-              FileManager.default.fileExists(atPath: fileURL.path) else { return }
-
-        if let data = try? Data(contentsOf: fileURL) {
-            let uti = UTType(filenameExtension: fileURL.pathExtension)?.identifier ?? UTType.png.identifier
-            provider.registerDataRepresentation(
-                forTypeIdentifier: uti, visibility: .all
-            ) { completion in
-                completion(data, nil)
-                return nil
+    static func imageExportURL(for bookmark: Bookmark) -> URL? {
+        for fileURL in [bookmark.originalImageFileURL, bookmark.thumbnailFileURL].compactMap(\.self) {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                return fileURL
             }
         }
+        return nil
     }
 
+    static func suggestedImageExportName(title: String, fileURL: URL) -> String {
+        let fileExtension = fileURL.pathExtension
+        let fallback = fileURL.deletingPathExtension().lastPathComponent
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return fallback }
+        guard !fileExtension.isEmpty else { return trimmedTitle }
+
+        let titleExtension = (trimmedTitle as NSString).pathExtension
+        let base = imageExtensionsMatch(titleExtension, fileExtension)
+            ? (trimmedTitle as NSString).deletingPathExtension
+            : trimmedTitle
+
+        guard !base.isEmpty else { return fallback }
+        return base
+    }
+
+    static func suggestedImageExportFileName(title: String, fileURL: URL) -> String {
+        let base = suggestedImageExportName(title: title, fileURL: fileURL)
+        let fileExtension = fileURL.pathExtension
+        guard !fileExtension.isEmpty else { return base }
+        return "\(base).\(fileExtension)"
+    }
+
+    private static func imageExtensionsMatch(_ lhs: String, _ rhs: String) -> Bool {
+        normalizedImageExtension(lhs) == normalizedImageExtension(rhs)
+    }
+
+    private static func normalizedImageExtension(_ value: String) -> String {
+        let lowercased = value.lowercased()
+        return lowercased == "jpeg" ? "jpg" : lowercased
+    }
 }
 
 // MARK: - Note Drag Payload
@@ -56,6 +81,8 @@ enum BookmarkDragPayload {
 enum NoteDragPayload {
     static let typeIdentifier = "com.cider.note-id"
     static let textPrefix = "cider-note-id:"
+    static let markdownTypeIdentifier = UTType(filenameExtension: "md")?.identifier
+        ?? "net.daringfireball.markdown"
 
     static func noteID(from raw: String) -> UUID? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -67,15 +94,43 @@ enum NoteDragPayload {
     }
 
     @MainActor
-    static func registerPublicFileURL(on provider: NSItemProvider, note: Note) {
-        guard !note.relativePath.isEmpty else { return }
-        let fileURL = StoragePaths.cachedDirectoryURL(for: .notes).appendingPathComponent(note.relativePath)
-        provider.registerDataRepresentation(
-            forTypeIdentifier: UTType.fileURL.identifier, visibility: .all
-        ) { completion in
-            completion(fileURL.dataRepresentation, nil)
-            return nil
-        }
+    static func makeMarkdownFileProvider(for note: Note) -> NSItemProvider? {
+        guard let fileURL = markdownExportURL(for: note) else { return nil }
+
+        let provider = NSItemProvider(contentsOf: fileURL) ?? NSItemProvider()
+        provider.suggestedName = markdownExportName(for: note, fileURL: fileURL)
+
+        return provider
+    }
+
+    @MainActor
+    static func makeInternalProvider(for note: Note) -> NSItemProvider {
+        let provider = NSItemProvider(
+            object: "\(textPrefix)\(note.id.uuidString)" as NSString
+        )
+        return provider
+    }
+
+    static func markdownExportURL(for note: Note) -> URL? {
+        guard !note.relativePath.isEmpty else { return nil }
+        let fileURL = note.relativePath.hasPrefix("/")
+            ? URL(fileURLWithPath: note.relativePath)
+            : note.absoluteFileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return fileURL
+    }
+
+    static func markdownExportName(for note: Note, fileURL: URL) -> String {
+        let fallback = fileURL.deletingPathExtension().lastPathComponent
+        let base = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return fallback }
+        return (base as NSString).pathExtension.lowercased() == "md"
+            ? (base as NSString).deletingPathExtension
+            : base
+    }
+
+    static func markdownExportFileName(for note: Note, fileURL: URL) -> String {
+        "\(markdownExportName(for: note, fileURL: fileURL)).md"
     }
 }
 
@@ -134,23 +189,6 @@ enum CiderMultiDrag {
         let items = allItemIDs.map { MultiDragPayload.Item(type: $0.type, id: $0.id) }
         let textPayload = MultiDragPayload.encodeToText(items: items) ?? ""
         let provider = NSItemProvider(object: textPayload as NSString)
-
-        if let data = MultiDragPayload.encode(items: items) {
-            provider.registerDataRepresentation(
-                forTypeIdentifier: MultiDragPayload.typeIdentifier,
-                visibility: .all
-            ) { completion in
-                completion(data, nil)
-                return nil
-            }
-        }
-
-        // Register external types for the primary item so external apps get useful data.
-        // NOTE: Do NOT register public.file-url for notes — it breaks .onDrop.
-        if let bookmark = primaryBookmark {
-            BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)
-            BookmarkDragPayload.registerPublicImage(on: provider, bookmark: bookmark)
-        }
 
         return provider
     }
@@ -469,7 +507,12 @@ extension View {
         @ViewBuilder preview: @escaping () -> Preview
     ) -> some View {
         if let provider {
-            onDrag(provider, preview: preview)
+            onDrag {
+                CiderInternalDragState.markStarted()
+                return provider()
+            } preview: {
+                preview()
+            }
         } else {
             self
         }
@@ -479,7 +522,8 @@ extension View {
     func ciderDraggable(_ provider: (() -> NSItemProvider)?) -> some View {
         if let provider {
             onDrag {
-                provider()
+                CiderInternalDragState.markStarted()
+                return provider()
             }
         } else {
             self

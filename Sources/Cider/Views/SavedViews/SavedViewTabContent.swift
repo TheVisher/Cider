@@ -719,9 +719,41 @@ struct SavedViewTabContent: View {
 
     private func contextMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
         var items: [CardMenuItem] = []
+        items.append(contentsOf: exportMenuItems(for: item))
         items.append(contentsOf: linkMenuItems(for: item))
         items.append(contentsOf: linkedItemsMenuItems(for: item))
         return items
+    }
+
+    private func exportMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
+        switch item {
+        case .bookmark(let bookmark):
+            guard let sourceURL = BookmarkDragPayload.imageExportURL(for: bookmark) else { return [] }
+            return ExportMenuBuilder.bookmarkImageExportMenuItems {
+                CiderFileExporter.exportFile(
+                    sourceURL: sourceURL,
+                    suggestedFileName: BookmarkDragPayload.suggestedImageExportFileName(
+                        title: bookmark.title,
+                        fileURL: sourceURL
+                    ),
+                    helpText: ExportMenuBuilder.bookmarkImageSavePanelHint
+                )
+            }
+        case .note(let note):
+            guard let sourceURL = NoteDragPayload.markdownExportURL(for: note) else { return [] }
+            return ExportMenuBuilder.noteMarkdownExportMenuItems {
+                CiderFileExporter.exportFile(
+                    sourceURL: sourceURL,
+                    suggestedFileName: NoteDragPayload.markdownExportFileName(
+                        for: note,
+                        fileURL: sourceURL
+                    ),
+                    helpText: ExportMenuBuilder.noteMarkdownSavePanelHint
+                )
+            }
+        case .dateCard, .contact, .todo, .vaultFile:
+            return []
+        }
     }
 
     private func linkMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {

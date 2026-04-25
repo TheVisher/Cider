@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
@@ -54,6 +55,7 @@ struct CiderPanelView: View {
     @State var newContactEditorContext: ContactEditorContext?
     @State var newTodoEditorContext: TodoEditorContext?
     @State var contentAreaWidth: CGFloat = 800
+    @State var isURLDropTargeted = false
 
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
@@ -170,7 +172,19 @@ struct CiderPanelView: View {
                     .padding(BookmarksDesign.detailsSlideOutFloatInset)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            if isURLDropTargeted {
+                urlDropOverlay
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
+        .onDrop(
+            of: Self.urlDropTypeIdentifiers,
+            delegate: CiderPanelURLDropDelegate(
+                isTargeted: $isURLDropTargeted,
+                targetFolderID: selectedFolderID,
+                onSaveDroppedURL: saveDroppedURL(_:folderID:)
+            )
+        )
         .animation(reduceMotion ? .none : .snappy, value: isSearchPaletteVisible)
         .animation(reduceMotion ? .none : .snappy, value: isDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isDetailSlideOut)

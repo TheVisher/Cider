@@ -81,6 +81,7 @@ struct FolderSidebarView: View {
     private static let multiDragTypeIdentifier = "com.cider.multi-drag"
     private static let bookmarkDragTypeIdentifier = "com.cider.bookmark-id"
     private static let noteDragTypeIdentifier = "com.cider.note-id"
+    private static let noteMarkdownTypeIdentifier = NoteDragPayload.markdownTypeIdentifier
 
     private var allFolderContentItems: [LibraryItemV2] {
         let bookmarks = bookmarks.map { LibraryItemV2.bookmark($0) }
@@ -97,6 +98,7 @@ struct FolderSidebarView: View {
             Self.multiDragTypeIdentifier,
             Self.bookmarkDragTypeIdentifier,
             Self.noteDragTypeIdentifier,
+            Self.noteMarkdownTypeIdentifier,
             UTType.text.identifier,
             UTType.plainText.identifier,
             UTType.utf8PlainText.identifier,
@@ -707,6 +709,24 @@ struct FolderSidebarView: View {
                 }
                 Task { @MainActor in
                     if let note = notes.first(where: { $0.id == noteID }) {
+                        _ = onAssignNoteToFolder?(note, targetFolderID)
+                    }
+                }
+            }
+            return true
+        }
+
+        // Markdown file fallback for note drags that SwiftUI exposes as a file
+        // representation instead of Cider's custom note ID.
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(Self.noteMarkdownTypeIdentifier) {
+            provider.loadFileRepresentation(forTypeIdentifier: Self.noteMarkdownTypeIdentifier) { fileURL, _ in
+                guard let fileURL else { return }
+                let filename = fileURL.lastPathComponent
+                Task { @MainActor in
+                    if let note = notes.first(where: { note in
+                        note.absoluteFileURL.lastPathComponent == filename
+                            || (note.relativePath as NSString).lastPathComponent == filename
+                    }) {
                         _ = onAssignNoteToFolder?(note, targetFolderID)
                     }
                 }

@@ -48,6 +48,22 @@ success() { echo -e "${GREEN}✓${NC} ${1}"; }
 warn() { echo -e "${YELLOW}⚠${NC} ${1}"; }
 fail() { echo -e "${RED}✗${NC} ${1}"; exit 1; }
 
+find_sparkle_tool() {
+    local tool_name="$1"
+    local candidate
+    for candidate in \
+        "$ROOT_DIR/.build/xcode/SourcePackages/artifacts/sparkle/Sparkle/bin/$tool_name" \
+        "$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin/$tool_name" \
+        "$ROOT_DIR/.build/checkouts/Sparkle/bin/$tool_name" \
+        "$ROOT_DIR/.build/checkouts/Sparkle/$tool_name"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # --- Validate arguments ---
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <version> [--skip-notarize] [--skip-github]"
@@ -248,15 +264,7 @@ if [ -n "$REPO_NAME" ]; then
 fi
 
 # Find Sparkle's generate_appcast tool
-GENERATE_APPCAST=""
-for candidate in \
-    "$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin/generate_appcast" \
-    "$ROOT_DIR/.build/checkouts/Sparkle/generate_appcast"; do
-    if [ -x "$candidate" ]; then
-        GENERATE_APPCAST="$candidate"
-        break
-    fi
-done
+GENERATE_APPCAST="$(find_sparkle_tool generate_appcast || true)"
 
 if [ -z "$GENERATE_APPCAST" ]; then
     warn "generate_appcast not found — skipping appcast generation"
@@ -304,7 +312,7 @@ Download **$DMG_NAME**, open it, and drag Cider to your Applications folder.
 - First public beta release
 
 ### Requirements
-- macOS 14.0 or later" \
+- macOS 26.0 or later" \
         --prerelease
 
     success "GitHub Release created: $TAG"

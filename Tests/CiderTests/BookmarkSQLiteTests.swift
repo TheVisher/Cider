@@ -434,6 +434,72 @@ struct BookmarkSQLiteTests {
         #expect(loaded.titleManuallySet == true)
     }
 
+    @Test("OEmbed enrichment does not overwrite manually set bookmark title")
+    func oEmbedDoesNotOverwriteManualTitle() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let bookmark = Bookmark(
+            title: "My Curated Title",
+            urlString: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            titleManuallySet: true
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyOEmbedResults(
+            for: bookmark.id,
+            title: "Network Suggested Title",
+            notes: "Network supplied notes"
+        )
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+
+        #expect(service2.bookmarks.count == 1)
+        let loaded = try #require(service2.bookmarks.first)
+        #expect(loaded.title == "My Curated Title")
+        #expect(loaded.titleManuallySet == true)
+        #expect(loaded.notes == "Network supplied notes")
+    }
+
+    @Test("AI enrichment does not overwrite manually set bookmark title")
+    func aiEnrichmentDoesNotOverwriteManualTitle() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let service = makeService(db)
+
+        let bookmark = Bookmark(
+            title: "Manual Image Title",
+            urlString: "https://example.com/image",
+            titleManuallySet: true
+        )
+        service.persistBookmarkToDatabase(db, bookmark: bookmark)
+        service.loadBookmarksFromDatabase(db)
+
+        service.applyAIResults(
+            for: bookmark.id,
+            tags: ["ai-suggested"],
+            ocrText: "OCR text",
+            dominantColors: ["#112233"],
+            title: "AI Suggested Title"
+        )
+
+        let service2 = makeService(db)
+        service2.loadBookmarksFromDatabase(db)
+
+        #expect(service2.bookmarks.count == 1)
+        let loaded = try #require(service2.bookmarks.first)
+        #expect(loaded.title == "Manual Image Title")
+        #expect(loaded.titleManuallySet == true)
+        #expect(loaded.tags == ["ai-suggested"])
+        #expect(loaded.ocrText == "OCR text")
+        #expect(loaded.dominantColors == ["#112233"])
+    }
+
     // MARK: - Date Precision
 
     @Test("Date fields survive round-trip with reasonable precision")

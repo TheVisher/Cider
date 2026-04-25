@@ -102,6 +102,7 @@ struct BookmarkCard: View {
                                     endPoint: .bottom
                                 )
                             )
+                            .allowsHitTesting(false)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }

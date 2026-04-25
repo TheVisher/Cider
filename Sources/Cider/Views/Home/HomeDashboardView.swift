@@ -646,17 +646,12 @@ struct HomeDashboardView: View {
             if isOptionHeld && hasImage {
                 let fileURL = bookmark.originalImageFileURL ?? bookmark.thumbnailFileURL
                 if let fileURL, let provider = NSItemProvider(contentsOf: fileURL) {
-                    let ext = fileURL.pathExtension
-                    let base = (bookmark.title as NSString).pathExtension.lowercased() == ext.lowercased()
-                        ? (bookmark.title as NSString).deletingPathExtension
-                        : bookmark.title
-                    provider.suggestedName = base + "." + ext
+                    provider.suggestedName = BookmarkDragPayload.suggestedImageExportName(
+                        title: bookmark.title,
+                        fileURL: fileURL
+                    )
                     return provider
                 }
-                // Fallback: raw image data
-                let provider = NSItemProvider()
-                BookmarkDragPayload.registerPublicImage(on: provider, bookmark: bookmark)
-                return provider
             }
 
             if selectedItemIDs.contains(itemID) && selectedItemIDs.count > 1 {
@@ -667,7 +662,7 @@ struct HomeDashboardView: View {
                     allItemIDs: allItems,
                 )
             } else {
-                // Normal drag: text (bookmark ID) + URL for internal folders + external link sharing
+                // Normal drag: internal payload only. External file/image export is handled by Option-drag.
                 let provider = NSItemProvider(
                     object: "\(BookmarkDragPayload.textPrefix)\(bookmark.id.uuidString)" as NSString
                 )
@@ -679,7 +674,6 @@ struct HomeDashboardView: View {
                     completion(payload, nil)
                     return nil
                 }
-                BookmarkDragPayload.registerPublicURL(on: provider, urlString: bookmark.urlString)
                 return provider
             }
         }
@@ -696,25 +690,14 @@ struct HomeDashboardView: View {
                     primaryID: note.id,
                     allItemIDs: allItems,
                 )
-            } else {
-                let provider = NSItemProvider(
-                    object: "\(NoteDragPayload.textPrefix)\(note.id.uuidString)" as NSString
-                )
-                let payload = Data(note.id.uuidString.utf8)
-                provider.registerDataRepresentation(
-                    forTypeIdentifier: NoteDragPayload.typeIdentifier,
-                    visibility: .all
-                ) { completion in
-                    completion(payload, nil)
-                    return nil
-                }
-                // NOTE: Do NOT register additional types (registerFileRepresentation,
-                // registerDataRepresentation for markdown, or public.file-url) here —
-                // any extra type registration breaks SwiftUI's .onDrop, causing providers
-                // to arrive with empty registeredTypeIdentifiers (internal folder drops
-                // silently fail). Finder drag-out is sacrificed for internal drag-to-folder.
+            }
+
+            if NSEvent.modifierFlags.contains(.option),
+               let provider = NoteDragPayload.makeMarkdownFileProvider(for: note) {
                 return provider
             }
+
+            return NoteDragPayload.makeInternalProvider(for: note)
         }
     }
 

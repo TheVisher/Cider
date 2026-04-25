@@ -1,17 +1,20 @@
 # Sparkle Auto-Updater Setup
 
-The code integration is complete (`SparkleUpdaterService`, Settings UI, AppDelegate wiring). Steps 1-3 are done. These steps remain for publishing updates.
+The code integration is complete (`SparkleUpdaterService`, Settings UI, AppDelegate wiring), and the Xcode debug app embeds `Sparkle.framework`. The remaining work is the signed release/appcast install test.
 
-## 1. Add Sparkle to the Xcode Project
+## 1. Verify Sparkle In The Xcode App Target (DONE)
 
-The SPM `Package.swift` already has the dependency, but Xcode needs to know about it too:
+Sparkle is supplied by the local Swift package product that the Xcode app target links.
 
-1. Open `Cider.xcodeproj` in Xcode
-2. Select the **Cider** project in the navigator (not the target)
-3. Go to **Package Dependencies** tab
-4. Click **+** → paste `https://github.com/sparkle-project/Sparkle` → Add Package
-5. When prompted, add the **Sparkle** library to the **Cider** app target
-6. Build to verify it links correctly
+Verified on `2026-04-24`:
+
+```bash
+xcodebuild -project Cider.xcodeproj -scheme CiderApp -configuration Debug -destination 'platform=macOS' build
+find ~/Library/Developer/Xcode/DerivedData -path '*/Cider.app/Contents/Frameworks/Sparkle.framework' -print
+otool -L ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/Cider.app/Contents/MacOS/Cider.debug.dylib | grep Sparkle
+```
+
+Expected result: the app bundle contains `Contents/Frameworks/Sparkle.framework`, and the Cider debug dylib links `@rpath/Sparkle.framework/Versions/B/Sparkle`.
 
 ## 2. Generate Ed25519 Signing Keys (DONE)
 
@@ -19,7 +22,7 @@ Sparkle signs updates with Ed25519. Key pair has been generated.
 
 ```bash
 # The generate_keys tool is inside the downloaded Sparkle framework
-.build/artifacts/sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework/Resources/bin/generate_keys
+.build/xcode/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys
 ```
 
 **Keep the private key safe.** If you lose it, existing users can't verify future updates.
@@ -37,7 +40,7 @@ The appcast is an XML file listing available versions. Sparkle provides a tool t
 
 ```bash
 # Sign a .dmg and generate/update the appcast
-.build/artifacts/sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework/Resources/bin/generate_appcast /path/to/dmg/directory
+.build/xcode/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast /path/to/dmg/directory
 ```
 
 Or manually create `appcast.xml`:
@@ -51,7 +54,7 @@ Or manually create `appcast.xml`:
       <title>Version 1.0.1</title>
       <sparkle:version>6</sparkle:version>
       <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
       <pubDate>Sat, 01 Mar 2026 12:00:00 +0000</pubDate>
       <enclosure
         url="https://github.com/TheVisher/Cider/releases/download/v1.0.1/Cider-1.0.1.dmg"
@@ -72,7 +75,7 @@ When publishing a new version:
 
 ```bash
 # Sign the .dmg with your private key
-.build/artifacts/sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework/Resources/bin/sign_update Cider-1.0.1.dmg
+.build/xcode/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update Cider-1.0.1.dmg
 ```
 
 This outputs an `edSignature` and `length` — put them in the appcast `<enclosure>` tag.

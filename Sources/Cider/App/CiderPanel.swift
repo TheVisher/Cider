@@ -151,6 +151,10 @@ final class CiderPanel: NSPanel {
         guard let contentView = contentView else { return false }
         let bounds = contentView.bounds
 
+        if isInResizeEdgeBand(locationInWindow, bounds: bounds) {
+            return false
+        }
+
         // Check if the hit view is an interactive control or our resize view
         if let hitView = contentView.hitTest(locationInWindow) {
             var view: NSView? = hitView
@@ -179,6 +183,23 @@ final class CiderPanel: NSPanel {
         }
 
         return false
+    }
+
+    private func isInResizeEdgeBand(_ locationInWindow: NSPoint, bounds: NSRect) -> Bool {
+        let hPad = CiderPanelDesign.shadowPadding
+        let topPad = CiderPanelDesign.topPadding
+        let bottomPad = CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
+        let edgeInset = CiderPanelDesign.resizeEdgeThickness
+
+        let contentMinX = hPad
+        let contentMaxX = bounds.width - hPad
+        let contentMinY = bottomPad
+        let contentMaxY = bounds.height - topPad
+
+        return locationInWindow.x < contentMinX + edgeInset
+            || locationInWindow.x > contentMaxX - edgeInset
+            || locationInWindow.y < contentMinY + edgeInset
+            || locationInWindow.y > contentMaxY - edgeInset
     }
 
     var persistableFrame: NSRect {

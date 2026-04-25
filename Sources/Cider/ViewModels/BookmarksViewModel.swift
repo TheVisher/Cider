@@ -78,8 +78,8 @@ final class BookmarksViewModel: ObservableObject {
     }
 
     @discardableResult
-    func addBookmark(urlString: String, title: String?) -> Bool {
-        VaultBookmarkService.shared.add(urlString: urlString, title: title) != nil
+    func addBookmark(urlString: String, title: String?, folderID: UUID? = nil) -> Bool {
+        VaultBookmarkService.shared.add(urlString: urlString, title: title, folderID: folderID) != nil
     }
 
     @discardableResult

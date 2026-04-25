@@ -129,6 +129,7 @@ struct CiderTabBar: View {
             }
         }
         .onDrag {
+            CiderInternalDragState.markStarted()
             draggingTabID = tab.id
             return NSItemProvider(object: tab.id as NSString)
         }

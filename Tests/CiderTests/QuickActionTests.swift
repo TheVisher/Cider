@@ -6,7 +6,7 @@ final class QuickActionTests: XCTestCase {
     // MARK: - Identity & Enumeration
 
     func testAllCasesCount() {
-        XCTAssertEqual(QuickAction.allCases.count, 8)
+        XCTAssertEqual(QuickAction.allCases.count, 10)
     }
 
     func testIDsAreUnique() {
@@ -104,8 +104,8 @@ final class QuickActionTests: XCTestCase {
 
     func testFilterNewShowsCreationActions() {
         let matches = QuickAction.allCases.filter { $0.matches(query: "new") }
-        // All 7 "New X" actions should match; "Open Settings" should not
-        XCTAssertEqual(matches.count, 7)
+        // All 9 creation actions should match; "Open Settings" should not.
+        XCTAssertEqual(matches.count, 9)
         XCTAssertFalse(matches.contains(.openSettings))
     }
 
@@ -123,7 +123,7 @@ final class QuickActionTests: XCTestCase {
     func testFilterAddMatchesAllCreationActions() {
         // "add" is a keyword on all creation actions
         let matches = QuickAction.allCases.filter { $0.matches(query: "add") }
-        XCTAssertEqual(matches.count, 7)
+        XCTAssertEqual(matches.count, 9)
         XCTAssertFalse(matches.contains(.openSettings))
     }
 

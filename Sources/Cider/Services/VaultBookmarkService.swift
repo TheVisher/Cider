@@ -87,10 +87,12 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
     private var database: CiderDatabase?
+    private let writesVaultCaches: Bool
 
     // MARK: - Init
 
     private init() {
+        writesVaultCaches = true
         ensureDirectories()
         loadBookmarks()
         startIndexWatcher()
@@ -100,6 +102,7 @@ final class VaultBookmarkService: ObservableObject {
     /// Does NOT call loadBookmarks() — tests call loadBookmarksFromDatabase() directly.
     init(database: CiderDatabase) {
         self.database = database
+        writesVaultCaches = false
     }
 
     // MARK: - Load
@@ -199,6 +202,7 @@ final class VaultBookmarkService: ObservableObject {
 
     /// Writes the current bookmarks array as the index cache.
     private func writeIndexCache() {
+        guard writesVaultCaches else { return }
         writeGeneration += 1
         let gen = writeGeneration
         isWritingIndex = true
@@ -350,7 +354,9 @@ final class VaultBookmarkService: ObservableObject {
     private func persist() {
         writeIndexCache()
         persistAllBookmarksToDatabase()
-        SyncService.shared.pushAfterLocalChange()
+        if writesVaultCaches {
+            SyncService.shared.pushAfterLocalChange()
+        }
     }
 
     /// Persist all current bookmarks to the database.
@@ -593,7 +599,7 @@ final class VaultBookmarkService: ObservableObject {
     // MARK: - CRUD
 
     @discardableResult
-    func add(urlString: String, title: String?) -> Bookmark? {
+    func add(urlString: String, title: String?, folderID: UUID? = nil) -> Bookmark? {
         guard let normalizedURL = normalizedURL(from: urlString) else { return nil }
         let canonical = normalizedURL.absoluteString
 
@@ -612,15 +618,19 @@ final class VaultBookmarkService: ObservableObject {
             existing.isEnriching = false
             bookmarks.insert(existing, at: 0)
             persist()
+            if existing.folderID != folderID {
+                _ = assignBookmark(existing.id, toFolder: folderID)
+            }
             startEnrichmentIfNeeded(for: existing.id)
-            return existing
+            return bookmarks.first(where: { $0.id == existing.id }) ?? existing
         }
 
         let resolvedTitle = resolvedTitle(for: normalizedURL, override: title)
         var bookmark = Bookmark(title: resolvedTitle, urlString: canonical)
+        bookmark.folderID = folderID
 
-        // Write .webloc file to Inbox/Bookmarks/
-        let (dirURL, dirRelativePath) = resolveBookmarkDirectory(nil)
+        // Write .webloc file to the selected folder, falling back to Inbox/Bookmarks.
+        let (dirURL, dirRelativePath) = resolveBookmarkDirectory(folderID)
         do {
             let relativePath = try BookmarkFileService.shared.write(
                 bookmark: bookmark,
@@ -1220,15 +1230,20 @@ final class VaultBookmarkService: ObservableObject {
         let fm = FileManager.default
 
         var existingIDByURL: [String: UUID] = [:]
+        var existingIDByRelativePath: [String: UUID] = [:]
         var existingIDs = Set<UUID>()
         for bm in bookmarks {
             let url = bm.urlString.lowercased()
             if !url.isEmpty { existingIDByURL[url] = bm.id }
+            if let relativePath = bm.relativePath {
+                existingIDByRelativePath[relativePath] = bm.id
+            }
             existingIDs.insert(bm.id)
         }
 
         var adopted: [Bookmark] = []
         var reassigned = 0
+        var externalURLUpdates = 0
         // URLs already claimed by a folder — first folder wins, later copies are kept as-is.
         // We intentionally do NOT delete duplicate .webloc files here: enrichment and file
         // moves can briefly leave two files with the same URL on disk, and a previous version
@@ -1269,6 +1284,32 @@ final class VaultBookmarkService: ObservableObject {
                     continue
                 }
 
+                // Same file, changed `.webloc` URL: treat the visible file as the
+                // content artifact and update SQLite metadata in place.
+                if let relativePath = bookmark.relativePath,
+                   let existingID = existingIDByRelativePath[relativePath],
+                   let idx = bookmarks.firstIndex(where: { $0.id == existingID }) {
+                    let oldURL = bookmarks[idx].urlString.lowercased()
+                    if oldURL != url {
+                        bookmarks[idx].urlString = bookmark.urlString
+                        bookmarks[idx].updatedAt = Date()
+                        if !bookmarks[idx].titleManuallySet {
+                            bookmarks[idx].title = bookmark.title
+                        }
+                        if !oldURL.isEmpty {
+                            existingIDByURL.removeValue(forKey: oldURL)
+                        }
+                        existingIDByURL[url] = existingID
+                        externalURLUpdates += 1
+                    }
+                    if bookmarks[idx].folderID != folderID {
+                        bookmarks[idx].folderID = folderID
+                        reassigned += 1
+                    }
+                    claimedURLs.insert(url)
+                    continue
+                }
+
                 // Duplicate URL detected: skip adopting this copy so it doesn't overwrite
                 // the already-claimed bookmark's folder assignment, but leave the file on
                 // disk. Hard-deleting duplicates here previously caused silent data loss.
@@ -1303,13 +1344,16 @@ final class VaultBookmarkService: ObservableObject {
         // are skipped (not deleted) so the user never loses data silently.
         processDirectory(dirURL: inboxBookmarksDir, dirRelativePath: inboxRelativePath, folderID: nil)
 
-        if !adopted.isEmpty || reassigned > 0 {
+        if !adopted.isEmpty || reassigned > 0 || externalURLUpdates > 0 {
             if !adopted.isEmpty {
                 logger.info("Adopted \(adopted.count) orphaned .webloc files from vault folders")
                 bookmarks.append(contentsOf: adopted)
             }
             if reassigned > 0 {
                 logger.info("Reassigned \(reassigned) bookmarks to match filesystem folders")
+            }
+            if externalURLUpdates > 0 {
+                logger.info("Updated \(externalURLUpdates) bookmarks from externally edited .webloc files")
             }
             persist()
             if !adopted.isEmpty {

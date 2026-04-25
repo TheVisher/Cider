@@ -340,6 +340,7 @@ struct CarouselThumbnailView: View {
                     }
                 }
                 .padding(.horizontal, Spacing.xs)
+                .frame(maxHeight: .infinity, alignment: .center)
             }
 
             // Page dots
