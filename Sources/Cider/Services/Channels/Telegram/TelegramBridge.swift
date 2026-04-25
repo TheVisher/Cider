@@ -762,6 +762,8 @@ actor TelegramBridge: ChannelBridge {
             )
         )
 
+        let displayName = await dailyBriefDisplayName()
+
         guard let reminder = DailyVaultReminderService.buildReminder(
             now: now,
             dateCards: dateCards,
@@ -769,6 +771,7 @@ actor TelegramBridge: ChannelBridge {
             bookmarks: bookmarks,
             notes: notes,
             resurfacedAt: state.resurfacedItemDates,
+            displayName: displayName,
             config: DailyVaultReminderService.Config(
                 resurfacingItemCount: configuration.dailyDigestResurfaceCount,
                 resurfacingMinAgeDays: configuration.dailyDigestResurfaceMinAgeDays,
@@ -790,6 +793,17 @@ actor TelegramBridge: ChannelBridge {
         state.deliveredDailyDigestKeys.insert(dayKey)
         for key in reminder.resurfacedItemKeys {
             state.resurfacedItemDates[key] = now
+        }
+    }
+
+    private func dailyBriefDisplayName() async -> String {
+        await MainActor.run {
+            guard AuthService.shared.isLoggedIn else { return "there" }
+            let emailPrefix = AuthService.shared.accountEmail
+                .split(separator: "@")
+                .first
+                .map(String.init) ?? ""
+            return emailPrefix.isEmpty ? "there" : emailPrefix
         }
     }
 

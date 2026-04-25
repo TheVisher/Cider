@@ -39,13 +39,14 @@ struct DailyVaultReminderServiceTests {
             todos: [todo],
             bookmarks: [oldBookmark],
             notes: [oldNote],
-            resurfacedAt: [:]
+            resurfacedAt: [:],
+            displayName: "dev"
         )
 
         let message = reminder?.message ?? ""
 
         #expect(reminder != nil)
-        #expect(message.contains("Here's your Cider brief"))
+        #expect(message.contains("Good morning, dev."))
         #expect(message.contains("Focus"))
         #expect(message.contains("Action Items"))
         #expect(message.contains("Today + Upcoming"))

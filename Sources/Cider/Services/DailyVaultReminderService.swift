@@ -28,6 +28,7 @@ struct DailyVaultReminderService {
         bookmarks: [Bookmark],
         notes: [Note],
         resurfacedAt: [String: Date],
+        displayName: String = "there",
         config: Config = Config()
     ) -> Reminder? {
         let resurfacedItems = selectResurfacedItems(
@@ -57,7 +58,12 @@ struct DailyVaultReminderService {
             surfacingDays: config.upcomingDays,
             now: now
         )
-        let message = telegramMessage(from: snapshot, resurfacedItems: resurfacedItems, now: now)
+        let message = telegramMessage(
+            from: snapshot,
+            resurfacedItems: resurfacedItems,
+            displayName: displayName,
+            now: now
+        )
 
         guard message.isEmpty == false else { return nil }
 
@@ -153,6 +159,7 @@ struct DailyVaultReminderService {
     private static func telegramMessage(
         from snapshot: HomeOverviewSnapshot,
         resurfacedItems: [ResurfacedItem],
+        displayName: String,
         now: Date
     ) -> String {
         guard snapshot.dailyBrief.focusItems.isEmpty == false
@@ -166,7 +173,11 @@ struct DailyVaultReminderService {
         }
 
         var lines = [
-            "Good morning. Here's your Cider brief.",
+            HomeOverviewDataProvider.dailyBriefGreetingText(
+                for: snapshot.dailyBrief,
+                displayName: displayName,
+                now: now
+            ),
             snapshot.dailyBrief.dateLabel,
             dailyBriefSummaryText(snapshot.dailyBrief.summaryParts)
         ]

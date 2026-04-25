@@ -547,38 +547,12 @@ struct HomeOverviewDashboardView: View {
     }
 
     private var dailyGreeting: String {
-        let name = dashboardDisplayName
-        let variants: [String]
-        switch snapshot.dailyBrief.greetingBucket {
-        case .morning:
-            variants = [
-                "Good morning, \(name). Let's make the day useful without making it dramatic.",
-                "Morning, \(name). The vault is awake and mostly behaving.",
-                "Good morning, \(name). A few threads are waiting, but nothing here gets to shout."
-            ]
-        case .afternoon:
-            variants = [
-                "Good afternoon, \(name). A clean middle chapter for the day.",
-                "Afternoon, \(name). Let's pull the useful threads forward.",
-                "Good afternoon, \(name). The vault has notes, nudges, and a little composure."
-            ]
-        case .evening:
-            variants = [
-                "Good evening, \(name). Time to sort the day gently.",
-                "Evening, \(name). We can tidy the loose ends without turning it into a quest.",
-                "Good evening, \(name). The dashboard brought receipts, but politely."
-            ]
-        case .lateNight:
-            variants = [
-                "Still up, \(name)? Cider is awake too, but with concerns.",
-                "Late night, \(name). We can be productive, but let's not get weird about it.",
-                "Hello, \(name). The vault is open, the hour is questionable, and we proceed."
-            ]
-        }
-
-        let components = calendar.dateComponents([.day, .hour], from: Date())
-        let seed = (components.day ?? 0) + (components.hour ?? 0) + snapshot.dailyBrief.focusItems.count
-        return variants[seed % variants.count]
+        HomeOverviewDataProvider.dailyBriefGreetingText(
+            for: snapshot.dailyBrief,
+            displayName: dashboardDisplayName,
+            now: Date(),
+            calendar: calendar
+        )
     }
 
     private var dashboardDisplayName: String {
