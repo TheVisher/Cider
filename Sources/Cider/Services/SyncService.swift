@@ -1,5 +1,5 @@
 import Combine
-import ConvexMobile
+@preconcurrency import ConvexMobile
 import Foundation
 import os
 
@@ -173,7 +173,8 @@ final class SyncService: ObservableObject {
         authTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let authResult: SyncAuthResponse = try await authClient.action(
+                nonisolated(unsafe) let actionClient = authClient
+                let authResult: SyncAuthResponse = try await actionClient.action(
                     "sync:authenticate", with: ["token": token]
                 )
                 guard !Task.isCancelled else { return }
@@ -884,7 +885,15 @@ final class SyncService: ObservableObject {
         if !notes.isEmpty {
             args["notes"] = notes as [ConvexEncodable?]
         }
-        let _: SyncPushResponse = try await client.action("sync:push", with: args)
+        nonisolated(unsafe) let actionArgs = args
+        let _: SyncPushResponse = try await client.action("sync:push", with: actionArgs)
+    }
+
+    private nonisolated func performSyncPushAction(
+        client: ConvexClient,
+        args: sending [String: ConvexEncodable?]
+    ) async throws -> SyncPushResponse {
+        try await client.action("sync:push", with: args)
     }
 
     private func saveReconciliationTimestamp() {

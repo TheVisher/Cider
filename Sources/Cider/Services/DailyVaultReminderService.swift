@@ -30,12 +30,6 @@ struct DailyVaultReminderService {
         resurfacedAt: [String: Date],
         config: Config = Config()
     ) -> Reminder? {
-        let todaySoonLines = buildTodaySoonLines(
-            now: now,
-            dateCards: dateCards,
-            todos: todos,
-            config: config
-        )
         let resurfacedItems = selectResurfacedItems(
             now: now,
             bookmarks: bookmarks,
@@ -44,26 +38,31 @@ struct DailyVaultReminderService {
             config: config
         )
 
-        guard !todaySoonLines.isEmpty || !resurfacedItems.isEmpty else { return nil }
+        let items = makeLibraryItems(
+            dateCards: dateCards,
+            todos: todos,
+            bookmarks: bookmarks,
+            notes: notes
+        )
+        let recentItems = Array(items.sorted { lhs, rhs in
+            if lhs.updatedDate == rhs.updatedDate {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return lhs.updatedDate > rhs.updatedDate
+        }.prefix(8))
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: items,
+            recentItems: recentItems,
+            folders: [],
+            surfacingDays: config.upcomingDays,
+            now: now
+        )
+        let message = telegramMessage(from: snapshot, resurfacedItems: resurfacedItems, now: now)
 
-        var lines = ["Good morning. Here's your daily vault reminder:"]
-
-        lines.append("")
-        lines.append("Today / Soon")
-        if todaySoonLines.isEmpty {
-            lines.append("- Nothing urgent on deck right now.")
-        } else {
-            lines.append(contentsOf: todaySoonLines)
-        }
-
-        if !resurfacedItems.isEmpty {
-            lines.append("")
-            lines.append("Resurface \(resurfacedItems.count)")
-            lines.append(contentsOf: resurfacedItems.map(formatResurfacedItem))
-        }
+        guard message.isEmpty == false else { return nil }
 
         return Reminder(
-            message: lines.joined(separator: "\n"),
+            message: message,
             resurfacedItemKeys: resurfacedItems.map(\.key)
         )
     }
@@ -137,6 +136,146 @@ struct DailyVaultReminderService {
         }
 
         return Array(lines.prefix(max(config.maxTodaySoonLines, 1)))
+    }
+
+    private static func makeLibraryItems(
+        dateCards: [DateCard],
+        todos: [TodoCard],
+        bookmarks: [Bookmark],
+        notes: [Note]
+    ) -> [LibraryItemV2] {
+        bookmarks.map(LibraryItemV2.bookmark)
+            + notes.map(LibraryItemV2.note)
+            + dateCards.map(LibraryItemV2.dateCard)
+            + todos.map(LibraryItemV2.todo)
+    }
+
+    private static func telegramMessage(
+        from snapshot: HomeOverviewSnapshot,
+        resurfacedItems: [ResurfacedItem],
+        now: Date
+    ) -> String {
+        guard snapshot.dailyBrief.focusItems.isEmpty == false
+            || snapshot.todoItems.isEmpty == false
+            || snapshot.completedTodoItems.isEmpty == false
+            || snapshot.upcomingItems.isEmpty == false
+            || snapshot.recentItems.isEmpty == false
+            || resurfacedItems.isEmpty == false
+        else {
+            return ""
+        }
+
+        var lines = [
+            "Good morning. Here's your Cider brief.",
+            snapshot.dailyBrief.dateLabel,
+            dailyBriefSummaryText(snapshot.dailyBrief.summaryParts)
+        ]
+
+        if !snapshot.dailyBrief.focusItems.isEmpty {
+            lines.append("")
+            lines.append("Focus")
+            lines.append(contentsOf: snapshot.dailyBrief.focusItems.map { "- \($0.title): \($0.subtitle)" })
+        }
+
+        let openTodos = snapshot.todoItems.prefix(4).map(formatOpenTodo)
+        let completedTodos = snapshot.completedTodoItems.prefix(3).map(formatCompletedTodo)
+        if !openTodos.isEmpty || !completedTodos.isEmpty {
+            lines.append("")
+            lines.append("Action Items")
+            if !openTodos.isEmpty {
+                lines.append(contentsOf: openTodos)
+            }
+            if !completedTodos.isEmpty {
+                if !openTodos.isEmpty {
+                    lines.append("")
+                }
+                lines.append("Done")
+                lines.append(contentsOf: completedTodos)
+            }
+        }
+
+        let upcomingLines = snapshot.upcomingItems.prefix(4).map { formatUpcomingItem($0, now: now) }
+        if !upcomingLines.isEmpty {
+            lines.append("")
+            lines.append("Today + Upcoming")
+            lines.append(contentsOf: upcomingLines)
+        }
+
+        let recentLines = snapshot.recentItems.prefix(4).map { formatRecentItem($0, now: now) }
+        if !recentLines.isEmpty {
+            lines.append("")
+            lines.append("Recent Activity")
+            lines.append(contentsOf: recentLines)
+        }
+
+        if !resurfacedItems.isEmpty {
+            lines.append("")
+            lines.append("Quiet Threads")
+            lines.append(contentsOf: resurfacedItems.map(formatResurfacedItem))
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func dailyBriefSummaryText(_ parts: [HomeDailyBriefSummaryPart]) -> String {
+        parts.map { part in
+            part.chip?.label ?? part.text
+        }
+        .joined()
+        .replacingOccurrences(of: " ,", with: ",")
+    }
+
+    private static func formatOpenTodo(_ todo: TodoCard) -> String {
+        var components = ["- \(todo.title)"]
+        if let priority = todo.priority {
+            components.append("[\(priority.displayName)]")
+        }
+        if let dueDate = todo.dueDate {
+            components.append("due \(formattedDateTime(dueDate, hasExplicitTime: todo.hasExplicitDueTime))")
+        }
+        return components.joined(separator: " ")
+    }
+
+    private static func formatCompletedTodo(_ todo: TodoCard) -> String {
+        let completedAt = todo.completedAt ?? todo.updatedAt
+        return "- \(todo.title) - done \(formattedDateTime(completedAt, hasExplicitTime: true))"
+    }
+
+    private static func formatUpcomingItem(_ item: LibraryItemV2, now: Date) -> String {
+        switch item {
+        case .dateCard(let dateCard):
+            return "- \(formattedOccurrencePrefix(dateCard.effectiveDate(now: now), now: now)): \(dateCard.title) (\(dateCard.allDay ? "all day" : formattedDateTime(dateCard.effectiveDate(now: now), hasExplicitTime: true)))"
+        case .todo(let todo):
+            return formatOpenTodo(todo)
+        default:
+            return "- \(item.title)"
+        }
+    }
+
+    private static func formatRecentItem(_ item: LibraryItemV2, now: Date) -> String {
+        let kind: String
+        switch item {
+        case .bookmark:
+            kind = "Bookmark"
+        case .note:
+            kind = "Note"
+        case .dateCard:
+            kind = "Event"
+        case .contact:
+            kind = "Contact"
+        case .todo(let todo):
+            kind = todo.isCompleted ? "Completed todo" : "Todo"
+        case .vaultFile:
+            kind = "File"
+        }
+
+        return "- \(kind): \(item.title) - \(relativeDateLabel(item.updatedDate, now: now))"
+    }
+
+    private static func relativeDateLabel(_ date: Date, now: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: now)
     }
 
     private static func selectResurfacedItems(

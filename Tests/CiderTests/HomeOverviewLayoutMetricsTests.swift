@@ -57,6 +57,13 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
     ) -> HomeOverviewSnapshot {
         HomeOverviewSnapshot(
             telemetry: [],
+            dailyBrief: HomeDailyBrief(
+                dateLabel: "Monday, Apr 13",
+                greetingBucket: .morning,
+                summary: "Summary",
+                summaryParts: [],
+                focusItems: []
+            ),
             pulse: "Active",
             overviewSummary: "Summary",
             overviewChips: [
@@ -71,6 +78,8 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
             ],
             recentItems: Array(repeating: makeItem(title: "Recent"), count: recentCount),
             upcomingItems: Array(repeating: makeItem(title: "Upcoming"), count: upcomingCount),
+            todoItems: [],
+            completedTodoItems: [],
             resurfacedItems: Array(repeating: makeItem(title: "Resurfaced"), count: resurfacedCount),
             closedTabs: Array(repeating: makeClosedTab(name: "Library"), count: closedTabCount)
         )

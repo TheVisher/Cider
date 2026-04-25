@@ -47,6 +47,46 @@ struct HomeAttentionMetric: Equatable, Identifiable {
     let target: HomeOverviewActionTarget
 }
 
+enum HomeDailyBriefGreetingBucket: Equatable {
+    case morning
+    case afternoon
+    case evening
+    case lateNight
+}
+
+enum HomeDailyBriefTarget: Equatable {
+    case item(LibraryItemV2)
+    case action(HomeOverviewActionTarget)
+}
+
+struct HomeDailyBriefItem: Equatable, Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let target: HomeDailyBriefTarget
+}
+
+struct HomeDailyBriefSummaryChip: Equatable, Identifiable {
+    let id: String
+    let label: String
+    let target: HomeOverviewActionTarget
+}
+
+struct HomeDailyBriefSummaryPart: Equatable, Identifiable {
+    let id: String
+    let text: String
+    let chip: HomeDailyBriefSummaryChip?
+}
+
+struct HomeDailyBrief: Equatable {
+    let dateLabel: String
+    let greetingBucket: HomeDailyBriefGreetingBucket
+    let summary: String
+    let summaryParts: [HomeDailyBriefSummaryPart]
+    let focusItems: [HomeDailyBriefItem]
+}
+
 struct HomeOverviewClosedTabSummary: Equatable, Identifiable {
     let id: UUID
     let name: String
@@ -56,22 +96,27 @@ struct HomeOverviewClosedTabSummary: Equatable, Identifiable {
 
 struct HomeOverviewSnapshot: Equatable {
     let telemetry: [HomeTelemetryMetric]
+    let dailyBrief: HomeDailyBrief
     let pulse: String
     let overviewSummary: String
     let overviewChips: [HomeOverviewChip]
     let attentionMetrics: [HomeAttentionMetric]
     let recentItems: [LibraryItemV2]
     let upcomingItems: [LibraryItemV2]
+    let todoItems: [TodoCard]
+    let completedTodoItems: [TodoCard]
     let resurfacedItems: [LibraryItemV2]
     let closedTabs: [HomeOverviewClosedTabSummary]
 }
 
 enum HomeOverviewPanelID {
+    case dailyBrief
     case pulse
     case overview
     case profile
     case recentActivity
     case upcoming
+    case todos
     case resurface
     case closedTabs
 }
@@ -81,6 +126,8 @@ struct HomeOverviewLayoutMetrics {
 
     func requiredHeight(for panel: HomeOverviewPanelID) -> CGFloat {
         switch panel {
+        case .dailyBrief:
+            return HomeOverviewDesign.fullLayoutTopRowHeight
         case .pulse:
             return HomeOverviewDesign.topRowMinHeight
         case .overview:
@@ -94,6 +141,8 @@ struct HomeOverviewLayoutMetrics {
             )
         case .upcoming:
             return HomeOverviewDesign.upcomingPanelFixedHeight
+        case .todos:
+            return HomeOverviewDesign.resurfacePanelMinHeight
         case .resurface:
             let visibleCardCount = min(snapshot.resurfacedItems.count, 2)
             let rowCount = CGFloat(max((visibleCardCount + 1) / 2, 1))
@@ -157,6 +206,8 @@ struct HomeOverviewFullLayoutTracks {
     var attentionWidth: CGFloat { fourth }
     var recentWidth: CGFloat { first + gap + second }
     var upcomingWidth: CGFloat { third + gap + fourth }
+    var captureTimelineWidth: CGFloat { first + gap + second + gap + third }
+    var continueWidth: CGFloat { fourth }
     var resurfaceWidth: CGFloat { first }
     var pinnedWidth: CGFloat { second + gap + third + gap + fourth }
 }

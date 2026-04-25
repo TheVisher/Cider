@@ -49,8 +49,6 @@ enum HomeOverviewDataProvider {
                 switch item {
                 case .dateCard(let dateCard):
                     return dateCard.urgency(now: now, windowDays: surfacingDays) != nil
-                case .todo(let todo):
-                    return todo.urgency(now: now, windowDays: surfacingDays) != nil
                 default:
                     return false
                 }
@@ -88,8 +86,67 @@ enum HomeOverviewDataProvider {
                 )
             }
 
+        let recentTarget = savedViewTarget(
+            name: "Recent Activity",
+            entityTypes: LibraryEntityType.activeCases,
+            sortMode: .updatedDescending
+        )
+        let upcomingTarget = savedViewTarget(
+            name: "Upcoming",
+            entityTypes: [.todo, .dateCard],
+            sortMode: .dateUpcoming
+        )
+        let resurfaceTarget = savedViewTarget(
+            name: "Resurface",
+            entityTypes: LibraryEntityType.activeCases,
+            sortMode: .updatedAscending
+        )
+        let urgentTarget = savedViewTarget(
+            name: "Urgent",
+            entityTypes: [.todo, .dateCard],
+            sortMode: .dateUpcoming
+        )
+        let notesTarget = savedViewTarget(
+            name: "Notes",
+            entityTypes: [.note],
+            sortMode: .updatedDescending
+        )
+
         return HomeOverviewSnapshot(
             telemetry: telemetry,
+            dailyBrief: HomeDailyBrief(
+                dateLabel: briefDateLabel(now),
+                greetingBucket: greetingBucket(for: now),
+                summary: overviewText(
+                    recentCount: recentItems.count,
+                    dueTodayCount: dueTodayCount,
+                    urgentCount: urgentCount,
+                    resurfacedCount: resurfacedItems.count
+                ),
+                summaryParts: dailyBriefSummaryParts(
+                    recentCount: recentItems.count,
+                    unfiledCount: unfiledCount,
+                    dueTodayCount: dueTodayCount,
+                    urgentCount: urgentCount,
+                    resurfacedCount: resurfacedItems.count,
+                    recentTarget: recentTarget,
+                    inboxTarget: .inbox,
+                    upcomingTarget: upcomingTarget,
+                    urgentTarget: urgentTarget,
+                    resurfaceTarget: resurfaceTarget
+                ),
+                focusItems: dailyBriefFocusItems(
+                    upcomingItems: Array(upcomingItems.prefix(3)),
+                    unfiledCount: unfiledCount,
+                    urgentCount: urgentCount,
+                    dueTodayCount: dueTodayCount,
+                    resurfacedItems: resurfacedItems,
+                    inboxTarget: .inbox,
+                    urgentTarget: urgentTarget,
+                    upcomingTarget: upcomingTarget,
+                    resurfaceTarget: resurfaceTarget
+                )
+            ),
             pulse: pulseText(unfiledCount: unfiledCount, urgentCount: urgentCount),
             overviewSummary: overviewText(
                 recentCount: recentItems.count,
@@ -102,28 +159,20 @@ enum HomeOverviewDataProvider {
                     id: "recent",
                     title: "Recent",
                     value: recentItems.count,
-                    target: savedViewTarget(
-                        name: "Recent Activity",
-                        entityTypes: LibraryEntityType.activeCases,
-                        sortMode: .updatedDescending
-                    )
+                    target: recentTarget
                 ),
                 HomeOverviewChip(id: "unfiled", title: "Unfiled", value: unfiledCount, target: .inbox),
                 HomeOverviewChip(
                     id: "dueToday",
                     title: "Due Today",
                     value: dueTodayCount,
-                    target: savedViewTarget(name: "Upcoming", entityTypes: [.todo, .dateCard], sortMode: .dateUpcoming)
+                    target: upcomingTarget
                 ),
                 HomeOverviewChip(
                     id: "resurfaced",
                     title: "Resurfaced",
                     value: resurfacedItems.count,
-                    target: savedViewTarget(
-                        name: "Resurface",
-                        entityTypes: LibraryEntityType.activeCases,
-                        sortMode: .updatedAscending
-                    )
+                    target: resurfaceTarget
                 )
             ],
             attentionMetrics: [
@@ -132,26 +181,81 @@ enum HomeOverviewDataProvider {
                     id: "urgent",
                     title: "Urgent",
                     value: urgentCount,
-                    target: savedViewTarget(name: "Urgent", entityTypes: [.todo, .dateCard], sortMode: .dateUpcoming)
+                    target: urgentTarget
                 ),
                 HomeAttentionMetric(
                     id: "dueToday",
                     title: "Due Today",
                     value: dueTodayCount,
-                    target: savedViewTarget(name: "Upcoming", entityTypes: [.todo, .dateCard], sortMode: .dateUpcoming)
+                    target: upcomingTarget
                 ),
                 HomeAttentionMetric(
                     id: "untitledNotes",
                     title: "Untitled Notes",
                     value: untitledNotesCount,
-                    target: savedViewTarget(name: "Notes", entityTypes: [.note], sortMode: .updatedDescending)
+                    target: notesTarget
                 )
             ],
             recentItems: Array(recentItems.prefix(4)),
             upcomingItems: Array(upcomingItems.prefix(4)),
+            todoItems: Array(todoQueueItems(from: items, now: now).prefix(6)),
+            completedTodoItems: Array(completedTodoItems(from: items).prefix(4)),
             resurfacedItems: resurfacedItems,
             closedTabs: closedTabs
         )
+    }
+
+    private static func todoQueueItems(from items: [LibraryItemV2], now: Date) -> [TodoCard] {
+        items.compactMap { item -> TodoCard? in
+            if case .todo(let todo) = item, !todo.isCompleted {
+                return todo
+            }
+            return nil
+        }
+        .sorted { lhs, rhs in
+            let lhsRank = todoSortRank(lhs, now: now)
+            let rhsRank = todoSortRank(rhs, now: now)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+
+            if lhs.priority != rhs.priority {
+                return priorityRank(lhs.priority) < priorityRank(rhs.priority)
+            }
+
+            let lhsDate = lhs.earliestApproachingDate ?? lhs.updatedAt
+            let rhsDate = rhs.earliestApproachingDate ?? rhs.updatedAt
+            if lhsDate != rhsDate { return lhsDate < rhsDate }
+
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    private static func completedTodoItems(from items: [LibraryItemV2]) -> [TodoCard] {
+        items.compactMap { item -> TodoCard? in
+            if case .todo(let todo) = item, todo.isCompleted {
+                return todo
+            }
+            return nil
+        }
+        .sorted { lhs, rhs in
+            (lhs.completedAt ?? lhs.updatedAt) > (rhs.completedAt ?? rhs.updatedAt)
+        }
+    }
+
+    private static func todoSortRank(_ todo: TodoCard, now: Date) -> Int {
+        guard let target = todo.earliestApproachingDate else { return 3 }
+        let calendar = Calendar.current
+        if target < calendar.startOfDay(for: now) { return 0 }
+        if calendar.isDate(target, inSameDayAs: now) { return 1 }
+        return 2
+    }
+
+    private static func priorityRank(_ priority: TodoPriority?) -> Int {
+        switch priority {
+        case .high: return 0
+        case .medium: return 1
+        case .low: return 2
+        case nil: return 3
+        }
     }
 
     private static func urgentCount(in items: [LibraryItemV2], surfacingDays: Int, now: Date) -> Int {
@@ -169,6 +273,106 @@ enum HomeOverviewDataProvider {
                 break
             }
         }
+    }
+
+    private static func dailyBriefFocusItems(
+        upcomingItems: [LibraryItemV2],
+        unfiledCount: Int,
+        urgentCount: Int,
+        dueTodayCount: Int,
+        resurfacedItems: [LibraryItemV2],
+        inboxTarget: HomeOverviewActionTarget,
+        urgentTarget: HomeOverviewActionTarget,
+        upcomingTarget: HomeOverviewActionTarget,
+        resurfaceTarget: HomeOverviewActionTarget
+    ) -> [HomeDailyBriefItem] {
+        var briefItems = upcomingItems.prefix(2).map { item in
+            HomeDailyBriefItem(
+                id: "item-\(item.id)",
+                title: item.title,
+                subtitle: item.dashboardSubtitle,
+                systemImage: item.dashboardSymbol,
+                target: .item(item)
+            )
+        }
+
+        if dueTodayCount > 0 {
+            briefItems.append(
+                HomeDailyBriefItem(
+                    id: "due-today",
+                    title: "\(dueTodayCount) due today",
+                    subtitle: "Start with the calendar before the vault gets loud.",
+                    systemImage: "calendar.badge.clock",
+                    target: .action(upcomingTarget)
+                )
+            )
+        } else if urgentCount > 0 {
+            briefItems.append(
+                HomeDailyBriefItem(
+                    id: "urgent",
+                    title: "\(urgentCount) time-sensitive",
+                    subtitle: "Worth checking before you settle into deeper work.",
+                    systemImage: "exclamationmark.circle",
+                    target: .action(urgentTarget)
+                )
+            )
+        }
+
+        if unfiledCount > 0 {
+            briefItems.append(
+                HomeDailyBriefItem(
+                    id: "unfiled",
+                    title: "\(unfiledCount) unfiled captures",
+                    subtitle: "A small tidy-up would make future you suspiciously pleased.",
+                    systemImage: "tray",
+                    target: .action(inboxTarget)
+                )
+            )
+        } else if let resurfaced = resurfacedItems.first {
+            briefItems.append(
+                HomeDailyBriefItem(
+                    id: "resurface-\(resurfaced.id)",
+                    title: resurfaced.title,
+                    subtitle: "An older item worth revisiting.",
+                    systemImage: resurfaced.dashboardSymbol,
+                    target: .item(resurfaced)
+                )
+            )
+        } else if !resurfacedItems.isEmpty {
+            briefItems.append(
+                HomeDailyBriefItem(
+                    id: "resurface",
+                    title: "\(resurfacedItems.count) older items",
+                    subtitle: "There are a few quiet threads worth revisiting.",
+                    systemImage: "sparkle.magnifyingglass",
+                    target: .action(resurfaceTarget)
+                )
+            )
+        }
+
+        return Array(briefItems.prefix(3))
+    }
+
+    private static func greetingBucket(for now: Date) -> HomeDailyBriefGreetingBucket {
+        let hour = Calendar.current.component(.hour, from: now)
+        switch hour {
+        case 5..<12:
+            return .morning
+        case 12..<17:
+            return .afternoon
+        case 17..<23:
+            return .evening
+        default:
+            return .lateNight
+        }
+    }
+
+    private static func briefDateLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter.string(from: date)
     }
 
     private static func pulseText(unfiledCount: Int, urgentCount: Int) -> String {
@@ -219,6 +423,69 @@ enum HomeOverviewDataProvider {
         resurfacedCount: Int
     ) -> String {
         "You have \(recentCount) recent captures, \(dueTodayCount) items due today, \(urgentCount) time-sensitive threads, and \(resurfacedCount) older cards worth revisiting."
+    }
+
+    private static func dailyBriefSummaryParts(
+        recentCount: Int,
+        unfiledCount: Int,
+        dueTodayCount: Int,
+        urgentCount: Int,
+        resurfacedCount: Int,
+        recentTarget: HomeOverviewActionTarget,
+        inboxTarget: HomeOverviewActionTarget,
+        upcomingTarget: HomeOverviewActionTarget,
+        urgentTarget: HomeOverviewActionTarget,
+        resurfaceTarget: HomeOverviewActionTarget
+    ) -> [HomeDailyBriefSummaryPart] {
+        var chips: [HomeDailyBriefSummaryChip] = []
+
+        if dueTodayCount > 0 {
+            chips.append(.init(id: "dueToday", label: "\(dueTodayCount) due today", target: upcomingTarget))
+        }
+        if urgentCount > 0 {
+            chips.append(.init(id: "urgent", label: "\(urgentCount) time-sensitive", target: urgentTarget))
+        }
+        if unfiledCount > 0 {
+            chips.append(.init(id: "unfiled", label: "\(unfiledCount) unfiled", target: inboxTarget))
+        }
+        if resurfacedCount > 0 {
+            chips.append(.init(id: "resurfaced", label: "\(resurfacedCount) resurfaced", target: resurfaceTarget))
+        }
+        if chips.isEmpty, recentCount > 0 {
+            chips.append(.init(id: "recent", label: "\(recentCount) recent", target: recentTarget))
+        }
+
+        let visibleChips = Array(chips.prefix(3))
+        guard !visibleChips.isEmpty else {
+            return [
+                .init(id: "text-empty", text: "Nothing is demanding the spotlight right now.", chip: nil)
+            ]
+        }
+
+        var parts: [HomeDailyBriefSummaryPart] = [
+            .init(id: "text-start", text: "You have ", chip: nil)
+        ]
+
+        for (index, chip) in visibleChips.enumerated() {
+            if index > 0 {
+                let connector = index == visibleChips.count - 1 ? ", and " : ", "
+                parts.append(.init(id: "text-connector-\(index)", text: connector, chip: nil))
+            }
+            parts.append(.init(id: "chip-\(chip.id)", text: "", chip: chip))
+        }
+
+        let ending: String
+        if visibleChips.contains(where: { $0.id == "dueToday" }) {
+            ending = " to shape the day around."
+        } else if visibleChips.contains(where: { $0.id == "urgent" }) {
+            ending = " worth checking before deeper work."
+        } else if visibleChips.contains(where: { $0.id == "unfiled" }) {
+            ending = " waiting for a little triage."
+        } else {
+            ending = " worth a quick look."
+        }
+        parts.append(.init(id: "text-ending", text: ending, chip: nil))
+        return parts
     }
 
     private static func savedViewTarget(

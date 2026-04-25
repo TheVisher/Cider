@@ -74,22 +74,10 @@ struct HomeOverviewDashboardView: View {
         let tracks = HomeOverviewFullLayoutTracks(availableWidth: availableWidth)
 
         return VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
-            HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
-                pulsePanel(fixedHeight: HomeOverviewDesign.fullLayoutTopRowHeight)
-                    .frame(width: tracks.pulseWidth)
-
-                overviewPanel(
-                    fixedHeight: HomeOverviewDesign.fullLayoutTopRowHeight,
-                    attentionColumnCount: 4
-                )
-                    .frame(width: tracks.overviewWidth)
-
-                profilePanel(fixedHeight: HomeOverviewDesign.fullLayoutTopRowHeight)
-                    .frame(width: tracks.attentionWidth)
-            }
+            dailyBriefPanel(fixedHeight: HomeOverviewDesign.fullLayoutTopRowHeight)
 
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
-                resurfacePanel(fixedHeight: HomeOverviewDesign.fullLayoutMiddleRowHeight, cardLimit: 4)
+                todoPanel(fixedHeight: HomeOverviewDesign.fullLayoutMiddleRowHeight)
                     .frame(width: tracks.recentWidth)
                 upcomingPanel(fixedHeight: HomeOverviewDesign.fullLayoutMiddleRowHeight)
                     .frame(width: tracks.upcomingWidth)
@@ -97,27 +85,23 @@ struct HomeOverviewDashboardView: View {
 
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
                 recentActivityPanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
-                    .frame(width: tracks.resurfaceWidth)
+                    .frame(width: tracks.captureTimelineWidth)
                 closedTabsPanel(
                     fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight,
-                    columnCount: HomeOverviewDesign.closedTabsFullColumnCount
+                    columnCount: 1,
+                    visibleCount: 5
                 )
-                    .frame(width: tracks.pinnedWidth)
+                    .frame(width: tracks.continueWidth)
             }
         }
     }
 
     private var compactLayout: some View {
         VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
-            HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
-                pulsePanel()
-                profilePanel()
-            }
-
-            overviewPanel(attentionColumnCount: 2)
+            dailyBriefPanel()
             upcomingPanel()
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
-                resurfacePanel(cardLimit: 4)
+                todoPanel()
                 recentActivityPanel()
             }
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsCompactColumnCount)
@@ -126,13 +110,103 @@ struct HomeOverviewDashboardView: View {
 
     private var singleColumnLayout: some View {
         VStack(alignment: .leading, spacing: HomeOverviewDesign.rowSpacing) {
-            pulsePanel()
-            overviewPanel(attentionColumnCount: 2)
-            profilePanel()
+            dailyBriefPanel()
             upcomingPanel()
-            resurfacePanel(cardLimit: 4)
+            todoPanel()
             recentActivityPanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsSingleColumnCount)
+        }
+    }
+
+    private func dailyBriefPanel(fixedHeight: CGFloat? = nil) -> some View {
+        return HomeOverviewPanel(
+            title: "Today's Brief",
+            minHeight: layoutMetrics.requiredHeight(for: .dailyBrief),
+            fixedHeight: fixedHeight,
+            headerAccessory: AnyView(dailyBriefHistoryChips)
+        ) {
+            Text(dailyGreeting)
+                .font(CiderFont.displayBold)
+                .foregroundColor(CiderColors.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(snapshot.dailyBrief.dateLabel)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
+
+            dailyBriefSummaryLine
+
+            Divider()
+                .background(CiderColors.separator)
+                .padding(.top, Spacing.xs)
+
+            Text("FOCUS")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .tracking(1.4)
+
+            if snapshot.dailyBrief.focusItems.isEmpty {
+                Text("Nothing is pressing right now. A suspiciously civilized start.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+            } else {
+                LazyVGrid(columns: attentionColumns(for: 3), spacing: Spacing.sm) {
+                    ForEach(snapshot.dailyBrief.focusItems) { item in
+                        dailyBriefFocusCard(item)
+                    }
+                }
+            }
+        }
+    }
+
+    private var dailyBriefSummaryLine: some View {
+        TagFlowLayout(spacing: Spacing.xs) {
+            ForEach(snapshot.dailyBrief.summaryParts) { part in
+                if let chip = part.chip {
+                    Button {
+                        onOpenTarget(chip.target)
+                    } label: {
+                        Text(chip.label)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.primary)
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.xxs)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(part.text)
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+        }
+    }
+
+    private var dailyBriefHistoryChips: some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach(["Today", "Yesterday", "2d Ago"], id: \.self) { label in
+                Text(label)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(label == "Today" ? CiderColors.primary : CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(label == "Today" ? CiderColors.surfaceInput : CiderColors.surfaceSubtle)
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(label == "Today" ? CiderColors.borderSubtle : Color.clear, lineWidth: 1)
+                            )
+                    )
+            }
         }
     }
 
@@ -302,12 +376,8 @@ struct HomeOverviewDashboardView: View {
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
             } else {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(snapshot.recentItems, id: \.id) { item in
-                        HomeOverviewTimelineRow(item: item, subtitle: item.dashboardSubtitle, onOpen: {
-                            onOpenItem(item)
-                        })
-                    }
+                HomeOverviewCaptureTimeline(items: snapshot.recentItems) { item in
+                    onOpenItem(item)
                 }
             }
         }
@@ -345,63 +415,108 @@ struct HomeOverviewDashboardView: View {
         }
     }
 
-    private func resurfacePanel(fixedHeight: CGFloat? = nil, cardLimit: Int = 2) -> some View {
+    private func todoPanel(fixedHeight: CGFloat? = nil) -> some View {
         HomeOverviewPanel(
-            title: "Resurface",
-            minHeight: layoutMetrics.requiredHeight(for: .resurface),
+            title: "Action Items",
+            minHeight: layoutMetrics.requiredHeight(for: .todos),
             fixedHeight: fixedHeight
         ) {
-            if snapshot.resurfacedItems.isEmpty {
-                Text("Nothing to resurface yet.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.tertiary)
-            } else {
-                LazyVGrid(columns: [
-                    GridItem(.flexible(), spacing: Spacing.sm),
-                    GridItem(.flexible(), spacing: Spacing.sm)
-                ], spacing: Spacing.sm) {
-                    ForEach(Array(snapshot.resurfacedItems.prefix(cardLimit)), id: \.id) { item in
-                        HomeOverviewResurfaceCard(item: item) {
-                            onOpenItem(item)
+            HStack(alignment: .top, spacing: Spacing.lg) {
+                todoLane(title: "Open", todos: snapshot.todoItems, emptyText: "No open todo cards.") { todo in
+                    HomeOverviewTodoRow(
+                        todo: todo,
+                        mode: .open,
+                        onToggleComplete: {
+                            TodoCardStorage.shared.markCompleted(todo.id, completed: true)
+                        },
+                        onOpen: {
+                            onOpenItem(.todo(todo))
                         }
-                    }
+                    )
+                }
+
+                Divider()
+                    .background(CiderColors.separator)
+
+                todoLane(title: "Done", todos: snapshot.completedTodoItems, emptyText: "Completed items will land here.") { todo in
+                    HomeOverviewTodoRow(
+                        todo: todo,
+                        mode: .completed,
+                        onToggleComplete: {
+                            TodoCardStorage.shared.markCompleted(todo.id, completed: false)
+                        },
+                        onOpen: {
+                            onOpenItem(.todo(todo))
+                        }
+                    )
                 }
             }
         }
     }
 
+    private func todoLane<Content: View>(
+        title: String,
+        todos: [TodoCard],
+        emptyText: String,
+        @ViewBuilder row: @escaping (TodoCard) -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(title.uppercased())
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .tracking(1.2)
+
+            if todos.isEmpty {
+                Text(emptyText)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.top, Spacing.xs)
+            } else {
+                ForEach(todos) { todo in
+                    row(todo)
+                    if todo.id != todos.last?.id {
+                        Divider()
+                            .background(CiderColors.separator)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
     private func closedTabsPanel(
         fixedHeight: CGFloat? = nil,
-        columnCount: Int = HomeOverviewDesign.closedTabsFullColumnCount
+        columnCount: Int = HomeOverviewDesign.closedTabsFullColumnCount,
+        visibleCount: Int? = nil
     ) -> some View {
-        HomeOverviewPanel(
-            title: "Closed Tabs",
+        let fallbackCount = max(columnCount, 1) * HomeOverviewDesign.closedTabsVisibleRowCount
+        let visibleTabs = Array(snapshot.closedTabs.prefix(visibleCount ?? fallbackCount))
+
+        return HomeOverviewPanel(
+            title: "Continue",
             minHeight: layoutMetrics.requiredHeight(for: .closedTabs),
             fixedHeight: fixedHeight
         ) {
             if snapshot.closedTabs.isEmpty {
                 HomeOverviewEmptyStateCard(
-                    title: "No closed tabs yet.",
-                    subtitle: "Close a tab and it will show up here so you can reopen it from the dashboard."
+                    title: "Nothing to pick back up.",
+                    subtitle: "Recent tabs and boards will show up here when there is a useful thread to continue."
                 )
             } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVGrid(
-                        columns: Array(
-                            repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: Spacing.sm),
-                            count: max(columnCount, 1)
-                        ),
-                        spacing: Spacing.sm
-                    ) {
-                        ForEach(snapshot.closedTabs) { tab in
-                            HomeOverviewClosedTabCard(tab: tab) {
-                                onOpenTab(tab)
-                            }
+                LazyVGrid(
+                    columns: Array(
+                        repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: Spacing.sm),
+                        count: max(columnCount, 1)
+                    ),
+                    spacing: Spacing.sm
+                ) {
+                    ForEach(visibleTabs) { tab in
+                        HomeOverviewContinueChip(tab: tab) {
+                            onOpenTab(tab)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
     }
@@ -429,6 +544,92 @@ struct HomeOverviewDashboardView: View {
         let unfiled = snapshot.attentionMetrics.first(where: { $0.id == "unfiled" })?.value ?? 0
         let urgent = snapshot.attentionMetrics.first(where: { $0.id == "urgent" })?.value ?? 0
         return "\(unfiled) unfiled  •  \(urgent) urgent"
+    }
+
+    private var dailyGreeting: String {
+        let name = dashboardDisplayName
+        let variants: [String]
+        switch snapshot.dailyBrief.greetingBucket {
+        case .morning:
+            variants = [
+                "Good morning, \(name). Let's make the day useful without making it dramatic.",
+                "Morning, \(name). The vault is awake and mostly behaving.",
+                "Good morning, \(name). A few threads are waiting, but nothing here gets to shout."
+            ]
+        case .afternoon:
+            variants = [
+                "Good afternoon, \(name). A clean middle chapter for the day.",
+                "Afternoon, \(name). Let's pull the useful threads forward.",
+                "Good afternoon, \(name). The vault has notes, nudges, and a little composure."
+            ]
+        case .evening:
+            variants = [
+                "Good evening, \(name). Time to sort the day gently.",
+                "Evening, \(name). We can tidy the loose ends without turning it into a quest.",
+                "Good evening, \(name). The dashboard brought receipts, but politely."
+            ]
+        case .lateNight:
+            variants = [
+                "Still up, \(name)? Cider is awake too, but with concerns.",
+                "Late night, \(name). We can be productive, but let's not get weird about it.",
+                "Hello, \(name). The vault is open, the hour is questionable, and we proceed."
+            ]
+        }
+
+        let components = calendar.dateComponents([.day, .hour], from: Date())
+        let seed = (components.day ?? 0) + (components.hour ?? 0) + snapshot.dailyBrief.focusItems.count
+        return variants[seed % variants.count]
+    }
+
+    private var dashboardDisplayName: String {
+        guard authService.isLoggedIn else { return "there" }
+        let emailPrefix = authService.accountEmail.split(separator: "@").first.map(String.init) ?? ""
+        return emailPrefix.isEmpty ? "there" : emailPrefix
+    }
+
+    @ViewBuilder
+    private func dailyBriefFocusCard(_ item: HomeDailyBriefItem) -> some View {
+        Button {
+            switch item.target {
+            case .item(let libraryItem):
+                onOpenItem(libraryItem)
+            case .action(let target):
+                onOpenTarget(target)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: item.systemImage)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 18, height: 18)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(item.title)
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text(item.subtitle)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, minHeight: HomeOverviewDesign.embeddedAttentionMetricTileHeight, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func attentionColumns(for count: Int) -> [GridItem] {

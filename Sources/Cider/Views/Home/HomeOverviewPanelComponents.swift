@@ -4,6 +4,7 @@ struct HomeOverviewPanel<Content: View>: View {
     let title: String
     var minHeight: CGFloat? = nil
     var fixedHeight: CGFloat? = nil
+    var headerAccessory: AnyView? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -32,10 +33,18 @@ struct HomeOverviewPanel<Content: View>: View {
 
     private var panelBody: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(title.uppercased())
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-                .tracking(2)
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(title.uppercased())
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .tracking(2)
+
+                Spacer(minLength: Spacing.sm)
+
+                if let headerAccessory {
+                    headerAccessory
+                }
+            }
 
             content()
 
@@ -111,10 +120,23 @@ struct HomeOverviewTimelineRow: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(alignment: .top, spacing: Spacing.sm) {
-                Circle()
-                    .fill(item.dashboardAccentColor)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 6)
+                ZStack(alignment: .top) {
+                    Rectangle()
+                        .fill(CiderColors.borderSubtle)
+                        .frame(width: 1)
+                        .padding(.top, 3)
+
+                    Circle()
+                        .fill(item.dashboardAccentColor)
+                        .frame(width: 8, height: 8)
+                        .overlay(
+                            Circle()
+                                .stroke(CiderColors.surfaceElevated, lineWidth: 2)
+                        )
+                        .padding(.top, 6)
+                }
+                .frame(width: 14)
+                .frame(maxHeight: .infinity)
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text(item.dashboardActivityTitle)
@@ -138,9 +160,155 @@ struct HomeOverviewTimelineRow: View {
                     }
                 }
             }
-            .padding(.vertical, Spacing.xs)
+            .padding(.vertical, Spacing.sm)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct HomeOverviewCaptureTimeline: View {
+    let items: [LibraryItemV2]
+    let onOpen: (LibraryItemV2) -> Void
+
+    private var visibleItems: [LibraryItemV2] {
+        Array(items.prefix(6))
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(visibleItems, id: \.id) { item in
+                HomeOverviewCaptureTimelineNode(
+                    item: item,
+                    onOpen: {
+                        onOpen(item)
+                    }
+                )
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: HomeOverviewCaptureTimelineLayout.totalHeight,
+            maxHeight: HomeOverviewCaptureTimelineLayout.totalHeight
+        )
+        .padding(.top, Spacing.xs)
+    }
+}
+
+private enum HomeOverviewCaptureTimelineLayout {
+    static let railTop: CGFloat = 52
+    static let nodeSize: CGFloat = 28
+    static let railHeight: CGFloat = 2
+    static let totalHeight: CGFloat = 194
+}
+
+private struct HomeOverviewCaptureTimelineNode: View {
+    let item: LibraryItemV2
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(spacing: 0) {
+                Text(item.createdDate.formatted(.dateTime.hour().minute()))
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+                    .monospacedDigit()
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                            )
+                    )
+                    .frame(height: HomeOverviewCaptureTimelineLayout.railTop, alignment: .top)
+
+                HStack(spacing: Spacing.xs) {
+                    Rectangle()
+                        .fill(item.dashboardAccentColor.opacity(0.65))
+                        .frame(height: HomeOverviewCaptureTimelineLayout.railHeight)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(item.dashboardAccentColor.opacity(0.18))
+                                .frame(height: 6)
+                                .blur(radius: 6)
+                        }
+                        .padding(.leading, Spacing.sm)
+
+                    nodeIcon
+
+                    Rectangle()
+                        .fill(item.dashboardAccentColor.opacity(0.22))
+                        .frame(height: HomeOverviewCaptureTimelineLayout.railHeight)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(item.dashboardAccentColor.opacity(0.08))
+                                .frame(height: 6)
+                                .blur(radius: 6)
+                        }
+                        .padding(.trailing, Spacing.sm)
+                }
+
+                label
+                    .padding(.top, Spacing.sm)
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: HomeOverviewCaptureTimelineLayout.totalHeight,
+                maxHeight: HomeOverviewCaptureTimelineLayout.totalHeight
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var nodeIcon: some View {
+        ZStack {
+            Circle()
+                .fill(item.dashboardAccentColor.opacity(0.18))
+                .frame(
+                    width: HomeOverviewCaptureTimelineLayout.nodeSize,
+                    height: HomeOverviewCaptureTimelineLayout.nodeSize
+                )
+
+            Circle()
+                .fill(CiderColors.surfaceInput)
+                .frame(width: 22, height: 22)
+
+            Image(systemName: item.dashboardSymbol)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(item.dashboardAccentColor)
+        }
+            .frame(
+                width: HomeOverviewCaptureTimelineLayout.nodeSize,
+                height: HomeOverviewCaptureTimelineLayout.nodeSize
+            )
+    }
+
+    private var label: some View {
+        VStack(alignment: .center, spacing: Spacing.xxs) {
+            Text(item.dashboardActivityTitle)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+
+            Text(item.dashboardSubtitle)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+
+            Text(item.createdDate.formatted(.relative(presentation: .named)))
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.quaternary)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: 164)
     }
 }
 
@@ -177,6 +345,118 @@ struct HomeOverviewAgendaRow: View {
             .padding(.vertical, Spacing.xs)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct HomeOverviewTodoRow: View {
+    enum Mode {
+        case open
+        case completed
+    }
+
+    let todo: TodoCard
+    let mode: Mode
+    let onToggleComplete: () -> Void
+    let onOpen: () -> Void
+
+    private let calendar = Calendar.current
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Button(action: onToggleComplete) {
+                Image(systemName: mode == .completed ? "checkmark.circle.fill" : "circle")
+                    .font(CiderFont.headingMedium)
+                    .foregroundColor(statusColor)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(mode == .completed ? "Mark incomplete" : "Mark complete")
+
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(spacing: Spacing.xs) {
+                        Text(todo.title)
+                            .font(CiderFont.labelMedium)
+                            .foregroundColor(mode == .completed ? CiderColors.tertiary : CiderColors.primary)
+                            .lineLimit(1)
+                            .strikethrough(mode == .completed)
+
+                        if let priority = todo.priority {
+                            Image(systemName: priority.icon)
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(priority.color)
+                        }
+                    }
+
+                    HStack(spacing: Spacing.xs) {
+                        Text(statusLabel)
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(statusColor)
+                            .lineLimit(1)
+
+                        if todo.totalCount > 0 {
+                            Text("\(todo.completedCount)/\(todo.totalCount)")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+
+                        if !todo.details.isEmpty {
+                            Text(todo.details)
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, Spacing.xs)
+    }
+
+    private var statusColor: Color {
+        if mode == .completed { return CiderColors.success }
+        if let dueDate = todo.earliestApproachingDate {
+            if dueDate < calendar.startOfDay(for: Date()) { return CiderColors.destructive }
+            if calendar.isDateInToday(dueDate) { return CiderColors.success }
+        }
+        return todo.priority?.color ?? CiderColors.controlAccent
+    }
+
+    private var statusLabel: String {
+        if mode == .completed {
+            guard let completedAt = todo.completedAt else {
+                return "Done"
+            }
+            if calendar.isDateInToday(completedAt) {
+                return "Done today"
+            }
+            return "Done \(completedAt.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+
+        guard let dueDate = todo.earliestApproachingDate else {
+            return "No date"
+        }
+
+        if dueDate < calendar.startOfDay(for: Date()) {
+            return "Overdue"
+        }
+
+        if calendar.isDateInToday(dueDate) {
+            return todo.hasExplicitDueTime
+                ? "Today \(dueDate.formatted(.dateTime.hour().minute()))"
+                : "Today"
+        }
+
+        if calendar.isDateInTomorrow(dueDate) {
+            return "Tomorrow"
+        }
+
+        return dueDate.formatted(.dateTime.month(.abbreviated).day())
     }
 }
 
@@ -289,6 +569,63 @@ struct HomeOverviewClosedTabCard: View {
             return "LIBRARY TAB"
         case .kanban:
             return "KANBAN"
+        }
+    }
+}
+
+struct HomeOverviewContinueChip: View {
+    let tab: HomeOverviewClosedTabSummary
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: tab.kind.systemImage)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.separatorLight)
+                    )
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(tab.name)
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Text("\(tabKindLabel) · \(tab.updatedAt.formatted(.relative(presentation: .named)))")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .stroke(CiderColors.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var tabKindLabel: String {
+        switch tab.kind {
+        case .dashboard:
+            return "Dashboard"
+        case .library:
+            return "Library"
+        case .kanban:
+            return "Kanban"
         }
     }
 }

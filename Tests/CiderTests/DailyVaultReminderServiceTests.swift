@@ -3,7 +3,7 @@ import Testing
 @testable import Cider
 
 struct DailyVaultReminderServiceTests {
-    @Test("daily vault reminder includes today-soon and resurfaced sections")
+    @Test("daily vault reminder formats the dashboard daily brief")
     func buildsCombinedReminder() {
         var components = DateComponents()
         components.year = 2026
@@ -45,8 +45,12 @@ struct DailyVaultReminderServiceTests {
         let message = reminder?.message ?? ""
 
         #expect(reminder != nil)
-        #expect(message.contains("Today / Soon"))
-        #expect(message.contains("Resurface 2"))
+        #expect(message.contains("Here's your Cider brief"))
+        #expect(message.contains("Focus"))
+        #expect(message.contains("Action Items"))
+        #expect(message.contains("Today + Upcoming"))
+        #expect(message.contains("Recent Activity"))
+        #expect(message.contains("Quiet Threads"))
         #expect(message.contains("Pay rent"))
         #expect(message.contains("Dentist"))
         #expect(message.contains("Old bookmark"))
@@ -90,7 +94,6 @@ struct DailyVaultReminderServiceTests {
         #expect(reminder != nil)
         #expect(reminder?.resurfacedItemKeys == ["bookmark:\(eligibleBookmark.id.uuidString)"])
         #expect(reminder?.message.contains("Eligible") == true)
-        #expect(reminder?.message.contains("Recently surfaced") == false)
-        #expect(reminder?.message.contains("Too recent") == false)
+        #expect(reminder?.message.contains("Quiet Threads") == true)
     }
 }
