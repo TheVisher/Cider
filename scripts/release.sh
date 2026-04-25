@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Cider Release Script
-# Usage: ./scripts/release.sh <version>
+# Usage: ./scripts/release.sh <version> [--preflight-only] [--skip-notarize] [--skip-github]
 # Example: ./scripts/release.sh 0.1.0-beta.1
 #
 # Prerequisites:
@@ -68,17 +68,19 @@ find_sparkle_tool() {
 
 # --- Validate arguments ---
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <version> [--skip-notarize] [--skip-github]"
+    echo "Usage: $0 <version> [--preflight-only] [--skip-notarize] [--skip-github]"
     echo "Example: $0 0.1.0-beta.1"
     exit 1
 fi
 
 VERSION="$1"
+PREFLIGHT_ONLY=false
 SKIP_NOTARIZE=false
 SKIP_GITHUB=false
 
 for arg in "${@:2}"; do
     case "$arg" in
+        --preflight-only) PREFLIGHT_ONLY=true ;;
         --skip-notarize) SKIP_NOTARIZE=true ;;
         --skip-github) SKIP_GITHUB=true ;;
         *) warn "Unknown flag: $arg" ;;
@@ -101,16 +103,25 @@ success "Developer ID certificate found"
 
 # Notarization credentials (unless skipping)
 if [ "$SKIP_NOTARIZE" = false ]; then
-    if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" 2>/dev/null | head -1 > /dev/null 2>&1; then
+    if ! NOTARY_HISTORY_OUTPUT="$(xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" 2>&1)"; then
         echo ""
-        warn "Notarization credentials not found for profile '$NOTARY_PROFILE'"
-        echo "  Run this first (one-time setup):"
-        echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id YOUR_APPLE_ID --team-id $TEAM_ID"
+        if echo "$NOTARY_HISTORY_OUTPUT" | grep -qi "agreement"; then
+            warn "Apple notarization is blocked by a missing or expired Apple agreement"
+            echo "  notarytool response:"
+            echo "$NOTARY_HISTORY_OUTPUT" | sed 's/^/  /'
+            echo ""
+            echo "  Sign in to Apple Developer and accept the required agreement for team $TEAM_ID,"
+            echo "  then re-run this script."
+        else
+            warn "Notarization credentials not found for profile '$NOTARY_PROFILE'"
+            echo "  Run this first (one-time setup):"
+            echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id YOUR_APPLE_ID --team-id $TEAM_ID"
+            echo ""
+            echo "  You'll be prompted for an app-specific password."
+            echo "  Generate one at: https://appleid.apple.com/account/manage -> Sign-In and Security -> App-Specific Passwords"
+        fi
         echo ""
-        echo "  You'll be prompted for an app-specific password."
-        echo "  Generate one at: https://appleid.apple.com/account/manage → Sign-In and Security → App-Specific Passwords"
-        echo ""
-        fail "Set up notarization credentials, then re-run this script"
+        fail "Notarization preflight failed"
     fi
     success "Notarization credentials found"
 fi
@@ -122,6 +133,11 @@ if [ "$SKIP_GITHUB" = false ]; then
     success "GitHub CLI authenticated"
 fi
 
+if [ "$PREFLIGHT_ONLY" = true ]; then
+    success "Preflight checks passed"
+    exit 0
+fi
+
 # --- Step 1: Update version ---
 step "Setting version to $VERSION"
 
@@ -130,7 +146,7 @@ CURRENT_BUILD=$(grep -A1 'CURRENT_PROJECT_VERSION' "$PROJECT/project.pbxproj" | 
 BUILD_NUMBER=$((CURRENT_BUILD + 1))
 
 # Update MARKETING_VERSION and CURRENT_PROJECT_VERSION in pbxproj
-sed -i '' "s/MARKETING_VERSION = [^;]*/MARKETING_VERSION = $VERSION/" "$PROJECT/project.pbxproj"
+sed -i '' "s/MARKETING_VERSION = [^;]*/MARKETING_VERSION = \"$VERSION\"/" "$PROJECT/project.pbxproj"
 sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*/CURRENT_PROJECT_VERSION = $BUILD_NUMBER/" "$PROJECT/project.pbxproj"
 
 success "Version: $VERSION (build $BUILD_NUMBER)"
@@ -244,6 +260,34 @@ hdiutil create \
 
 # Sign the DMG itself
 codesign --sign "Developer ID Application: Erik Holum (S9SS3NNGSW)" "$DMG_PATH" 2>&1
+success "DMG signed: $DMG_PATH"
+
+if [ "$SKIP_NOTARIZE" = true ]; then
+    warn "Skipping DMG notarization (--skip-notarize)"
+else
+    step "Notarizing DMG with Apple"
+
+    DMG_NOTARIZE_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
+        --keychain-profile "$NOTARY_PROFILE" \
+        --wait \
+        2>&1)
+    echo "$DMG_NOTARIZE_OUTPUT"
+
+    if echo "$DMG_NOTARIZE_OUTPUT" | grep -q "status: Invalid"; then
+        echo ""
+        warn "DMG notarization failed. Check the log:"
+        SUBMISSION_ID=$(echo "$DMG_NOTARIZE_OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
+        if [ -n "$SUBMISSION_ID" ]; then
+            echo "  xcrun notarytool log $SUBMISSION_ID --keychain-profile $NOTARY_PROFILE"
+        fi
+        fail "DMG notarization returned Invalid status"
+    fi
+
+    step "Stapling DMG notarization ticket"
+    xcrun stapler staple "$DMG_PATH" 2>&1 || fail "DMG stapling failed"
+    success "DMG notarization complete and stapled"
+fi
+
 success "DMG created: $DMG_PATH"
 
 # Clean up staging

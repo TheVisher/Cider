@@ -263,14 +263,18 @@ Code/manual update on `2026-04-24`: the hover-details footer is visual-only for 
 - Possibly add: appcast hosting files
 
 - [x] Confirm Sparkle package is linked in the Xcode app target.
-- [ ] Build a signed app archive.
-- [ ] Generate or update appcast XML.
+- [x] Build a signed app archive.
+- [x] Generate or update appcast XML.
 - [ ] Host appcast at `https://thevisher.github.io/Cider/appcast.xml` or update `SUFeedURL`.
 - [ ] Create a test older build and a newer build.
 - [ ] Use "Check for Updates Now" and verify Sparkle offers and installs the newer build.
-- [ ] Document exact release/update steps.
+- [x] Document exact release/update steps.
 
 Local update on `2026-04-24`: the Xcode debug app embeds `Contents/Frameworks/Sparkle.framework`, `Cider.debug.dylib` links Sparkle 2.9.0, and the built app plist contains `SUFeedURL`, `SUPublicEDKey`, and `LSMinimumSystemVersion` `26.0`. `scripts/release.sh` now finds Sparkle tools in `.build/xcode/SourcePackages/artifacts/sparkle/Sparkle/bin` and the generated GitHub release notes no longer claim macOS 14 support. Remaining unchecked steps require signed/notarized release artifacts and live appcast/install testing.
+
+Follow-up on `2026-04-25`: Developer ID signing is present and valid locally, GitHub auth works, and the hosted appcast currently resolves at `https://thevisher.github.io/Cider/appcast.xml` with `0.1.0-beta.2`. The existing dry-run artifact `build/export/Cider.app` is signed as `Developer ID Application: Erik Holum (S9SS3NNGSW)`, embeds Sparkle, contains `SUFeedURL`, `SUPublicEDKey`, and version `0.1.0-beta.3` build `7`; its local `build/appcast/appcast.xml` contains `0.1.0-beta.3` plus the previous `0.1.0-beta.2` item and a Sparkle Ed25519 signature. `spctl --assess --type execute` rejects the dry-run app as `source=Unnotarized Developer ID`, which is expected because notarization was skipped. A real notarization preflight is currently blocked by Apple with HTTP 403: a required Apple Developer agreement is missing or expired. `scripts/release.sh` now reports that agreement blocker explicitly instead of mislabeling it as missing credentials. Exact signed/notarized release and two-build update-install steps are documented in `Docs/Architecture/SPARKLE_SETUP.md`. Remaining unchecked steps require accepting the Apple agreement, running `./scripts/release.sh <next-version>` without `--skip-notarize`, publishing the release/appcast, and manually verifying Sparkle updates an older installed build.
+
+Second follow-up on `2026-04-25`: after accepting the Apple Developer agreement, `xcrun notarytool history --keychain-profile CiderNotary --team-id S9SS3NNGSW` succeeded and showed prior accepted submissions. `scripts/release.sh` now has `--preflight-only` for safe credential checks and notarizes/staples the DMG before generating the Sparkle appcast. A local unpublished run of `./scripts/release.sh 0.1.0-beta.3 --skip-github` succeeded with `CFBundleShortVersionString` `0.1.0-beta.3`, `CFBundleVersion` `8`, `SUFeedURL` `https://thevisher.github.io/Cider/appcast.xml`, and `SUPublicEDKey` present. `spctl` accepts both `build/export/Cider.app` and `build/Cider-0.1.0-beta.3.dmg` as `source=Notarized Developer ID`; `codesign --verify` passes for both; `hdiutil verify build/Cider-0.1.0-beta.3.dmg` reports a valid checksum. `build/appcast/appcast.xml` now contains `0.1.0-beta.3` build `8`, `sparkle:minimumSystemVersion` `26.0`, `sparkle:hardwareRequirements` `arm64`, and a fresh Sparkle Ed25519 signature for the final stapled DMG. Remaining unchecked steps require publishing the GitHub release and hosted appcast, installing an older build, and verifying Sparkle offers and installs the newer build.
 
 ### 12. Verify Storage Rework Is Not Mid-Flight
 
