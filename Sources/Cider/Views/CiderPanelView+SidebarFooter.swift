@@ -14,6 +14,8 @@ extension CiderPanelView {
     var sidebarFooterView: some View {
         VStack(spacing: Spacing.sm) {
             SidebarProfilePanel(
+                isExpanded: $sidebarProfileExpanded,
+                showAIQuickActions: $aiSectionExpanded,
                 onOpenSettings: {
                     NotificationCenter.default.post(name: .openCiderSettings, object: nil)
                 },
@@ -22,69 +24,139 @@ extension CiderPanelView {
                 },
                 onCreateNew: {
                     showNewItemPicker.toggle()
+                },
+                onOpenAI: {
+                    NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
                 }
-            )
-            .padding(.horizontal, Spacing.sm)
+            ) {
+                expandedViewOptionsButton
+            } compactViewOptions: {
+                compactViewOptionsButton
+            } aiQuickActions: {
+                aiQuickActionsList
+            }
+            .popover(isPresented: $showNewItemPicker, arrowEdge: .bottom) {
+                newItemPickerContent
+            }
 
-            // AI Quick Actions + Assistant button
-            aiSidebarSection
-
-            Divider()
-                .background(CiderColors.separator)
-                .padding(.bottom, Spacing.xs)
-
-            HStack(spacing: Spacing.sm) {
-                // Settings gear
-                Button {
-                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(CiderFont.bodyMedium)
-                        .foregroundColor(CiderColors.secondary)
-                        .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Settings")
-
-                Spacer(minLength: 0)
-
-                // + pill button
-                Button {
-                    showNewItemPicker.toggle()
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "plus")
-                            .font(CiderFont.captionSemibold)
-                        Text("New")
-                            .font(CiderFont.bodyMedium)
-                    }
-                    .foregroundColor(CiderColors.secondary)
-                    .padding(.horizontal, Spacing.sm)
-                    .frame(height: CiderPanelDesign.trafficLightTapTarget)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .help("Create new item")
-                .popover(isPresented: $showNewItemPicker, arrowEdge: .bottom) {
-                    newItemPickerContent
-                }
-
-                Spacer(minLength: 0)
-
-                // View options
-                viewOptionsButton
+            if !sidebarProfileExpanded && aiSectionExpanded {
+                aiQuickActionsList
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        .animation(reduceMotion ? .none : .snappy, value: sidebarProfileExpanded)
+        .animation(reduceMotion ? .none : .snappy, value: aiSectionExpanded)
         .padding(.top, Spacing.sm)
         .padding(.horizontal, Spacing.sm)
         .padding(.bottom, Spacing.sm)
         .frame(width: BookmarksDesign.folderSidebarWidth)
+    }
+
+    var expandedViewOptionsButton: some View {
+        Group {
+            if showFolderViewOptions {
+                expandedFilterButton(isEnabled: true) {
+                    isHomeViewOptionsVisible.toggle()
+                }
+                .popover(isPresented: $isHomeViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale,
+                        hideCardFooters: $hideCardFooters,
+                        showCardDetailsOnHover: $showCardDetailsOnHover
+                    )
+                }
+            } else if let savedViewID = selectedTab?.savedViewID,
+                      let savedView = savedViewStorage.savedView(for: savedViewID),
+                      savedView.kind != .dashboard {
+                expandedFilterButton(isEnabled: true) {
+                    isHomeViewOptionsVisible.toggle()
+                }
+                .popover(isPresented: $isHomeViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale,
+                        hideCardFooters: $hideCardFooters,
+                        showCardDetailsOnHover: $showCardDetailsOnHover,
+                        sortMode: sortModeBinding(for: savedViewID),
+                        entityFilter: entityFilterBinding(for: savedViewID),
+                        tagFilter: tagFilterBinding(for: savedViewID),
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID),
+                        showComingUp: showComingUpBinding(for: savedViewID)
+                    )
+                }
+            } else {
+                expandedFilterButton(isEnabled: false) {}
+            }
+        }
+    }
+
+    private func expandedFilterButton(isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        HomeOverviewQuickActionButton(
+            title: "Filter",
+            systemImage: "slider.horizontal.3",
+            disabled: !isEnabled,
+            action: action
+        )
+        .opacity(isEnabled ? 1 : 0.55)
+        .help(isEnabled ? "View options" : "No view options")
+    }
+
+    var compactViewOptionsButton: some View {
+        Group {
+            if showFolderViewOptions {
+                compactFilterButton(isEnabled: true) {
+                    isHomeViewOptionsVisible.toggle()
+                }
+                .popover(isPresented: $isHomeViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale,
+                        hideCardFooters: $hideCardFooters,
+                        showCardDetailsOnHover: $showCardDetailsOnHover
+                    )
+                }
+            } else if let savedViewID = selectedTab?.savedViewID,
+                      let savedView = savedViewStorage.savedView(for: savedViewID),
+                      savedView.kind != .dashboard {
+                compactFilterButton(isEnabled: true) {
+                    isHomeViewOptionsVisible.toggle()
+                }
+                .popover(isPresented: $isHomeViewOptionsVisible) {
+                    ViewOptionsDropdown(
+                        displayMode: $homeDisplayMode,
+                        cardSizeScale: $homeCardSizeScale,
+                        hideCardFooters: $hideCardFooters,
+                        showCardDetailsOnHover: $showCardDetailsOnHover,
+                        sortMode: sortModeBinding(for: savedViewID),
+                        entityFilter: entityFilterBinding(for: savedViewID),
+                        tagFilter: tagFilterBinding(for: savedViewID),
+                        onlyUnassigned: onlyUnassignedBinding(for: savedViewID),
+                        showComingUp: showComingUpBinding(for: savedViewID)
+                    )
+                }
+            } else {
+                compactFilterButton(isEnabled: false) {}
+            }
+        }
+    }
+
+    private func compactFilterButton(isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "slider.horizontal.3")
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(isEnabled ? CiderColors.secondary : CiderColors.quaternary.opacity(0.55))
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isHomeViewOptionsVisible && isEnabled ? CiderColors.controlAccent.opacity(0.12) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help(isEnabled ? "View options" : "No view options")
     }
 
     var newItemPickerContent: some View {
@@ -147,95 +219,60 @@ extension CiderPanelView {
 
     // MARK: - AI Sidebar Section
 
-    @ViewBuilder
-    var aiSidebarSection: some View {
-        VStack(spacing: Spacing.xs) {
-            // Header: sparkles + label + chevron, click to expand
-            Button {
-                withAnimation(reduceMotion ? .none : .snappy) {
-                    aiSectionExpanded.toggle()
+    var aiQuickActionsList: some View {
+        VStack(spacing: Spacing.xxs) {
+            ForEach(aiQuickActions, id: \.label) { action in
+                Button {
+                    action.execute()
+                } label: {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: action.icon)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.controlAccent)
+                            .frame(width: 14, alignment: .center)
+                        Text(action.label)
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.primary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xxs)
+
+            Button {
+                NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    Image(systemName: "sparkles")
-                        .font(CiderFont.bodyMedium)
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(CiderFont.caption)
                         .foregroundColor(CiderColors.controlAccent)
-                    Text("AI")
-                        .font(CiderFont.labelMedium)
-                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: 14, alignment: .center)
+                    Text("Open Chat")
+                        .font(CiderFont.label)
+                        .foregroundColor(CiderColors.primary)
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(CiderFont.microSemibold)
+                    Text("⌥A")
+                        .font(CiderFont.captionMonospaced)
                         .foregroundColor(CiderColors.quaternary)
-                        .rotationEffect(.degrees(aiSectionExpanded ? 90 : 0))
                 }
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(CiderColors.surfaceSubtle)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, Spacing.sm)
-
-            // Expanded: quick actions + open chat button
-            if aiSectionExpanded {
-                VStack(spacing: Spacing.xxs) {
-                    // Context-sensitive quick actions
-                    ForEach(aiQuickActions, id: \.label) { action in
-                        Button {
-                            action.execute()
-                        } label: {
-                            HStack(spacing: Spacing.sm) {
-                                Image(systemName: action.icon)
-                                    .font(CiderFont.caption)
-                                    .foregroundColor(CiderColors.controlAccent)
-                                    .frame(width: 14, alignment: .center)
-                                Text(action.label)
-                                    .font(CiderFont.label)
-                                    .foregroundColor(CiderColors.primary)
-                                Spacer()
-                            }
-                            .padding(.horizontal, Spacing.sm)
-                            .padding(.vertical, Spacing.xs)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Divider()
-                        .padding(.horizontal, Spacing.sm)
-                        .padding(.vertical, Spacing.xxs)
-
-                    // Open full chat
-                    Button {
-                        NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
-                    } label: {
-                        HStack(spacing: Spacing.sm) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(CiderFont.caption)
-                                .foregroundColor(CiderColors.controlAccent)
-                                .frame(width: 14, alignment: .center)
-                            Text("Open Chat")
-                                .font(CiderFont.label)
-                                .foregroundColor(CiderColors.primary)
-                            Spacer()
-                            Text("⌥A")
-                                .font(CiderFont.captionMonospaced)
-                                .foregroundColor(CiderColors.quaternary)
-                        }
-                        .padding(.horizontal, Spacing.sm)
-                        .padding(.vertical, Spacing.xs)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, Spacing.sm)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
         }
+        .padding(.vertical, Spacing.xxs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+        )
     }
 
     /// Quick actions — general actions always available in sidebar.
@@ -388,20 +425,53 @@ extension CiderPanelView {
 
 }
 
-private struct SidebarProfilePanel: View {
+private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions: View, AIQuickActions: View>: View {
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
+
+    @Binding var isExpanded: Bool
+    @Binding var showAIQuickActions: Bool
 
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
     let onCreateNew: () -> Void
+    let onOpenAI: () -> Void
+    let expandedViewOptions: () -> ExpandedViewOptions
+    let compactViewOptions: () -> CompactViewOptions
+    let aiQuickActions: () -> AIQuickActions
 
     var body: some View {
+        Group {
+            if isExpanded {
+                expandedBody
+            } else {
+                compactBody
+            }
+        }
+    }
+
+    private var expandedBody: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("PROFILE")
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-                .tracking(2)
+            HStack(spacing: Spacing.sm) {
+                Text("PROFILE")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                    .tracking(2)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    isExpanded = false
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(CiderFont.microSemibold)
+                        .foregroundColor(CiderColors.quaternary)
+                        .frame(width: 22, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Collapse profile controls")
+            }
 
             HStack(alignment: .center, spacing: Spacing.sm) {
                 Circle()
@@ -452,18 +522,168 @@ private struct SidebarProfilePanel: View {
                     systemImage: "plus",
                     action: onCreateNew
                 )
+                expandedViewOptions()
+                HomeOverviewQuickActionButton(
+                    title: "AI",
+                    systemImage: "sparkles",
+                    detail: showAIQuickActions ? "Hide" : nil,
+                    action: {
+                        showAIQuickActions.toggle()
+                    }
+                )
+            }
+
+            if showAIQuickActions {
+                aiQuickActions()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(Spacing.md)
+        .padding(.horizontal, CiderBorder.innerStrokeInset)
+        .padding(.vertical, Spacing.xs)
+    }
+
+    private var compactBody: some View {
+        VStack(spacing: Spacing.xs) {
+            Button {
+                isExpanded = true
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Circle()
+                        .fill(authService.isLoggedIn ? CiderColors.controlAccent.opacity(0.18) : CiderColors.surfaceInput)
+                        .frame(width: 24, height: 24)
+                        .overlay {
+                            Image(systemName: "person.fill")
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(authService.isLoggedIn ? CiderColors.controlAccent : CiderColors.tertiary)
+                        }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(authService.isLoggedIn ? authService.accountEmail : "Sign In")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(1)
+                        Text(compactSyncStatusText)
+                            .font(CiderFont.micro)
+                            .foregroundColor(authService.isLoggedIn ? CiderColors.success : CiderColors.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.up")
+                        .font(CiderFont.microSemibold)
+                        .foregroundColor(CiderColors.quaternary)
+                }
+                .padding(.leading, Spacing.xs)
+                .padding(.trailing, Spacing.sm)
+                .padding(.top, Spacing.xs)
+                .padding(.bottom, Spacing.xxs)
+                .frame(minHeight: BookmarksDesign.folderSidebarRowMinHeight + 2)
+                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("Expand profile controls")
+
+            Divider()
+                .overlay(CiderColors.borderSubtle.opacity(0.75))
+
+            HStack(spacing: Spacing.xs) {
+                compactIconButton(
+                    systemImage: "gearshape",
+                    help: "Settings",
+                    action: onOpenSettings
+                )
+
+                compactIconButton(
+                    systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
+                    help: authService.isLoggedIn ? "Sync Now" : "Sign In",
+                    disabled: authService.isLoggedIn && syncService.isSyncing,
+                    action: {
+                        if authService.isLoggedIn {
+                            onSyncNow()
+                        } else {
+                            onOpenSettings()
+                        }
+                    }
+                )
+                compactNewButton
+                compactAIButton
+                compactViewOptions()
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, CiderBorder.innerStrokeInset)
+        .padding(.vertical, Spacing.xs)
         .background(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(CiderColors.surfaceElevated)
                 .overlay(
-                    RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                        .stroke(CiderColors.borderDefault, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
                 )
         )
-        .clipShape(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+    }
+
+    private var compactNewButton: some View {
+        Button {
+            onCreateNew()
+        } label: {
+            Image(systemName: "plus")
+                .font(CiderFont.bodyMedium)
+            .foregroundColor(CiderColors.secondary)
+            .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Create new item")
+    }
+
+    private var compactAIButton: some View {
+        Button {
+            showAIQuickActions.toggle()
+        } label: {
+            Image(systemName: "sparkles")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(showAIQuickActions ? CiderColors.controlAccent : CiderColors.secondary)
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(showAIQuickActions ? CiderColors.controlAccent.opacity(0.12) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("AI")
+        .contextMenu {
+            Button("Open Chat", action: onOpenAI)
+        }
+    }
+
+    private func compactIconButton(
+        systemImage: String,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(disabled ? CiderColors.quaternary : CiderColors.secondary)
+                .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(help)
+    }
+
+    private var compactSyncStatusText: String {
+        if syncService.isSyncing { return "Syncing now" }
+        if authService.isLoggedIn { return "Signed in" }
+        return "Sync across devices"
     }
 
     @ViewBuilder

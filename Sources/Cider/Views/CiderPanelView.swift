@@ -65,6 +65,7 @@ struct CiderPanelView: View {
     @State var scrollToItemID: String?
     @State var keyboardMonitor: Any?
     @State var aiSectionExpanded: Bool = false
+    @AppStorage("cider.sidebarProfileExpanded") var sidebarProfileExpanded: Bool = true
 
     var allTabs: [CiderTab] {
         savedViewTabs + dynamicTabs
