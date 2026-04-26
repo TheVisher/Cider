@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cider - Your Mac's living knowledge vault</title>
+    <meta
+      name="description"
+      content="Cider is a native macOS knowledge vault for capturing bookmarks, notes, files, and ideas without losing your flow."
+    />
+    <link rel="icon" href="./assets/favicon-32.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="cider-river" aria-hidden="true"></canvas>
+
+    <header class="site-header">
+      <a class="brand-mark" href="#top" aria-label="Cider home">
+        <img src="./assets/favicon-32.png" alt="" />
+        <span>Cider</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#vault">Vault</a>
+        <a href="#features">Features</a>
+        <a href="#ai">AI</a>
+      </nav>
+      <a class="header-cta" href="https://github.com/TheVisher/Cider/releases/latest">Download Beta</a>
+    </header>
+
+    <main id="top">
+      <section class="hero section">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Native macOS capture, organized by your own files</p>
+          <h1>Let everything worth keeping flow back to you.</h1>
+          <p class="lede">
+            Cider floats above your Mac, catches links, notes, screenshots, files, dates, and contacts,
+            then turns them into a fast local knowledge vault you actually want to revisit.
+          </p>
+          <div class="cta-row">
+            <a class="primary-cta" href="https://github.com/TheVisher/Cider/releases/latest">
+              Download Beta
+              <span>macOS 26 · Apple Silicon</span>
+            </a>
+            <a class="secondary-cta" href="#flow">See the flow</a>
+          </div>
+        </div>
+
+        <div class="hero-stage reveal" aria-label="Cider app preview">
+          <div class="app-window app-window-main">
+            <div class="window-chrome">
+              <span></span><span></span><span></span>
+              <strong>Cider</strong>
+            </div>
+            <div class="app-shell">
+              <aside class="mock-sidebar">
+                <div class="mock-search">Search</div>
+                <b>Folders</b>
+                <span>Applications <em>11</em></span>
+                <span>Development <em>8</em></span>
+                <span>Food <em>5</em></span>
+                <span>Projects <em>1</em></span>
+                <span>Tech <em>7</em></span>
+                <div class="mock-spacer"></div>
+                <span>Settings</span>
+                <span>AI</span>
+              </aside>
+              <div class="app-content">
+                <div class="mock-tabs">
+                  <b>Dashboard</b>
+                  <span>Inbox</span>
+                  <span>Library</span>
+                  <em>200 bookmarks</em>
+                </div>
+                <section class="daily-brief">
+                  <small>Today's Brief</small>
+                  <h3>Evening, dev. Tidy the loose ends.</h3>
+                  <p><b>2 time-sensitive</b> · <b>45 unfiled</b> · <b>4 resurfaced</b></p>
+                  <div class="brief-row">
+                    <span>Pay Rent</span>
+                    <span>Time-sensitive</span>
+                    <span>Unfiled captures</span>
+                  </div>
+                </section>
+                <div class="dashboard-grid">
+                  <article class="action-panel">
+                    <small>Action Items</small>
+                    <b>Pay rent ↑</b>
+                    <span>Apr 30</span>
+                  </article>
+                  <article class="calendar-panel">
+                    <small>Today + Upcoming</small>
+                    <div class="days">
+                      <span>19</span><span>20</span><span>21</span><span>22</span><b>25</b>
+                    </div>
+                    <p>Pay Rent · Upcoming event</p>
+                  </article>
+                  <article class="activity-panel">
+                    <small>Recent Activity</small>
+                    <div class="timeline"><i></i><i></i><i></i><i></i></div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="shot-note">Cinematic product preview. Real screenshots live below for proof.</p>
+        </div>
+      </section>
+
+      <section id="flow" class="river-section section">
+        <div class="narrative reveal">
+          <p class="eyebrow">First-person capture flow</p>
+          <h2>Double-tap Option. The stream opens wherever you are.</h2>
+          <p>
+            The page starts close to the cider current, then pulls back as the product appears:
+            capture from Safari, write a note, drop a file, ask AI, and watch it all settle into your vault.
+          </p>
+        </div>
+        <div class="flow-lanes">
+          <div class="flow-card reveal">
+            <span>01</span>
+            <h3>Capture without context switching</h3>
+            <p>Save the active tab, catch copied URLs, drag in images, or turn screenshots into searchable notes.</p>
+          </div>
+          <div class="flow-card reveal">
+            <span>02</span>
+            <h3>Organize at the speed of thought</h3>
+            <p>Folders, tags, saved views, masonry, lists, and a command palette keep the vault moving.</p>
+          </div>
+          <div class="flow-card reveal">
+            <span>03</span>
+            <h3>Resurface what matters</h3>
+            <p>Search across notes, bookmarks, date cards, contacts, and files from a panel that stays out of the way.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="vault" class="vault section">
+        <div class="split-copy reveal">
+          <p class="eyebrow">Your data stays yours</p>
+          <h2>A vault made of real files, backed by SQLite.</h2>
+          <p>
+            Cider does not trap your knowledge in an opaque cloud database. Bookmarks are native
+            <code>.webloc</code> files, notes are Markdown, folders are Finder folders, and SQLite keeps
+            rich metadata fast.
+          </p>
+        </div>
+        <div class="filesystem reveal" aria-label="Vault file structure">
+          <div class="tree-line">~/CiderVault/</div>
+          <div class="tree-line indent">Bookmarks/</div>
+          <div class="tree-line indent-2">Design System.webloc</div>
+          <div class="tree-line indent">Notes/</div>
+          <div class="tree-line indent-2">Launch Plan.md</div>
+          <div class="tree-line indent">Screenshots/</div>
+          <div class="tree-line indent-2">OCR Capture.png</div>
+          <div class="tree-line muted">.cider/cider.db</div>
+        </div>
+      </section>
+
+      <section id="screenshots" class="screenshots section" aria-label="App screenshots">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Product moments</p>
+          <h2>Real views, not vapor.</h2>
+        </div>
+        <div class="shot-grid">
+          <figure class="screenshot-slot screenshot-dashboard wide reveal">
+            <img src="./assets/screenshots/dashboard.png" alt="Cider dashboard overview with sidebar, daily brief, action items, calendar, and recent activity." loading="lazy" decoding="async" />
+            <figcaption>Dashboard overview: sidebar, daily brief, action items, calendar, and recent activity.</figcaption>
+          </figure>
+          <figure class="screenshot-slot screenshot-library reveal">
+            <img src="./assets/screenshots/library.jpeg" alt="Cider library masonry view with saved bookmarks, folders, images, and web captures." loading="lazy" decoding="async" />
+            <figcaption>Library view: a visual masonry feed for bookmarks, images, notes, and saved references.</figcaption>
+          </figure>
+          <figure class="screenshot-slot screenshot-kanban reveal">
+            <img src="./assets/screenshots/kanban-board.png" alt="Cider roadmap kanban board with columns for backlog, in progress, testing, and done." loading="lazy" decoding="async" />
+            <figcaption>Kanban boards: turn folders and projects into working boards without leaving Cider.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="features" class="features section">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Powerful without feeling heavy</p>
+          <h2>Built like a Mac app, not a web app in a coat.</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature reveal">
+            <h3>Native floating panel</h3>
+            <p>Double-tap Option and Cider appears on the screen where you are already working.</p>
+          </article>
+          <article class="feature reveal">
+            <h3>Universal library</h3>
+            <p>Bookmarks, notes, files, date cards, contacts, and folders live in one searchable feed.</p>
+          </article>
+          <article class="feature reveal">
+            <h3>Fast capture</h3>
+            <p>Save browser tabs, copied URLs, screenshots with OCR, images, and rich notes from anywhere.</p>
+          </article>
+          <article class="feature reveal">
+            <h3>Flexible views</h3>
+            <p>Switch between list, grid, masonry, tags, folders, and custom saved tabs.</p>
+          </article>
+          <article class="feature reveal">
+            <h3>Spotlight-ready</h3>
+            <p>Index your saved knowledge so the Mac itself can help you find what you captured.</p>
+          </article>
+          <article class="feature reveal">
+            <h3>Portable by design</h3>
+            <p>Delete the app tomorrow and your files still make sense in Finder, editors, and AI tools.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="ai" class="ai section">
+        <div class="ai-panel reveal">
+          <p class="eyebrow">Optional intelligence</p>
+          <h2>Ask your vault questions without handing it away.</h2>
+          <p>
+            Use Cider with no AI at all, lean on Apple on-device intelligence, or opt into local models
+            for summaries, tagging, semantic search, and vault chat. Power users can bring any CLI agent
+            because the vault is just files.
+          </p>
+          <div class="ai-modes">
+            <span>No AI required</span>
+            <span>Apple on-device</span>
+            <span>Local model</span>
+            <span>CLI agents</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta section">
+        <div class="cta-copy reveal">
+          <img src="./assets/icon-1024.png" alt="" />
+          <p class="eyebrow">Cider beta</p>
+          <h2>Start building a vault your future self can actually use.</h2>
+          <p>Native Swift. Local-first storage. No subscription. No Electron.</p>
+          <a class="primary-cta" href="https://github.com/TheVisher/Cider/releases/latest">
+            Download Cider Beta
+            <span>Latest release on GitHub</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
