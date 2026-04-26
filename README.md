@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TheVisher/Cider/releases/latest">Download Beta</a>
+  <a href="https://github.com/TheVisher/Cider/releases/tag/v0.1.0-beta.3">Download Beta</a>
   &nbsp;&bull;&nbsp;
   <a href="https://github.com/TheVisher/Cider/issues">Send Feedback</a>
 </p>
@@ -73,7 +73,7 @@ No Electron. No subscriptions. Just a native Swift app that stays out of your wa
 
 ## Install
 
-1. Download the latest `.dmg` from [Releases](https://github.com/TheVisher/Cider/releases/latest)
+1. Download the latest `.dmg` from [Releases](https://github.com/TheVisher/Cider/releases/tag/v0.1.0-beta.3)
 2. Open the `.dmg` and drag Cider to your Applications folder
 3. Launch Cider. Double-tap Option to open the panel
 
