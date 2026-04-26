@@ -591,6 +591,8 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+  width: min(100%, 72rem);
+  margin: 0 auto;
 }
 
 .screenshot-slot {
@@ -619,7 +621,7 @@ h3 {
 }
 
 .screenshot-dashboard img {
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 16 / 8.6;
   object-position: center top;
 }
 
