@@ -3,6 +3,16 @@
     <channel>
         <title>Cider Updates</title>
         <item>
+            <title>0.1.0-beta.3</title>
+            <pubDate>Sun, 26 Apr 2026 16:40:10 -0700</pubDate>
+            <link>https://github.com/TheVisher/Cider</link>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>0.1.0-beta.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/TheVisher/Cider/releases/download/v0.1.0-beta.3/Cider-0.1.0-beta.3.dmg" length="20369105" type="application/octet-stream" sparkle:edSignature="vDfna6ouUrzALOH1AT/lM3pFsqUlimQLsunoInm64AHHHlDI7rMqgxIV5G6FvB7H2GCB0Snx2kj5WWaiInh3AQ=="/>
+        </item>
+        <item>
             <title>0.1.0-beta.2</title>
             <pubDate>Mon, 02 Mar 2026 19:31:28 -0800</pubDate>
             <link>https://github.com/TheVisher/Cider</link>
