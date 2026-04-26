@@ -110,6 +110,9 @@ actor AgentOrchestrator {
         guard let runtime else {
             throw AgentError.providerUnavailable
         }
+        if runtime.kind == .process && !Self.processRuntimeAllowed(on: envelope.channel) {
+            throw AgentError.deliveryFailed("Process runtimes are only available from the local Cider UI.")
+        }
 
         try await runtime.start()
 
@@ -382,7 +385,7 @@ actor AgentOrchestrator {
             prompt += "\n\nAvailable Cider tools: \(toolNames)"
         }
 
-        if let agentInstructions = canonicalAgentInstructions() {
+        if runtime.kind != .process, let agentInstructions = canonicalAgentInstructions() {
             prompt += "\n\nVault agent instructions:\n\(agentInstructions)"
         }
 
@@ -730,6 +733,15 @@ actor AgentOrchestrator {
         }
 
         return nil
+    }
+
+    private static func processRuntimeAllowed(on channel: AgentChannel) -> Bool {
+        switch channel {
+        case .uiPanel, .system:
+            return true
+        case .iMessage, .telegram, .shareIngress, .iosApp, .notification:
+            return false
+        }
     }
 
     private func formatReminderPrompt(_ context: AgentContext.ReminderContext) -> String {

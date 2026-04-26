@@ -521,16 +521,23 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
             "/Users/minivish/.cargo/bin"
         ]
 
-        let inherited = ProcessInfo.processInfo.environment["PATH"]?
+        let inheritedPath = ProcessInfo.processInfo.environment["PATH"]?
             .split(separator: ":")
             .map(String.init) ?? []
 
         var combined: [String] = []
-        for path in pathCandidates + inherited where !combined.contains(path) {
+        for path in pathCandidates + inheritedPath where !combined.contains(path) {
             combined.append(path)
         }
 
-        return ["PATH": combined.joined(separator: ":")]
+        var env: [String: String] = ["PATH": combined.joined(separator: ":")]
+        let inheritedEnvironment = ProcessInfo.processInfo.environment
+        for key in ["HOME", "TMPDIR", "LANG", "LC_ALL", "SHELL", "USER"] {
+            if let value = inheritedEnvironment[key], !value.isEmpty {
+                env[key] = value
+            }
+        }
+        return env
     }
 
     private func turnTimeout(for channel: AgentChannel) -> Duration {
@@ -558,6 +565,8 @@ final class CodexProcessRuntime: @unchecked Sendable, ProcessAgentRuntime {
             group.addTask {
                 try await Task.sleep(for: timeout)
                 self.logger.warning("Codex runtime timed out during \(label, privacy: .public)")
+                await self.processManager.stop()
+                await self.sessionState.resetForNewProcess()
                 throw AgentError.deliveryFailed("Codex runtime timed out during \(label)")
             }
 

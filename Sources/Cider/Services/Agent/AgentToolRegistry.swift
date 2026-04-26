@@ -76,9 +76,11 @@ actor AgentToolRegistry {
         case .full:
             return tools
         case .standard:
-            return tools.filter { !$0.categories.contains(.vaultDelete) || !$0.requiresConfirmation }
+            return tools.filter { !$0.requiresConfirmation }
         case .limited:
-            return tools.filter { $0.categories.contains(.reminder) || $0.categories.contains(.search) }
+            return tools.filter {
+                !$0.requiresConfirmation && ($0.categories.contains(.reminder) || $0.categories.contains(.search))
+            }
         }
     }
 

@@ -376,6 +376,70 @@ final class VaultFolderService {
         let title: String
     }
 
+    private func drainItemsFromFolders(_ folderIDs: Set<UUID>) -> (relocatedCount: Int, failures: [DeleteFolderFailure]) {
+        MutationAuditContext.withSource(.cleanup) {
+            var relocatedItemCount = 0
+            var failures: [DeleteFolderFailure] = []
+            for id in folderIDs {
+                // Notes — assignNote returns Bool AND moves .md on disk
+                for note in NotesStorage.shared.notes where note.folderID == id {
+                    relocatedItemCount += 1
+                    let ok = NotesStorage.shared.assignNote(note.id, toFolder: nil)
+                    let nowUnfiled = NotesStorage.shared.notes.first(where: { $0.id == note.id })?.folderID == nil
+                    if !ok || !nowUnfiled {
+                        failures.append(.init(itemType: "note", itemID: note.id, title: note.title))
+                    }
+                }
+                // Bookmarks — assignBookmark returns Bool AND moves .webloc on disk
+                for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.folderID == id {
+                    relocatedItemCount += 1
+                    let ok = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
+                    let nowUnfiled = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmark.id })?.folderID == nil
+                    if !ok || !nowUnfiled {
+                        failures.append(.init(itemType: "bookmark", itemID: bookmark.id, title: bookmark.title))
+                    }
+                }
+                // Vault files — assignFile is Void AND moves the file on disk; verify via post-check.
+                for file in VaultFileService.shared.files where file.folderID == id {
+                    relocatedItemCount += 1
+                    VaultFileService.shared.assignFile(file.id, toFolder: nil)
+                    let nowUnfiled = VaultFileService.shared.files.first(where: { $0.id == file.id })?.folderID == nil
+                    if !nowUnfiled {
+                        failures.append(.init(itemType: "vaultFile", itemID: file.id, title: file.displayTitle))
+                    }
+                }
+                // Todos — assignTodoCard returns Bool AND moves the .ics file on disk
+                for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
+                    relocatedItemCount += 1
+                    let ok = TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
+                    let nowUnfiled = TodoCardStorage.shared.todoCards.first(where: { $0.id == todo.id })?.folderID == nil
+                    if !ok || !nowUnfiled {
+                        failures.append(.init(itemType: "todo", itemID: todo.id, title: todo.title))
+                    }
+                }
+                // Date cards (events) — assignDateCard returns Bool AND moves the .ics file on disk
+                for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
+                    relocatedItemCount += 1
+                    let ok = DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
+                    let nowUnfiled = DateCardStorage.shared.dateCards.first(where: { $0.id == dc.id })?.folderID == nil
+                    if !ok || !nowUnfiled {
+                        failures.append(.init(itemType: "event", itemID: dc.id, title: dc.title))
+                    }
+                }
+                // Contacts — assignContact returns Bool AND moves the .vcf file on disk
+                for contact in ContactStorage.shared.contacts where contact.folderID == id {
+                    relocatedItemCount += 1
+                    let ok = ContactStorage.shared.assignContact(contact.id, toFolder: nil)
+                    let nowUnfiled = ContactStorage.shared.contacts.first(where: { $0.id == contact.id })?.folderID == nil
+                    if !ok || !nowUnfiled {
+                        failures.append(.init(itemType: "contact", itemID: contact.id, title: contact.displayName))
+                    }
+                }
+            }
+            return (relocatedItemCount, failures)
+        }
+    }
+
     /// Deletes a folder safely:
     ///   1. Enumerate EVERY folder-aware item in the subtree (all 7 types:
     ///      notes, bookmarks, vault files, todos, date cards, contacts,
@@ -427,68 +491,9 @@ final class VaultFolderService {
         // 3. Drain items. Track failures — if any relocation fails,
         // we abort the folder delete entirely so we never trash a
         // directory with live content still inside.
-        var relocatedItemCount = 0
-        let failures: [DeleteFolderFailure] = MutationAuditContext.withSource(.cleanup) {
-            var failures: [DeleteFolderFailure] = []
-            for id in deletedFolderIDs {
-                // Notes — assignNote returns Bool AND moves .md on disk
-                for note in NotesStorage.shared.notes where note.folderID == id {
-                    relocatedItemCount += 1
-                    let ok = NotesStorage.shared.assignNote(note.id, toFolder: nil)
-                    let nowUnfiled = NotesStorage.shared.notes.first(where: { $0.id == note.id })?.folderID == nil
-                    if !ok || !nowUnfiled {
-                        failures.append(.init(itemType: "note", itemID: note.id, title: note.title))
-                    }
-                }
-                // Bookmarks — assignBookmark returns Bool AND moves .webloc on disk
-                for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.folderID == id {
-                    relocatedItemCount += 1
-                    let ok = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
-                    let nowUnfiled = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmark.id })?.folderID == nil
-                    if !ok || !nowUnfiled {
-                        failures.append(.init(itemType: "bookmark", itemID: bookmark.id, title: bookmark.title))
-                    }
-                }
-                // Vault files — assignFile is Void AND moves the file on disk;
-                // verify via post-check of the in-memory state.
-                for file in VaultFileService.shared.files where file.folderID == id {
-                    relocatedItemCount += 1
-                    VaultFileService.shared.assignFile(file.id, toFolder: nil)
-                    let nowUnfiled = VaultFileService.shared.files.first(where: { $0.id == file.id })?.folderID == nil
-                    if !nowUnfiled {
-                        failures.append(.init(itemType: "vaultFile", itemID: file.id, title: file.displayTitle))
-                    }
-                }
-                // Todos — assignTodoCard returns Bool AND moves the .ics file on disk
-                for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
-                    relocatedItemCount += 1
-                    let ok = TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
-                    let nowUnfiled = TodoCardStorage.shared.todoCards.first(where: { $0.id == todo.id })?.folderID == nil
-                    if !ok || !nowUnfiled {
-                        failures.append(.init(itemType: "todo", itemID: todo.id, title: todo.title))
-                    }
-                }
-                // Date cards (events) — assignDateCard returns Bool AND moves the .ics file on disk
-                for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
-                    relocatedItemCount += 1
-                    let ok = DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
-                    let nowUnfiled = DateCardStorage.shared.dateCards.first(where: { $0.id == dc.id })?.folderID == nil
-                    if !ok || !nowUnfiled {
-                        failures.append(.init(itemType: "event", itemID: dc.id, title: dc.title))
-                    }
-                }
-                // Contacts — assignContact returns Bool AND moves the .vcf file on disk
-                for contact in ContactStorage.shared.contacts where contact.folderID == id {
-                    relocatedItemCount += 1
-                    let ok = ContactStorage.shared.assignContact(contact.id, toFolder: nil)
-                    let nowUnfiled = ContactStorage.shared.contacts.first(where: { $0.id == contact.id })?.folderID == nil
-                    if !ok || !nowUnfiled {
-                        failures.append(.init(itemType: "contact", itemID: contact.id, title: contact.displayName))
-                    }
-                }
-            }
-            return failures
-        }
+        let drainResult = drainItemsFromFolders(deletedFolderIDs)
+        let relocatedItemCount = drainResult.relocatedCount
+        let failures = drainResult.failures
 
         // 4. Abort on any failure — do NOT trash the folder, do NOT delete
         // rows. Items that relocated successfully stay in Inbox; the user
@@ -952,17 +957,31 @@ final class VaultFolderService {
         isMutating = true
         defer { isMutating = false }
 
-        // Check if name changed — requires directory rename
+        let targetParentPath: String?
+        if let parentID, parentID != folderID {
+            targetParentPath = index[parentID]?.relativePath
+        } else {
+            targetParentPath = nil
+        }
+
+        // Check if name or parent changed — requires directory move.
         let sanitized = Self.sanitizeDirectoryName(name)
-        if !sanitized.isEmpty && sanitized != folder.name {
-            let parentPath = folder.parentRelativePath
-            let resolvedName = uniqueName(baseName: sanitized, parentPath: parentPath, excludingID: folderID)
-            let newRelativePath = parentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
+        if !sanitized.isEmpty && (sanitized != folder.name || targetParentPath != folder.parentRelativePath) {
+            let resolvedName = uniqueName(baseName: sanitized, parentPath: targetParentPath, excludingID: folderID)
+            let newRelativePath = targetParentPath.map { "\($0)/\(resolvedName)" } ?? resolvedName
             let oldURL = vaultRoot.appendingPathComponent(folder.relativePath)
             let newURL = vaultRoot.appendingPathComponent(newRelativePath)
 
-            do {
-                try FileManager.default.moveItem(at: oldURL, to: newURL)
+            if newRelativePath != folder.relativePath {
+                do {
+                    try FileManager.default.moveItem(at: oldURL, to: newURL)
+                    rewriteItemPathsAfterMove(oldPrefix: folder.relativePath, newPrefix: newRelativePath)
+                } catch {
+                    logger.error("updateFolderFromSync: move failed: \(error.localizedDescription)")
+                }
+            }
+
+            if FileManager.default.fileExists(atPath: newURL.path) || newRelativePath == folder.relativePath {
                 // Update this folder and all descendants
                 let oldPrefix = folder.relativePath + "/"
                 for (id, var entry) in index {
@@ -977,8 +996,6 @@ final class VaultFolderService {
                     }
                 }
                 folder = index[folderID]!
-            } catch {
-                logger.error("updateFolderFromSync: rename failed: \(error.localizedDescription)")
             }
         }
 
@@ -1014,33 +1031,26 @@ final class VaultFolderService {
             }
             return ids
         }()
-        var relocatedItemCount = 0
-        MutationAuditContext.withSource(.cleanup) {
-            for id in deletedIDs {
-                for note in NotesStorage.shared.notes where note.folderID == id {
-                    relocatedItemCount += 1
-                    NotesStorage.shared.assignNote(note.id, toFolder: nil)
-                }
-                for bookmark in VaultBookmarkService.shared.bookmarks where bookmark.folderID == id {
-                    relocatedItemCount += 1
-                    VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: nil)
-                }
-                for todo in TodoCardStorage.shared.todoCards where todo.folderID == id {
-                    relocatedItemCount += 1
-                    TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: nil)
-                }
-                for dc in DateCardStorage.shared.dateCards where dc.folderID == id {
-                    relocatedItemCount += 1
-                    DateCardStorage.shared.assignDateCard(dc.id, toFolder: nil)
-                }
-                for contact in ContactStorage.shared.contacts where contact.folderID == id {
-                    relocatedItemCount += 1
-                    ContactStorage.shared.assignContact(contact.id, toFolder: nil)
-                }
-                for file in VaultFileService.shared.files where file.folderID == id {
-                    relocatedItemCount += 1
-                    VaultFileService.shared.assignFile(file.id, toFolder: nil)
-                }
+        let drainResult = drainItemsFromFolders(deletedIDs)
+        let relocatedItemCount = drainResult.relocatedCount
+        if !drainResult.failures.isEmpty {
+            logger.error("deleteFolderFromSync ABORTED: \(drainResult.failures.count) item(s) failed to relocate out of '\(folder.relativePath)' — folder preserved, DB rows preserved")
+            for f in drainResult.failures {
+                logger.error("  failed: \(f.itemType) \(f.itemID.uuidString.prefix(8)) '\(f.title)'")
+            }
+            return
+        }
+
+        unassignItemsFromFolders(Array(deletedIDs))
+        unassignSessionsFromFolders(Array(deletedIDs))
+
+        // Remove directory (contains all sub-folders and filed cards)
+        if FileManager.default.fileExists(atPath: directoryURL.path) {
+            do {
+                try FileManager.default.removeItem(at: directoryURL)
+            } catch {
+                logger.error("deleteFolderFromSync: failed to remove directory: \(error.localizedDescription) — preserving folder rows to avoid filesystem/database drift")
+                return
             }
         }
 
@@ -1053,15 +1063,6 @@ final class VaultFolderService {
         }
         index.removeValue(forKey: folderID)
         deleteFolderFromDatabase(folderID: folderID)
-
-        // Remove directory (contains all sub-folders and filed cards)
-        if FileManager.default.fileExists(atPath: directoryURL.path) {
-            do {
-                try FileManager.default.removeItem(at: directoryURL)
-            } catch {
-                logger.error("deleteFolderFromSync: failed to remove directory: \(error.localizedDescription)")
-            }
-        }
 
         saveIndex()
         rebuildFolders()

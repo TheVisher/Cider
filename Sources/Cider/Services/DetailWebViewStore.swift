@@ -37,8 +37,10 @@ final class DetailWebViewStore: ObservableObject {
 
     // MARK: - Eager Preload
 
-    /// Call when a bookmark detail opens. Eagerly starts loading both the live
-    /// web page and reader extraction so content is ready when the user switches.
+    /// Call when a bookmark detail opens. Reader extraction is safe to do in the
+    /// background, but the live web page is loaded lazily only when the user
+    /// switches to web mode. Some sites keep heavy media/JS processes alive even
+    /// while hidden, which can make Cider's memory and CPU climb over time.
     func preload(url: URL, bookmarkID: UUID) {
         currentBookmarkID = bookmarkID
 
@@ -51,9 +53,6 @@ final class DetailWebViewStore: ObservableObject {
             // Start background reader extraction
             startReaderExtraction(url: url, bookmarkID: bookmarkID)
         }
-
-        // Start preloading the live web view
-        startWebViewPreload(url: url)
     }
 
     // MARK: - Web View Preload
@@ -95,6 +94,10 @@ final class DetailWebViewStore: ObservableObject {
         webView = wv
         loadedURL = url
         return wv
+    }
+
+    func setWebViewReady(_ ready: Bool) {
+        webViewReady = ready
     }
 
     // MARK: - Reader Extraction (Background)
@@ -179,8 +182,9 @@ final class DetailWebViewStore: ObservableObject {
     // MARK: - Lifecycle
 
     func reset() {
-        pauseMedia(in: webView)
-        pauseMedia(in: readerWebView)
+        dispose(webView)
+        dispose(readerWebView)
+        dispose(extractionWebView)
         webView = nil
         readerWebView = nil
         loadedURL = nil
@@ -203,6 +207,14 @@ final class DetailWebViewStore: ObservableObject {
         wv?.evaluateJavaScript(
             "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause();}catch(e){}})"
         )
+    }
+
+    private func dispose(_ wv: WKWebView?) {
+        pauseMedia(in: wv)
+        wv?.stopLoading()
+        wv?.navigationDelegate = nil
+        wv?.uiDelegate = nil
+        wv?.removeFromSuperview()
     }
 
     /// Shared UI delegate that suppresses window.open() during preload.

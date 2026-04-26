@@ -999,9 +999,9 @@ final class SyncService: ObservableObject {
         var pending: [(noteSyncId: String, filename: String, fileURL: URL)] = []
         for note in dirtyNotes {
             let content = note.resolvedContent
-            let urls = note.imageURLs(from: content)
+            let urls = note.attachmentImageURLs(from: content)
             for url in urls {
-                // Only upload local file attachments (not remote URLs)
+                // Only upload note-owned local attachments, never arbitrary absolute file references.
                 guard url.isFileURL else { continue }
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
                 let filename = url.lastPathComponent

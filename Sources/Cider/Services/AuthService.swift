@@ -120,6 +120,9 @@ final class AuthService: ObservableObject {
         guard let url = URL(string: baseURL + path) else {
             throw AuthError.invalidURL
         }
+        guard Self.isSecureAuthURL(url) else {
+            throw AuthError.insecureURL
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -185,15 +188,30 @@ final class AuthService: ObservableObject {
 
     enum AuthError: LocalizedError {
         case invalidURL
+        case insecureURL
         case networkError
         case serverError(String)
 
         var errorDescription: String? {
             switch self {
             case .invalidURL: return "Invalid server URL"
+            case .insecureURL: return "Sync login requires HTTPS"
             case .networkError: return "Network error — check your connection"
             case .serverError(let msg): return msg
             }
         }
+    }
+
+    private static func isSecureAuthURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "https" { return true }
+        #if DEBUG
+        if scheme == "http",
+           let host = url.host?.lowercased(),
+           ["localhost", "127.0.0.1", "::1"].contains(host) {
+            return true
+        }
+        #endif
+        return false
     }
 }

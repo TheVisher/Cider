@@ -270,6 +270,8 @@ final class AIAssistantViewModel: ObservableObject {
                 if !response.toolCallsMade.isEmpty {
                     logger.info("Orchestrator made \(response.toolCallsMade.count) tool call(s)")
                 }
+            } catch is CancellationError {
+                logger.debug("Orchestrator stream cancelled")
             } catch {
                 logger.error("Orchestrator error: \(error.localizedDescription, privacy: .public)")
                 await finishTypewriter()
@@ -312,6 +314,8 @@ final class AIAssistantViewModel: ObservableObject {
                 await finishTypewriter()
                 let assistantMessage = AIAssistantMessage(role: .assistant, content: streamingText)
                 messages.append(assistantMessage)
+            } catch is CancellationError {
+                logger.debug("AI response stream cancelled")
             } catch {
                 logger.error("AI response error: \(error.localizedDescription, privacy: .public)")
                 await finishTypewriter()

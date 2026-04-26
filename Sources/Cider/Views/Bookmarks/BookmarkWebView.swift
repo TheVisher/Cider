@@ -8,7 +8,9 @@ struct BookmarkWebView: NSViewRepresentable {
     var isActive: Bool = true
     var store: DetailWebViewStore
 
-    func makeCoordinator() -> Coordinator { Coordinator(isLoading: $isLoading) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isLoading: $isLoading, store: store)
+    }
 
     func makeNSView(context: Context) -> NSView {
         // Use a wrapper view so the WKWebView can be reattached from the store
@@ -41,22 +43,31 @@ struct BookmarkWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding var isLoading: Bool
-        init(isLoading: Binding<Bool>) { _isLoading = isLoading }
+        private weak var store: DetailWebViewStore?
+
+        init(isLoading: Binding<Bool>, store: DetailWebViewStore) {
+            _isLoading = isLoading
+            self.store = store
+        }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation _: WKNavigation!) {
             isLoading = true
+            store?.setWebViewReady(false)
         }
 
         func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
             isLoading = false
+            store?.setWebViewReady(true)
         }
 
         func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError _: Error) {
             isLoading = false
+            store?.setWebViewReady(true)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError _: Error) {
             isLoading = false
+            store?.setWebViewReady(true)
         }
 
         func webView(

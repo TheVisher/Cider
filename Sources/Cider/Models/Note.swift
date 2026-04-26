@@ -93,6 +93,15 @@ struct Note: Identifiable, Hashable {
         return urls
     }
 
+    /// Extract only note-owned attachment URLs that are safe to upload during sync.
+    func attachmentImageURLs(from text: String) -> [URL] {
+        let attachmentDir = absoluteFileURL.deletingLastPathComponent()
+            .appendingPathComponent(".attachments", isDirectory: true)
+        return imageURLs(from: text).filter {
+            FileContainment.isContained($0, in: attachmentDir)
+        }
+    }
+
     /// Word count from plain text content (HTML stripped).
     var wordCount: Int {
         let plain = strippedContent
@@ -133,23 +142,35 @@ struct Note: Identifiable, Hashable {
     }
 
     private func resolveImagePath(_ path: String, base: URL) -> URL? {
+        func existingContainedURL(_ url: URL, allowedRoots: [URL]) -> URL? {
+            let standardized = url.standardizedFileURL
+            guard FileManager.default.fileExists(atPath: standardized.path),
+                  FileContainment.isContained(standardized, inAny: allowedRoots) else {
+                return nil
+            }
+            return standardized
+        }
+
+        let attachmentDir = base.appendingPathComponent(".attachments", isDirectory: true)
+        let allowedRoots = [base, attachmentDir]
+
+        if path.hasPrefix("cider-vault://"),
+           let url = URL(string: path) {
+            return existingContainedURL(URL(fileURLWithPath: url.path), allowedRoots: allowedRoots)
+        }
         if path.hasPrefix("file:///") {
             let posixPath = String(path.dropFirst("file://".count))
-            let url = URL(fileURLWithPath: posixPath)
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            return existingContainedURL(URL(fileURLWithPath: posixPath), allowedRoots: allowedRoots)
         }
         if path.hasPrefix("./") {
             let relative = String(path.dropFirst(2))
-            let url = base.appendingPathComponent(relative)
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            return existingContainedURL(base.appendingPathComponent(relative), allowedRoots: allowedRoots)
         }
         if path.hasPrefix(".attachments/") {
-            let url = base.appendingPathComponent(path)
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            return existingContainedURL(base.appendingPathComponent(path), allowedRoots: [attachmentDir])
         }
         if path.hasPrefix("/") {
-            let url = URL(fileURLWithPath: path)
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            return existingContainedURL(URL(fileURLWithPath: path), allowedRoots: allowedRoots)
         }
         return nil
     }

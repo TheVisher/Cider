@@ -17,8 +17,8 @@ struct AgentRoutingInstructionsTests {
         #expect(text.contains("If the destination is unclear, save to Inbox and explain why."))
     }
 
-    @Test("process runtime bookmark capture prompt prefers raw URL save and native enrichment")
-    func processRuntimeBookmarkCapturePromptPrefersRawURLSave() async throws {
+    @Test("remote channels cannot use process runtimes")
+    func remoteChannelsCannotUseProcessRuntimes() async throws {
         let tempVault = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempVault, withIntermediateDirectories: true)
 
@@ -35,27 +35,17 @@ struct AgentRoutingInstructionsTests {
         let orchestrator = AgentOrchestrator()
         await orchestrator.setRuntime(runtime)
 
-        _ = try await orchestrator.handleMessage(
-            .telegram(
+        await #expect(throws: AgentError.self) {
+            _ = try await orchestrator.handleMessage(.telegram(
                 text: "save this https://www.imdb.com/title/tt8633478 to Media/Movies",
                 threadID: UUID(),
                 channelThreadID: "test-chat",
                 context: .empty,
                 senderID: "tester",
                 senderDisplayName: "Tester"
-            )
-        )
-
-        let prompt = runtime.lastSystemPrompt
-        #expect(prompt?.contains("cider-cli bookmark add \"<url>\" --path \"<vault-path>\"") == true)
-        #expect(prompt?.contains("Do not pass `--title` unless the user explicitly gave the final title") == true)
-        #expect(prompt?.contains("Only add extra AI enrichment after the bookmark already exists") == true)
-        #expect(prompt?.contains("You are Cider's Telegram bookmark capture fast path.") == true)
-        #expect(prompt?.contains("Do not invoke external skills or read skill docs.") == true)
-        #expect(prompt?.contains("Default to `Inbox/Bookmarks` if routing is not obvious within one quick check.") == true)
-        #expect(prompt?.contains("--title \"<title>\"") == false)
-        #expect(prompt?.contains("Vault agent instructions:") == false)
-        #expect(prompt?.contains("Recent prior turns:") == false)
+            ))
+        }
+        #expect(runtime.lastSystemPrompt == nil)
     }
 }
 

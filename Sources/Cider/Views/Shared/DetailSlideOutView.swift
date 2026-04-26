@@ -336,8 +336,8 @@ struct DetailSlideOutView: View {
                 heroModeButton(
                     symbol: "globe",
                     mode: .web,
-                    isLoading: !webViewStore.webViewReady,
-                    isDisabled: !webViewStore.webViewReady && heroMode != .web,
+                    isLoading: heroMode == .web && !webViewStore.webViewReady,
+                    isDisabled: false,
                     help: webViewStore.webViewReady ? "View live page" : "Loading page..."
                 )
             }
@@ -399,7 +399,7 @@ struct BookmarkPageToolbar: View {
                         heroMode = heroMode == .reader ? .thumbnail : .reader
                     }
                 }
-                toolbarButton("globe", active: heroMode == .web, disabled: !webViewReady && heroMode != .web, loading: !webViewReady, help: webViewReady ? "View live page" : "Loading page...") {
+                toolbarButton("globe", active: heroMode == .web, loading: heroMode == .web && !webViewReady, help: webViewReady ? "View live page" : "Loading page...") {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         heroMode = heroMode == .web ? .thumbnail : .web
                     }

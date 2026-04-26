@@ -111,6 +111,7 @@ extension CiderPanelView {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        detailWebViewStore.reset()
         selectedContact = nil
         selectedVaultFile = nil
 
@@ -139,6 +140,7 @@ extension CiderPanelView {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        detailWebViewStore.reset()
         selectedDateCard = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
@@ -165,6 +167,7 @@ extension CiderPanelView {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        detailWebViewStore.reset()
         selectedDateCard = nil
         selectedContact = nil
         selectedVaultFile = nil
@@ -192,6 +195,7 @@ extension CiderPanelView {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        detailWebViewStore.reset()
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
@@ -223,6 +227,7 @@ extension CiderPanelView {
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
+        detailWebViewStore.reset()
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil

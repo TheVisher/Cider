@@ -93,7 +93,6 @@ enum NoteDragPayload {
         return UUID(uuidString: trimmed)
     }
 
-    @MainActor
     static func makeMarkdownFileProvider(for note: Note) -> NSItemProvider? {
         guard let fileURL = markdownExportURL(for: note) else { return nil }
 
@@ -103,7 +102,6 @@ enum NoteDragPayload {
         return provider
     }
 
-    @MainActor
     static func makeInternalProvider(for note: Note) -> NSItemProvider {
         let provider = NSItemProvider(
             object: "\(textPrefix)\(note.id.uuidString)" as NSString

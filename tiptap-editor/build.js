@@ -43,6 +43,7 @@ async function build() {
   fs.writeFileSync(path.join(distDir, 'editor.html'), html);
 
   // Copy dist to Resources
+  fs.rmSync(resourceDir, { recursive: true, force: true });
   fs.mkdirSync(resourceDir, { recursive: true });
   for (const file of fs.readdirSync(distDir)) {
     fs.copyFileSync(path.join(distDir, file), path.join(resourceDir, file));

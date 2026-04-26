@@ -68,7 +68,7 @@ enum AgentToolRegistration {
             name: "getItemsByTag",
             description: "Get all items with a specific tag.",
             parameters: [
-                AgentToolParameter(name: "tag", type: .string, description: "Tag name to search for", required: true)
+                AgentToolParameter(name: "tagName", type: .string, description: "Tag name to search for", required: true)
             ],
             categories: [.search],
             requiresConfirmation: false,
@@ -160,7 +160,7 @@ enum AgentToolRegistration {
             description: "Add a tag to items matching a search query.",
             parameters: [
                 AgentToolParameter(name: "searchQuery", type: .string, description: "Keyword to find items to tag", required: true),
-                AgentToolParameter(name: "tag", type: .string, description: "Tag to apply", required: true)
+                AgentToolParameter(name: "tagName", type: .string, description: "Tag to apply", required: true)
             ],
             categories: [.vaultWrite],
             requiresConfirmation: false,
@@ -172,7 +172,7 @@ enum AgentToolRegistration {
             description: "Remove a tag from items matching a search query.",
             parameters: [
                 AgentToolParameter(name: "searchQuery", type: .string, description: "Keyword to find items to untag", required: true),
-                AgentToolParameter(name: "tag", type: .string, description: "Tag to remove", required: true)
+                AgentToolParameter(name: "tagName", type: .string, description: "Tag to remove", required: true)
             ],
             categories: [.vaultWrite],
             requiresConfirmation: false,
@@ -183,7 +183,7 @@ enum AgentToolRegistration {
             name: "renameBookmark",
             description: "Rename a bookmark by searching for it.",
             parameters: [
-                AgentToolParameter(name: "searchQuery", type: .string, description: "Keyword to find the bookmark", required: true),
+                AgentToolParameter(name: "currentTitle", type: .string, description: "Keyword to find the bookmark", required: true),
                 AgentToolParameter(name: "newTitle", type: .string, description: "New title for the bookmark", required: true)
             ],
             categories: [.vaultWrite],
@@ -222,7 +222,7 @@ enum AgentToolRegistration {
             name: "renameFolder",
             description: "Rename an existing folder.",
             parameters: [
-                AgentToolParameter(name: "folderName", type: .string, description: "Current folder name", required: true),
+                AgentToolParameter(name: "currentName", type: .string, description: "Current folder name", required: true),
                 AgentToolParameter(name: "newName", type: .string, description: "New folder name", required: true)
             ],
             categories: [.vaultWrite],
@@ -282,7 +282,7 @@ enum AgentToolRegistration {
                 AgentToolParameter(name: "deleteEntirely", type: .boolean, description: "If true, delete the event. If false, just disable notifications.", required: false)
             ],
             categories: [.reminder],
-            requiresConfirmation: false,
+            requiresConfirmation: true,
             execute: { args in MLXToolExecutor.execute(name: "cancelReminder", arguments: args) }
         ))
 

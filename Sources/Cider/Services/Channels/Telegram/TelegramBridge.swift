@@ -401,7 +401,7 @@ actor TelegramBridge: ChannelBridge {
             Cider Telegram commands:
             /status — show bridge and runtime health
             /runtime — show active runtime
-            /runtime codex|apple|local — switch runtime
+            /runtime apple|local — switch runtime
             /restart — restart the active runtime
             """
 
@@ -415,7 +415,7 @@ actor TelegramBridge: ChannelBridge {
                 return await runtimeSummary()
             }
             guard let selection = parseRuntimeSelection(parts[1]) else {
-                return "Unknown runtime. Use /runtime codex, /runtime apple, or /runtime local."
+                return "Unknown runtime. Use /runtime apple or /runtime local. Codex CLI is only available from the local Cider UI."
             }
             await AIAssistantViewModel.shared.switchRuntimeFromExternalCommand(to: selection)
             let summary = await runtimeSummary()
@@ -439,7 +439,7 @@ actor TelegramBridge: ChannelBridge {
     private func parseRuntimeSelection(_ raw: String) -> AIAgentRuntimeSelection? {
         switch raw.lowercased() {
         case "codex", "codexcli", "codex-cli":
-            return .codexCLI
+            return nil
         case "apple", "appleintelligence", "foundation":
             return .appleIntelligence
         case "local", "mlx", "qwen":

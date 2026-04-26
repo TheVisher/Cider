@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os
 
@@ -49,7 +50,7 @@ actor AgentProcessManager {
         proc.standardOutput = stdout
         proc.standardError = stderr
 
-        var env = ProcessInfo.processInfo.environment
+        var env: [String: String] = [:]
         for (key, value) in environment {
             env[key] = value
         }
@@ -92,7 +93,7 @@ actor AgentProcessManager {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             if process.isRunning {
-                process.interrupt()
+                kill(process.processIdentifier, SIGKILL)
             }
         }
 
