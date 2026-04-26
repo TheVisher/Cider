@@ -131,6 +131,7 @@ main {
 }
 
 .social-token {
+  position: relative;
   justify-content: center;
   width: 2.55rem;
   height: 2.55rem;
@@ -155,13 +156,45 @@ main {
   transform: rotate(6deg) translateY(0.08rem);
 }
 
+.social-token:nth-child(3) {
+  transform: rotate(-4deg) translateY(-0.04rem);
+}
+
+.social-token:nth-child(4) {
+  transform: rotate(5deg) translateY(0.08rem);
+}
+
 .social-token svg {
   width: 1.08rem;
   height: 1.08rem;
   fill: currentColor;
 }
 
-.social-token:hover {
+.social-token-soon {
+  color: rgba(246, 239, 228, 0.42);
+  opacity: 0.82;
+}
+
+.social-token-soon small,
+.social-card-soon small {
+  position: absolute;
+  top: -0.52rem;
+  right: -0.5rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.3rem 0.12rem;
+  color: #211607;
+  background: var(--peel-highlight);
+  box-shadow: 0 8px 22px rgba(217, 119, 6, 0.24);
+  font-size: 0.56rem;
+  font-weight: 900;
+  line-height: 1;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08rem;
+  text-underline-offset: 0.12rem;
+  text-transform: uppercase;
+}
+
+.social-token:not(.social-token-soon):hover {
   border-color: rgba(244, 164, 43, 0.34);
   color: var(--ink);
   box-shadow:
@@ -787,6 +820,7 @@ h3 {
 }
 
 .social-card {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.52rem;
@@ -811,6 +845,14 @@ h3 {
   transform: rotateX(10deg) rotateY(10deg) rotateZ(2deg);
 }
 
+.social-card:nth-child(3) {
+  transform: rotateX(9deg) rotateY(-7deg) rotateZ(1deg);
+}
+
+.social-card:nth-child(4) {
+  transform: rotateX(9deg) rotateY(8deg) rotateZ(-1deg);
+}
+
 .social-card svg {
   width: 1rem;
   height: 1rem;
@@ -832,6 +874,12 @@ h3 {
 
 .social-card-muted {
   color: rgba(246, 239, 228, 0.44);
+  padding-right: 0.95rem;
+  cursor: default;
+}
+
+.social-card-soon {
+  opacity: 0.84;
 }
 
 .reveal {
