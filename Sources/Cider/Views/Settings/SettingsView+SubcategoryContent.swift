@@ -23,6 +23,11 @@ extension SettingsView {
                         subtitle: "Periodically check for new versions of Cider",
                         isOn: $automaticallyChecksForUpdates
                     )
+                    SettingsToggleRow(
+                        title: "Show update reminders in sidebar",
+                        subtitle: "Show a sidebar badge when a new version of Cider is available",
+                        isOn: $showSidebarUpdateReminders
+                    )
 
                     HStack {
                         Button("Check for Updates Now") {
