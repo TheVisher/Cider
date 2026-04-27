@@ -83,8 +83,12 @@ final class SparkleUpdaterService: NSObject, ObservableObject {
 
     func dismissCurrentSidebarUpdateReminder() {
         guard let availableUpdateIdentifier else { return }
-        dismissedSidebarUpdateIdentifier = availableUpdateIdentifier
-        defaults.set(availableUpdateIdentifier, forKey: DefaultsKey.dismissedSidebarUpdateIdentifier)
+        dismissSidebarUpdateReminder(identifier: availableUpdateIdentifier)
+    }
+
+    func dismissSidebarUpdateReminder(identifier: String) {
+        dismissedSidebarUpdateIdentifier = identifier
+        defaults.set(identifier, forKey: DefaultsKey.dismissedSidebarUpdateIdentifier)
     }
 
     func markUpdateAvailable(identifier: String, displayVersion: String?) {
@@ -165,6 +169,10 @@ private final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     ) {
         if choice == .install {
             service?.clearAvailableUpdate()
+        } else if choice == .skip {
+            service?.dismissSidebarUpdateReminder(
+                identifier: "\(updateItem.displayVersionString)-\(updateItem.versionString)"
+            )
         }
     }
 }

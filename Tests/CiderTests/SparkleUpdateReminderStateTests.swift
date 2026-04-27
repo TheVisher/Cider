@@ -67,4 +67,31 @@ final class SparkleUpdateReminderStateTests: XCTestCase {
 
         XCTAssertFalse(state.shouldShowSidebarReminder)
     }
+
+    @MainActor
+    func testServicePersistsDismissedSidebarUpdateIdentifier() {
+        let suiteName = "SparkleUpdateReminderStateTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let service = SparkleUpdaterService(defaults: defaults)
+        service.markUpdateAvailable(identifier: "1.0.0-100", displayVersion: "1.0.0")
+
+        XCTAssertTrue(service.shouldShowSidebarUpdateReminder)
+
+        service.dismissSidebarUpdateReminder(identifier: "1.0.0-100")
+
+        XCTAssertFalse(service.shouldShowSidebarUpdateReminder)
+
+        let reloadedService = SparkleUpdaterService(defaults: defaults)
+        reloadedService.markUpdateAvailable(identifier: "1.0.0-100", displayVersion: "1.0.0")
+
+        XCTAssertFalse(reloadedService.shouldShowSidebarUpdateReminder)
+
+        reloadedService.markUpdateAvailable(identifier: "1.0.1-101", displayVersion: "1.0.1")
+
+        XCTAssertTrue(reloadedService.shouldShowSidebarUpdateReminder)
+    }
 }
