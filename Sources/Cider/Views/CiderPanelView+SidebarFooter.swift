@@ -603,15 +603,9 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
             HStack(spacing: Spacing.xs) {
                 compactIconButton(
                     systemImage: "gearshape",
-                    help: updaterService.shouldShowSidebarUpdateReminder ? "Update Available" : "Settings",
-                    accessibilityLabel: updaterService.shouldShowSidebarUpdateReminder ? "Check for updates" : "Settings",
-                    action: {
-                        if updaterService.shouldShowSidebarUpdateReminder {
-                            updaterService.checkForUpdates()
-                        } else {
-                            onOpenSettings()
-                        }
-                    }
+                    help: updaterService.shouldShowSidebarUpdateReminder ? "Settings - update available" : "Settings",
+                    accessibilityLabel: updaterService.shouldShowSidebarUpdateReminder ? "Settings, update available" : "Settings",
+                    action: onOpenSettings
                 )
                 .overlay(alignment: .topTrailing) {
                     if updaterService.shouldShowSidebarUpdateReminder {
