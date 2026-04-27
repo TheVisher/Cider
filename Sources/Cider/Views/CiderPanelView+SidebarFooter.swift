@@ -428,6 +428,8 @@ extension CiderPanelView {
 private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions: View, AIQuickActions: View>: View {
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
+    @ObservedObject private var updaterService = SparkleUpdaterService.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Binding var isExpanded: Bool
     @Binding var showAIQuickActions: Bool
@@ -499,6 +501,9 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
             syncStatusBadge
 
             VStack(spacing: Spacing.xs) {
+                if updaterService.shouldShowSidebarUpdateReminder {
+                    expandedUpdateReminderButton
+                }
                 HomeOverviewQuickActionButton(
                     title: "Settings",
                     systemImage: "gearshape",
@@ -678,6 +683,50 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
         .buttonStyle(.plain)
         .disabled(disabled)
         .help(help)
+    }
+
+    private var expandedUpdateReminderButton: some View {
+        Button {
+            updaterService.checkForUpdates()
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.controlAccent)
+                    .frame(width: 18, height: 18)
+
+                Text("Update Available")
+                    .font(CiderFont.labelMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: Spacing.sm)
+
+                Button {
+                    updaterService.dismissCurrentSidebarUpdateReminder()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(CiderFont.microSemibold)
+                        .foregroundColor(CiderColors.quaternary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Hide this update reminder")
+            }
+            .padding(.horizontal, Spacing.sm)
+            .frame(maxWidth: .infinity, minHeight: HomeOverviewDesign.quickActionButtonHeight, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.controlAccent.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                            .stroke(CiderColors.controlAccent.opacity(0.35), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Check for updates")
     }
 
     private var compactSyncStatusText: String {
