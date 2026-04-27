@@ -135,7 +135,7 @@ final class SparkleUpdaterService: NSObject, ObservableObject {
     }
 }
 
-private final class SparkleUpdaterDelegate: NSObject, @preconcurrency SPUUpdaterDelegate {
+private final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     weak var service: SparkleUpdaterService?
 
     @MainActor
