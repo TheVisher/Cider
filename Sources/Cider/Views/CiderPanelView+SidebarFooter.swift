@@ -430,6 +430,8 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
     @ObservedObject private var syncService = SyncService.shared
     @ObservedObject private var updaterService = SparkleUpdaterService.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var updateBadgePulse = false
+    @State private var updateBadgePulseToken = 0
 
     @Binding var isExpanded: Bool
     @Binding var showAIQuickActions: Bool
@@ -602,6 +604,7 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                 compactIconButton(
                     systemImage: "gearshape",
                     help: updaterService.shouldShowSidebarUpdateReminder ? "Update Available" : "Settings",
+                    accessibilityLabel: updaterService.shouldShowSidebarUpdateReminder ? "Check for updates" : "Settings",
                     action: {
                         if updaterService.shouldShowSidebarUpdateReminder {
                             updaterService.checkForUpdates()
@@ -645,6 +648,18 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                         .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
                 )
         )
+        .onAppear {
+            triggerUpdateBadgePulse()
+        }
+        .onChange(of: updaterService.availableUpdateIdentifier) { _, _ in
+            triggerUpdateBadgePulse()
+        }
+        .onChange(of: updaterService.shouldShowSidebarUpdateReminder) { _, _ in
+            triggerUpdateBadgePulse()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            triggerUpdateBadgePulse()
+        }
     }
 
     private var compactNewButton: some View {
@@ -687,6 +702,7 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
     private func compactIconButton(
         systemImage: String,
         help: String,
+        accessibilityLabel: String? = nil,
         disabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
@@ -701,6 +717,7 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
         .buttonStyle(.plain)
         .disabled(disabled)
         .help(help)
+        .accessibilityLabel(Text(accessibilityLabel ?? help))
     }
 
     private var expandedUpdateReminderButton: some View {
@@ -753,13 +770,43 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
     }
 
     private var updateReminderBadge: some View {
-        Circle()
+        let isPulsing = !reduceMotion && updateBadgePulse
+
+        return Circle()
             .fill(CiderColors.controlAccent)
             .frame(width: 7, height: 7)
-            .shadow(color: CiderColors.controlAccent.opacity(reduceMotion ? 0.25 : 0.45), radius: reduceMotion ? 2 : 5)
-            .scaleEffect(reduceMotion ? 1 : 1.08)
-            .animation(reduceMotion ? .none : .easeInOut(duration: 1.2).repeatCount(3, autoreverses: true), value: updaterService.availableUpdateIdentifier)
+            .shadow(color: CiderColors.controlAccent.opacity(isPulsing ? 0.45 : 0.25), radius: isPulsing ? 5 : 2)
+            .scaleEffect(isPulsing ? 1.08 : 1)
             .accessibilityHidden(true)
+    }
+
+    private func triggerUpdateBadgePulse() {
+        updateBadgePulseToken += 1
+        let pulseToken = updateBadgePulseToken
+
+        var resetTransaction = Transaction()
+        resetTransaction.disablesAnimations = true
+        withTransaction(resetTransaction) {
+            updateBadgePulse = false
+        }
+
+        guard updaterService.shouldShowSidebarUpdateReminder, !reduceMotion else { return }
+
+        DispatchQueue.main.async {
+            guard pulseToken == updateBadgePulseToken else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatCount(3, autoreverses: true)) {
+                updateBadgePulse = true
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.7) {
+            guard pulseToken == updateBadgePulseToken else { return }
+            var resetTransaction = Transaction()
+            resetTransaction.disablesAnimations = true
+            withTransaction(resetTransaction) {
+                updateBadgePulse = false
+            }
+        }
     }
 
     private var compactSyncStatusText: String {
