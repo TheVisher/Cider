@@ -561,6 +561,12 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                                 .font(CiderFont.captionSemibold)
                                 .foregroundColor(authService.isLoggedIn ? CiderColors.controlAccent : CiderColors.tertiary)
                         }
+                        .overlay(alignment: .topTrailing) {
+                            if updaterService.shouldShowSidebarUpdateReminder {
+                                updateReminderBadge
+                                    .offset(x: 2, y: -2)
+                            }
+                        }
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(authService.isLoggedIn ? authService.accountEmail : "Sign In")
@@ -595,9 +601,21 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
             HStack(spacing: Spacing.xs) {
                 compactIconButton(
                     systemImage: "gearshape",
-                    help: "Settings",
-                    action: onOpenSettings
+                    help: updaterService.shouldShowSidebarUpdateReminder ? "Update Available" : "Settings",
+                    action: {
+                        if updaterService.shouldShowSidebarUpdateReminder {
+                            updaterService.checkForUpdates()
+                        } else {
+                            onOpenSettings()
+                        }
+                    }
                 )
+                .overlay(alignment: .topTrailing) {
+                    if updaterService.shouldShowSidebarUpdateReminder {
+                        updateReminderBadge
+                            .offset(x: -4, y: 3)
+                    }
+                }
 
                 compactIconButton(
                     systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
@@ -732,6 +750,16 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                         .stroke(CiderColors.controlAccent.opacity(0.35), lineWidth: 1)
                 )
         )
+    }
+
+    private var updateReminderBadge: some View {
+        Circle()
+            .fill(CiderColors.controlAccent)
+            .frame(width: 7, height: 7)
+            .shadow(color: CiderColors.controlAccent.opacity(reduceMotion ? 0.25 : 0.45), radius: reduceMotion ? 2 : 5)
+            .scaleEffect(reduceMotion ? 1 : 1.08)
+            .animation(reduceMotion ? .none : .easeInOut(duration: 1.2).repeatCount(3, autoreverses: true), value: updaterService.availableUpdateIdentifier)
+            .accessibilityHidden(true)
     }
 
     private var compactSyncStatusText: String {
