@@ -603,16 +603,9 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
             HStack(spacing: Spacing.xs) {
                 compactIconButton(
                     systemImage: "gearshape",
-                    help: updaterService.shouldShowSidebarUpdateReminder ? "Settings - update available" : "Settings",
-                    accessibilityLabel: updaterService.shouldShowSidebarUpdateReminder ? "Settings, update available" : "Settings",
+                    help: "Settings",
                     action: onOpenSettings
                 )
-                .overlay(alignment: .topTrailing) {
-                    if updaterService.shouldShowSidebarUpdateReminder {
-                        updateReminderBadge
-                            .offset(x: -4, y: 3)
-                    }
-                }
 
                 compactIconButton(
                     systemImage: authService.isLoggedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus",
