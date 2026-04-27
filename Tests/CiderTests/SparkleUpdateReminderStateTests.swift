@@ -42,6 +42,22 @@ final class SparkleUpdateReminderStateTests: XCTestCase {
         XCTAssertTrue(state.shouldShowSidebarReminder)
     }
 
+    func testReminderStateUsesPersistedDismissalForExactIdentifierOnly() {
+        let dismissedCurrent = SparkleUpdateReminderState(
+            availableUpdateIdentifier: "1.0.0-100",
+            sidebarRemindersEnabled: true,
+            dismissedUpdateIdentifier: "1.0.0-100"
+        )
+        let nextUpdate = SparkleUpdateReminderState(
+            availableUpdateIdentifier: "1.0.1-101",
+            sidebarRemindersEnabled: true,
+            dismissedUpdateIdentifier: "1.0.0-100"
+        )
+
+        XCTAssertFalse(dismissedCurrent.shouldShowSidebarReminder)
+        XCTAssertTrue(nextUpdate.shouldShowSidebarReminder)
+    }
+
     func testReminderHiddenWhenNoUpdateIsAvailable() {
         let state = SparkleUpdateReminderState(
             availableUpdateIdentifier: nil,
