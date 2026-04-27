@@ -686,47 +686,52 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
     }
 
     private var expandedUpdateReminderButton: some View {
-        Button {
-            updaterService.checkForUpdates()
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(CiderFont.captionSemibold)
-                    .foregroundColor(CiderColors.controlAccent)
-                    .frame(width: 18, height: 18)
-
-                Text("Update Available")
-                    .font(CiderFont.labelMedium)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(1)
-
-                Spacer(minLength: Spacing.sm)
-
-                Button {
-                    updaterService.dismissCurrentSidebarUpdateReminder()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(CiderFont.microSemibold)
-                        .foregroundColor(CiderColors.quaternary)
+        HStack(spacing: Spacing.sm) {
+            Button {
+                updaterService.checkForUpdates()
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.controlAccent)
                         .frame(width: 18, height: 18)
-                        .contentShape(Rectangle())
+
+                    Text("Update Available")
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: Spacing.sm)
                 }
-                .buttonStyle(.plain)
-                .help("Hide this update reminder")
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, Spacing.sm)
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity, minHeight: HomeOverviewDesign.quickActionButtonHeight, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .fill(CiderColors.controlAccent.opacity(0.12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                            .stroke(CiderColors.controlAccent.opacity(0.35), lineWidth: 1)
-                    )
-            )
+            .help("Check for updates")
+
+            Button {
+                updaterService.dismissCurrentSidebarUpdateReminder()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.microSemibold)
+                    .foregroundColor(CiderColors.quaternary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Hide this update reminder")
+            .accessibilityLabel("Hide this update reminder")
         }
-        .buttonStyle(.plain)
-        .help("Check for updates")
+        .padding(.horizontal, Spacing.sm)
+        .frame(maxWidth: .infinity, minHeight: HomeOverviewDesign.quickActionButtonHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.controlAccent.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .stroke(CiderColors.controlAccent.opacity(0.35), lineWidth: 1)
+                )
+        )
     }
 
     private var compactSyncStatusText: String {
