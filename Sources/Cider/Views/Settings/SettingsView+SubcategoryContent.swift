@@ -41,6 +41,20 @@ extension SettingsView {
                                 .foregroundColor(CiderColors.quaternary)
                         }
                     }
+
+                    #if DEBUG
+                    HStack {
+                        Button("Simulate Update Available") {
+                            SparkleUpdaterService.shared.simulateSidebarUpdateAvailableForDebug()
+                        }
+                        .controlSize(.small)
+
+                        Button("Clear Simulated Update") {
+                            SparkleUpdaterService.shared.clearAvailableUpdate()
+                        }
+                        .controlSize(.small)
+                    }
+                    #endif
                 }
                 Spacer(minLength: 0)
             }

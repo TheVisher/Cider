@@ -101,6 +101,16 @@ final class SparkleUpdaterService: NSObject, ObservableObject {
         availableUpdateDisplayVersion = nil
     }
 
+    #if DEBUG
+    func simulateSidebarUpdateAvailableForDebug() {
+        let buildIdentifier = String(Int(Date().timeIntervalSince1970))
+        markUpdateAvailable(
+            identifier: "debug-update-\(buildIdentifier)",
+            displayVersion: "Debug Update"
+        )
+    }
+    #endif
+
     func prepareForSparkleUserInterface() {
         NSApp.activate(ignoringOtherApps: true)
 
