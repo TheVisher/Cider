@@ -301,6 +301,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Cider", action: #selector(toggleCiderPanelFromMenu), keyEquivalent: " "))
+        #if DEBUG
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(debugMenuItem(title: "Simulate Update Available", action: #selector(simulateUpdateAvailableFromMenu)))
+        menu.addItem(debugMenuItem(title: "Clear Simulated Update", action: #selector(clearSimulatedUpdateFromMenu)))
+        #endif
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Cider", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
@@ -310,6 +315,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleCiderPanelFromMenu() {
         toggleCiderPanel()
     }
+
+    #if DEBUG
+    private func debugMenuItem(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc func simulateUpdateAvailableFromMenu() {
+        SparkleUpdaterService.shared.simulateSidebarUpdateAvailableForDebug()
+        showCiderPanel()
+    }
+
+    @objc func clearSimulatedUpdateFromMenu() {
+        SparkleUpdaterService.shared.clearAvailableUpdate()
+        showCiderPanel()
+    }
+    #endif
 
     // MARK: - Config Changes
 

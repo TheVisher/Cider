@@ -23,6 +23,11 @@ extension SettingsView {
                         subtitle: "Periodically check for new versions of Cider",
                         isOn: $automaticallyChecksForUpdates
                     )
+                    SettingsToggleRow(
+                        title: "Show update reminders in sidebar",
+                        subtitle: "Show a sidebar badge when a new version of Cider is available",
+                        isOn: $showSidebarUpdateReminders
+                    )
 
                     HStack {
                         Button("Check for Updates Now") {
@@ -36,6 +41,20 @@ extension SettingsView {
                                 .foregroundColor(CiderColors.quaternary)
                         }
                     }
+
+                    #if DEBUG
+                    HStack {
+                        Button("Simulate Update Available") {
+                            SparkleUpdaterService.shared.simulateSidebarUpdateAvailableForDebug()
+                        }
+                        .controlSize(.small)
+
+                        Button("Clear Simulated Update") {
+                            SparkleUpdaterService.shared.clearAvailableUpdate()
+                        }
+                        .controlSize(.small)
+                    }
+                    #endif
                 }
                 Spacer(minLength: 0)
             }

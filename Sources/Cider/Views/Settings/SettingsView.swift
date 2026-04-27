@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State var isCreatingDatabaseBackup = false
     @State var pendingSubcategory: SettingsSubcategory?
     @State var automaticallyChecksForUpdates = SparkleUpdaterService.shared.automaticallyChecksForUpdates
+    @State var showSidebarUpdateReminders = SparkleUpdaterService.shared.showSidebarUpdateReminders
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
@@ -69,6 +70,9 @@ struct SettingsView: View {
         }
         .onChange(of: automaticallyChecksForUpdates) { _, newValue in
             SparkleUpdaterService.shared.automaticallyChecksForUpdates = newValue
+        }
+        .onChange(of: showSidebarUpdateReminders) { _, newValue in
+            SparkleUpdaterService.shared.showSidebarUpdateReminders = newValue
         }
         .onReceive(NotificationCenter.default.publisher(for: .settingsNavigate)) { notification in
             guard let category = notification.userInfo?["category"] as? String else { return }

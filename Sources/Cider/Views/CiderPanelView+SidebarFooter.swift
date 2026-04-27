@@ -428,6 +428,10 @@ extension CiderPanelView {
 private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions: View, AIQuickActions: View>: View {
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
+    @ObservedObject private var updaterService = SparkleUpdaterService.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var updateBadgePulse = false
+    @State private var updateBadgePulseToken = 0
 
     @Binding var isExpanded: Bool
     @Binding var showAIQuickActions: Bool
@@ -499,6 +503,9 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
             syncStatusBadge
 
             VStack(spacing: Spacing.xs) {
+                if updaterService.shouldShowSidebarUpdateReminder {
+                    expandedUpdateReminderButton
+                }
                 HomeOverviewQuickActionButton(
                     title: "Settings",
                     systemImage: "gearshape",
@@ -555,6 +562,12 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                             Image(systemName: "person.fill")
                                 .font(CiderFont.captionSemibold)
                                 .foregroundColor(authService.isLoggedIn ? CiderColors.controlAccent : CiderColors.tertiary)
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if updaterService.shouldShowSidebarUpdateReminder {
+                                updateReminderBadge
+                                    .offset(x: 2, y: -2)
+                            }
                         }
 
                     VStack(alignment: .leading, spacing: 1) {
@@ -622,6 +635,18 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                         .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
                 )
         )
+        .onAppear {
+            triggerUpdateBadgePulse()
+        }
+        .onChange(of: updaterService.availableUpdateIdentifier) { _, _ in
+            triggerUpdateBadgePulse()
+        }
+        .onChange(of: updaterService.shouldShowSidebarUpdateReminder) { _, _ in
+            triggerUpdateBadgePulse()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            triggerUpdateBadgePulse()
+        }
     }
 
     private var compactNewButton: some View {
@@ -664,6 +689,7 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
     private func compactIconButton(
         systemImage: String,
         help: String,
+        accessibilityLabel: String? = nil,
         disabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
@@ -678,6 +704,96 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
         .buttonStyle(.plain)
         .disabled(disabled)
         .help(help)
+        .accessibilityLabel(Text(accessibilityLabel ?? help))
+    }
+
+    private var expandedUpdateReminderButton: some View {
+        HStack(spacing: Spacing.sm) {
+            Button {
+                updaterService.checkForUpdates()
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 18, height: 18)
+
+                    Text("Update Available")
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: Spacing.sm)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, minHeight: HomeOverviewDesign.quickActionButtonHeight, alignment: .leading)
+            .help("Check for updates")
+
+            Button {
+                updaterService.dismissCurrentSidebarUpdateReminder()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(CiderFont.microSemibold)
+                    .foregroundColor(CiderColors.quaternary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Hide this update reminder")
+            .accessibilityLabel("Hide this update reminder")
+        }
+        .padding(.horizontal, Spacing.sm)
+        .frame(maxWidth: .infinity, minHeight: HomeOverviewDesign.quickActionButtonHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.controlAccent.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .stroke(CiderColors.controlAccent.opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+
+    private var updateReminderBadge: some View {
+        let isPulsing = !reduceMotion && updateBadgePulse
+
+        return Circle()
+            .fill(CiderColors.controlAccent)
+            .frame(width: 7, height: 7)
+            .shadow(color: CiderColors.controlAccent.opacity(isPulsing ? 0.45 : 0.25), radius: isPulsing ? 5 : 2)
+            .scaleEffect(isPulsing ? 1.08 : 1)
+            .accessibilityHidden(true)
+    }
+
+    private func triggerUpdateBadgePulse() {
+        updateBadgePulseToken += 1
+        let pulseToken = updateBadgePulseToken
+
+        var resetTransaction = Transaction()
+        resetTransaction.disablesAnimations = true
+        withTransaction(resetTransaction) {
+            updateBadgePulse = false
+        }
+
+        guard updaterService.shouldShowSidebarUpdateReminder, !reduceMotion else { return }
+
+        DispatchQueue.main.async {
+            guard pulseToken == updateBadgePulseToken else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatCount(3, autoreverses: true)) {
+                updateBadgePulse = true
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.7) {
+            guard pulseToken == updateBadgePulseToken else { return }
+            var resetTransaction = Transaction()
+            resetTransaction.disablesAnimations = true
+            withTransaction(resetTransaction) {
+                updateBadgePulse = false
+            }
+        }
     }
 
     private var compactSyncStatusText: String {
