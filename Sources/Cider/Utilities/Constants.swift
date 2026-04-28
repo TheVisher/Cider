@@ -64,6 +64,12 @@ extension Notification.Name {
     static let showImageClipboardReviewToast = Notification.Name("cider.showImageClipboardReviewToast")
     static let toggleCiderPanel = Notification.Name("cider.toggleCiderPanel")
     static let dismissCiderPanel = Notification.Name("cider.dismissCiderPanel")
+    static let openCiderMainWindow = Notification.Name("cider.openCiderMainWindow")
+    static let dismissCiderMainWindow = Notification.Name("cider.dismissCiderMainWindow")
+    static let minimizeCiderMainWindow = Notification.Name("cider.minimizeCiderMainWindow")
+    static let maximizeCiderMainWindow = Notification.Name("cider.maximizeCiderMainWindow")
+    static let floatCiderSurface = Notification.Name("cider.floatCiderSurface")
+    static let dockCiderSurface = Notification.Name("cider.dockCiderSurface")
     static let toggleCiderPanelCollapse = Notification.Name("cider.toggleCiderPanelCollapse")
     static let maximizeCiderPanel = Notification.Name("cider.maximizeCiderPanel")
     static let openBookmarkDetails = Notification.Name("cider.openBookmarkDetails")
@@ -91,6 +97,7 @@ extension Notification.Name {
     static let toggleAIAssistantPanel = Notification.Name("cider.toggleAIAssistantPanel")
     static let showAIAssistantPanel = Notification.Name("cider.showAIAssistantPanel")
     static let dismissAIAssistantPanel = Notification.Name("cider.dismissAIAssistantPanel")
+    static let showCiderDropZone = Notification.Name("cider.showCiderDropZone")
     static let kanbanBoardsChanged = Notification.Name("cider.kanbanBoardsChanged")
 }
 

@@ -33,7 +33,8 @@ extension AppDelegate {
 
         let panelView = CiderPanelView(
             bookmarksViewModel: bookmarksViewModel,
-            notesViewModel: notesViewModel
+            notesViewModel: notesViewModel,
+            surface: .quickPanel
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -138,7 +139,7 @@ extension AppDelegate {
             }
             hideCiderPanel()
         } else {
-            showCiderPanel()
+            transitionToQuickPanel()
         }
     }
 

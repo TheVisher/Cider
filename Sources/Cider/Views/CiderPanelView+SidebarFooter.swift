@@ -26,7 +26,7 @@ extension CiderPanelView {
                     showNewItemPicker.toggle()
                 },
                 onOpenAI: {
-                    NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+                    requestFloatingAIAssistant()
                 }
             ) {
                 expandedViewOptionsButton
@@ -247,7 +247,7 @@ extension CiderPanelView {
                 .padding(.vertical, Spacing.xxs)
 
             Button {
-                NotificationCenter.default.post(name: .toggleAIAssistantPanel, object: nil)
+                requestFloatingAIAssistant()
             } label: {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "bubble.left.and.bubble.right")
@@ -299,6 +299,13 @@ extension CiderPanelView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             AIAssistantViewModel.shared.send(message)
         }
+    }
+
+    private func requestFloatingAIAssistant() {
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: "aiAssistant"
+        )
     }
 
     var showFolderViewOptions: Bool {

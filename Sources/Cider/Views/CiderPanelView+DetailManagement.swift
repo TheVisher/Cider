@@ -62,6 +62,55 @@ extension CiderPanelView {
         return bookmarksViewModel.bookmarks.first(where: { $0.id == detailBookmarkID })
     }
 
+    func requestFloat(_ surface: CiderFloatableSurface) {
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: surface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: surface]
+        )
+    }
+
+    func floatBookmarkDetails() {
+        guard let bookmark = selectedDetailsBookmark else { return }
+        saveBookmarkDetails()
+        requestFloat(.bookmarkMetadata(bookmark.id))
+    }
+
+    func floatDateCardDetail() {
+        guard let dateCard = selectedDateCard else { return }
+        requestFloat(.dateCard(dateCard.id))
+    }
+
+    func floatContactDetail() {
+        guard let contact = selectedContact else { return }
+        requestFloat(.contact(contact.id))
+    }
+
+    func floatTodoDetail() {
+        guard let todoCard = selectedTodoCard else { return }
+        requestFloat(.todo(todoCard.id))
+    }
+
+    func floatNoteDetail() {
+        guard let note = notesViewModel.selectedNote ?? selectedNote else { return }
+        notesViewModel.flushSave()
+        requestFloat(.note(note.id))
+    }
+
+    func floatCurrentDetailForPageMode() {
+        if isDetailPageMode {
+            floatBookmarkDetails()
+        } else if selectedDateCard != nil {
+            floatDateCardDetail()
+        } else if selectedContact != nil {
+            floatContactDetail()
+        } else if selectedTodoCard != nil {
+            floatTodoDetail()
+        } else if isNoteDetailPageMode {
+            floatNoteDetail()
+        }
+    }
+
     func openBookmarkDetails(_ bookmark: Bookmark) {
         if isSearchPaletteVisible {
             isSearchPaletteVisible = false

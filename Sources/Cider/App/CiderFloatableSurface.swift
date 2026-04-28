@@ -1,0 +1,79 @@
+import Foundation
+
+enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
+    case note(UUID)
+    case bookmark(UUID)
+    case bookmarkMetadata(UUID)
+    case contact(UUID)
+    case dateCard(UUID)
+    case todo(UUID)
+    case clipboard
+    case aiAssistant
+    case dropZone
+
+    var id: String { stableKey }
+
+    var stableKey: String {
+        switch self {
+        case .note(let id):
+            "note:\(id.uuidString)"
+        case .bookmark(let id):
+            "bookmark:\(id.uuidString)"
+        case .bookmarkMetadata(let id):
+            "bookmarkMetadata:\(id.uuidString)"
+        case .contact(let id):
+            "contact:\(id.uuidString)"
+        case .dateCard(let id):
+            "dateCard:\(id.uuidString)"
+        case .todo(let id):
+            "todo:\(id.uuidString)"
+        case .clipboard:
+            "clipboard"
+        case .aiAssistant:
+            "aiAssistant"
+        case .dropZone:
+            "dropZone"
+        }
+    }
+
+    var defaultTitle: String {
+        switch self {
+        case .note:
+            "Note"
+        case .bookmark:
+            "Bookmark"
+        case .bookmarkMetadata:
+            "Bookmark Metadata"
+        case .contact:
+            "Contact"
+        case .dateCard:
+            "Date Card"
+        case .todo:
+            "Todo"
+        case .clipboard:
+            "Clipboard"
+        case .aiAssistant:
+            "AI Assistant"
+        case .dropZone:
+            "Drop Zone"
+        }
+    }
+
+    var fallbackDescription: String {
+        switch self {
+        case .note(let id),
+             .bookmark(let id),
+             .bookmarkMetadata(let id),
+             .contact(let id),
+             .dateCard(let id),
+             .todo(let id):
+            id.uuidString
+        case .clipboard:
+            "Floating clipboard surface"
+        case .aiAssistant:
+            "Floating AI assistant surface"
+        case .dropZone:
+            "Drop files, links, text, or images here"
+        }
+    }
+}

@@ -27,11 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var bookmarkClipboardReviewLastTick: Date?
 
     // Main Cider panel
+    var ciderMainWindow: CiderMainWindow?
     var ciderPanel: CiderPanel?
     var ciderShadowPanel: CiderShadowPanel?
     var panelFrameObservation: NSKeyValueObservation?
     let ciderPanelPositionStore = CiderPanelPositionStore.shared
     var frameBeforeSlideOut: NSRect?
+    var floatingPanelManager: CiderFloatingPanelManager?
 
     // Undo toast
     var undoToastPanel: BookmarkCaptureToastPanel?
@@ -81,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.setActivationPolicy(.regular)
         AccessibilityHelpers.promptIfNeeded()
         VaultStructureMigration.migrateIfNeeded()
         VaultStructureMigration.migrateContentToInboxIfNeeded()
@@ -121,10 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureSettings()
         configureNotes()
         configureBookmarks()
+        configureCiderMainWindow()
         configureCiderPanel()
         configureStatusItem()
         observeSettingsNotifications()
         observeBookmarksNotifications()
+        observeCiderMainWindowNotifications()
         observeCiderPanelNotifications()
         observeConfigChanges()
         observeWorkspaceApplicationActivation()
@@ -141,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureAIAssistantPanel()
         observeAIAssistantNotifications()
         startAIAssistantHotkeyDetection()
+        configureFloatingPanels()
 
         // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
         DispatchQueue.main.async { [weak self] in
@@ -151,7 +156,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     item.action = #selector(self.openSettingsFromMenu)
                 }
             }
+            self.installCiderApplicationMenuItems()
         }
+
+        transitionToCiderMainWindow()
 
         // Build vault index if empty (first run or rebuild needed)
         if VaultIndexService.shared.entries.isEmpty {
@@ -248,6 +256,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardPanel?.orderOut(nil)
         aiAssistantShadowPanel?.orderOut(nil)
         aiAssistantPanel?.orderOut(nil)
+        floatingPanelManager?.closeDropZone()
+        ciderMainWindow?.orderOut(nil)
         if telegramBridgeStarted {
             Task {
                 await TelegramBridge.shared.stop()
@@ -260,6 +270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillResignActive(_ notification: Notification) {
         flushNotesDraftIfNeeded()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        transitionToCiderMainWindow()
+        return true
     }
 
     // MARK: - Spotlight Deep Links
@@ -281,6 +296,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    private func installCiderApplicationMenuItems() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+
+        let ciderMenu: NSMenu
+        if let existing = mainMenu.item(withTitle: "Surfaces")?.submenu {
+            ciderMenu = existing
+            ciderMenu.removeAllItems()
+        } else {
+            ciderMenu = NSMenu(title: "Surfaces")
+            let ciderMenuItem = NSMenuItem(title: "Surfaces", action: nil, keyEquivalent: "")
+            ciderMenuItem.submenu = ciderMenu
+            let insertIndex = max(1, mainMenu.items.count - 1)
+            mainMenu.insertItem(ciderMenuItem, at: insertIndex)
+        }
+
+        ciderMenu.addItem(statusMenuItem(title: "Show Cider Window", action: #selector(openCiderMainWindowFromMenu), keyEquivalent: "1"))
+        ciderMenu.addItem(statusMenuItem(title: "Show Quick Panel", action: #selector(showCiderPanelFromMenu), keyEquivalent: "2"))
+        ciderMenu.addItem(NSMenuItem.separator())
+        ciderMenu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: "3"))
+        ciderMenu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: "4"))
+        ciderMenu.addItem(statusMenuItem(title: "Show Drop Zone", action: #selector(showDropZoneFromMenu), keyEquivalent: "5"))
+    }
+
     // MARK: - Status Item
 
     func configureStatusItem() {
@@ -300,7 +338,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Show Cider", action: #selector(toggleCiderPanelFromMenu), keyEquivalent: " "))
+        menu.addItem(statusMenuItem(title: "Show Cider Window", action: #selector(openCiderMainWindowFromMenu), keyEquivalent: ""))
+        menu.addItem(statusMenuItem(title: "Show Quick Panel", action: #selector(showCiderPanelFromMenu), keyEquivalent: " "))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: ""))
+        menu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: ""))
+        menu.addItem(statusMenuItem(title: "Show Drop Zone", action: #selector(showDropZoneFromMenu), keyEquivalent: ""))
         #if DEBUG
         menu.addItem(NSMenuItem.separator())
         menu.addItem(debugMenuItem(title: "Simulate Update Available", action: #selector(simulateUpdateAvailableFromMenu)))
@@ -312,8 +355,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
+    private func statusMenuItem(title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.target = self
+        return item
+    }
+
     @objc func toggleCiderPanelFromMenu() {
         toggleCiderPanel()
+    }
+
+    @objc func showCiderPanelFromMenu() {
+        transitionToQuickPanel()
+    }
+
+    @objc func showAIAssistantPanelFromMenu() {
+        showAIAssistantPanel()
+    }
+
+    @objc func showClipboardPanelFromMenu() {
+        showClipboardPanel()
+    }
+
+    @objc func showDropZoneFromMenu() {
+        NotificationCenter.default.post(name: .showCiderDropZone, object: nil)
+    }
+
+    func configureFloatingPanels() {
+        floatingPanelManager = CiderFloatingPanelManager()
     }
 
     #if DEBUG

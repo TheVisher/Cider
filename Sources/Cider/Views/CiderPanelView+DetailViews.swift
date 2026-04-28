@@ -46,6 +46,7 @@ extension CiderPanelView {
             onOpenURL: openDetailURL,
             onCopyURL: copyDetailURL,
             onSave: saveBookmarkDetails,
+            onFloat: floatBookmarkDetails,
             onCancel: closeBookmarkDetails,
             onModeChange: changeDetailViewMode
         )
@@ -70,6 +71,7 @@ extension CiderPanelView {
                 onOpenURL: openDetailURL,
                 onCopyURL: copyDetailURL,
                 onSave: saveBookmarkDetails,
+                onFloat: floatBookmarkDetails,
                 onCancel: closeBookmarkDetails,
                 onModeChange: changeDetailViewMode,
                 showDragHandle: false
@@ -95,6 +97,7 @@ extension CiderPanelView {
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
                 },
+                onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) }
@@ -118,6 +121,7 @@ extension CiderPanelView {
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
                 },
+                onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) }
@@ -138,6 +142,7 @@ extension CiderPanelView {
                 detailViewMode: .slideOut,
                 width: BookmarksDesign.detailsSlideOutMinWidth,
                 maxWidth: BookmarksDesign.detailsSlideOutMinWidth,
+                onFloat: floatTodoDetail,
                 onClose: closeGenericDetail,
                 onModeChange: { _ in },
                 trailingExtra: { AIDetailActionsButton(todoTitle: todoCard.title) }
@@ -176,6 +181,7 @@ extension CiderPanelView {
                 title: dateCard.title,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode
             ) {
@@ -197,6 +203,7 @@ extension CiderPanelView {
                 title: contact.displayName,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode
             ) {
@@ -282,9 +289,20 @@ extension CiderPanelView {
                 readerReady: detailWebViewStore.readerReady,
                 webViewReady: detailWebViewStore.webViewReady,
                 heroMode: $bookmarkHeroMode,
-                isMetadataVisible: $bookmarkMetadataVisible
+                isMetadataVisible: $bookmarkMetadataVisible,
+                onFloat: floatBookmarkDetails
             )
         }
+
+        Button(action: floatCurrentDetailForPageMode) {
+            Image(systemName: "rectangle.on.rectangle")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Float")
 
         DetailViewModePicker(currentMode: detailViewMode, onChange: changeDetailViewMode)
     }
@@ -328,6 +346,7 @@ extension CiderPanelView {
             onOpenURL: openDetailURL,
             onCopyURL: copyDetailURL,
             onSave: saveBookmarkDetails,
+            onFloat: floatBookmarkDetails,
             onCancel: closeBookmarkDetails,
             onModeChange: changeDetailViewMode,
             showDragHandle: false
@@ -343,6 +362,7 @@ extension CiderPanelView {
                 title: dateCard.title,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode
             ) {
@@ -362,6 +382,7 @@ extension CiderPanelView {
                 title: contact.displayName,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode
             ) {
@@ -413,6 +434,7 @@ extension CiderPanelView {
                 let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                 detailSlideOutWidth = clamped
             },
+            onFloat: floatNoteDetail,
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
             toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
@@ -431,6 +453,7 @@ extension CiderPanelView {
             scrollsContent: false,
             onRenameTitle: renameCurrentNote,
             isEditingTitle: $isEditingNoteTitle,
+            onFloat: floatNoteDetail,
             onClose: closeNoteDetail,
             onModeChange: changeDetailViewMode,
             toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },

@@ -66,6 +66,21 @@ extension CiderPanelView {
             }
             .help("Clipboard history (\u{2325}V)")
 
+        Image(systemName: surface == .quickPanel ? "macwindow" : "rectangle.on.rectangle")
+            .font(CiderFont.bodySemibold)
+            .foregroundColor(CiderColors.secondary)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                switch surface {
+                case .quickPanel:
+                    NotificationCenter.default.post(name: .openCiderMainWindow, object: nil)
+                case .mainWindow:
+                    NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+                }
+            }
+            .help(surface == .quickPanel ? "Open as app window" : "Show floating panel")
+
     }
 
     @ViewBuilder

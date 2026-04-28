@@ -20,6 +20,7 @@ struct DetailSlideOutView: View {
     var onOpenURL: () -> Void
     var onCopyURL: () -> Void
     var onSave: () -> Void
+    var onFloat: (() -> Void)? = nil
     var onCancel: () -> Void
     var onModeChange: (DetailViewMode) -> Void
     var showDragHandle: Bool = true
@@ -360,6 +361,18 @@ struct DetailSlideOutView: View {
             .buttonStyle(.plain)
             .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
 
+            if let onFloat {
+                Button(action: onFloat) {
+                    Image(systemName: "rectangle.on.rectangle")
+                        .font(CiderFont.label)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Float")
+            }
+
             // Mode toggle
             DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
         }
@@ -376,6 +389,7 @@ struct BookmarkPageToolbar: View {
     var webViewReady: Bool
     @Binding var heroMode: BookmarkHeroMode
     @Binding var isMetadataVisible: Bool
+    var onFloat: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var readerDisabled: Bool {
@@ -404,6 +418,10 @@ struct BookmarkPageToolbar: View {
                         heroMode = heroMode == .web ? .thumbnail : .web
                     }
                 }
+            }
+
+            if let onFloat {
+                toolbarButton("rectangle.on.rectangle", active: false, help: "Float", action: onFloat)
             }
 
             Button {

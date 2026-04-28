@@ -15,6 +15,7 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
     var onRenameTitle: ((String) -> Void)? = nil
     var isEditingTitle: Binding<Bool>? = nil
     var onResize: (CGFloat) -> Void = { _ in }
+    var onFloat: (() -> Void)? = nil
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
     @ViewBuilder var toolbarExtra: () -> ToolbarExtra
@@ -107,6 +108,18 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
 
                 trailingExtra()
 
+                if let onFloat {
+                    Button(action: onFloat) {
+                        Image(systemName: "rectangle.on.rectangle")
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.tertiary)
+                            .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Float")
+                }
+
                 DetailViewModePicker(currentMode: detailViewMode, onChange: onModeChange)
             }
         }
@@ -126,6 +139,7 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra 
         showTitle: Bool = true,
         scrollsContent: Bool = true,
         onResize: @escaping (CGFloat) -> Void = { _ in },
+        onFloat: (() -> Void)? = nil,
         onClose: @escaping () -> Void,
         onModeChange: @escaping (DetailViewMode) -> Void,
         @ViewBuilder content: @escaping () -> Content
@@ -138,6 +152,7 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra 
         self.showTitle = showTitle
         self.scrollsContent = scrollsContent
         self.onResize = onResize
+        self.onFloat = onFloat
         self.onClose = onClose
         self.onModeChange = onModeChange
         self.toolbarExtra = { EmptyView() }
@@ -213,6 +228,7 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
         showTitle: Bool = true,
         scrollsContent: Bool = true,
         onResize: @escaping (CGFloat) -> Void = { _ in },
+        onFloat: (() -> Void)? = nil,
         onClose: @escaping () -> Void,
         onModeChange: @escaping (DetailViewMode) -> Void,
         @ViewBuilder trailingExtra: @escaping () -> TrailingExtra,
@@ -226,6 +242,7 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
         self.showTitle = showTitle
         self.scrollsContent = scrollsContent
         self.onResize = onResize
+        self.onFloat = onFloat
         self.onClose = onClose
         self.onModeChange = onModeChange
         self.toolbarExtra = { EmptyView() }
@@ -244,6 +261,7 @@ extension GenericItemDetailPanel where TrailingExtra == EmptyView {
         showTitle: Bool = true,
         scrollsContent: Bool = true,
         onResize: @escaping (CGFloat) -> Void = { _ in },
+        onFloat: (() -> Void)? = nil,
         onClose: @escaping () -> Void,
         onModeChange: @escaping (DetailViewMode) -> Void,
         @ViewBuilder toolbarExtra: @escaping () -> ToolbarExtra,
@@ -257,6 +275,7 @@ extension GenericItemDetailPanel where TrailingExtra == EmptyView {
         self.showTitle = showTitle
         self.scrollsContent = scrollsContent
         self.onResize = onResize
+        self.onFloat = onFloat
         self.onClose = onClose
         self.onModeChange = onModeChange
         self.toolbarExtra = toolbarExtra

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
+    var surface: CiderWorkspaceSurface = .quickPanel
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @StateObject var libraryViewModel = LibraryViewModel()
     @State var selectedTab: CiderTab?
@@ -84,9 +85,10 @@ struct CiderPanelView: View {
             isCollapsed: isCollapsed,
             suppressSidebarAutoExpand: isAnyDetailOpen,
             blurRightColumn: isDetailSlideOut || isGenericDetailSlideOut || isNoteDetailSlideOut,
-            onClose: { NotificationCenter.default.post(name: .dismissCiderPanel, object: nil) },
-            onCollapse: { NotificationCenter.default.post(name: .toggleCiderPanelCollapse, object: nil) },
-            onMaximize: { NotificationCenter.default.post(name: .maximizeCiderPanel, object: nil) }
+            showsPanelControls: true,
+            onClose: { closeSurface() },
+            onCollapse: { minimizeSurface() },
+            onMaximize: { maximizeSurface() }
         ) {
             folderSidebar
         } sidebarFooter: {
