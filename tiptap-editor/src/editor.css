@@ -12,6 +12,7 @@
 html, body {
   background: transparent;
   color: #e0e0e0;
+  color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-size: var(--cider-editor-base-font-size);
   line-height: 1.6;
@@ -51,6 +52,8 @@ html, body {
   font-size: var(--cider-editor-base-font-size);
   max-width: 720px;
   margin: 0 auto;
+  caret-color: #f2f2f2;
+  tab-size: 2;
 }
 
 .tiptap-editor > *:first-child {
@@ -79,7 +82,7 @@ html, body {
 .tiptap-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
-  color: #666;
+  color: rgba(255, 255, 255, 0.38);
   pointer-events: none;
   height: 0;
   font-style: italic;
@@ -426,7 +429,8 @@ html, body {
 }
 
 /* Selection */
-.tiptap-editor ::selection {
+.tiptap-editor ::selection,
+.tiptap-editor::selection {
   background: rgba(108, 180, 238, 0.3);
 }
 

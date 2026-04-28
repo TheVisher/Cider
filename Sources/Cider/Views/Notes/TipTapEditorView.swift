@@ -240,6 +240,24 @@ final class TipTapWebView: WKWebView {
         return super.performKeyEquivalent(with: event)
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        if menu.items.isEmpty == false {
+            menu.addItem(.separator())
+        }
+        menu.addItem(withTitle: "Find in Note", action: #selector(showFindFromContextMenu), keyEquivalent: "")
+        menu.addItem(withTitle: "Insert Image...", action: #selector(insertImageFromContextMenu), keyEquivalent: "")
+        return menu
+    }
+
+    @objc private func showFindFromContextMenu() {
+        onFindRequested?()
+    }
+
+    @objc private func insertImageFromContextMenu() {
+        viewModel?.openImagePicker()
+    }
+
     // MARK: - Drag & Drop (UTF-8 text file + web image interception)
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

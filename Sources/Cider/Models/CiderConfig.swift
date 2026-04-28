@@ -90,6 +90,31 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
     }
 }
 
+enum NoteEditorMode: String, Codable, CaseIterable {
+    case rich
+    case source
+
+    static let `default`: NoteEditorMode = .rich
+
+    var displayName: String {
+        switch self {
+        case .rich:
+            "Rich"
+        case .source:
+            "Markdown"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .rich:
+            "textformat"
+        case .source:
+            "chevron.left.forwardslash.chevron.right"
+        }
+    }
+}
+
 
 enum ClipboardPanelPosition: String, Codable, CaseIterable {
     case followMouse
@@ -126,6 +151,7 @@ struct CiderConfig: Codable {
         case showCardDetailsOnHover
         case enableNotesHotkey
         case notesEditorTextSize
+        case noteEditorMode
         case enableBookmarksHotkey
         case enableBookmarksCaptureHotkey
         case autoCaptureCopiedURLs
@@ -203,6 +229,7 @@ struct CiderConfig: Codable {
     var showCardDetailsOnHover: Bool  // When card footers are hidden, reveal details on hover
     var enableNotesHotkey: Bool  // Enable Option+N to create note
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
+    var noteEditorMode: NoteEditorMode  // Last-used note editor surface: rich text or Markdown source
     var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
     var enableBookmarksCaptureHotkey: Bool  // Enable Option+Shift+B to capture active browser tab
     var autoCaptureCopiedURLs: Bool  // Automatically save copied URLs as bookmarks
@@ -285,6 +312,7 @@ struct CiderConfig: Codable {
             showCardDetailsOnHover: true,
             enableNotesHotkey: true,
             notesEditorTextSize: .normal,
+            noteEditorMode: .default,
             enableBookmarksHotkey: true,
             enableBookmarksCaptureHotkey: true,
             autoCaptureCopiedURLs: false,
@@ -385,6 +413,7 @@ struct CiderConfig: Codable {
             NotesEditorTextSize.self,
             forKey: .notesEditorTextSize
         ) ?? .normal
+        noteEditorMode = try container.decodeIfPresent(NoteEditorMode.self, forKey: .noteEditorMode) ?? .default
         enableBookmarksHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableBookmarksHotkey) ?? true
         enableBookmarksCaptureHotkey = try container.decodeIfPresent(
             Bool.self,
@@ -575,6 +604,7 @@ struct CiderConfig: Codable {
         showCardDetailsOnHover: Bool = true,
         enableNotesHotkey: Bool = true,
         notesEditorTextSize: NotesEditorTextSize = .normal,
+        noteEditorMode: NoteEditorMode = .default,
         enableBookmarksHotkey: Bool = true,
         enableBookmarksCaptureHotkey: Bool = true,
         autoCaptureCopiedURLs: Bool = false,
@@ -651,6 +681,7 @@ struct CiderConfig: Codable {
         self.showCardDetailsOnHover = showCardDetailsOnHover
         self.enableNotesHotkey = enableNotesHotkey
         self.notesEditorTextSize = notesEditorTextSize
+        self.noteEditorMode = noteEditorMode
         self.enableBookmarksHotkey = enableBookmarksHotkey
         self.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = autoCaptureCopiedURLs

@@ -25,7 +25,11 @@ struct InlineNoteEditorView: View {
                 }
 
                 if viewModel.selectedNote != nil {
-                    TipTapEditorView(viewModel: viewModel)
+                    if viewModel.noteEditorMode == .source {
+                        NativeMarkdownEditorView(viewModel: viewModel)
+                    } else {
+                        TipTapEditorView(viewModel: viewModel)
+                    }
                 } else {
                     NotesEditorEmptyState(onCreateNew: { viewModel.createNewNote() })
                 }
@@ -108,6 +112,10 @@ struct NotesCompactToolbar: View {
 
             NotesToolbarDivider()
 
+            NotesEditorModePicker(viewModel: viewModel)
+
+            NotesToolbarDivider()
+
             Button {
                 showSnapshotPopover.toggle()
             } label: {
@@ -129,6 +137,26 @@ struct NotesCompactToolbar: View {
 
         }
         .disabled(viewModel.selectedNote == nil)
+    }
+}
+
+struct NotesEditorModePicker: View {
+    @ObservedObject var viewModel: NotesViewModel
+
+    var body: some View {
+        Picker("Editor Mode", selection: Binding(
+            get: { viewModel.noteEditorMode },
+            set: { viewModel.setNoteEditorMode($0) }
+        )) {
+            ForEach(NoteEditorMode.allCases, id: \.self) { mode in
+                Label(mode.displayName, systemImage: mode.icon)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 136)
+        .help("Switch between rich editing and Markdown source")
     }
 }
 
@@ -1366,6 +1394,14 @@ struct NotesStatusBar: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             if viewModel.selectedNote != nil {
+                Label(viewModel.noteEditorMode.displayName, systemImage: viewModel.noteEditorMode.icon)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text("•")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+
                 Text("\(viewModel.charCount) chars")
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
