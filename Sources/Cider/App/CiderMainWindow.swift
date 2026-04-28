@@ -29,9 +29,16 @@ final class CiderMainWindow: NSWindow {
         hasShadow = true
     }
 
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
     func showCentered() {
-        if frame.origin == .zero {
-            center()
+        let targetScreen = screenContainingMouse() ?? NSScreen.main
+
+        if frame.origin == .zero || !isVisible(frame, on: targetScreen) {
+            center(on: targetScreen)
+        } else if let clampedFrame = frameClampedToVisibleScreen(frame, screen: targetScreen) {
+            setFrame(clampedFrame, display: true)
         }
         if isMiniaturized {
             deminiaturize(nil)
@@ -129,6 +136,49 @@ final class CiderMainWindow: NSWindow {
             || locationInWindow.x > contentMaxX - edgeInset
             || locationInWindow.y < contentMinY + edgeInset
             || locationInWindow.y > contentMaxY - edgeInset
+    }
+
+    private func isVisible(_ rect: NSRect, on screen: NSScreen?) -> Bool {
+        guard let screen else { return false }
+        let minimumVisibleArea: CGFloat = 12_000
+        return rect.intersection(screen.visibleFrame).area >= minimumVisibleArea
+    }
+
+    private func frameClampedToVisibleScreen(_ rect: NSRect, screen: NSScreen?) -> NSRect? {
+        guard let screen else { return nil }
+        let visibleFrame = screen.visibleFrame
+        var clamped = rect
+        clamped.size.width = min(max(minSize.width, clamped.width), visibleFrame.width)
+        clamped.size.height = min(max(minSize.height, clamped.height), visibleFrame.height)
+        clamped.origin.x = min(max(clamped.minX, visibleFrame.minX), visibleFrame.maxX - clamped.width)
+        clamped.origin.y = min(max(clamped.minY, visibleFrame.minY), visibleFrame.maxY - clamped.height)
+        return clamped
+    }
+
+    private func center(on screen: NSScreen?) {
+        guard let visibleFrame = screen?.visibleFrame else {
+            center()
+            return
+        }
+
+        var centeredFrame = frame
+        centeredFrame.size.width = min(max(minSize.width, centeredFrame.width), visibleFrame.width)
+        centeredFrame.size.height = min(max(minSize.height, centeredFrame.height), visibleFrame.height)
+        centeredFrame.origin.x = visibleFrame.midX - centeredFrame.width / 2
+        centeredFrame.origin.y = visibleFrame.midY - centeredFrame.height / 2
+        setFrame(centeredFrame, display: true)
+    }
+
+    private func screenContainingMouse() -> NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
+    }
+}
+
+private extension NSRect {
+    var area: CGFloat {
+        guard !isNull, !isEmpty else { return 0 }
+        return width * height
     }
 }
 
