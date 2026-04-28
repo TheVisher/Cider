@@ -11,6 +11,15 @@
 - **Editor resources** — `Resources/TipTapEditor/editor.html` + `editor.css` + `editor.js` (minified bundle)
 - **Build** — `npm run build` in `tiptap-editor/` uses esbuild, copies minified bundle to `Sources/Cider/Resources/TipTapEditor/`
 
+## Editor Modes
+
+- **Rich mode** is the TipTap/ProseMirror WKWebView editor. It renders Markdown as editable rich content, then serializes edits back to Markdown through the existing `contentChanged` pipeline.
+- **Markdown mode** is a native AppKit source editor (`NativeMarkdownEditorView`) backed by `NSTextView`. It edits the raw Markdown stored in `NotesViewModel.editingContent` and saves through `sourceContentChanged(_:)`.
+- **Mode preference** is persisted in `CiderConfig.noteEditorMode`. The default is `.rich`, and older config files decode to rich mode for backwards compatibility.
+- **Mode switching** keeps one Markdown source of truth. Switching to Markdown first syncs any pending rich-editor content out of TipTap. Switching back to Rich pushes the current raw Markdown into TipTap and refocuses the WebView.
+- **Toolbar commands** such as bold, headings, lists, links, tables, and image insertion are rich-editor commands. They no-op while Markdown mode is active because the native editor should behave like a plain macOS text view.
+- **Context menus differ by design.** Rich mode keeps the WebKit menu and adds Cider actions like `Find in Note` and `Insert Image...`. Markdown mode uses the native macOS text menu, including Look Up, Translate, Writing Tools, spelling/grammar, substitutions, Services, and standard Cut/Copy/Paste behavior.
+
 ---
 
 ## CSS Gotchas
