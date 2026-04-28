@@ -5,22 +5,22 @@ import os
 
 // MARK: - Convex pull response types
 
-private struct SyncAuthResponse: Decodable {
+struct SyncAuthResponse: Decodable {
     let userId: String
 }
 
-private struct SyncChangeSignal: Decodable {
+struct SyncChangeSignal: Decodable {
     let lastChange: Double
 }
 
-private struct SyncPullResponse: Decodable {
+struct SyncPullResponse: Decodable {
     let bookmarks: [SyncPulledBookmark]
     let folders: [SyncPulledFolder]
     let notes: [SyncPulledNote]
     let serverTime: Double
 }
 
-private struct SyncPulledBookmark: Decodable {
+struct SyncPulledBookmark: Decodable {
     let ciderSyncId: String?
     let title: String
     let urlString: String
@@ -33,10 +33,12 @@ private struct SyncPulledBookmark: Decodable {
     let updatedAt: Double
     let deleted: Bool?
     let deletedAt: Double?
+    let purged: Bool?
+    let purgedAt: Double?
     let folderSyncId: String?
 }
 
-private struct SyncPulledFolder: Decodable {
+struct SyncPulledFolder: Decodable {
     let ciderSyncId: String?
     let name: String
     let icon: String?
@@ -45,9 +47,11 @@ private struct SyncPulledFolder: Decodable {
     let updatedAt: Double
     let deleted: Bool?
     let deletedAt: Double?
+    let purged: Bool?
+    let purgedAt: Double?
 }
 
-private struct SyncPulledNote: Decodable {
+struct SyncPulledNote: Decodable {
     let ciderSyncId: String?
     let title: String
     let content: String?
@@ -58,10 +62,20 @@ private struct SyncPulledNote: Decodable {
     let updatedAt: Double
     let deleted: Bool?
     let deletedAt: Double?
+    let purged: Bool?
+    let purgedAt: Double?
 }
 
-private struct SyncPushResponse: Decodable {
+struct SyncPushResponse: Decodable {
     let serverTime: Double
+}
+
+struct SyncNotePayloadPreview: Equatable {
+    let ciderSyncId: String
+    let title: String
+    let content: String
+    let tags: [String]
+    let folderSyncId: String?
 }
 
 // MARK: - SyncService
@@ -564,7 +578,9 @@ final class SyncService: ObservableObject {
             }
 
             if let local = localFolders.first(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
-                if isDeleted {
+                if folder.purged == true {
+                    folderService.deleteFolderFromSync(local.id)
+                } else if isDeleted {
                     folderService.deleteFolderFromSync(local.id)
                 } else if remoteUpdatedAt > local.updatedAt {
                     folderService.updateFolderFromSync(
@@ -601,7 +617,9 @@ final class SyncService: ObservableObject {
 
             if let localIndex = storage.bookmarks.firstIndex(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
                 let local = storage.bookmarks[localIndex]
-                if isDeleted {
+                if bookmark.purged == true {
+                    storage.removeSynced(local)
+                } else if isDeleted {
                     storage.trashFromSync(local)
                 } else if remoteUpdatedAt > local.updatedAt {
                     // Determine the folder to set:
@@ -656,6 +674,7 @@ final class SyncService: ObservableObject {
             let isDeleted = note.deleted ?? false
             let content = note.content ?? ""
             let isPinned = note.isPinned ?? false
+            let tags = note.tags ?? []
 
             let remoteFolderSyncId = note.folderSyncId?.lowercased()
             let resolvedFolderID: UUID? = if let remoteFolderSyncId {
@@ -666,7 +685,9 @@ final class SyncService: ObservableObject {
 
             if let localIndex = notesStorage.notes.firstIndex(where: { $0.id.uuidString.lowercased() == syncIdLower }) {
                 let local = notesStorage.notes[localIndex]
-                if isDeleted {
+                if note.purged == true {
+                    notesStorage.removeSynced(local)
+                } else if isDeleted {
                     notesStorage.deleteFromSync(local)
                 } else if remoteUpdatedAt > local.modifiedAt {
                     let syncFolderID: UUID?
@@ -684,12 +705,13 @@ final class SyncService: ObservableObject {
                         && local.title == note.title
                         && local.folderID == syncFolderID
                         && local.isPinned == isPinned
+                        && local.tags == tags
                     {
                         continue
                     }
                     notesStorage.updateFromSync(
                         noteID: local.id, title: note.title, content: content,
-                        folderID: syncFolderID, isPinned: isPinned,
+                        folderID: syncFolderID, isPinned: isPinned, tags: tags,
                         remoteUpdatedAt: remoteUpdatedAt
                     )
                 }
@@ -697,7 +719,7 @@ final class SyncService: ObservableObject {
                 if let uuid = UUID(uuidString: syncId) {
                     notesStorage.addFromSync(
                         id: uuid, title: note.title, content: content,
-                        folderID: resolvedFolderID, isPinned: isPinned,
+                        folderID: resolvedFolderID, isPinned: isPinned, tags: tags,
                         createdAt: Date(timeIntervalSince1970: note.createdAt / 1000),
                         updatedAt: remoteUpdatedAt
                     )
@@ -962,17 +984,33 @@ final class SyncService: ObservableObject {
     }
 
     private static func notePayload(from note: Note) -> [String: ConvexEncodable?] {
+        let preview = notePayloadPreview(from: note)
         var payload: [String: ConvexEncodable?] = [
-            "ciderSyncId": note.id.uuidString.lowercased(),
-            "title": note.title,
-            "content": note.resolvedContent,
+            "ciderSyncId": preview.ciderSyncId,
+            "title": preview.title,
+            "content": preview.content,
+            "tags": preview.tags as [ConvexEncodable?],
             "createdAt": note.createdAt.timeIntervalSince1970 * 1000,
             "updatedAt": note.modifiedAt.timeIntervalSince1970 * 1000,
             "deleted": false,
         ]
         if note.isPinned { payload["isPinned"] = true }
-        if let folderID = note.folderID { payload["folderSyncId"] = folderID.uuidString.lowercased() }
+        if let folderSyncId = preview.folderSyncId { payload["folderSyncId"] = folderSyncId }
         return payload
+    }
+
+    static func notePayloadPreviewForTesting(from note: Note) -> SyncNotePayloadPreview {
+        notePayloadPreview(from: note)
+    }
+
+    private static func notePayloadPreview(from note: Note) -> SyncNotePayloadPreview {
+        SyncNotePayloadPreview(
+            ciderSyncId: note.id.uuidString.lowercased(),
+            title: note.title,
+            content: note.resolvedContent,
+            tags: note.tags,
+            folderSyncId: note.folderID?.uuidString.lowercased()
+        )
     }
 
     private static func noteDeletionTombstone(syncId: String, nowMs: Double) -> [String: ConvexEncodable?] {

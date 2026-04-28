@@ -1138,6 +1138,7 @@ final class NotesStorage: ObservableObject {
         content: String,
         folderID: UUID?,
         isPinned: Bool,
+        tags: [String],
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -1184,7 +1185,8 @@ final class NotesStorage: ObservableObject {
             modifiedAt: updatedAt,
             relativePath: relativePath,
             folderID: folderID,
-            isPinned: isPinned
+            isPinned: isPinned,
+            tags: tags
         )
         notes.insert(note, at: 0)
         persistNoteToDatabase(note)
@@ -1197,6 +1199,7 @@ final class NotesStorage: ObservableObject {
         content: String,
         folderID: UUID?,
         isPinned: Bool,
+        tags: [String],
         remoteUpdatedAt: Date
     ) {
         guard let idx = notes.firstIndex(where: { $0.id == noteID }) else { return }
@@ -1241,6 +1244,7 @@ final class NotesStorage: ObservableObject {
         notes[idx].modifiedAt = remoteUpdatedAt
         notes[idx].folderID = folderID
         notes[idx].isPinned = isPinned
+        notes[idx].tags = tags
 
         // Invalidate caches
         contentCache.removeValue(forKey: noteID)
@@ -1254,6 +1258,29 @@ final class NotesStorage: ObservableObject {
         )
         saveIndex()
         persistNoteToDatabase(notes[idx])
+    }
+
+    /// Permanently remove a note because the server sent a purge tombstone.
+    /// Does NOT re-report to SyncService to avoid deletion ping-pong.
+    func removeSynced(_ note: Note) {
+        MutationAuditContext.withSource(.cleanup) {
+            contentCache.removeValue(forKey: note.id)
+            try? FileManager.default.removeItem(at: noteFileURL(for: note))
+            try? FileManager.default.removeItem(at: snapshotDirectoryURL(for: note))
+            deleteNoteFromDatabase(note.id)
+            index.removeValue(forKey: note.id)
+            saveIndex()
+            notes.removeAll { $0.id == note.id }
+            scheduleAttachmentCleanup()
+            MutationAuditService.shared.record(
+                action: "delete",
+                itemType: "note",
+                itemID: note.id,
+                before: MutationAuditSnapshots.note(note),
+                after: ["state": "removed_by_sync"],
+                metadata: ["reason": "sync_purge"]
+            )
+        }
     }
 
     /// Delete a note from a sync pull (remote deleted it).
