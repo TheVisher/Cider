@@ -53,6 +53,7 @@ final class NotesViewModel: ObservableObject {
     @Published var findMatchIndex: Int = 0
     @Published var findFocusToken = UUID()
     @Published private(set) var notesEditorTextSize: NotesEditorTextSize
+    @Published private(set) var noteEditorMode: NoteEditorMode
     @Published var editorFormatState = EditorFormatState()
     @Published var isMetadataPanelVisible: Bool = false
     @Published private(set) var hasSnapshots: Bool = false
@@ -167,6 +168,7 @@ final class NotesViewModel: ObservableObject {
         self.displayMode = config.notesDefaultViewMode
         self.cardSizeScale = config.notesCardSizeScale ?? 1.0
         self.notesEditorTextSize = config.notesEditorTextSize
+        self.noteEditorMode = config.noteEditorMode
 
         // Observe storage changes
         NotesStorage.shared.$notes
@@ -188,9 +190,13 @@ final class NotesViewModel: ObservableObject {
                 let newScale = config.notesCardSizeScale ?? 1.0
                 if self.displayMode != newMode { self.displayMode = newMode }
                 if self.cardSizeScale != newScale { self.cardSizeScale = newScale }
-                guard self.notesEditorTextSize != config.notesEditorTextSize else { return }
-                self.notesEditorTextSize = config.notesEditorTextSize
-                self.applyNotesEditorTextSize()
+                if self.noteEditorMode != config.noteEditorMode {
+                    self.noteEditorMode = config.noteEditorMode
+                }
+                if self.notesEditorTextSize != config.notesEditorTextSize {
+                    self.notesEditorTextSize = config.notesEditorTextSize
+                    self.applyNotesEditorTextSize()
+                }
             }
             .store(in: &cancellables)
 
@@ -348,6 +354,7 @@ final class NotesViewModel: ObservableObject {
     }
 
     func openImagePicker() {
+        guard noteEditorMode == .rich else { return }
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
@@ -460,6 +467,20 @@ final class NotesViewModel: ObservableObject {
         } else {
             persistedContent = NotesStorage.shared.markdownForPersistence(newContent)
         }
+        applyEditedContent(persistedContent)
+    }
+
+    func sourceContentChanged(_ newContent: String) {
+        let persistedContent: String
+        if let note = selectedNote {
+            persistedContent = NotesStorage.shared.markdownForPersistence(newContent, note: note)
+        } else {
+            persistedContent = NotesStorage.shared.markdownForPersistence(newContent)
+        }
+        applyEditedContent(persistedContent)
+    }
+
+    private func applyEditedContent(_ persistedContent: String) {
         editingContent = persistedContent
         charCount = persistedContent.count
         hasPendingSave = true
@@ -703,42 +724,52 @@ final class NotesViewModel: ObservableObject {
     // MARK: - Editor Formatting
 
     func editorUndo() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("undo")
     }
 
     func editorRedo() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("redo")
     }
 
     func editorToggleBold() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleBold")
     }
 
     func editorToggleItalic() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleItalic")
     }
 
     func editorToggleUnderline() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleUnderline")
     }
 
     func editorSetTextSizeSmall() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setFontSize", stringArgument: "12px")
     }
 
     func editorSetTextSizeNormal() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setFontSize", stringArgument: "14px")
     }
 
     func editorSetTextSizeLarge() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setFontSize", stringArgument: "18px")
     }
 
     func editorSetTextSizeExtraLarge() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setFontSize", stringArgument: "24px")
     }
 
     func editorResetTextSize() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("unsetFontSize")
     }
 
@@ -758,101 +789,146 @@ final class NotesViewModel: ObservableObject {
         applyNotesEditorTextSize()
     }
 
+    func setNoteEditorMode(_ mode: NoteEditorMode) {
+        guard noteEditorMode != mode else { return }
+
+        if mode == .source, let noteID = selectedNote?.id {
+            syncContentFromEditor(noteID: noteID)
+        }
+
+        noteEditorMode = mode
+
+        var config = CiderConfig.load()
+        config.noteEditorMode = mode
+        config.save()
+        NotificationCenter.default.post(name: .ciderConfigChanged, object: nil)
+
+        if mode == .rich {
+            isLoadingNote = true
+            pushContentToEditor(editingContent)
+            focusEditor()
+        }
+    }
+
     func editorAlignLeft() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setTextAlign", stringArgument: "left")
     }
 
     func editorAlignCenter() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setTextAlign", stringArgument: "center")
     }
 
     func editorAlignRight() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setTextAlign", stringArgument: "right")
     }
 
     func editorToggleBulletList() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleBulletList")
     }
 
     func editorToggleOrderedList() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleOrderedList")
     }
 
     func editorToggleTaskList() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleTaskList")
     }
 
     func editorInsertTable(rows: Int = 3, cols: Int = 3) {
+        guard noteEditorMode == .rich else { return }
         guard editorIsReady, let webView = editorWebView else { return }
         webView.evaluateJavaScript("window.editorAPI.insertTable(\(rows), \(cols));")
     }
 
     func editorAddRowBefore() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("addRowBefore")
     }
 
     func editorAddRowAfter() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("addRowAfter")
     }
 
     func editorDeleteRow() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("deleteRow")
     }
 
     func editorAddColumnBefore() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("addColumnBefore")
     }
 
     func editorAddColumnAfter() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("addColumnAfter")
     }
 
     func editorDeleteColumn() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("deleteColumn")
     }
 
     func editorMergeCells() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("mergeCells")
     }
 
     func editorSplitCell() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("splitCell")
     }
 
     func editorToggleHeaderRow() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleHeaderRow")
     }
 
     func editorToggleHeaderColumn() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleHeaderColumn")
     }
 
     func editorDeleteTable() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("deleteTable")
     }
 
     func editorPromptForLink() {
+        guard noteEditorMode == .rich else { return }
         guard let rawValue = promptForLinkURL() else { return }
         runEditorCommand("setLink", stringArgument: normalizeLinkURL(rawValue))
     }
 
     func editorRemoveLink() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("unsetLink")
     }
 
     func editorToggleStrike() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleStrike")
     }
 
     func editorToggleBlockquote() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleBlockquote")
     }
 
     func editorInsertHorizontalRule() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setHorizontalRule")
     }
 
     func editorToggleHighlight(color: String? = nil) {
+        guard noteEditorMode == .rich else { return }
         if let color {
             runEditorCommand("toggleHighlight", stringArgument: color)
         } else {
@@ -861,30 +937,37 @@ final class NotesViewModel: ObservableObject {
     }
 
     func editorToggleCode() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleCode")
     }
 
     func editorIndent() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("indent")
     }
 
     func editorOutdent() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("outdent")
     }
 
     func editorClearFormatting() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("clearFormatting")
     }
 
     func editorSetHeading(_ level: Int) {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setHeading", intArgument: level)
     }
 
     func editorSetParagraph() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("setParagraph")
     }
 
     func editorToggleCodeBlock() {
+        guard noteEditorMode == .rich else { return }
         runEditorCommand("toggleCodeBlock")
     }
 
