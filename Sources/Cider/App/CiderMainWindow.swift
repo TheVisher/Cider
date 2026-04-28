@@ -33,6 +33,9 @@ final class CiderMainWindow: NSWindow {
         if frame.origin == .zero {
             center()
         }
+        if isMiniaturized {
+            deminiaturize(nil)
+        }
         makeKeyAndOrderFront(nil)
     }
 

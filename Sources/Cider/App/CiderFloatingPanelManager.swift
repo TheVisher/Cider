@@ -27,6 +27,28 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         }
     }
 
+    enum SurfaceNotificationPayload {
+        static func surface(from notification: Notification) -> CiderFloatableSurface? {
+            if let surface = notification.object as? CiderFloatableSurface {
+                return surface
+            }
+
+            if let surface = notification.userInfo?[surfaceUserInfoKey] as? CiderFloatableSurface {
+                return surface
+            }
+
+            if let surface = notification.userInfo?["ciderSurface"] as? CiderFloatableSurface {
+                return surface
+            }
+
+            if let surface = notification.userInfo?["floatableSurface"] as? CiderFloatableSurface {
+                return surface
+            }
+
+            return nil
+        }
+    }
+
     nonisolated static let surfaceUserInfoKey = "surface"
 
     private var panelsByKey: [String: CiderFloatingPanel] = [:]
@@ -163,10 +185,17 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             name: .showCiderDropZone,
             object: nil
         )
+
+        center.addObserver(
+            self,
+            selector: #selector(handleDockSurfaceNotification(_:)),
+            name: .dockCiderSurface,
+            object: nil
+        )
     }
 
     @objc private func handleFloatSurfaceNotification(_ notification: Notification) {
-        guard let surface = notification.userInfo?[Self.surfaceUserInfoKey] as? CiderFloatableSurface else {
+        guard let surface = SurfaceNotificationPayload.surface(from: notification) else {
             return
         }
 
@@ -178,6 +207,15 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         }
 
         float(surface)
+    }
+
+    @objc private func handleDockSurfaceNotification(_ notification: Notification) {
+        guard let surface = SurfaceNotificationPayload.surface(from: notification),
+              contains(surface) else {
+            return
+        }
+
+        dock(surface)
     }
 
     @objc private func handleShowDropZoneNotification(_ notification: Notification) {

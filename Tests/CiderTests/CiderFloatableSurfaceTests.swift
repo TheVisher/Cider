@@ -25,6 +25,30 @@ struct CiderFloatableSurfaceTests {
         #expect(Notification.Name.showCiderDropZone.rawValue == "cider.showCiderDropZone")
     }
 
+    @Test("manager resolves floatable surfaces from notification object and common userInfo keys")
+    func managerResolvesSurfaceNotificationPayloads() {
+        let noteID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let note = CiderFloatableSurface.note(noteID)
+        let bookmark = CiderFloatableSurface.bookmarkMetadata(noteID)
+        let todo = CiderFloatableSurface.todo(noteID)
+
+        let objectNotification = Notification(name: .floatCiderSurface, object: note)
+        let surfaceNotification = Notification(
+            name: .floatCiderSurface,
+            object: nil,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: bookmark]
+        )
+        let compatibilityNotification = Notification(
+            name: .dockCiderSurface,
+            object: nil,
+            userInfo: ["floatableSurface": todo]
+        )
+
+        #expect(CiderFloatingPanelManager.SurfaceNotificationPayload.surface(from: objectNotification) == note)
+        #expect(CiderFloatingPanelManager.SurfaceNotificationPayload.surface(from: surfaceNotification) == bookmark)
+        #expect(CiderFloatingPanelManager.SurfaceNotificationPayload.surface(from: compatibilityNotification) == todo)
+    }
+
     @Test("manager bookkeeping reuses existing surfaces by stable key")
     @MainActor
     func managerBookkeepingReusesExistingSurfaceKeys() {
