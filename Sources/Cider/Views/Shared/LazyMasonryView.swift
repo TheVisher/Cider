@@ -4,6 +4,7 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
     let items: [Item]
     let minimumColumnWidth: CGFloat
     let itemSpacing: CGFloat
+    var viewportWidth: CGFloat?
     let estimatedHeight: (Item, CGFloat) -> CGFloat
     @ViewBuilder let content: (Item, CGFloat) -> Content
 
@@ -11,8 +12,12 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
     @State private var plannedColumns = LazyMasonryColumnPlanner.Plan<Item.ID>.empty
 
     var body: some View {
+        let resolvedContainerWidth = LazyMasonryColumnPlanner.explicitContainerWidth(
+            viewportWidth,
+            fallbackWidth: max(containerWidth, minimumColumnWidth)
+        )
         let layout = LazyMasonryColumnPlanner.layout(
-            containerWidth: max(containerWidth, minimumColumnWidth),
+            containerWidth: resolvedContainerWidth,
             minimumColumnWidth: minimumColumnWidth,
             itemSpacing: itemSpacing
         )
@@ -34,13 +39,15 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
             Color.clear
                 .frame(maxWidth: .infinity)
                 .background {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .onAppear {
-                                updateContainerWidth(parentWidth: proxy.size.width)
-                            }
-                            .onChange(of: proxy.size.width) { _, width in
-                                updateContainerWidth(parentWidth: width)
+                    if viewportWidth == nil {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear {
+                                    updateContainerWidth(parentWidth: proxy.size.width)
+                                }
+                                .onChange(of: proxy.size.width) { _, width in
+                                    updateContainerWidth(parentWidth: width)
+                                }
                             }
                     }
                 }
@@ -108,13 +115,21 @@ enum LazyMasonryColumnPlanner {
         minimumColumnWidth: CGFloat,
         itemSpacing: CGFloat
     ) -> LayoutMetrics {
-        let resolvedWidth = max(containerWidth, minimumColumnWidth)
+        let resolvedWidth = max(containerWidth, 1)
         let denominator = max(minimumColumnWidth + itemSpacing, 1)
         let rawColumnCount = Int(((resolvedWidth + itemSpacing) / denominator).rounded(.down))
         let columnCount = max(1, rawColumnCount)
         let totalSpacing = itemSpacing * CGFloat(columnCount - 1)
         let columnWidth = max(1, (resolvedWidth - totalSpacing) / CGFloat(columnCount))
         return LayoutMetrics(columnCount: columnCount, columnWidth: columnWidth)
+    }
+
+    static func explicitContainerWidth(_ width: CGFloat?, fallbackWidth: CGFloat) -> CGFloat {
+        if let width, width.isFinite, width > 0 {
+            return width
+        }
+        guard fallbackWidth.isFinite, fallbackWidth > 0 else { return 1 }
+        return fallbackWidth
     }
 
     static func resolvedContainerWidth(

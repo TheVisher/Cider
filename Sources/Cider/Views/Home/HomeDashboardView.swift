@@ -149,20 +149,27 @@ struct HomeDashboardView: View {
                         config.save()
                     }
                 } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            libraryFeed
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .scrollIndicators(.hidden)
-                        .onChange(of: scrollToItemID) { _, id in
-                            if let id {
-                                withAnimation(reduceMotion ? .none : .snappy) {
-                                    proxy.scrollTo(id, anchor: .center)
+                    GeometryReader { contentProxy in
+                        let feedWidth = HomeDashboardFeedLayout.availableWidth(
+                            contentWidth: contentProxy.size.width
+                        )
+
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                libraryFeed(availableWidth: feedWidth)
+                                    .frame(width: feedWidth, alignment: .leading)
+                            }
+                            .scrollIndicators(.hidden)
+                            .onChange(of: scrollToItemID) { _, id in
+                                if let id {
+                                    withAnimation(reduceMotion ? .none : .snappy) {
+                                        proxy.scrollTo(id, anchor: .center)
+                                    }
+                                    scrollToItemID = nil
                                 }
-                                scrollToItemID = nil
                             }
                         }
+                        .frame(width: feedWidth, alignment: .leading)
                     }
                     .padding(Spacing.xxs)
                     .padding(.horizontal, Spacing.md)
@@ -176,7 +183,7 @@ struct HomeDashboardView: View {
     // MARK: - Library Feed
 
     @ViewBuilder
-    private var libraryFeed: some View {
+    private func libraryFeed(availableWidth: CGFloat) -> some View {
         switch displayMode {
         case .list:
             // Handled separately in body — this branch should not be reached
@@ -190,12 +197,14 @@ struct HomeDashboardView: View {
                         .id(item.id)
                 }
             }
+            .frame(width: availableWidth, alignment: .leading)
 
         case .masonry:
             LazyMasonryView(
                 items: libraryItems,
                 minimumColumnWidth: cardSizing.cardMinWidth,
                 itemSpacing: Spacing.md,
+                viewportWidth: availableWidth,
                 estimatedHeight: { item, columnWidth in
                     LibraryItemMasonryMetrics.estimatedHeight(
                         for: item,
@@ -206,7 +215,7 @@ struct HomeDashboardView: View {
             ) { item, columnWidth in
                 libraryCard(item, mode: .masonry, masonryCardWidth: columnWidth)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: availableWidth, alignment: .leading)
             .padding(.bottom, Spacing.xs)
 
         case .kanban:
@@ -218,6 +227,7 @@ struct HomeDashboardView: View {
                         .id(item.id)
                 }
             }
+            .frame(width: availableWidth, alignment: .leading)
         }
     }
 
@@ -719,5 +729,12 @@ struct HomeDashboardView: View {
 
         guard !previewItems.isEmpty else { return nil }
         return AnyView(MultiDragPreview(items: previewItems, totalCount: selectedItemIDs.count))
+    }
+}
+
+enum HomeDashboardFeedLayout {
+    static func availableWidth(contentWidth: CGFloat) -> CGFloat {
+        guard contentWidth.isFinite, contentWidth > 0 else { return 1 }
+        return contentWidth
     }
 }

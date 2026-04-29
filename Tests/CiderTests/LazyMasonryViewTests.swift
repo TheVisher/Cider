@@ -39,6 +39,28 @@ struct LazyMasonryViewTests {
         #expect(layout.columnWidth == 256)
     }
 
+    @Test("lazy masonry can shrink a single column below preferred card width")
+    func plannerAllowsViewportBelowPreferredCardWidth() {
+        let layout = LazyMasonryColumnPlanner.layout(
+            containerWidth: 180,
+            minimumColumnWidth: 240,
+            itemSpacing: 16
+        )
+
+        #expect(layout.columnCount == 1)
+        #expect(layout.columnWidth == 180)
+    }
+
+    @Test("lazy masonry uses explicit viewport width over fallback measurements")
+    func plannerUsesExplicitViewportWidth() {
+        let width = LazyMasonryColumnPlanner.explicitContainerWidth(
+            760,
+            fallbackWidth: 1_240
+        )
+
+        #expect(width == 760)
+    }
+
     @Test("lazy masonry prefers parent width when measured content is stale and wider")
     func plannerPrefersParentWidthOverStaleMeasuredContentWidth() {
         let width = LazyMasonryColumnPlanner.resolvedContainerWidth(
@@ -46,6 +68,13 @@ struct LazyMasonryViewTests {
             measuredContentWidth: 1_240,
             minimumColumnWidth: 240
         )
+
+        #expect(width == 760)
+    }
+
+    @Test("home dashboard feed width follows the viewport instead of a stale masonry width")
+    func homeDashboardFeedWidthUsesViewportWidth() {
+        let width = HomeDashboardFeedLayout.availableWidth(contentWidth: 760)
 
         #expect(width == 760)
     }
