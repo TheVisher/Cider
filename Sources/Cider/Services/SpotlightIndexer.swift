@@ -267,8 +267,8 @@ final class SpotlightIndexer {
 
         let itemType = String(parts[1])
 
-        // Show the panel
-        NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+        // Show the main window before routing to the selected item.
+        NotificationCenter.default.post(name: .openCiderMainWindow, object: nil)
 
         // Navigate to the item based on type
         switch itemType {

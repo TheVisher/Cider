@@ -1,10 +1,12 @@
 import SwiftUI
 
 typealias CiderFloatingDockAction = @MainActor @Sendable () -> Void
+typealias CiderFloatingReanchorAction = @MainActor @Sendable (CiderFloatableSurface) -> Void
 
 struct CiderFloatingItemView: View {
     let surface: CiderFloatableSurface
     var onDock: CiderFloatingDockAction?
+    var onReanchor: CiderFloatingReanchorAction?
 
     @ObservedObject private var bookmarks = VaultBookmarkService.shared
     @ObservedObject private var notes = NotesStorage.shared
@@ -54,6 +56,7 @@ struct CiderFloatingItemView: View {
             }
         }
         .environment(\.floatingCiderDockAction, onDock)
+        .environment(\.floatingCiderReanchorAction, onReanchor)
     }
 }
 
@@ -80,6 +83,7 @@ private struct FloatingNoteDetail: View {
                 }
             },
             trailingExtra: {
+                FloatingReanchorButton(surface: surface)
                 if presentation.showsMetadataToggle {
                     NotesInfoToggleButton(viewModel: viewModel)
                 }
@@ -146,6 +150,8 @@ private struct FloatingBookmarkDetail: View {
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
+                FloatingReanchorButton(surface: surface)
+
                 Button {
                     withAnimation(reduceMotion ? .none : .snappy) {
                         isMetadataVisible.toggle()
@@ -368,7 +374,10 @@ private struct FloatingContactDetail: View {
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
-            trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) }
+            trailingExtra: {
+                FloatingReanchorButton(surface: surface)
+                AIDetailActionsButton(contactName: contact.displayName)
+            }
         ) {
             ContactDetailView(contact: contact, onDismiss: { dock(surface, action: onDock) })
         }
@@ -387,7 +396,10 @@ private struct FloatingDateCardDetail: View {
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
-            trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) }
+            trailingExtra: {
+                FloatingReanchorButton(surface: surface)
+                AIDetailActionsButton(eventTitle: dateCard.title)
+            }
         ) {
             DateCardDetailView(dateCard: dateCard, onDismiss: { dock(surface, action: onDock) })
         }
@@ -406,7 +418,10 @@ private struct FloatingTodoDetail: View {
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
-            trailingExtra: { AIDetailActionsButton(todoTitle: todo.title) }
+            trailingExtra: {
+                FloatingReanchorButton(surface: surface)
+                AIDetailActionsButton(todoTitle: todo.title)
+            }
         ) {
             TodoDetailView(todoCard: todo, onDismiss: { dock(surface, action: onDock) })
         }
@@ -424,7 +439,12 @@ private struct FloatingMissingItemView: View {
             detailViewMode: .slideOut,
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
-            onModeChange: { _ in }
+            onModeChange: { _ in },
+            trailingExtra: {
+                if CiderReanchorSurfaceResolver.canOpenInMainWindow(surface) {
+                    FloatingReanchorButton(surface: surface)
+                }
+            }
         ) {
             Text(title)
                 .font(CiderFont.body)
@@ -452,6 +472,29 @@ private struct FloatingDetailRow: View {
     }
 }
 
+private struct FloatingReanchorButton: View {
+    let surface: CiderFloatableSurface
+    @Environment(\.floatingCiderReanchorAction) private var onReanchor
+
+    var body: some View {
+        Button {
+            if let onReanchor {
+                onReanchor(surface)
+            } else {
+                reanchor(surface)
+            }
+        } label: {
+            Image(systemName: "rectangle.arrowtriangle.2.inward")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show in Cider")
+    }
+}
+
 @MainActor
 private func dock(_ surface: CiderFloatableSurface, action: CiderFloatingDockAction?) {
     if let action {
@@ -461,13 +504,31 @@ private func dock(_ surface: CiderFloatableSurface, action: CiderFloatingDockAct
     }
 }
 
+@MainActor
+private func reanchor(_ surface: CiderFloatableSurface) {
+    NotificationCenter.default.post(
+        name: .reanchorCiderSurface,
+        object: surface,
+        userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: surface]
+    )
+}
+
 private struct FloatingCiderDockActionKey: EnvironmentKey {
     static let defaultValue: CiderFloatingDockAction? = nil
+}
+
+private struct FloatingCiderReanchorActionKey: EnvironmentKey {
+    static let defaultValue: CiderFloatingReanchorAction? = nil
 }
 
 private extension EnvironmentValues {
     var floatingCiderDockAction: CiderFloatingDockAction? {
         get { self[FloatingCiderDockActionKey.self] }
         set { self[FloatingCiderDockActionKey.self] = newValue }
+    }
+
+    var floatingCiderReanchorAction: CiderFloatingReanchorAction? {
+        get { self[FloatingCiderReanchorActionKey.self] }
+        set { self[FloatingCiderReanchorActionKey.self] = newValue }
     }
 }

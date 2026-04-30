@@ -74,6 +74,40 @@ struct CiderFloatableSurfaceTests {
         #expect(bookkeeping.activeCount == 1)
     }
 
+    @Test("floating manager records recallable surfaces")
+    @MainActor
+    func floatingManagerRecordsRecallableSurfaces() {
+        let manager = CiderFloatingPanelManager()
+        let noteID = UUID()
+
+        manager.recordRecallCandidate(.note(noteID))
+
+        #expect(manager.recallCoordinator.lastRecallableSurface == .note(noteID))
+    }
+
+    @Test("floating manager ignores drop zone as recall candidate")
+    @MainActor
+    func floatingManagerIgnoresDropZoneRecall() {
+        let manager = CiderFloatingPanelManager()
+
+        manager.recordRecallCandidate(.dropZone)
+
+        #expect(manager.recallCoordinator.lastRecallableSurface == nil)
+    }
+
+    @Test("floating manager smart recall falls back when no candidate exists")
+    @MainActor
+    func floatingManagerSmartRecallFallsBackWithoutCandidate() {
+        let manager = CiderFloatingPanelManager()
+        var didFallback = false
+
+        manager.performSmartRecall {
+            didFallback = true
+        }
+
+        #expect(didFallback)
+    }
+
     @Test("floating bookmark metadata exposes useful detail sections")
     func floatingBookmarkMetadataBuildsUsefulSections() {
         let bookmark = Bookmark(
@@ -153,5 +187,22 @@ struct CiderFloatableSurfaceTests {
 
         #expect(size.width >= 760)
         #expect(size.height >= 560)
+    }
+
+    @Test("reanchor resolver accepts item surfaces")
+    func reanchorResolverAcceptsItemSurfaces() {
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.note(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.bookmark(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.bookmarkMetadata(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.contact(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.dateCard(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.todo(UUID())))
+    }
+
+    @Test("reanchor resolver rejects utility surfaces")
+    func reanchorResolverRejectsUtilitySurfaces() {
+        #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.dropZone))
+        #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.clipboard))
+        #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.aiAssistant))
     }
 }

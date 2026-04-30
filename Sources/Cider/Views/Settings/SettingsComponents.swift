@@ -676,8 +676,8 @@ struct KeyboardShortcutsReferenceView: View {
 
     private let groups: [ShortcutGroup] = [
         ShortcutGroup(title: "Panel", shortcuts: [
-            ShortcutEntry(keys: "Option \u{2325}  double-tap", description: "Toggle Cider panel"),
-            ShortcutEntry(keys: "Escape", description: "Clear search \u{2192} close editor \u{2192} clear selection \u{2192} dismiss panel"),
+            ShortcutEntry(keys: "Option \u{2325}  double-tap", description: "Recall last Cider surface"),
+            ShortcutEntry(keys: "Escape", description: "Clear search \u{2192} close editor \u{2192} clear selection \u{2192} dismiss window"),
         ]),
         ShortcutGroup(title: "Capture", shortcuts: [
             ShortcutEntry(keys: "\u{2325}B", description: "Capture bookmark from active browser"),

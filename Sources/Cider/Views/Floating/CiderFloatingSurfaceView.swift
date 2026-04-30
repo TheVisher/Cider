@@ -3,10 +3,15 @@ import SwiftUI
 struct CiderFloatingSurfaceView: View {
     let surface: CiderFloatableSurface
     var onDock: CiderFloatingDockAction?
+    var onReanchor: CiderFloatingReanchorAction?
 
     var body: some View {
         if surface.isLibraryItemSurface {
-            CiderFloatingItemView(surface: surface, onDock: onDock)
+            CiderFloatingItemView(
+                surface: surface,
+                onDock: onDock,
+                onReanchor: onReanchor
+            )
         } else {
             fallbackView
         }

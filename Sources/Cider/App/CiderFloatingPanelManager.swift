@@ -61,6 +61,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
     private var dropZoneAutoDismissTimer: Timer?
 
     private(set) var bookkeeping = Bookkeeping()
+    private(set) var recallCoordinator = CiderSurfaceRecallCoordinator()
 
     override init() {
         super.init()
@@ -77,6 +78,33 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         bookkeeping.contains(surface)
     }
 
+    func recordRecallCandidate(_ surface: CiderFloatableSurface) {
+        recallCoordinator.record(surface)
+    }
+
+    func recordClosedRecallCandidate(_ surface: CiderFloatableSurface) {
+        recallCoordinator.recordClosed(surface)
+    }
+
+    func isVisible(_ surface: CiderFloatableSurface) -> Bool {
+        panelsByKey[surface.stableKey]?.isVisible == true
+    }
+
+    func performSmartRecall(fallbackToMainWindow: () -> Void) {
+        switch recallCoordinator.activationAction(isVisible: isVisible) {
+        case .openMainWindow:
+            fallbackToMainWindow()
+        case .show(let surface):
+            guard canRestore(surface) else {
+                fallbackToMainWindow()
+                return
+            }
+            float(surface)
+        case .hide(let surface):
+            dock(surface)
+        }
+    }
+
     @discardableResult
     func float(_ surface: CiderFloatableSurface) -> CiderFloatingPanel {
         if case .dropZone = surface, dropZoneContext == nil {
@@ -86,6 +114,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         let key = surface.stableKey
         if let panel = panelsByKey[key] {
             _ = bookkeeping.register(surface)
+            recordRecallCandidate(surface)
             if case .dropZone = surface, dropZoneContext?.isPinned == true {
                 panel.orderFrontRegardless()
             } else {
@@ -104,6 +133,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         panelsByKey[key] = panel
         surfacesByPanel[ObjectIdentifier(panel)] = surface
         _ = bookkeeping.register(surface)
+        recordRecallCandidate(surface)
         panel.showNearMouse()
         return panel
     }
@@ -111,11 +141,13 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
     func dock(_ surface: CiderFloatableSurface) {
         let key = surface.stableKey
         guard let panel = panelsByKey.removeValue(forKey: key) else {
+            recordClosedRecallCandidate(surface)
             bookkeeping.unregister(surface)
             return
         }
 
         surfacesByPanel.removeValue(forKey: ObjectIdentifier(panel))
+        recordClosedRecallCandidate(surface)
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
             stopDropZoneAutoDismissTimer()
@@ -157,6 +189,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         guard let surface = surfacesByPanel.removeValue(forKey: panelID) else { return }
 
         panelsByKey.removeValue(forKey: surface.stableKey)
+        recordClosedRecallCandidate(surface)
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
             stopDropZoneAutoDismissTimer()
@@ -177,6 +210,23 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
                 self?.dock(surface)
             }
         )
+    }
+
+    private func canRestore(_ surface: CiderFloatableSurface) -> Bool {
+        switch surface {
+        case .note(let id):
+            NotesStorage.shared.notes.contains { $0.id == id }
+        case .bookmark(let id), .bookmarkMetadata(let id):
+            VaultBookmarkService.shared.bookmarks.contains { $0.id == id }
+        case .contact(let id):
+            ContactStorage.shared.contacts.contains { $0.id == id }
+        case .dateCard(let id):
+            DateCardStorage.shared.dateCards.contains { $0.id == id }
+        case .todo(let id):
+            TodoCardStorage.shared.todoCards.contains { $0.id == id }
+        case .clipboard, .aiAssistant, .dropZone:
+            false
+        }
     }
 
     private func installNotificationObservers() {

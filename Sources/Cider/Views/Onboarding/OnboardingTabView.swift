@@ -18,8 +18,8 @@ struct OnboardingTabView: View {
     // 10 items total → 5 rows of 2 in grid mode
     private let allCards: [SectionData] = [
         SectionData(id: 0, icon: "option", title: "Open Cider Anytime", lines: [
-            "Double-tap the Option key to summon Cider on any screen.",
-            "It floats above everything \u{2014} always one gesture away."
+            "Double-tap Option to recall your last floating Cider surface.",
+            "If there is nothing to recall, Cider opens the main window."
         ]),
         SectionData(id: 1, icon: "plus.circle.fill", title: "Capture from Your Browser", lines: [
             "Click the capture button (top right) or press Opt+B.",
@@ -81,7 +81,7 @@ struct OnboardingTabView: View {
                             .font(CiderFont.displayBold)
                             .foregroundColor(CiderColors.primary)
 
-                        Text("Your floating command palette for saving\nand organizing anything on macOS.")
+                        Text("Your Mac workspace for saving\nand organizing anything you want back later.")
                             .font(CiderFont.body)
                             .foregroundColor(CiderColors.tertiary)
                             .multilineTextAlignment(.center)
@@ -204,11 +204,11 @@ struct OnboardingTabView: View {
                 .foregroundColor(CiderColors.primary)
 
             VStack(spacing: Spacing.xs) {
-                shortcutRow(keys: "Option \u{00D7} 2", action: "Open / close Cider")
+                shortcutRow(keys: "Option \u{00D7} 2", action: "Recall last surface")
                 shortcutRow(keys: "Opt + B", action: "Capture browser tab")
                 shortcutRow(keys: "Opt + N", action: "New note")
                 shortcutRow(keys: "Cmd + K", action: "Search palette")
-                shortcutRow(keys: "Esc", action: "Dismiss panel")
+                shortcutRow(keys: "Esc", action: "Dismiss window")
             }
             .padding(.top, Spacing.xs)
         }

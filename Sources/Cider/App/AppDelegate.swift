@@ -26,13 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var bookmarkClipboardReviewRemaining: TimeInterval = BookmarksToastDesign.reviewAutoHideDuration
     var bookmarkClipboardReviewLastTick: Date?
 
-    // Main Cider panel
+    // Main Cider window
     var ciderMainWindow: CiderMainWindow?
-    var ciderPanel: CiderPanel?
-    var ciderShadowPanel: CiderShadowPanel?
-    var panelFrameObservation: NSKeyValueObservation?
-    let ciderPanelPositionStore = CiderPanelPositionStore.shared
-    var frameBeforeSlideOut: NSRect?
     var floatingPanelManager: CiderFloatingPanelManager?
 
     // Undo toast
@@ -124,7 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureNotes()
         configureBookmarks()
         configureCiderMainWindow()
-        configureCiderPanel()
         configureStatusItem()
         observeSettingsNotifications()
         observeBookmarksNotifications()
@@ -286,9 +280,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - File Open Handler
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        // Bring Cider panel to front for opened URLs
+        // Bring the main Cider window to front for opened URLs.
         if !urls.isEmpty {
-            NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+            NotificationCenter.default.post(name: .openCiderMainWindow, object: nil)
         }
     }
 
@@ -312,7 +306,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         ciderMenu.addItem(statusMenuItem(title: "Show Cider Window", action: #selector(openCiderMainWindowFromMenu), keyEquivalent: "1"))
-        ciderMenu.addItem(statusMenuItem(title: "Show Quick Panel", action: #selector(showCiderPanelFromMenu), keyEquivalent: "2"))
         ciderMenu.addItem(NSMenuItem.separator())
         ciderMenu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: "3"))
         ciderMenu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: "4"))
@@ -341,7 +334,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(statusMenuItem(title: "Show Cider Window", action: #selector(openCiderMainWindowFromMenu), keyEquivalent: ""))
-        menu.addItem(statusMenuItem(title: "Show Quick Panel", action: #selector(showCiderPanelFromMenu), keyEquivalent: " "))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: ""))
         menu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: ""))
@@ -379,11 +371,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggleCiderPanelFromMenu() {
-        toggleCiderPanel()
+        performCiderActivation()
     }
 
     @objc func showCiderPanelFromMenu() {
-        transitionToQuickPanel()
+        transitionToCiderMainWindow()
     }
 
     @objc func showAIAssistantPanelFromMenu() {
@@ -411,12 +403,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func simulateUpdateAvailableFromMenu() {
         SparkleUpdaterService.shared.simulateSidebarUpdateAvailableForDebug()
-        showCiderPanel()
+        transitionToCiderMainWindow()
     }
 
     @objc func clearSimulatedUpdateFromMenu() {
         SparkleUpdaterService.shared.clearAvailableUpdate()
-        showCiderPanel()
+        transitionToCiderMainWindow()
     }
     #endif
 
@@ -550,10 +542,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode: config.activationMode
         ) { [weak self] in
             Task { @MainActor in
-                self?.toggleCiderPanel()
+                self?.performCiderActivation()
             }
         }
         doubleTapDetector?.start()
+    }
+
+    func performCiderActivation() {
+        guard let floatingPanelManager else {
+            transitionToCiderMainWindow()
+            return
+        }
+
+        floatingPanelManager.performSmartRecall { [weak self] in
+            self?.transitionToCiderMainWindow()
+        }
     }
 
     // MARK: - Settings

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
-    var surface: CiderWorkspaceSurface = .quickPanel
+    var surface: CiderWorkspaceSurface = .mainWindow
     @ObservedObject var savedViewStorage = SavedViewStorage.shared
     @StateObject var libraryViewModel = LibraryViewModel()
     @State var selectedTab: CiderTab?
@@ -308,6 +308,13 @@ struct CiderPanelView: View {
             guard let bookmarkID = notification.userInfo?["bookmarkID"] as? UUID,
                   let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == bookmarkID }) else { return }
             openBookmarkDetails(bookmark)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openCiderSurfaceInMainWindow)) { notification in
+            guard surface == .mainWindow,
+                  let floatableSurface = CiderFloatingPanelManager.SurfaceNotificationPayload.surface(from: notification) else {
+                return
+            }
+            openSurfaceInMainWindow(floatableSurface)
         }
         .onReceive(NotificationCenter.default.publisher(for: .openNewItemPopover)) { notification in
             let ui = notification.userInfo

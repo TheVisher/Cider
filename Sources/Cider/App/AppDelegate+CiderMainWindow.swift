@@ -55,6 +55,25 @@ extension AppDelegate {
                 self?.maximizeCiderMainWindow()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .reanchorCiderSurface)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self,
+                      let surface = CiderFloatingPanelManager.SurfaceNotificationPayload.surface(from: notification) else {
+                    return
+                }
+
+                self.transitionToCiderMainWindow()
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .openCiderSurfaceInMainWindow,
+                        object: surface,
+                        userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: surface]
+                    )
+                }
+            }
+            .store(in: &cancellables)
     }
 
     @objc func openCiderMainWindowFromMenu() {
@@ -62,13 +81,7 @@ extension AppDelegate {
     }
 
     func transitionToCiderMainWindow() {
-        let currentSurface: CiderWorkspaceSurface? = ciderPanel?.isVisible == true ? .quickPanel : nil
-        apply(CiderSurfaceTransitionPolicy.transition(from: currentSurface, to: .mainWindow))
-    }
-
-    func transitionToQuickPanel() {
-        let currentSurface: CiderWorkspaceSurface? = ciderMainWindow?.isVisible == true ? .mainWindow : nil
-        apply(CiderSurfaceTransitionPolicy.transition(from: currentSurface, to: .quickPanel))
+        apply(CiderSurfaceTransitionPolicy.transitionToMainWindow())
     }
 
     func showCiderMainWindow() {
@@ -91,20 +104,12 @@ extension AppDelegate {
     private func apply(_ transition: CiderSurfaceTransition) {
         NSApplication.shared.setActivationPolicy(transition.activationPolicy)
 
-        if transition.shouldHideQuickPanel {
-            hideCiderPanel()
-        }
-
         if transition.shouldHideMainWindow {
             hideCiderMainWindow()
         }
 
         if transition.shouldShowMainWindow {
             showCiderMainWindow()
-        }
-
-        if transition.shouldShowQuickPanel {
-            showCiderPanel()
         }
 
         if transition.shouldActivateApp {
