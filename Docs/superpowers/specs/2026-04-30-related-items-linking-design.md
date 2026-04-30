@@ -25,6 +25,9 @@ The first implementation should prioritize:
 
 - Linking any supported item to a contact.
 - Showing both direct links and backlinks in the contact Related tab.
+- Showing linked-item metadata on cards/details wherever the item type has a compact metadata area.
+- Opening the linked target when a user clicks a linked-item row or metadata chip.
+- Showing the reciprocal linked item when the target opens, so moving from item A to item B still makes item A visible from item B.
 - Letting agents create, remove, list, and inspect links from the CLI.
 - Keeping existing date-card/contact birthday links working.
 
@@ -117,6 +120,13 @@ Contact Related tab:
 - Grouping can remain a simple flat list for the first pass.
 - Each row should show icon, title, subtitle, and item type context.
 - Rows should open the target item using existing detail/open flows where available.
+
+Cards and detail metadata:
+
+- Item cards that already have metadata/footer areas should show a compact linked-item indicator when links exist.
+- Detail surfaces should show linked items in a clear metadata/related area, not only hidden in context menus.
+- Link affordances should be clickable and should navigate to or open the linked item.
+- The opened linked item should show the original item through the same outgoing-plus-backlink merge, even if only one side originally wrote the link.
 
 ## Error Handling
 
