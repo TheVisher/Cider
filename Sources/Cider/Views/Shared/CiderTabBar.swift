@@ -101,6 +101,7 @@ struct CiderTabBar: View {
             .opacity(isDragging ? 0.4 : 1)
         }
         .buttonStyle(.plain)
+        .background(CiderWindowDragExclusionReporter(id: "tab-\(tab.id)"))
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
                 if let savedViewID = tab.savedViewID {
@@ -153,6 +154,7 @@ struct CiderTabBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(CiderWindowDragExclusionReporter(id: "tab-add"))
         .help("New tab")
         .popover(isPresented: $showAddTabPopover, arrowEdge: .bottom) {
             addTabPopoverContent(action: action)

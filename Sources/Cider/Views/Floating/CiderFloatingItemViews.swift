@@ -61,39 +61,65 @@ private struct FloatingNoteDetail: View {
     let note: Note
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
-
-    private var content: String {
-        NotesStorage.shared.loadContent(for: note)
-    }
+    @StateObject private var viewModel = NotesViewModel()
 
     var body: some View {
+        let presentation = FloatingNoteDetailPresentation(note: note)
+
         GenericItemDetailPanel(
-            title: note.title,
+            title: presentation.title,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            scrollsContent: presentation.scrollsContent,
+            onRenameTitle: renameNote,
             onClose: { dock(surface, action: onDock) },
-            onModeChange: { _ in }
-        ) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Empty note")
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.tertiary)
-                } else {
-                    Text(content)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.primary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+            onModeChange: { _ in },
+            toolbarExtra: {
+                if presentation.showsFormattingToolbar {
+                    NotesCompactToolbar(viewModel: viewModel)
                 }
-
-                if !note.tags.isEmpty {
-                    Text(note.tags.joined(separator: ", "))
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
+            },
+            trailingExtra: {
+                if presentation.showsMetadataToggle {
+                    NotesInfoToggleButton(viewModel: viewModel)
                 }
             }
+        ) {
+            if presentation.usesInlineEditor {
+                InlineNoteEditorView(viewModel: viewModel)
+            }
         }
+        .onAppear(perform: syncSelectedNote)
+        .onChange(of: note.id) { _, _ in syncSelectedNote() }
+        .onDisappear {
+            viewModel.flushSave()
+        }
+    }
+
+    private func syncSelectedNote() {
+        guard viewModel.selectedNote?.id != note.id else { return }
+        viewModel.selectNote(note)
+    }
+
+    private func renameNote(_ newTitle: String) {
+        guard let selected = viewModel.selectedNote ?? NotesStorage.shared.notes.first(where: { $0.id == note.id }) else { return }
+        NotesStorage.shared.rename(note: selected, to: newTitle)
+    }
+}
+
+struct FloatingNoteDetailPresentation: Equatable {
+    let title: String
+    let usesInlineEditor: Bool
+    let showsFormattingToolbar: Bool
+    let showsMetadataToggle: Bool
+    let scrollsContent: Bool
+
+    init(note: Note) {
+        title = note.title.isEmpty ? "Untitled" : note.title
+        usesInlineEditor = true
+        showsFormattingToolbar = true
+        showsMetadataToggle = true
+        scrollsContent = false
     }
 }
 

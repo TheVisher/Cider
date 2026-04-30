@@ -9,6 +9,7 @@ final class CiderMainWindow: NSWindow {
     private var dragStartOrigin: NSPoint?
     private var dragStartMouse: NSPoint?
     private var isDragging = false
+    private var dragExclusionRects: [String: NSRect] = [:]
 
     init() {
         let initialFrame = NSRect(x: 0, y: 0, width: 1180, height: 760)
@@ -23,7 +24,7 @@ final class CiderMainWindow: NSWindow {
         title = "Cider"
         isReleasedWhenClosed = false
         minSize = NSSize(width: 920, height: 560)
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
@@ -88,11 +89,29 @@ final class CiderMainWindow: NSWindow {
         }
     }
 
+    func setDragExclusionRect(_ rect: NSRect, for id: String) {
+        dragExclusionRects[id] = rect
+    }
+
+    func removeDragExclusionRect(for id: String) {
+        dragExclusionRects.removeValue(forKey: id)
+    }
+
+    func isLocationExcludedFromWindowDrag(_ locationInWindow: NSPoint) -> Bool {
+        dragExclusionRects.values.contains { rect in
+            rect.insetBy(dx: -1, dy: -1).contains(locationInWindow)
+        }
+    }
+
     private func isInDraggableArea(_ locationInWindow: NSPoint) -> Bool {
         guard let contentView else { return false }
         let bounds = contentView.bounds
 
         if isInResizeEdgeBand(locationInWindow, bounds: bounds) {
+            return false
+        }
+
+        if isLocationExcludedFromWindowDrag(locationInWindow) {
             return false
         }
 

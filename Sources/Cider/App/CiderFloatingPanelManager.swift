@@ -96,7 +96,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
 
         let panel = CiderFloatingPanel(
             surface: surface,
-            contentSize: defaultContentSize(for: surface)
+            contentSize: CiderFloatingPanelLayout.defaultContentSize(for: surface)
         )
         panel.delegate = self
         panel.contentView = contentView(for: surface)
@@ -160,15 +160,6 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
             stopDropZoneAutoDismissTimer()
-        }
-    }
-
-    private func defaultContentSize(for surface: CiderFloatableSurface) -> NSSize {
-        switch surface {
-        case .dropZone:
-            NSSize(width: 340, height: 360)
-        default:
-            NSSize(width: 420, height: 520)
         }
     }
 
@@ -283,6 +274,19 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             isMouseInsideWindow: mouseInsidePanel
         ) {
             dismissDropZoneIfUnpinned()
+        }
+    }
+}
+
+enum CiderFloatingPanelLayout {
+    static func defaultContentSize(for surface: CiderFloatableSurface) -> NSSize {
+        switch surface {
+        case .dropZone:
+            NSSize(width: 340, height: 360)
+        case .note:
+            NSSize(width: 820, height: 620)
+        default:
+            NSSize(width: 420, height: 520)
         }
     }
 }

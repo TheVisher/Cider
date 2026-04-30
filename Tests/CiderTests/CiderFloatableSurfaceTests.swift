@@ -131,4 +131,27 @@ struct CiderFloatableSurfaceTests {
         #expect(FloatingBookmarkDetailLayout.mode(for: 920) == .sideRail)
         #expect(FloatingBookmarkDetailLayout.mode(for: 640) == .stacked)
     }
+
+    @Test("floating notes use editable editor chrome")
+    func floatingNotePresentationUsesEditableEditorChrome() {
+        let note = Note(title: "Editable note")
+
+        let presentation = FloatingNoteDetailPresentation(note: note)
+
+        #expect(presentation.title == "Editable note")
+        #expect(presentation.usesInlineEditor)
+        #expect(presentation.showsFormattingToolbar)
+        #expect(presentation.showsMetadataToggle)
+        #expect(!presentation.scrollsContent)
+    }
+
+    @Test("floating note panels default wide enough for editor chrome")
+    func floatingNotePanelDefaultSizeFitsEditorChrome() {
+        let noteID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+
+        let size = CiderFloatingPanelLayout.defaultContentSize(for: .note(noteID))
+
+        #expect(size.width >= 760)
+        #expect(size.height >= 560)
+    }
 }
