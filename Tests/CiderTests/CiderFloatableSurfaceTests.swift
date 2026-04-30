@@ -73,4 +73,62 @@ struct CiderFloatableSurfaceTests {
         #expect(bookkeeping.contains(metadata))
         #expect(bookkeeping.activeCount == 1)
     }
+
+    @Test("floating bookmark metadata exposes useful detail sections")
+    func floatingBookmarkMetadataBuildsUsefulSections() {
+        let bookmark = Bookmark(
+            title: "Useful thing",
+            urlString: "https://example.com/path",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            notes: "A note worth reading",
+            tags: ["research", "mac"],
+            aiSummary: "Short AI summary",
+            dominantColors: ["#112233", "#445566"],
+            mediaType: .video,
+            relativePath: "Inbox/Bookmarks/Useful thing.webloc",
+            enrichmentStatus: "complete"
+        )
+
+        let metadata = FloatingBookmarkDetailMetadata(bookmark: bookmark, folderName: "Inbox")
+
+        #expect(metadata.url == URL(string: "https://example.com/path"))
+        #expect(metadata.notes == "A note worth reading")
+        #expect(metadata.summary == "Short AI summary")
+        #expect(metadata.tags == ["research", "mac"])
+        #expect(metadata.folderName == "Inbox")
+        #expect(metadata.mediaType == "Video")
+        #expect(metadata.relativePath == "Inbox/Bookmarks/Useful thing.webloc")
+        #expect(metadata.enrichmentStatus == "complete")
+        #expect(metadata.colors == ["#112233", "#445566"])
+    }
+
+    @Test("floating bookmark metadata trims empty optional text")
+    func floatingBookmarkMetadataTrimsEmptyOptionalText() {
+        let bookmark = Bookmark(
+            title: "Noisy",
+            urlString: "not a url",
+            notes: "   ",
+            tags: [],
+            aiSummary: "\n ",
+            dominantColors: [],
+            enrichmentStatus: ""
+        )
+
+        let metadata = FloatingBookmarkDetailMetadata(bookmark: bookmark, folderName: nil)
+
+        #expect(metadata.url == nil)
+        #expect(metadata.notes == nil)
+        #expect(metadata.summary == nil)
+        #expect(metadata.tags.isEmpty)
+        #expect(metadata.folderName == nil)
+        #expect(metadata.colors.isEmpty)
+        #expect(metadata.enrichmentStatus == nil)
+    }
+
+    @Test("floating bookmark layout keeps metadata in a side rail when there is room")
+    func floatingBookmarkLayoutUsesSideRailWhenWideEnough() {
+        #expect(FloatingBookmarkDetailLayout.mode(for: 920) == .sideRail)
+        #expect(FloatingBookmarkDetailLayout.mode(for: 640) == .stacked)
+    }
 }

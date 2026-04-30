@@ -101,39 +101,232 @@ private struct FloatingBookmarkDetail: View {
     let bookmark: Bookmark
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var draft: BookmarkDetailsDraft
+    @State private var isMetadataVisible = true
+
+    init(bookmark: Bookmark, surface: CiderFloatableSurface) {
+        self.bookmark = bookmark
+        self.surface = surface
+        _draft = State(initialValue: BookmarkDetailsDraft(bookmark: bookmark))
+    }
 
     var body: some View {
         GenericItemDetailPanel(
             title: bookmark.title,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            scrollsContent: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        isMetadataVisible.toggle()
+                    }
+                } label: {
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(isMetadataVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                        .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                        .overlay {
+                            Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
+                                .font(CiderFont.toolbarIcon)
+                                .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                        }
+                }
+                .buttonStyle(.plain)
+                .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
+
                 AIDetailActionsButton(
                     bookmarkTitle: bookmark.title,
                     bookmarkURL: bookmark.urlString
                 )
             }
         ) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                BookmarkDetailsHeroPreview(
-                    bookmark: bookmark,
-                    draft: BookmarkDetailsDraft(bookmark: bookmark)
-                )
-                .frame(height: 180)
+            FloatingBookmarkDetailContent(
+                bookmark: bookmark,
+                draft: $draft,
+                isMetadataVisible: $isMetadataVisible
+            )
+        }
+        .onChange(of: bookmark.id) { _, _ in
+            draft = BookmarkDetailsDraft(bookmark: bookmark)
+            isMetadataVisible = true
+        }
+        .onChange(of: bookmark.updatedAt) { _, _ in
+            draft = BookmarkDetailsDraft(bookmark: bookmark)
+        }
+    }
+}
 
-                FloatingDetailRow(label: "URL", value: bookmark.urlString)
+struct FloatingBookmarkDetailMetadata: Equatable {
+    let urlString: String
+    let url: URL?
+    let notes: String?
+    let summary: String?
+    let tags: [String]
+    let folderName: String?
+    let createdAt: Date
+    let updatedAt: Date
+    let metadataUpdatedAt: Date?
+    let mediaType: String?
+    let relativePath: String?
+    let enrichmentStatus: String?
+    let colors: [String]
 
-                if !bookmark.notes.isEmpty {
-                    FloatingDetailRow(label: "Notes", value: bookmark.notes)
+    init(bookmark: Bookmark, folderName: String?) {
+        urlString = bookmark.urlString
+        url = Self.absoluteURL(from: bookmark.urlString)
+        notes = Self.trimmed(bookmark.notes)
+        summary = Self.trimmed(bookmark.aiSummary ?? "")
+        tags = bookmark.tags
+        self.folderName = Self.trimmed(folderName ?? "")
+        createdAt = bookmark.createdAt
+        updatedAt = bookmark.updatedAt
+        metadataUpdatedAt = bookmark.metadataUpdatedAt
+        mediaType = bookmark.mediaType.map { Self.mediaTypeLabel($0) }
+        relativePath = Self.trimmed(bookmark.relativePath ?? "")
+        enrichmentStatus = Self.trimmed(bookmark.enrichmentStatus ?? "")
+        colors = (bookmark.dominantColors ?? []).filter { Self.trimmed($0) != nil }
+    }
+
+    private static func trimmed(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func absoluteURL(from value: String) -> URL? {
+        guard let url = URL(string: value),
+              url.scheme != nil else {
+            return nil
+        }
+        return url
+    }
+
+    private static func mediaTypeLabel(_ mediaType: BookmarkMediaType) -> String {
+        switch mediaType {
+        case .image: "Image"
+        case .gif: "GIF"
+        case .video: "Video"
+        }
+    }
+}
+
+private struct FloatingBookmarkDetailContent: View {
+    let bookmark: Bookmark
+    @Binding var draft: BookmarkDetailsDraft
+    @Binding var isMetadataVisible: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            switch FloatingBookmarkDetailLayout.mode(for: proxy.size.width) {
+            case .sideRail:
+                HStack(alignment: .top, spacing: 0) {
+                    previewStage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if isMetadataVisible {
+                        metadataSidebar
+                            .background(CiderColors.surfaceInput)
+                            .overlay(alignment: .leading) {
+                                CiderColors.separator
+                                    .frame(width: Spacing.hairline)
+                            }
+                            .transition(
+                                .detailSlideOutSidebar(
+                                    style: DetailSlideOutMotionPolicy.sidebarTransitionStyle()
+                                )
+                            )
+                    }
                 }
 
-                if !bookmark.tags.isEmpty {
-                    FloatingDetailRow(label: "Tags", value: bookmark.tags.joined(separator: ", "))
+            case .stacked:
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        previewStage
+                            .frame(minHeight: FloatingBookmarkDetailLayout.compactPreviewMinHeight)
+
+                        if isMetadataVisible {
+                            metadataSidebar
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(Spacing.md)
                 }
             }
         }
+    }
+
+    private var previewStage: some View {
+        BookmarkDetailsHeroPreview(bookmark: bookmark, draft: draft)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(Spacing.lg)
+    }
+
+    private var metadataSidebar: some View {
+        BookmarkMetadataSidebar(
+            draft: $draft,
+            bookmark: bookmark,
+            errorMessage: nil,
+            folders: VaultFolderService.shared.legacyFolders,
+            width: FloatingBookmarkDetailLayout.metadataSidebarWidth,
+            showBackground: false,
+            onDelete: nil,
+            onFolderChanged: assignFolder,
+            onOpenURL: openURL,
+            onCopyURL: copyURL,
+            onSave: saveDraft,
+            onCancel: {}
+        )
+    }
+
+    private func openURL() {
+        guard let url = URL(string: draft.sourceURL) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func copyURL() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(draft.sourceURL, forType: .string)
+    }
+
+    private func saveDraft() {
+        let parsedTags = draft.tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let sourceURL: String? = draft.sourceURL != draft.originalURLString
+            ? draft.sourceURL
+            : nil
+
+        _ = VaultBookmarkService.shared.updateDetails(
+            for: bookmark.id,
+            title: draft.title,
+            notes: draft.notes,
+            tags: parsedTags,
+            labelIDs: draft.labelIDs,
+            urlString: sourceURL
+        )
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID)
+    }
+}
+
+struct FloatingBookmarkDetailLayout {
+    enum Mode {
+        case sideRail
+        case stacked
+    }
+
+    static let metadataSidebarWidth = BookmarksDesign.detailsSidebarFixedWidth
+    static let compactPreviewMinHeight: CGFloat = 300
+    static let sideRailMinimumWidth: CGFloat = 760
+
+    static func mode(for width: CGFloat) -> Mode {
+        width >= sideRailMinimumWidth ? .sideRail : .stacked
     }
 }
 

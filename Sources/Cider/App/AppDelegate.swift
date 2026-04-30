@@ -335,6 +335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 button.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Cider")
             }
+
+            installStatusDropTarget(on: button)
         }
 
         let menu = NSMenu()
@@ -353,6 +355,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit Cider", action: #selector(quit), keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
+    }
+
+    private func installStatusDropTarget(on button: NSStatusBarButton) {
+        button.subviews
+            .compactMap { $0 as? CiderStatusDropTarget }
+            .forEach { $0.removeFromSuperview() }
+
+        let dropTarget = CiderStatusDropTarget { [weak self] in
+            Task { @MainActor in
+                self?.showDropZoneFromMenu()
+            }
+        }
+        dropTarget.frame = button.bounds
+        dropTarget.autoresizingMask = [.width, .height]
+        button.addSubview(dropTarget)
     }
 
     private func statusMenuItem(title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {

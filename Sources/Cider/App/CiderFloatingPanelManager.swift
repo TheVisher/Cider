@@ -3,6 +3,10 @@ import SwiftUI
 
 @MainActor
 final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
+    private static let dropZoneAutoDismissTickSeconds: TimeInterval = 1 / 60
+    private static let dropZoneAutoDismissDuration: CGFloat = 6
+    private static let dropZoneAutoDismissStep = CGFloat(dropZoneAutoDismissTickSeconds) / dropZoneAutoDismissDuration
+
     enum RegistrationResult: Equatable {
         case created
         case reused
@@ -54,6 +58,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
     private var panelsByKey: [String: CiderFloatingPanel] = [:]
     private var surfacesByPanel: [ObjectIdentifier: CiderFloatableSurface] = [:]
     private var dropZoneContext: CiderDropZoneContext?
+    private var dropZoneAutoDismissTimer: Timer?
 
     private(set) var bookkeeping = Bookkeeping()
 
@@ -81,7 +86,11 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         let key = surface.stableKey
         if let panel = panelsByKey[key] {
             _ = bookkeeping.register(surface)
-            panel.showNearMouse()
+            if case .dropZone = surface, dropZoneContext?.isPinned == true {
+                panel.orderFrontRegardless()
+            } else {
+                panel.showNearMouse()
+            }
             return panel
         }
 
@@ -109,7 +118,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         surfacesByPanel.removeValue(forKey: ObjectIdentifier(panel))
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
-            dropZoneContext = nil
+            stopDropZoneAutoDismissTimer()
         }
 
         panel.orderOut(nil)
@@ -125,13 +134,21 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         surfaces.forEach(dock)
     }
 
-    func showDropZone(context: CiderDropZoneContext = .manualTesting()) {
+    func showDropZone(context providedContext: CiderDropZoneContext? = nil) {
+        let context = providedContext ?? dropZoneContext ?? .manualTesting()
         dropZoneContext = context
-        _ = float(.dropZone)
+        context.resetDismissProgress()
+        let panel = float(.dropZone)
+        startDropZoneAutoDismissTimer(context: context, panel: panel)
     }
 
     func closeDropZone() {
         dock(.dropZone)
+    }
+
+    func dismissDropZoneIfUnpinned() {
+        guard dropZoneContext?.isPinned != true else { return }
+        closeDropZone()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -142,14 +159,14 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         panelsByKey.removeValue(forKey: surface.stableKey)
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
-            dropZoneContext = nil
+            stopDropZoneAutoDismissTimer()
         }
     }
 
     private func defaultContentSize(for surface: CiderFloatableSurface) -> NSSize {
         switch surface {
         case .dropZone:
-            NSSize(width: 340, height: 300)
+            NSSize(width: 340, height: 360)
         default:
             NSSize(width: 420, height: 520)
         }
@@ -159,7 +176,9 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         if case .dropZone = surface {
             let context = dropZoneContext ?? .manualTesting()
             dropZoneContext = context
-            return NSHostingView(rootView: CiderDropZoneView(context: context))
+            return NSHostingView(
+                rootView: CiderDropZoneView(context: context)
+            )
         }
 
         return NSHostingView(
@@ -223,6 +242,47 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             showDropZone(context: context)
         } else {
             showDropZone()
+        }
+    }
+
+    private func startDropZoneAutoDismissTimer(
+        context: CiderDropZoneContext,
+        panel: CiderFloatingPanel
+    ) {
+        stopDropZoneAutoDismissTimer()
+
+        let timer = Timer(timeInterval: Self.dropZoneAutoDismissTickSeconds, repeats: true) { [weak self, weak context, weak panel] _ in
+            Task { @MainActor in
+                guard let self, let context, let panel else { return }
+                self.tickDropZoneAutoDismiss(context: context, panel: panel)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dropZoneAutoDismissTimer = timer
+    }
+
+    private func stopDropZoneAutoDismissTimer() {
+        dropZoneAutoDismissTimer?.invalidate()
+        dropZoneAutoDismissTimer = nil
+    }
+
+    private func tickDropZoneAutoDismiss(
+        context: CiderDropZoneContext,
+        panel: CiderFloatingPanel
+    ) {
+        guard panelsByKey[CiderFloatableSurface.dropZone.stableKey] === panel,
+              panel.isVisible else {
+            stopDropZoneAutoDismissTimer()
+            context.setHoverPaused(false)
+            return
+        }
+
+        let mouseInsidePanel = NSMouseInRect(NSEvent.mouseLocation, panel.frame, false)
+        if context.tickAutoDismiss(
+            by: Self.dropZoneAutoDismissStep,
+            isMouseInsideWindow: mouseInsidePanel
+        ) {
+            dismissDropZoneIfUnpinned()
         }
     }
 }
