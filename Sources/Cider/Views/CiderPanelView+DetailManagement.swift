@@ -152,6 +152,37 @@ extension CiderPanelView {
         }
     }
 
+    func openLinkedRef(_ ref: LibraryEntityRef) {
+        switch ref.type {
+        case .bookmark:
+            if let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == ref.entityID }) {
+                openBookmarkDetails(bookmark)
+            }
+        case .note:
+            if let note = notesViewModel.notes.first(where: { $0.id == ref.entityID }) {
+                openNoteDetail(note)
+            }
+        case .dateCard:
+            if let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) {
+                openDateCardDetail(dateCard)
+            }
+        case .contact:
+            if let contact = ContactStorage.shared.contact(for: ref.entityID) {
+                openContactDetail(contact)
+            }
+        case .todo:
+            if let todo = TodoCardStorage.shared.todoCard(for: ref.entityID) {
+                openTodoDetail(todo)
+            }
+        case .vaultFile:
+            if let file = VaultFileService.shared.file(for: ref.entityID) {
+                openVaultFileDetail(file)
+            }
+        case .externalFile, .session:
+            break
+        }
+    }
+
     func openBookmarkDetails(_ bookmark: Bookmark) {
         if isSearchPaletteVisible {
             isSearchPaletteVisible = false

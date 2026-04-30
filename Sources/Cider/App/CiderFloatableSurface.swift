@@ -77,3 +77,22 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
         }
     }
 }
+
+extension CiderFloatableSurface {
+    init?(linkedRef ref: LibraryEntityRef) {
+        switch ref.type {
+        case .note:
+            self = .note(ref.entityID)
+        case .bookmark:
+            self = .bookmarkMetadata(ref.entityID)
+        case .contact:
+            self = .contact(ref.entityID)
+        case .dateCard:
+            self = .dateCard(ref.entityID)
+        case .todo:
+            self = .todo(ref.entityID)
+        case .vaultFile, .externalFile, .session:
+            return nil
+        }
+    }
+}

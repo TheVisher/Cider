@@ -379,7 +379,7 @@ struct CiderPanelView: View {
         .sheet(item: $newContactEditorContext) { context in
             ContactEditorSheet(
                 existingContact: context.existingContact,
-                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar in
+                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
                     LibraryItemEditor.saveContact(
                         draftContactID: draftContactID,
                         existingContact: context.existingContact,
@@ -392,7 +392,8 @@ struct CiderPanelView: View {
                         email: email,
                         phone: phone,
                         address: address,
-                        hasAvatar: hasAvatar
+                        hasAvatar: hasAvatar,
+                        customFields: customFields
                     )
                 },
                 onDelete: { contact in

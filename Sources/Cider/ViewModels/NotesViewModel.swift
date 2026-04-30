@@ -316,6 +316,11 @@ final class NotesViewModel: ObservableObject {
         }
     }
 
+    func pushCurrentContentToEditorIfReady() {
+        guard let selectedNote else { return }
+        pushContentToEditor(selectedNote.content)
+    }
+
     /// Focus the TipTap editor.
     /// In a non-activating NSPanel, JavaScript focus alone isn't enough —
     /// the WKWebView must also become the window's first responder.

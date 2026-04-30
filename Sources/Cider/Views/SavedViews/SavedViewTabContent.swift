@@ -14,6 +14,7 @@ struct SavedViewTabContent: View {
     var onOpenDateCard: ((DateCard) -> Void)? = nil
     var onOpenContact: ((ContactCard) -> Void)? = nil
     var onOpenTodo: ((TodoCard) -> Void)? = nil
+    var onOpenVaultFile: ((VaultFile) -> Void)? = nil
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var contactStorage = ContactStorage.shared
     @ObservedObject private var labelStorage = CardLabelStorage.shared
@@ -113,7 +114,7 @@ struct SavedViewTabContent: View {
         .sheet(item: $contactEditorContext) { context in
             ContactEditorSheet(
                 existingContact: context.existingContact,
-                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar in
+                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
                     LibraryItemEditor.saveContact(
                         draftContactID: draftContactID,
                         existingContact: context.existingContact,
@@ -126,7 +127,8 @@ struct SavedViewTabContent: View {
                         email: email,
                         phone: phone,
                         address: address,
-                        hasAvatar: hasAvatar
+                        hasAvatar: hasAvatar,
+                        customFields: customFields
                     )
                 },
                 onDelete: { contact in
@@ -757,63 +759,42 @@ struct SavedViewTabContent: View {
     }
 
     private func linkMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
-        switch item {
-        case .dateCard(let dateCard):
+        let source = entityRef(for: item)
+        if case .contact = item {
+            let groups = linkableItemGroups(excluding: source)
+            guard !groups.isEmpty else {
+                return [.submenu(title: "Link Item", children: [.disabled(title: "No items available")])]
+            }
+            return [.submenu(title: "Link Item", children: groups)]
+        } else {
             if contactStorage.contacts.isEmpty {
-                return [.submenu(title: "Link Contact", children: [
-                    .action(title: "No contacts available") {}
-                ])]
+                return [.submenu(title: "Link Contact", children: [.disabled(title: "No contacts available")])]
             }
             let children: [CardMenuItem] = contactStorage.contacts.map { contact in
-                let alreadyLinked = dateCard.linkedEntities.contains(
-                    LibraryEntityRef(type: .contact, entityID: contact.id)
-                )
+                let target = LibraryEntityRef(type: .contact, entityID: contact.id)
+                let alreadyLinked = isLinked(source, target)
                 if alreadyLinked {
-                    return .action(title: "\(contact.displayName) (Linked)") {}
+                    return .disabled(title: "\(contact.displayName) (Linked)")
                 } else {
                     return .action(title: contact.displayName) {
-                        link(dateCardID: dateCard.id, contactID: contact.id)
+                        link(source: source, to: target)
                     }
                 }
             }
             return [.submenu(title: "Link Contact", children: children)]
-        case .contact(let contact):
-            if dateCardStorage.dateCards.isEmpty {
-                return [.submenu(title: "Link Date Card", children: [
-                    .action(title: "No date cards available") {}
-                ])]
-            }
-            let children: [CardMenuItem] = dateCardStorage.dateCards.map { dateCard in
-                let alreadyLinked = contact.linkedEntities.contains(
-                    LibraryEntityRef(type: .dateCard, entityID: dateCard.id)
-                )
-                if alreadyLinked {
-                    return .action(title: "\(dateCard.title) (Linked)") {}
-                } else {
-                    return .action(title: dateCard.title) {
-                        link(dateCardID: dateCard.id, contactID: contact.id)
-                    }
-                }
-            }
-            return [.submenu(title: "Link Date Card", children: children)]
-        case .todo:
-            // Todos can link to contacts and date cards — placeholder for now
-            return []
-        case .bookmark, .note, .vaultFile:
-            return []
         }
     }
 
     private func linkedItemsMenuItems(for item: LibraryItemV2) -> [CardMenuItem] {
-        let refs = linkedEntityRefs(for: item)
-        guard !refs.isEmpty else { return [] }
-        let children: [CardMenuItem] = refs.compactMap { ref in
-            guard let title = titleForLinkedRef(ref) else { return nil }
-            return .action(title: title) {
-                openLinkedRef(ref)
+        let ref = entityRef(for: item)
+        let refs = (try? ItemLinkService.shared.relatedRefs(for: ref)) ?? linkedEntityRefs(for: item)
+        let summaries = ItemLinkService.shared.summaries(for: refs)
+        guard !summaries.isEmpty else { return [] }
+        let children: [CardMenuItem] = summaries.map { summary in
+            .action(title: summary.title) {
+                openLinkedRef(summary.ref)
             }
         }
-        guard !children.isEmpty else { return [] }
         return [.submenu(title: "Linked Items", children: children)]
     }
 
@@ -831,6 +812,9 @@ struct SavedViewTabContent: View {
     }
 
     private func titleForLinkedRef(_ ref: LibraryEntityRef) -> String? {
+        if let summary = ItemLinkService.shared.summary(for: ref) {
+            return summary.title
+        }
         switch ref.type {
         case .bookmark:
             return VaultBookmarkService.shared.bookmarks.first(where: { $0.id == ref.entityID })?.title
@@ -869,26 +853,122 @@ struct SavedViewTabContent: View {
             if let todoCard = TodoCardStorage.shared.todoCard(for: ref.entityID) {
                 onOpenTodo?(todoCard)
             }
-        case .externalFile, .vaultFile, .session: // session kept for backward compat
+        case .vaultFile:
+            if let file = VaultFileService.shared.file(for: ref.entityID) {
+                onOpenVaultFile?(file)
+            }
+        case .externalFile, .session: // session kept for backward compat
             break
         }
     }
 
-    private func link(dateCardID: UUID, contactID: UUID) {
-        guard var dateCard = dateCardStorage.dateCard(for: dateCardID),
-              var contact = contactStorage.contact(for: contactID) else { return }
+    private func link(source: LibraryEntityRef, to target: LibraryEntityRef) {
+        do {
+            try ItemLinkService.shared.addLink(from: source, to: target)
+            updateInMemoryLinkedEntities(source: source, target: target, shouldAdd: true)
+            updateInMemoryLinkedEntities(source: target, target: source, shouldAdd: true)
+        } catch {
+            print("Failed to link \(source.id) to \(target.id): \(error.localizedDescription)")
+        }
+    }
 
-        let contactRef = LibraryEntityRef(type: .contact, entityID: contactID)
-        if !dateCard.linkedEntities.contains(contactRef) {
-            dateCard.linkedEntities.append(contactRef)
+    private func updateInMemoryLinkedEntities(source: LibraryEntityRef, target: LibraryEntityRef, shouldAdd: Bool) {
+        switch source.type {
+        case .dateCard:
+            guard var dateCard = dateCardStorage.dateCard(for: source.entityID) else { return }
+            mergePersistedOutgoingRefs(into: &dateCard.linkedEntities, source: source)
+            updateRefs(&dateCard.linkedEntities, target: target, shouldAdd: shouldAdd)
             _ = dateCardStorage.updateDateCard(dateCard)
-        }
-
-        let dateRef = LibraryEntityRef(type: .dateCard, entityID: dateCardID)
-        if !contact.linkedEntities.contains(dateRef) {
-            contact.linkedEntities.append(dateRef)
+        case .contact:
+            guard var contact = contactStorage.contact(for: source.entityID) else { return }
+            mergePersistedOutgoingRefs(into: &contact.linkedEntities, source: source)
+            updateRefs(&contact.linkedEntities, target: target, shouldAdd: shouldAdd)
             _ = contactStorage.updateContact(contact)
+        case .todo:
+            guard var todo = TodoCardStorage.shared.todoCard(for: source.entityID) else { return }
+            mergePersistedOutgoingRefs(into: &todo.linkedEntities, source: source)
+            updateRefs(&todo.linkedEntities, target: target, shouldAdd: shouldAdd)
+            _ = TodoCardStorage.shared.updateTodoCard(todo)
+        case .bookmark, .note, .vaultFile, .externalFile, .session:
+            break
         }
+    }
+
+    private func mergePersistedOutgoingRefs(into refs: inout [LibraryEntityRef], source: LibraryEntityRef) {
+        guard let persistedRefs = try? ItemLinkService.shared.outgoingRefs(for: source) else { return }
+        for ref in persistedRefs where !refs.contains(ref) {
+            refs.append(ref)
+        }
+    }
+
+    private func updateRefs(_ refs: inout [LibraryEntityRef], target: LibraryEntityRef, shouldAdd: Bool) {
+        if shouldAdd {
+            if !refs.contains(target) {
+                refs.append(target)
+            }
+        } else {
+            refs.removeAll { $0 == target }
+        }
+    }
+
+    private func isLinked(_ source: LibraryEntityRef, _ target: LibraryEntityRef) -> Bool {
+        ((try? ItemLinkService.shared.relatedRefs(for: source)) ?? linkedEntityRefs(for: source)).contains(target)
+    }
+
+    private func linkedEntityRefs(for ref: LibraryEntityRef) -> [LibraryEntityRef] {
+        switch ref.type {
+        case .dateCard:
+            return dateCardStorage.dateCard(for: ref.entityID)?.linkedEntities ?? []
+        case .contact:
+            return contactStorage.contact(for: ref.entityID)?.linkedEntities ?? []
+        case .todo:
+            return TodoCardStorage.shared.todoCard(for: ref.entityID)?.linkedEntities ?? []
+        case .bookmark, .note, .vaultFile, .externalFile, .session:
+            return []
+        }
+    }
+
+    private func linkableItemGroups(excluding source: LibraryEntityRef) -> [CardMenuItem] {
+        [
+            linkableGroup(title: "Bookmarks", refsAndTitles: VaultBookmarkService.shared.bookmarks.map {
+                (LibraryEntityRef(type: .bookmark, entityID: $0.id), $0.title)
+            }, excluding: source),
+            linkableGroup(title: "Notes", refsAndTitles: NotesStorage.shared.notes.map {
+                (LibraryEntityRef(type: .note, entityID: $0.id), $0.title)
+            }, excluding: source),
+            linkableGroup(title: "Todos", refsAndTitles: TodoCardStorage.shared.todoCards.map {
+                (LibraryEntityRef(type: .todo, entityID: $0.id), $0.title)
+            }, excluding: source),
+            linkableGroup(title: "Date Cards", refsAndTitles: dateCardStorage.dateCards.map {
+                (LibraryEntityRef(type: .dateCard, entityID: $0.id), $0.title)
+            }, excluding: source),
+            linkableGroup(title: "Contacts", refsAndTitles: contactStorage.contacts.map {
+                (LibraryEntityRef(type: .contact, entityID: $0.id), $0.displayName)
+            }, excluding: source),
+            linkableGroup(title: "Files", refsAndTitles: VaultFileService.shared.files.map {
+                (LibraryEntityRef(type: .vaultFile, entityID: $0.id), $0.displayTitle)
+            }, excluding: source)
+        ]
+        .compactMap { $0 }
+    }
+
+    private func linkableGroup(
+        title: String,
+        refsAndTitles: [(LibraryEntityRef, String)],
+        excluding source: LibraryEntityRef
+    ) -> CardMenuItem? {
+        let children: [CardMenuItem] = refsAndTitles
+            .filter { $0.0 != source }
+            .map { target, title in
+                if isLinked(source, target) {
+                    return .disabled(title: "\(title) (Linked)")
+                }
+                return .action(title: title) {
+                    link(source: source, to: target)
+                }
+            }
+        guard !children.isEmpty else { return nil }
+        return .submenu(title: title, children: children)
     }
 
     private func entityRef(for item: LibraryItemV2) -> LibraryEntityRef {

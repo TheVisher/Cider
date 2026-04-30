@@ -90,7 +90,8 @@ enum LibraryItemEditor {
         email: String,
         phone: String,
         address: String,
-        hasAvatar: Bool
+        hasAvatar: Bool,
+        customFields: [ContactCustomField]? = nil
     ) {
         if var existingContact {
             existingContact.displayName = displayName
@@ -102,6 +103,9 @@ enum LibraryItemEditor {
             existingContact.address = address
             existingContact.hasAvatar = hasAvatar
             existingContact.labelIDs = labelIDs
+            if let customFields {
+                existingContact.customFields = customFields
+            }
             _ = ContactStorage.shared.updateContact(existingContact)
             if addBirthdayDateCard, let birthday {
                 createOrUpdateBirthdayDateCard(for: existingContact, birthday: birthday)
@@ -118,6 +122,7 @@ enum LibraryItemEditor {
         created.address = address
         created.hasAvatar = hasAvatar
         created.labelIDs = labelIDs
+        created.customFields = customFields ?? []
         _ = ContactStorage.shared.updateContact(created)
 
         if addBirthdayDateCard, let birthday {

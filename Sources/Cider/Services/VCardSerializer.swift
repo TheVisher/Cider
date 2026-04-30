@@ -45,6 +45,9 @@ enum VCardSerializer {
             let refs = contact.linkedEntities.map { "\($0.type.rawValue):\($0.entityID.uuidString)" }
             lines.append("X-CIDER-LINKED:\(refs.joined(separator: ","))")
         }
+        if !contact.customFields.isEmpty {
+            lines.append("X-CIDER-FIELDS:\(escapeVCard(ContactCustomFieldCodec.encode(contact.customFields)))")
+        }
         if contact.hasAvatar {
             lines.append("X-CIDER-HAS-AVATAR:TRUE")
         }
@@ -76,6 +79,7 @@ enum VCardSerializer {
         var relationshipLabel = ""
         var labelIDs: [UUID] = []
         var linkedEntities: [LibraryEntityRef] = []
+        var customFields: [ContactCustomField] = []
         var hasAvatar = false
         var createdAt: Date?
         var updatedAt: Date?
@@ -112,6 +116,8 @@ enum VCardSerializer {
                 labelIDs = value.components(separatedBy: ",").compactMap { UUID(uuidString: $0.trimmingCharacters(in: .whitespaces)) }
             case "X-CIDER-LINKED":
                 linkedEntities = parseLinkedEntities(value)
+            case "X-CIDER-FIELDS":
+                customFields = ContactCustomFieldCodec.decode(unescapeVCard(value))
             case "X-CIDER-HAS-AVATAR":
                 hasAvatar = value.uppercased() == "TRUE"
             case "X-CIDER-CREATED":
@@ -137,6 +143,7 @@ enum VCardSerializer {
             hasAvatar: hasAvatar,
             labelIDs: labelIDs,
             linkedEntities: linkedEntities,
+            customFields: customFields,
             createdAt: createdAt ?? Date(),
             updatedAt: updatedAt ?? Date()
         )

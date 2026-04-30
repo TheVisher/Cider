@@ -119,6 +119,26 @@ func outputJSON(_ value: Any) {
     if !contact.notes.isEmpty { d["notes"] = contact.notes }
     if !contact.relationshipLabel.isEmpty { d["relationship"] = contact.relationshipLabel }
     if let birthday = contact.birthday { d["birthday"] = ISO8601DateFormatter().string(from: birthday) }
+    if !contact.linkedEntities.isEmpty {
+        d["linkedEntities"] = contact.linkedEntities.map { ref in
+            [
+                "type": ref.type.rawValue,
+                "id": ref.entityID.uuidString
+            ]
+        }
+    }
+    if !contact.customFields.isEmpty {
+        d["fields"] = contact.customFields.map { field in
+            [
+                "id": field.id.uuidString,
+                "section": field.section,
+                "label": field.label,
+                "value": field.value,
+                "kind": field.kind.rawValue,
+                "pinned": field.isPinned
+            ] as [String: Any]
+        }
+    }
     return d
 }
 

@@ -123,7 +123,8 @@ enum CiderSchema {
             email              TEXT NOT NULL DEFAULT '',
             phone              TEXT NOT NULL DEFAULT '',
             address            TEXT NOT NULL DEFAULT '',
-            has_avatar         INTEGER NOT NULL DEFAULT 0
+            has_avatar         INTEGER NOT NULL DEFAULT 0,
+            custom_fields      TEXT NOT NULL DEFAULT '[]'
         );
         """
 

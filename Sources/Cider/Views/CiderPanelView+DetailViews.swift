@@ -132,7 +132,8 @@ extension CiderPanelView {
                         closeGenericDetail()
                         newContactEditorContext = ContactEditorContext(existingContact: contact)
                     },
-                    onDismiss: closeGenericDetail
+                    onDismiss: closeGenericDetail,
+                    onOpenRelated: openLinkedRef
                 )
             }
         } else if let todoCard = selectedTodoCard {
@@ -213,7 +214,8 @@ extension CiderPanelView {
                         closeGenericDetail()
                         newContactEditorContext = ContactEditorContext(existingContact: contact)
                     },
-                    onDismiss: closeGenericDetail
+                    onDismiss: closeGenericDetail,
+                    onOpenRelated: openLinkedRef
                 )
             }
             .padding(BookmarksDesign.detailsSlideOutFloatInset)
@@ -392,7 +394,8 @@ extension CiderPanelView {
                         closeGenericDetail()
                         newContactEditorContext = ContactEditorContext(existingContact: contact)
                     },
-                    onDismiss: closeGenericDetail
+                    onDismiss: closeGenericDetail,
+                    onOpenRelated: openLinkedRef
                 )
             }
             .padding(.horizontal, Spacing.md)

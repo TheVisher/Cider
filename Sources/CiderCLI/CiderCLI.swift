@@ -95,6 +95,8 @@ struct CiderCLI {
             handleEvent(subcommand: subcommand, args: remaining)
         case "contact":
             handleContact(subcommand: subcommand, args: remaining)
+        case "link":
+            handleLink(subcommand: subcommand, args: remaining)
         case "file":
             handleFile(subcommand: subcommand, args: remaining, service: vaultFileService)
         case "folder":
@@ -1329,6 +1331,9 @@ struct CiderCLI {
     static func handleContact(subcommand: String?, args: [String]) {
         let storage = ContactStorage.shared
         switch subcommand {
+        case nil, "help", "--help", "-h":
+            print(ContactCLIHelpText.contact)
+
         case "list", "ls":
             let contacts = storage.contacts
             if jsonOutput {
@@ -1340,6 +1345,12 @@ struct CiderCLI {
                     print("  [\(contact.id.uuidString.prefix(8))] \(contact.displayName)\(email)")
                 }
             }
+
+        case "profile":
+            handleContactProfile(subcommand: args.first, args: Array(args.dropFirst()), storage: storage)
+
+        case "field", "fields":
+            handleContactField(subcommand: args.first, args: Array(args.dropFirst()), storage: storage)
 
         case "create":
             let targetFolder: VaultFolder?
@@ -1490,7 +1501,349 @@ struct CiderCLI {
 
         default:
             print("Unknown contact command: \(subcommand ?? "nil")")
-            print("Commands: list, create, delete, update, export, set-avatar, remove-avatar")
+            print(ContactCLIHelpText.contact)
+        }
+    }
+
+    static func handleContactProfile(subcommand: String?, args: [String], storage: ContactStorage) {
+        switch subcommand {
+        case "show", "get":
+            if hasHelpArg(args) {
+                print(ContactCLIHelpText.profile)
+                return
+            }
+            let ref = leadingPositionalArgs(from: args).joined(separator: " ")
+            guard !ref.isEmpty else {
+                print("Error: Contact ID prefix or name required. Usage: cider-cli contact profile show <id|name> [--json]")
+                return
+            }
+            guard let contact = findContact(ref, in: storage) else { return }
+            if jsonOutput {
+                outputJSON(contactProfileOutput(contact))
+            } else {
+                printContactProfile(contact)
+            }
+
+        case "apply", "set":
+            if hasHelpArg(args) {
+                print(ContactCLIHelpText.profile)
+                return
+            }
+            let ref = leadingPositionalArgs(from: args).joined(separator: " ")
+            let createIfMissing = args.contains("--create")
+            let targetFolder: VaultFolder?
+            switch resolveFolderArg(from: args) {
+            case .unspecified: targetFolder = nil
+            case .resolved(let f): targetFolder = f
+            case .failed: return
+            }
+
+            guard !ref.isEmpty || createIfMissing else {
+                print("Error: Contact ID prefix or name required. Usage: cider-cli contact profile apply <id|name> --profile-json <json> [--create] [--json]")
+                return
+            }
+            guard let json = readContactProfileJSON(from: args) else { return }
+
+            let patch: ContactProfilePatch
+            do {
+                patch = try ContactProfileJSON.decodePatch(from: json)
+            } catch {
+                print("Error: Invalid profile JSON: \(error.localizedDescription)")
+                return
+            }
+
+            let existing = ref.isEmpty ? nil : resolveContact(ref, in: storage, reportErrors: false)
+            let originalBirthday = existing?.birthday
+            let updated: ContactCard
+            let action: String
+            do {
+                if var contact = existing {
+                    contact = try patch.apply(to: contact)
+                    if let targetFolder {
+                        contact.folderID = targetFolder.id
+                    }
+                    guard storage.updateContact(contact) else {
+                        print("Error: Failed to update contact '\(contact.displayName)'")
+                        return
+                    }
+                    updated = storage.contact(for: contact.id) ?? contact
+                    action = "updated"
+                } else if createIfMissing {
+                    let baseName = ref.isEmpty ? "New Contact" : ref
+                    let desired = try patch.apply(to: ContactCard(displayName: baseName))
+                    let finalName = desired.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !finalName.isEmpty, finalName != "New Contact" || !ref.isEmpty else {
+                        print("Error: --create requires a contact name or displayName in profile JSON")
+                        return
+                    }
+                    var contact = storage.createContact(displayName: finalName)
+                    guard storage.contacts.contains(where: { $0.id == contact.id }) else {
+                        print("Error: Failed to create contact (disk write failed)")
+                        return
+                    }
+                    contact.displayName = finalName
+                    contact.relationshipLabel = desired.relationshipLabel
+                    contact.birthday = desired.birthday
+                    contact.notes = desired.notes
+                    contact.email = desired.email
+                    contact.phone = desired.phone
+                    contact.address = desired.address
+                    contact.linkedEntities = desired.linkedEntities
+                    contact.customFields = desired.customFields
+                    if let targetFolder {
+                        contact.folderID = targetFolder.id
+                    }
+                    guard storage.updateContact(contact) else {
+                        print("Error: Failed to finish created contact '\(finalName)'")
+                        return
+                    }
+                    updated = storage.contact(for: contact.id) ?? contact
+                    action = "created"
+                } else {
+                    print("Error: No contact found with ID prefix or name: \(ref)")
+                    return
+                }
+            } catch {
+                print("Error: \(error.localizedDescription)")
+                return
+            }
+
+            if let birthday = updated.birthday, birthday != originalBirthday {
+                LibraryItemEditor.createOrUpdateBirthdayDateCard(for: updated, birthday: birthday)
+            }
+
+            if jsonOutput {
+                var output = contactProfileOutput(updated)
+                output["action"] = action
+                outputJSON(output)
+            } else {
+                print("\(action.capitalized): \(updated.displayName) (\(updated.id.uuidString.prefix(8)))")
+            }
+
+        case nil, "help", "--help", "-h":
+            print(ContactCLIHelpText.profile)
+
+        default:
+            print("Unknown contact profile command: \(subcommand ?? "nil")")
+            print(ContactCLIHelpText.profile)
+        }
+    }
+
+    static func handleContactField(subcommand: String?, args: [String], storage: ContactStorage) {
+        switch subcommand {
+        case "list", "ls":
+            if hasHelpArg(args) {
+                print(ContactCLIHelpText.field)
+                return
+            }
+            let ref = leadingPositionalArgs(from: args).joined(separator: " ")
+            guard !ref.isEmpty else {
+                print("Error: Contact ID prefix or name required. Usage: cider-cli contact field list <contact> [--json]")
+                return
+            }
+            guard let contact = findContact(ref, in: storage) else { return }
+            if jsonOutput {
+                outputJSON(contact.customFields.map(contactFieldToDict))
+            } else {
+                print("Fields for \(contact.displayName) (\(contact.customFields.count)):")
+                for field in contact.customFields {
+                    print("  [\(field.id.uuidString.prefix(8))] \(field.section) / \(field.label): \(field.value)\(field.isPinned ? " (pinned)" : "")")
+                }
+            }
+
+        case "add":
+            if hasHelpArg(args) {
+                print(ContactCLIHelpText.field)
+                return
+            }
+            let ref = leadingPositionalArgs(from: args).joined(separator: " ")
+            guard !ref.isEmpty else {
+                print("Error: Contact ID prefix or name required. Usage: cider-cli contact field add <contact> --section <s> --label <l> --value <v> [--kind text|phone|email|url|date|number] [--pinned]")
+                return
+            }
+            guard var contact = findContact(ref, in: storage) else { return }
+            guard let section = parseFlag("--section", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !section.isEmpty,
+                  let label = parseFlag("--label", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty,
+                  let value = parseFlag("--value", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+                print("Error: --section, --label, and --value are required")
+                return
+            }
+            let kind = parseContactFieldKind(from: args)
+            let pinned = parseOptionalBoolFlag("--pinned", from: args) ?? args.contains("--pinned")
+            let field = ContactCustomField(section: section, label: label, value: value, kind: kind, isPinned: pinned)
+            contact.customFields.append(field)
+            guard storage.updateContact(contact) else {
+                print("Error: Failed to add field to \(contact.displayName)")
+                return
+            }
+            if jsonOutput {
+                outputJSON(contactFieldToDict(field))
+            } else {
+                print("Added field: \(field.section) / \(field.label) (\(field.id.uuidString.prefix(8)))")
+            }
+
+        case "update", "set":
+            if hasHelpArg(args) {
+                print(ContactCLIHelpText.field)
+                return
+            }
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                print("Error: Usage: cider-cli contact field update <contact> <field-id|label> [--section <s>] [--label <l>] [--value <v>] [--kind text|phone|email|url|date|number] [--pinned true|false]")
+                return
+            }
+            let contactRef = positional.dropLast().joined(separator: " ")
+            let fieldRef = positional.last ?? ""
+            guard var contact = findContact(contactRef, in: storage) else { return }
+            guard let idx = resolveContactFieldIndex(fieldRef, in: contact) else {
+                print("Error: No field found on \(contact.displayName) matching '\(fieldRef)'")
+                return
+            }
+            if let section = parseFlag("--section", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !section.isEmpty {
+                contact.customFields[idx].section = section
+            }
+            if let label = parseFlag("--label", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+                contact.customFields[idx].label = label
+            }
+            if let value = parseFlag("--value", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                contact.customFields[idx].value = value
+            }
+            if parseFlag("--kind", from: args) != nil {
+                contact.customFields[idx].kind = parseContactFieldKind(from: args)
+            }
+            if let pinned = parseOptionalBoolFlag("--pinned", from: args) {
+                contact.customFields[idx].isPinned = pinned
+            } else if args.contains("--pinned") {
+                contact.customFields[idx].isPinned = true
+            } else if args.contains("--unpinned") {
+                contact.customFields[idx].isPinned = false
+            }
+            let updatedField = contact.customFields[idx]
+            guard storage.updateContact(contact) else {
+                print("Error: Failed to update field on \(contact.displayName)")
+                return
+            }
+            if jsonOutput {
+                outputJSON(contactFieldToDict(updatedField))
+            } else {
+                print("Updated field: \(updatedField.section) / \(updatedField.label) (\(updatedField.id.uuidString.prefix(8)))")
+            }
+
+        case "delete", "remove", "rm":
+            if hasHelpArg(args) {
+                print(ContactCLIHelpText.field)
+                return
+            }
+            let positional = leadingPositionalArgs(from: args)
+            guard positional.count >= 2 else {
+                print("Error: Usage: cider-cli contact field delete <contact> <field-id|label>")
+                return
+            }
+            let contactRef = positional.dropLast().joined(separator: " ")
+            let fieldRef = positional.last ?? ""
+            guard var contact = findContact(contactRef, in: storage) else { return }
+            guard let idx = resolveContactFieldIndex(fieldRef, in: contact) else {
+                print("Error: No field found on \(contact.displayName) matching '\(fieldRef)'")
+                return
+            }
+            let removed = contact.customFields.remove(at: idx)
+            guard storage.updateContact(contact) else {
+                print("Error: Failed to delete field on \(contact.displayName)")
+                return
+            }
+            if jsonOutput {
+                outputJSON(contactFieldToDict(removed))
+            } else {
+                print("Deleted field: \(removed.section) / \(removed.label) (\(removed.id.uuidString.prefix(8)))")
+            }
+
+        case nil, "help", "--help", "-h":
+            print(ContactCLIHelpText.field)
+
+        default:
+            print("Unknown contact field command: \(subcommand ?? "nil")")
+            print(ContactCLIHelpText.field)
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: - Link Commands
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    static func handleLink(subcommand: String?, args: [String]) {
+        let service = ItemLinkService.shared
+        switch subcommand {
+        case nil, "help", "--help", "-h":
+            print(ItemLinkCLIHelpText.link)
+
+        case "add":
+            if hasHelpArg(args) {
+                print(ItemLinkCLIHelpText.link)
+                return
+            }
+            do {
+                let (source, target) = try resolveLinkPair(from: args, service: service)
+                try service.addLink(from: source, to: target)
+                printLinkMutation(action: "linked", source: source, target: target, service: service)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "remove", "rm", "delete":
+            if hasHelpArg(args) {
+                print(ItemLinkCLIHelpText.link)
+                return
+            }
+            do {
+                let (source, target) = try resolveLinkPair(from: args, service: service)
+                try service.removeLink(from: source, to: target)
+                printLinkMutation(action: "unlinked", source: source, target: target, service: service)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "list":
+            if hasHelpArg(args) {
+                print(ItemLinkCLIHelpText.link)
+                return
+            }
+            do {
+                let ref = try resolveSingleLinkRef(from: args, service: service)
+                let refs = try service.outgoingRefs(for: ref)
+                printLinkSummaries(refs, service: service)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "backlinks":
+            if hasHelpArg(args) {
+                print(ItemLinkCLIHelpText.link)
+                return
+            }
+            do {
+                let ref = try resolveSingleLinkRef(from: args, service: service)
+                let refs = try service.backlinkRefs(for: ref)
+                printLinkSummaries(refs, service: service)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        case "related":
+            if hasHelpArg(args) {
+                print(ItemLinkCLIHelpText.link)
+                return
+            }
+            do {
+                let ref = try resolveSingleLinkRef(from: args, service: service)
+                let refs = try service.relatedRefs(for: ref)
+                printLinkSummaries(refs, service: service)
+            } catch {
+                print("Error: \(error.localizedDescription)")
+            }
+
+        default:
+            print("Unknown link command: \(subcommand ?? "nil")")
+            print(ItemLinkCLIHelpText.link)
         }
     }
 
@@ -4236,6 +4589,249 @@ struct CiderCLI {
         return note
     }
 
+    static func findContact(_ ref: String, in storage: ContactStorage) -> ContactCard? {
+        resolveContact(ref, in: storage, reportErrors: true)
+    }
+
+    static func resolveContact(_ ref: String, in storage: ContactStorage, reportErrors: Bool) -> ContactCard? {
+        let normalized = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        let lowercased = normalized.lowercased()
+
+        if let contact = storage.contacts.first(where: {
+            $0.id.uuidString.lowercased().hasPrefix(lowercased)
+        }) {
+            return contact
+        }
+
+        let exactMatches = storage.contacts.filter {
+            $0.displayName.localizedCaseInsensitiveCompare(normalized) == .orderedSame
+        }
+        if exactMatches.count == 1 {
+            return exactMatches[0]
+        }
+        if exactMatches.count > 1 {
+            if reportErrors {
+                print("Error: Multiple contacts named '\(normalized)'. Use an ID prefix.")
+            }
+            return nil
+        }
+
+        let containsMatches = storage.contacts.filter {
+            $0.displayName.localizedCaseInsensitiveContains(normalized)
+        }
+        if containsMatches.count == 1 {
+            return containsMatches[0]
+        }
+        if containsMatches.count > 1 {
+            if reportErrors {
+                print("Error: Multiple contacts match '\(normalized)':")
+                for contact in containsMatches {
+                    print("  [\(contact.id.uuidString.prefix(8))] \(contact.displayName)")
+                }
+            }
+            return nil
+        }
+
+        if reportErrors {
+            print("Error: No contact found with ID prefix or name: \(normalized)")
+        }
+        return nil
+    }
+
+    static func leadingPositionalArgs(from args: [String]) -> [String] {
+        var values: [String] = []
+        for arg in args {
+            if arg.hasPrefix("--") { break }
+            values.append(arg)
+        }
+        return values
+    }
+
+    static func hasHelpArg(_ args: [String]) -> Bool {
+        args.contains("help") || args.contains("--help") || args.contains("-h")
+    }
+
+    static func nonFlagArgs(_ args: [String]) -> [String] {
+        args.filter { !$0.hasPrefix("--") }
+    }
+
+    static func resolveLinkPair(
+        from args: [String],
+        service: ItemLinkService
+    ) throws -> (source: LibraryEntityRef, target: LibraryEntityRef) {
+        let positional = nonFlagArgs(args)
+        guard positional.count >= 4 else {
+            throw ItemLinkService.LinkError.unsupportedType(
+                "Usage: cider-cli link add <source-type> <source-ref> <target-type> <target-ref>"
+            )
+        }
+        let sourceType = try ItemLinkService.entityType(from: positional[0])
+        let targetType = try ItemLinkService.entityType(from: positional[2])
+        let source = try service.resolve(type: sourceType, ref: positional[1])
+        let target = try service.resolve(type: targetType, ref: positional[3])
+        return (source, target)
+    }
+
+    static func resolveSingleLinkRef(
+        from args: [String],
+        service: ItemLinkService
+    ) throws -> LibraryEntityRef {
+        let positional = nonFlagArgs(args)
+        guard positional.count >= 2 else {
+            throw ItemLinkService.LinkError.unsupportedType(
+                "Usage: cider-cli link list <type> <ref>"
+            )
+        }
+        let type = try ItemLinkService.entityType(from: positional[0])
+        return try service.resolve(type: type, ref: positional[1])
+    }
+
+    static func printLinkMutation(
+        action: String,
+        source: LibraryEntityRef,
+        target: LibraryEntityRef,
+        service: ItemLinkService
+    ) {
+        if jsonOutput {
+            outputJSON([
+                "action": action,
+                "source": linkRefToDict(source, service: service),
+                "target": linkRefToDict(target, service: service)
+            ])
+        } else {
+            let sourceTitle = service.summary(for: source)?.title ?? source.entityID.uuidString
+            let targetTitle = service.summary(for: target)?.title ?? target.entityID.uuidString
+            print("\(action.capitalized): \(source.type.rawValue) '\(sourceTitle)' <-> \(target.type.rawValue) '\(targetTitle)'")
+        }
+    }
+
+    static func printLinkSummaries(_ refs: [LibraryEntityRef], service: ItemLinkService) {
+        let rows = refs.map { linkRefToDict($0, service: service) }
+        if jsonOutput {
+            outputJSON(rows)
+        } else if rows.isEmpty {
+            print("No links found.")
+        } else {
+            for row in rows {
+                let type = row["type"] as? String ?? "item"
+                let id = row["id"] as? String ?? ""
+                let title = row["title"] as? String ?? "(untitled)"
+                let subtitle = row["subtitle"] as? String ?? ""
+                print("  [\(id.prefix(8))] \(type): \(title)\(subtitle.isEmpty ? "" : " — \(subtitle)")")
+            }
+        }
+    }
+
+    static func linkRefToDict(_ ref: LibraryEntityRef, service: ItemLinkService) -> [String: Any] {
+        let summary = service.summary(for: ref)
+        var dict: [String: Any] = [
+            "type": ref.type.rawValue,
+            "id": ref.entityID.uuidString
+        ]
+        if let summary {
+            dict["title"] = summary.title
+            dict["subtitle"] = summary.subtitle
+            dict["symbol"] = summary.symbol
+        }
+        return dict
+    }
+
+    static func readContactProfileJSON(from args: [String]) -> String? {
+        if let inline = parseFlag("--profile-json", from: args) {
+            if inline == "-" {
+                return String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8)
+            }
+            return inline
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\t", with: "\t")
+        }
+
+        if let path = parseFlag("--profile-file", from: args) {
+            let expanded = NSString(string: path).expandingTildeInPath
+            do {
+                return try String(contentsOfFile: expanded, encoding: .utf8)
+            } catch {
+                print("Error: Could not read profile file '\(expanded)': \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        print("Error: --profile-json <json> or --profile-file <path> required")
+        return nil
+    }
+
+    static func contactProfileOutput(_ contact: ContactCard) -> [String: Any] {
+        var dict = ContactProfileJSON.profileDictionary(for: contact)
+        dict["folder"] = contact.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+        dict["folderID"] = contact.folderID?.uuidString as Any
+        return dict
+    }
+
+    static func contactFieldToDict(_ field: ContactCustomField) -> [String: Any] {
+        [
+            "id": field.id.uuidString,
+            "section": field.section,
+            "label": field.label,
+            "value": field.value,
+            "kind": field.kind.rawValue,
+            "pinned": field.isPinned
+        ]
+    }
+
+    static func resolveContactFieldIndex(_ ref: String, in contact: ContactCard) -> Int? {
+        let lowercased = ref.lowercased()
+        if let idx = contact.customFields.firstIndex(where: { $0.id.uuidString.lowercased().hasPrefix(lowercased) }) {
+            return idx
+        }
+
+        let exact = contact.customFields.indices.filter {
+            contact.customFields[$0].label.localizedCaseInsensitiveCompare(ref) == .orderedSame
+                || "\(contact.customFields[$0].section)/\(contact.customFields[$0].label)".localizedCaseInsensitiveCompare(ref) == .orderedSame
+        }
+        if exact.count == 1 { return exact[0] }
+
+        let contains = contact.customFields.indices.filter {
+            contact.customFields[$0].label.localizedCaseInsensitiveContains(ref)
+                || contact.customFields[$0].section.localizedCaseInsensitiveContains(ref)
+        }
+        return contains.count == 1 ? contains[0] : nil
+    }
+
+    static func parseContactFieldKind(from args: [String]) -> ContactCustomFieldKind {
+        guard let raw = parseFlag("--kind", from: args)?.lowercased() else { return .text }
+        return ContactCustomFieldKind(rawValue: raw) ?? .text
+    }
+
+    static func parseOptionalBoolFlag(_ flag: String, from args: [String]) -> Bool? {
+        guard let raw = parseFlag(flag, from: args)?.lowercased() else { return nil }
+        switch raw {
+        case "true", "yes", "1", "on":
+            return true
+        case "false", "no", "0", "off":
+            return false
+        default:
+            return nil
+        }
+    }
+
+    static func printContactProfile(_ contact: ContactCard) {
+        let birthday = contact.birthday.map(ContactProfileJSON.formatBirthday) ?? "(none)"
+        let folder = contact.folderID.flatMap { VaultFolderService.shared.folder(for: $0)?.name } ?? "Inbox"
+        print("Contact Profile: \(contact.displayName)")
+        print("  ID:           \(contact.id.uuidString)")
+        print("  Folder:       \(folder)")
+        print("  Relationship: \(contact.relationshipLabel.isEmpty ? "(none)" : contact.relationshipLabel)")
+        print("  Birthday:     \(birthday)")
+        print("  Email:        \(contact.email.isEmpty ? "(none)" : contact.email)")
+        print("  Phone:        \(contact.phone.isEmpty ? "(none)" : contact.phone)")
+        print("  Address:      \(contact.address.isEmpty ? "(none)" : contact.address)")
+        print("  Linked:       \(contact.linkedEntities.count)")
+        print("  Fields:       \(contact.customFields.count)")
+        print("  Notes:")
+        print(contact.notes.isEmpty ? "(empty)" : contact.notes)
+    }
+
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // MARK: - Saved View Commands
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4467,6 +5063,13 @@ struct CiderCLI {
           cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name|path>]
           cider-cli contact delete <id-prefix>
           cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
+          cider-cli contact profile show <id|name> [--json]
+          cider-cli contact profile apply <id|name> --profile-json <json> [--create] [--json]
+          cider-cli contact profile apply <id|name> --profile-file <path> [--create] [--json]
+          cider-cli contact field list <id|name> [--json]
+          cider-cli contact field add <id|name> --section <s> --label <l> --value <v> [--kind text|phone|email|url|date|number] [--pinned]
+          cider-cli contact field update <id|name> <field-id|label> [--section <s>] [--label <l>] [--value <v>] [--kind <kind>] [--pinned true|false]
+          cider-cli contact field delete <id|name> <field-id|label>
           cider-cli contact export <id-prefix> --to <path.vcf>
           cider-cli contact set-avatar <id-prefix> <image-path>
           cider-cli contact remove-avatar <id-prefix>

@@ -4,8 +4,8 @@ import SwiftUI
 struct ContactEditorSheet: View {
     let existingContact: ContactCard?
     /// Parameters: draftContactID, displayName, relationship, birthday, notes,
-    ///             labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar
-    let onSave: (UUID, String, String, Date?, String, [UUID], Bool, String, String, String, Bool) -> Void
+    ///             labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields
+    let onSave: (UUID, String, String, Date?, String, [UUID], Bool, String, String, String, Bool, [ContactCustomField]) -> Void
     let onDelete: ((ContactCard) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -25,11 +25,12 @@ struct ContactEditorSheet: View {
     @State private var addBirthdayDateCard: Bool
     @State private var hasAvatar: Bool
     @State private var avatarImage: NSImage?
+    @State private var customFields: [ContactCustomField]
     @State private var draftLabelName = ""
 
     init(
         existingContact: ContactCard?,
-        onSave: @escaping (UUID, String, String, Date?, String, [UUID], Bool, String, String, String, Bool) -> Void,
+        onSave: @escaping (UUID, String, String, Date?, String, [UUID], Bool, String, String, String, Bool, [ContactCustomField]) -> Void,
         onDelete: ((ContactCard) -> Void)? = nil
     ) {
         self.existingContact = existingContact
@@ -49,6 +50,7 @@ struct ContactEditorSheet: View {
         _addBirthdayDateCard = State(initialValue: existingContact?.birthday == nil)
         _hasAvatar = State(initialValue: existingContact?.hasAvatar ?? false)
         _avatarImage = State(initialValue: nil)
+        _customFields = State(initialValue: existingContact?.customFields ?? [])
     }
 
     var body: some View {
@@ -57,112 +59,119 @@ struct ContactEditorSheet: View {
                 .font(CiderFont.subheading)
                 .foregroundColor(CiderColors.primary)
 
-            // Avatar picker row
-            HStack(spacing: Spacing.md) {
-                ZStack(alignment: .topTrailing) {
-                    Button(action: pickAvatar) {
-                        avatarEditorCircle(size: 60)
-                    }
-                    .buttonStyle(.plain)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    // Avatar picker row
+                    HStack(spacing: Spacing.md) {
+                        ZStack(alignment: .topTrailing) {
+                            Button(action: pickAvatar) {
+                                avatarEditorCircle(size: 60)
+                            }
+                            .buttonStyle(.plain)
 
-                    if hasAvatar {
-                        Button(action: removeAvatar) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(CiderFont.title)
-                                .foregroundColor(CiderColors.secondary)
-                                .background(
-                                    Circle()
-                                        .fill(CiderColors.surfaceSubtle)
-                                        .padding(-1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .offset(x: 4, y: -4)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Button(action: pickAvatar) {
-                        Text(hasAvatar ? "Change Photo" : "Add Photo")
-                            .font(CiderFont.bodyMedium)
-                            .foregroundColor(CiderColors.controlAccent)
-                    }
-                    .buttonStyle(.plain)
-
-                    Text("Tap to choose from your files")
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.tertiary)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                TextField("Name", text: $displayName)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Relationship", text: $relationshipLabel)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Email", text: $email)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Phone", text: $phone)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Address", text: $address, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...3)
-
-                Toggle("Has Birthday", isOn: $hasBirthday)
-                    .toggleStyle(.switch)
-
-                if hasBirthday {
-                    DatePicker(
-                        "Birthday",
-                        selection: $birthday,
-                        displayedComponents: [.date]
-                    )
-
-                    Toggle("Create/Update Birthday Date Card", isOn: $addBirthdayDateCard)
-                        .toggleStyle(.switch)
-                }
-
-                TextField("Notes", text: $notes, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(3...6)
-
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Labels")
-                        .font(CiderFont.captionSemibold)
-                        .foregroundColor(CiderColors.tertiary)
-
-                    if labelStorage.labels.isEmpty {
-                        Text("No labels yet. Add one below.")
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.quaternary)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: Spacing.xs) {
-                                ForEach(labelStorage.labels) { label in
-                                    labelChip(label)
+                            if hasAvatar {
+                                Button(action: removeAvatar) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(CiderFont.title)
+                                        .foregroundColor(CiderColors.secondary)
+                                        .background(
+                                            Circle()
+                                                .fill(CiderColors.surfaceSubtle)
+                                                .padding(-1)
+                                        )
                                 }
+                                .buttonStyle(.plain)
+                                .offset(x: 4, y: -4)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            Button(action: pickAvatar) {
+                                Text(hasAvatar ? "Change Photo" : "Add Photo")
+                                    .font(CiderFont.bodyMedium)
+                                    .foregroundColor(CiderColors.controlAccent)
+                            }
+                            .buttonStyle(.plain)
+
+                            Text("Tap to choose from your files")
+                                .font(CiderFont.caption)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        TextField("Name", text: $displayName)
+                            .textFieldStyle(.roundedBorder)
+
+                        TextField("Relationship", text: $relationshipLabel)
+                            .textFieldStyle(.roundedBorder)
+
+                        TextField("Email", text: $email)
+                            .textFieldStyle(.roundedBorder)
+
+                        TextField("Phone", text: $phone)
+                            .textFieldStyle(.roundedBorder)
+
+                        TextField("Address", text: $address, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...3)
+
+                        Toggle("Has Birthday", isOn: $hasBirthday)
+                            .toggleStyle(.switch)
+
+                        if hasBirthday {
+                            DatePicker(
+                                "Birthday",
+                                selection: $birthday,
+                                displayedComponents: [.date]
+                            )
+
+                            Toggle("Create/Update Birthday Date Card", isOn: $addBirthdayDateCard)
+                                .toggleStyle(.switch)
+                        }
+
+                        fieldsSection
+
+                        TextField("Notes", text: $notes, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(3...6)
+
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Labels")
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.tertiary)
+
+                            if labelStorage.labels.isEmpty {
+                                Text("No labels yet. Add one below.")
+                                    .font(CiderFont.caption)
+                                    .foregroundColor(CiderColors.quaternary)
+                            } else {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: Spacing.xs) {
+                                        ForEach(labelStorage.labels) { label in
+                                            labelChip(label)
+                                        }
+                                    }
+                                }
+                            }
+
+                            HStack(spacing: Spacing.xs) {
+                                TextField("New label", text: $draftLabelName)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Add") {
+                                    let trimmed = draftLabelName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !trimmed.isEmpty else { return }
+                                    let created = labelStorage.createLabel(name: trimmed)
+                                    selectedLabelIDs.insert(created.id)
+                                    draftLabelName = ""
+                                }
+                                .buttonStyle(.borderless)
                             }
                         }
                     }
-
-                    HStack(spacing: Spacing.xs) {
-                        TextField("New label", text: $draftLabelName)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Add") {
-                            let trimmed = draftLabelName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !trimmed.isEmpty else { return }
-                            let created = labelStorage.createLabel(name: trimmed)
-                            selectedLabelIDs.insert(created.id)
-                            draftLabelName = ""
-                        }
-                        .buttonStyle(.borderless)
-                    }
                 }
             }
+            .frame(maxHeight: 500)
 
             HStack(spacing: Spacing.sm) {
                 if let existingContact {
@@ -192,7 +201,8 @@ struct ContactEditorSheet: View {
                         email.trimmingCharacters(in: .whitespacesAndNewlines),
                         phone.trimmingCharacters(in: .whitespacesAndNewlines),
                         address.trimmingCharacters(in: .whitespacesAndNewlines),
-                        hasAvatar
+                        hasAvatar,
+                        sanitizedCustomFields
                     )
                     dismiss()
                 }
@@ -206,6 +216,96 @@ struct ContactEditorSheet: View {
             guard let existingContact, existingContact.hasAvatar else { return }
             let url = ContactStorage.shared.avatarURL(for: existingContact.id)
             avatarImage = await loadAvatarFromDisk(url: url)
+        }
+    }
+
+    private var fieldsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Text("Fields")
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                Spacer(minLength: 0)
+                Button {
+                    customFields.append(ContactCustomField(section: "Details", label: "", value: "", kind: .text))
+                } label: {
+                    Label("Add Field", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if customFields.isEmpty {
+                Text("Add structured facts like favorite color, sizes, preferences, school info, phone, email, or links.")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.quaternary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    ForEach($customFields) { $field in
+                        customFieldRow(field: $field)
+                    }
+                }
+            }
+        }
+        .padding(.top, Spacing.xs)
+    }
+
+    private func customFieldRow(field: Binding<ContactCustomField>) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                TextField("Section", text: field.section)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 90)
+
+                TextField("Label", text: field.label)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 110)
+
+                Picker("Kind", selection: field.kind) {
+                    ForEach(ContactCustomFieldKind.allCases, id: \.self) { kind in
+                        Text(kind.rawValue.capitalized).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 90)
+
+                Button(role: .destructive) {
+                    customFields.removeAll { $0.id == field.wrappedValue.id }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                TextField("Value", text: field.value, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...3)
+
+                Toggle("Pinned", isOn: field.isPinned)
+                    .toggleStyle(.checkbox)
+                    .font(CiderFont.caption)
+            }
+        }
+        .padding(Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceSubtle)
+        )
+    }
+
+    private var sanitizedCustomFields: [ContactCustomField] {
+        customFields.compactMap { field in
+            let value = field.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return nil }
+            return ContactCustomField(
+                id: field.id,
+                section: field.section.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Details" : field.section.trimmingCharacters(in: .whitespacesAndNewlines),
+                label: field.label.trimmingCharacters(in: .whitespacesAndNewlines),
+                value: value,
+                kind: field.kind,
+                isPinned: field.isPinned
+            )
         }
     }
 

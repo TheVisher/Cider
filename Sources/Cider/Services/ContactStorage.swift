@@ -789,7 +789,7 @@ final class ContactStorage: ObservableObject {
             let stmt = try db.prepare("""
                 SELECT i.id, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
                        c.relationship_label, c.birthday, c.notes, c.email, c.phone,
-                       c.address, c.has_avatar
+                       c.address, c.has_avatar, c.custom_fields
                 FROM items i
                 JOIN contacts c ON c.item_id = i.id
                 WHERE i.type = 'contact';
@@ -810,6 +810,7 @@ final class ContactStorage: ObservableObject {
                 let phone = stmt.string(at: 10)
                 let address = stmt.string(at: 11)
                 let hasAvatar = stmt.bool(at: 12)
+                let customFields = ContactCustomFieldCodec.decode(stmt.optionalString(at: 13))
 
                 let labelIDs = (try? loadLabelIDs(db, itemID: id)) ?? []
                 let linkedEntities = (try? loadLinkedEntities(db, sourceID: id)) ?? []
@@ -826,6 +827,7 @@ final class ContactStorage: ObservableObject {
                     hasAvatar: hasAvatar,
                     labelIDs: labelIDs,
                     linkedEntities: linkedEntities,
+                    customFields: customFields,
                     folderID: folderID,
                     createdAt: createdAt,
                     updatedAt: updatedAt
@@ -973,9 +975,9 @@ final class ContactStorage: ObservableObject {
         // 2. UPSERT into contacts. Note: no display_name column — title lives in items.
         let contactStmt = try db.prepare("""
             INSERT INTO contacts (
-                item_id, relationship_label, birthday, notes, email, phone, address, has_avatar
+                item_id, relationship_label, birthday, notes, email, phone, address, has_avatar, custom_fields
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 relationship_label = excluded.relationship_label,
                 birthday = excluded.birthday,
@@ -983,7 +985,8 @@ final class ContactStorage: ObservableObject {
                 email = excluded.email,
                 phone = excluded.phone,
                 address = excluded.address,
-                has_avatar = excluded.has_avatar;
+                has_avatar = excluded.has_avatar,
+                custom_fields = excluded.custom_fields;
             """)
         contactStmt.bind(itemID, at: 1)
             .bind(contact.relationshipLabel, at: 2)
@@ -993,6 +996,7 @@ final class ContactStorage: ObservableObject {
             .bind(contact.phone, at: 6)
             .bind(contact.address, at: 7)
             .bind(contact.hasAvatar ? Int64(1) : Int64(0), at: 8)
+            .bind(ContactCustomFieldCodec.encode(contact.customFields), at: 9)
         try contactStmt.step()
 
         // 3. Sync item_labels: delete all, re-insert current.

@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 6
+    static let latestVersion: Int = 7
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -51,7 +51,28 @@ enum DatabaseMigrations {
         }
         if currentVersion < 6 {
             try migrateToV6(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 7 {
+            try migrateToV7(db)
+        }
+    }
+
+    // MARK: - V6 -> V7: Contact custom fields
+
+    private static func migrateToV7(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 7...")
+
+        try withTransaction(db) {
+            if try tableExists(db, table: "contacts"),
+               !(try columnExists(db, table: "contacts", column: "custom_fields")) {
+                try runOnDB(db, "ALTER TABLE contacts ADD COLUMN custom_fields TEXT NOT NULL DEFAULT '[]';")
+            }
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (7);")
+        }
+
+        logger.info("Migration to v7 complete")
     }
 
     // MARK: - V5 -> V6: mutation audit log

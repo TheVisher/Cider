@@ -59,19 +59,27 @@ struct ContactCardCardView: View {
                     .padding(.top, Spacing.xxs)
                 }
 
-                // Notes
-                if !contact.notes.isEmpty {
-                    Text(contact.notes)
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.secondary)
-                        .lineLimit(3)
+                let previewLines = ContactProfileCardPreview.lines(for: contact, limit: 3)
+                if !previewLines.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ForEach(Array(previewLines.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(CiderFont.body)
+                                .foregroundColor(CiderColors.secondary)
+                                .lineLimit(1)
+                        }
+                    }
                 }
+
+                let linkedSummaries = linkedItemSummaries
 
                 // Metadata (birthday, email, phone, address) with separator
                 let hasAnyMeta = contact.birthday != nil
                     || !contact.email.isEmpty
                     || !contact.phone.isEmpty
                     || !contact.address.isEmpty
+                    || contact.customFields.contains(where: { $0.isPinned && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    || !linkedSummaries.isEmpty
                 if hasAnyMeta {
                     Divider()
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -87,6 +95,12 @@ struct ContactCardCardView: View {
                         }
                         if !contact.address.isEmpty {
                             metaRow(icon: "mappin.and.ellipse", text: contact.address)
+                        }
+                        ForEach(contact.customFields.filter { $0.isPinned && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { field in
+                            metaRow(icon: field.kind.contactCardSymbol, text: ContactProfileCustomFields.displayText(for: field))
+                        }
+                        if let firstLinked = linkedSummaries.first {
+                            metaRow(icon: "link", text: linkedSummaryText(firstLinked, count: linkedSummaries.count))
                         }
                     }
                 }
@@ -151,6 +165,17 @@ struct ContactCardCardView: View {
         }
     }
 
+    private var linkedItemSummaries: [ItemLinkSummary] {
+        let ref = LibraryEntityRef(type: .contact, entityID: contact.id)
+        let refs = (try? ItemLinkService.shared.relatedRefs(for: ref))
+            ?? ContactProfileRelatedRefs.merged(outgoing: contact.linkedEntities, backlinks: [], excluding: ref)
+        return ItemLinkService.shared.summaries(for: refs)
+    }
+
+    private func linkedSummaryText(_ firstLinked: ItemLinkSummary, count: Int) -> String {
+        count == 1 ? "Linked: \(firstLinked.title)" : "\(count) linked items"
+    }
+
     // MARK: - Avatar Circle
 
     @ViewBuilder
@@ -200,6 +225,25 @@ struct ContactCardCardView: View {
             return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         }.value
         avatarImage = image
+    }
+}
+
+private extension ContactCustomFieldKind {
+    var contactCardSymbol: String {
+        switch self {
+        case .text:
+            "text.alignleft"
+        case .phone:
+            "phone"
+        case .email:
+            "envelope"
+        case .url:
+            "link"
+        case .date:
+            "calendar"
+        case .number:
+            "number"
+        }
     }
 }
 

@@ -93,16 +93,27 @@ private struct FloatingNoteDetail: View {
                 InlineNoteEditorView(viewModel: viewModel)
             }
         }
-        .onAppear(perform: syncSelectedNote)
+        .onAppear { syncSelectedNote() }
         .onChange(of: note.id) { _, _ in syncSelectedNote() }
+        .task(id: note.id) {
+            syncSelectedNote()
+            try? await Task.sleep(for: .milliseconds(150))
+            syncSelectedNote(forcePush: true)
+        }
         .onDisappear {
             viewModel.flushSave()
         }
     }
 
-    private func syncSelectedNote() {
-        guard viewModel.selectedNote?.id != note.id else { return }
-        viewModel.selectNote(note)
+    private func syncSelectedNote(forcePush: Bool = false) {
+        if viewModel.selectedNote?.id != note.id {
+            viewModel.selectNote(note)
+            return
+        }
+
+        if forcePush {
+            viewModel.pushCurrentContentToEditorIfReady()
+        }
     }
 
     private func renameNote(_ newTitle: String) {
@@ -366,6 +377,7 @@ private struct FloatingContactDetail: View {
     let contact: ContactCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var editorContext: ContactEditorContext?
 
     var body: some View {
         GenericItemDetailPanel(
@@ -379,8 +391,51 @@ private struct FloatingContactDetail: View {
                 AIDetailActionsButton(contactName: contact.displayName)
             }
         ) {
-            ContactDetailView(contact: contact, onDismiss: { dock(surface, action: onDock) })
+            ContactDetailView(
+                contact: contact,
+                onEdit: {
+                    editorContext = ContactEditorContext(existingContact: contact)
+                },
+                onDismiss: { dock(surface, action: onDock) },
+                onOpenRelated: floatLinkedRef
+            )
         }
+        .sheet(item: $editorContext) { context in
+            ContactEditorSheet(
+                existingContact: context.existingContact,
+                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
+                    LibraryItemEditor.saveContact(
+                        draftContactID: draftContactID,
+                        existingContact: context.existingContact,
+                        displayName: displayName,
+                        relationshipLabel: relationshipLabel,
+                        birthday: birthday,
+                        notes: notes,
+                        labelIDs: labelIDs,
+                        addBirthdayDateCard: addBirthdayDateCard,
+                        email: email,
+                        phone: phone,
+                        address: address,
+                        hasAvatar: hasAvatar,
+                        customFields: customFields
+                    )
+                },
+                onDelete: { contact in
+                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                    }
+                }
+            )
+        }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 
