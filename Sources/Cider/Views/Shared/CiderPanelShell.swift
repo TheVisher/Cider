@@ -17,6 +17,7 @@ struct CiderPanelShell<
     let isCollapsed: Bool
     let suppressSidebarAutoExpand: Bool
     let blurRightColumn: Bool
+    let showsPanelControls: Bool
     let onClose: () -> Void
     let onCollapse: () -> Void
     let onMaximize: () -> Void
@@ -44,6 +45,7 @@ struct CiderPanelShell<
         isCollapsed: Bool,
         suppressSidebarAutoExpand: Bool = false,
         blurRightColumn: Bool = false,
+        showsPanelControls: Bool = true,
         onClose: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
         onMaximize: @escaping () -> Void,
@@ -56,6 +58,7 @@ struct CiderPanelShell<
         self.isCollapsed = isCollapsed
         self.suppressSidebarAutoExpand = suppressSidebarAutoExpand
         self.blurRightColumn = blurRightColumn
+        self.showsPanelControls = showsPanelControls
         self.onClose = onClose
         self.onCollapse = onCollapse
         self.onMaximize = onMaximize
@@ -69,7 +72,7 @@ struct CiderPanelShell<
     var body: some View {
         ZStack {
             AcrylicPanelBackground(
-                cornerRadius: CiderPanelDesign.cornerRadius
+                cornerRadius: showsPanelControls ? CiderPanelDesign.cornerRadius : 0
             )
 
             HStack(spacing: 0) {
@@ -125,7 +128,7 @@ struct CiderPanelShell<
             )
             .overlay { panelOverlay }
             // Clip sidebar slide animation + overlay to panel boundary (not shadow edge)
-            .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: showsPanelControls ? CiderPanelDesign.cornerRadius : 0, style: .continuous))
 
             // Compact overlay sidebar
             if !isCollapsed && isCompactMode && isSidebarVisible {
@@ -133,20 +136,22 @@ struct CiderPanelShell<
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if !isCollapsed {
+            if showsPanelControls && !isCollapsed {
                 CiderPanelResizeIcon()
             }
         }
-        .padding(.horizontal, CiderPanelDesign.shadowPadding)
-        .padding(.top, CiderPanelDesign.topPadding)
+        .padding(.horizontal, showsPanelControls ? CiderPanelDesign.shadowPadding : 0)
+        .padding(.top, showsPanelControls ? CiderPanelDesign.topPadding : 0)
         .padding(
             .bottom,
-            isCollapsed
+            !showsPanelControls
+                ? 0
+                : isCollapsed
                 ? CiderPanelDesign.collapsedBottomPadding
                 : CiderPanelDesign.shadowPadding + CiderPanelDesign.bottomPadding
         )
         .overlay {
-            if !isCollapsed {
+            if showsPanelControls && !isCollapsed {
                 PanelEdgeResizeView()
             }
         }
@@ -155,6 +160,9 @@ struct CiderPanelShell<
             // Sync sidebar visibility to the panel for drag area calculation
             if let panel = NSApp.windows.compactMap({ $0 as? CiderPanel }).first {
                 panel.isSidebarCurrentlyVisible = visible
+            }
+            if let window = NSApp.windows.compactMap({ $0 as? CiderMainWindow }).first {
+                window.isSidebarCurrentlyVisible = visible
             }
 
             toggleAppearTask?.cancel()
@@ -206,9 +214,13 @@ struct CiderPanelShell<
         .frame(height: CiderPanelDesign.titleBarHeight)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Close", action: onClose)
-            Button(isCollapsed ? "Expand" : "Minimize", action: onCollapse)
-            Button("Maximize", action: onMaximize)
+            if showsPanelControls {
+                Button("Close", action: onClose)
+                Button(isCollapsed ? "Expand" : "Minimize", action: onCollapse)
+                Button("Maximize", action: onMaximize)
+            } else {
+                Button("Close Window", action: onClose)
+            }
         }
     }
 
@@ -227,36 +239,41 @@ struct CiderPanelShell<
 
     private var sidebarHeader: some View {
         HStack(alignment: .top, spacing: CiderPanelDesign.trafficLightSpacing) {
-            PanelTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close panel", action: onClose)
-            PanelTrafficLightButton(
-                color: .systemYellow,
-                symbol: "minus",
-                help: isCollapsed ? "Expand panel" : "Collapse to header",
-                action: onCollapse
-            )
-            PanelTrafficLightButton(
-                color: .systemGreen,
-                symbol: "arrow.up.left.and.arrow.down.right",
-                help: "Snap or maximize",
-                action: onMaximize
-            )
-            .onHover { hovering in
-                isHoveringGreenButton = hovering
-                updateSnapMenuVisibility()
-            }
-            .popover(isPresented: $showSnapMenu, arrowEdge: .bottom) {
-                SnapMenuView { target in
-                    showSnapMenu = false
-                    NotificationCenter.default.post(
-                        name: .snapCiderPanel,
-                        object: nil,
-                        userInfo: ["target": target.rawValue]
-                    )
-                }
+            if showsPanelControls {
+                PanelTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close panel", action: onClose)
+                PanelTrafficLightButton(
+                    color: .systemYellow,
+                    symbol: "minus",
+                    help: isCollapsed ? "Expand panel" : "Collapse to header",
+                    action: onCollapse
+                )
+                PanelTrafficLightButton(
+                    color: .systemGreen,
+                    symbol: "arrow.up.left.and.arrow.down.right",
+                    help: "Snap or maximize",
+                    action: onMaximize
+                )
                 .onHover { hovering in
-                    isHoveringSnapMenu = hovering
+                    isHoveringGreenButton = hovering
                     updateSnapMenuVisibility()
                 }
+                .popover(isPresented: $showSnapMenu, arrowEdge: .bottom) {
+                    SnapMenuView { target in
+                        showSnapMenu = false
+                        NotificationCenter.default.post(
+                            name: .snapCiderPanel,
+                            object: nil,
+                            userInfo: ["target": target.rawValue]
+                        )
+                    }
+                    .onHover { hovering in
+                        isHoveringSnapMenu = hovering
+                        updateSnapMenuVisibility()
+                    }
+                }
+            } else {
+                Color.clear
+                    .frame(width: 68)
             }
 
             Spacer(minLength: 0)
@@ -339,6 +356,7 @@ extension CiderPanelShell where PanelOverlay == EmptyView {
         isCollapsed: Bool,
         suppressSidebarAutoExpand: Bool = false,
         blurRightColumn: Bool = false,
+        showsPanelControls: Bool = true,
         onClose: @escaping () -> Void,
         onCollapse: @escaping () -> Void,
         onMaximize: @escaping () -> Void,
@@ -350,6 +368,7 @@ extension CiderPanelShell where PanelOverlay == EmptyView {
         self.isCollapsed = isCollapsed
         self.suppressSidebarAutoExpand = suppressSidebarAutoExpand
         self.blurRightColumn = blurRightColumn
+        self.showsPanelControls = showsPanelControls
         self.onClose = onClose
         self.onCollapse = onCollapse
         self.onMaximize = onMaximize

@@ -6,12 +6,16 @@ final class CiderPanelPositionStore {
 
     private let storageKey = "CiderPanelFrame"
     private let perScreenStorageKey = "CiderPanelFramePerScreen"
+    private let floatingStorageKey = "CiderFloatingPanelFrames"
 
     /// Legacy single-frame cache (fallback for first launch after upgrade)
     private var cachedFrame: NSRect?
 
     /// Per-screen frame cache, keyed by screen identifier (e.g. "3440x1440")
     private var perScreenFrames: [String: NSRect] = [:]
+
+    /// Last known frame for each floatable surface, keyed by stable surface key.
+    private var floatingFrames: [String: NSRect] = [:]
 
     private init() {
         loadFromDefaults()
@@ -39,11 +43,22 @@ final class CiderPanelPositionStore {
         saveToDefaults()
     }
 
+    func frame(forFloatingSurfaceKey surfaceKey: String) -> NSRect? {
+        floatingFrames[surfaceKey]
+    }
+
+    func setFrame(_ frame: NSRect, forFloatingSurfaceKey surfaceKey: String) {
+        floatingFrames[surfaceKey] = frame
+        saveToDefaults()
+    }
+
     func clear() {
         cachedFrame = nil
         perScreenFrames.removeAll()
+        floatingFrames.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)
         UserDefaults.standard.removeObject(forKey: perScreenStorageKey)
+        UserDefaults.standard.removeObject(forKey: floatingStorageKey)
     }
 
     // MARK: - Screen Key
@@ -75,6 +90,15 @@ final class CiderPanelPositionStore {
                 }
             }
         }
+
+        if let dict = UserDefaults.standard.dictionary(forKey: floatingStorageKey) as? [String: [String: Double]] {
+            for (surfaceKey, raw) in dict {
+                if let x = raw["x"], let y = raw["y"], let w = raw["width"], let h = raw["height"] {
+                    floatingFrames[surfaceKey] = NSRect(x: x, y: y, width: w, height: h)
+                }
+            }
+        }
+
     }
 
     private func saveToDefaults() {
@@ -99,5 +123,21 @@ final class CiderPanelPositionStore {
             ]
         }
         UserDefaults.standard.set(dict, forKey: perScreenStorageKey)
+
+        var floatingDict: [String: [String: Double]] = [:]
+        for (surfaceKey, frame) in floatingFrames {
+            floatingDict[surfaceKey] = Self.encodedFrame(frame)
+        }
+        UserDefaults.standard.set(floatingDict, forKey: floatingStorageKey)
+
+    }
+
+    private static func encodedFrame(_ frame: NSRect) -> [String: Double] {
+        [
+            "x": frame.origin.x,
+            "y": frame.origin.y,
+            "width": frame.size.width,
+            "height": frame.size.height,
+        ]
     }
 }

@@ -1,77 +1,42 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Cider Panel Management
+// MARK: - Deprecated Full-App Panel Compatibility
 
 extension AppDelegate {
-
     func configureCiderPanel() {
-        guard bookmarksViewModel != nil, notesViewModel != nil else { return }
-
-        let panel = CiderPanel()
-        self.ciderPanel = panel
-
-        let shadowPanel = CiderShadowPanel()
-        self.ciderShadowPanel = shadowPanel
-
-        // Keep shadow panel frame in sync with main panel at every step —
-        // including during user dragging, programmatic setFrame, and animations.
-        panelFrameObservation = panel.observe(\.frame, options: [.new]) { [weak self] _, change in
-            guard let frame = change.newValue else { return }
-            DispatchQueue.main.async { [weak self] in
-                self?.ciderShadowPanel?.updateFrame(for: frame)
-            }
-        }
-
-        updateCiderPanelView()
+        // The old full-app NSPanel is intentionally no longer created. The normal
+        // app window is the primary workspace; individual surfaces float as panels.
     }
 
-    func updateCiderPanelView() {
-        guard let panel = ciderPanel,
-              let bookmarksViewModel,
-              let notesViewModel else { return }
-
-        let panelView = CiderPanelView(
-            bookmarksViewModel: bookmarksViewModel,
-            notesViewModel: notesViewModel
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        let hostingView = CiderPanelHostingView(rootView: panelView)
-        panel.contentView = hostingView
-
-        panel.setContentSize(NSSize(
-            width: CiderPanelDesign.panelContentWidth,
-            height: CiderPanelDesign.panelContentHeight
-        ))
-    }
+    func updateCiderPanelView() {}
 
     func observeCiderPanelNotifications() {
         NotificationCenter.default.publisher(for: .toggleCiderPanel)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.toggleCiderPanel()
+                self?.performCiderActivation()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .dismissCiderPanel)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.hideCiderPanel()
+                self?.hideCiderMainWindow()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .toggleCiderPanelCollapse)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.toggleCiderPanelCollapsed()
+                self?.minimizeCiderMainWindow()
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .maximizeCiderPanel)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.maximizeCiderPanel()
+                self?.maximizeCiderMainWindow()
             }
             .store(in: &cancellables)
 
@@ -84,34 +49,13 @@ extension AppDelegate {
             }
             .store(in: &cancellables)
 
-        // Note editor hotkey — show panel if hidden, CiderPanelView handles the rest
         NotificationCenter.default.publisher(for: .toggleNoteEditor)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                if self.ciderPanel?.isVisible != true {
-                    self.showCiderPanel()
-                }
+                self?.transitionToCiderMainWindow()
             }
             .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: .expandCiderPanelForSlideOut)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                let minWidth = notification.userInfo?["minimumWidth"] as? CGFloat
-                    ?? BookmarksDesign.detailsSlideOutExpandedPanelMinWidth
-                self?.expandCiderPanelForSlideOut(minimumWidth: minWidth)
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .restoreCiderPanelAfterSlideOut)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.restoreCiderPanelAfterSlideOut()
-            }
-            .store(in: &cancellables)
-
-        // Bookmark capture hotkey
         NotificationCenter.default.publisher(for: .captureBookmark)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -121,181 +65,41 @@ extension AppDelegate {
     }
 
     func toggleCiderPanel() {
-        guard let panel = ciderPanel else { return }
-
-        if panel.isVisible {
-            let config = CiderConfig.load()
-            if config.openOnMouseScreen {
-                // If mouse is on a different screen than the panel, move there instead of hiding
-                let mouseLocation = NSEvent.mouseLocation
-                let panelScreen = panel.screen ?? NSScreen.main
-                let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
-                if let mouseScreen, mouseScreen != panelScreen {
-                    persistCurrentCiderPanelFrameIfNeeded()
-                    showCiderPanel()
-                    return
-                }
-            }
-            hideCiderPanel()
-        } else {
-            showCiderPanel()
-        }
+        performCiderActivation()
     }
 
     func showCiderPanel() {
-        guard let panel = ciderPanel else { return }
-        if panel.isVisible {
-            persistCurrentCiderPanelFrameIfNeeded()
-        }
-
-        panel.setCollapsed(false, animated: false)
-
-        let config = CiderConfig.load()
-        if config.rememberPanelPosition {
-            if config.openOnMouseScreen {
-                // Find the screen where the mouse is and use its saved frame
-                let mouseLocation = NSEvent.mouseLocation
-                let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
-                if let savedFrame = ciderPanelPositionStore.frame(for: mouseScreen) {
-                    // Check if the saved frame is on the mouse's screen
-                    if let mouseScreen,
-                       !NSMouseInRect(NSPoint(x: savedFrame.midX, y: savedFrame.midY), mouseScreen.frame, false) {
-                        // Saved frame is for a different screen — center on mouse screen
-                        let visible = mouseScreen.visibleFrame
-                        let x = max(visible.minX, min(mouseLocation.x - savedFrame.width / 2, visible.maxX - savedFrame.width))
-                        let y = max(visible.minY, min(mouseLocation.y - savedFrame.height / 2, visible.maxY - savedFrame.height))
-                        panel.show(frame: NSRect(x: x, y: y, width: savedFrame.width, height: savedFrame.height))
-                    } else {
-                        panel.show(frame: savedFrame)
-                    }
-                } else {
-                    panel.showAtMouse()
-                }
-            } else if let savedFrame = ciderPanelPositionStore.frame() {
-                panel.show(frame: savedFrame)
-            } else {
-                panel.showAtMouse()
-            }
-        } else {
-            panel.showAtMouse()
-        }
-
-        // Show shadow behind the main panel.
-        ciderShadowPanel?.updateFrame(for: panel.frame)
-        ciderShadowPanel?.orderFront(nil)
-        panel.orderFront(nil)
+        transitionToCiderMainWindow()
     }
 
     func hideCiderPanel() {
-        persistCurrentCiderPanelFrameIfNeeded()
-        ciderShadowPanel?.orderOut(nil)
-        ciderPanel?.orderOut(nil)
+        hideCiderMainWindow()
     }
 
     func toggleCiderPanelCollapsed() {
-        guard let panel = ciderPanel, panel.isVisible else { return }
-        panel.toggleCollapsed()
-        persistCurrentCiderPanelFrameIfNeeded()
+        minimizeCiderMainWindow()
     }
 
     func maximizeCiderPanel() {
-        guard let panel = ciderPanel, panel.isVisible else { return }
-
-        if panel.isMaximized, let restoreFrame = panel.frameBeforeMaximize {
-            // Restore to previous size
-            panel.isMaximized = false
-            panel.frameBeforeMaximize = nil
-            panel.setCollapsed(false, animated: false)
-            panel.setFrame(restoreFrame, display: true)
-            persistCurrentCiderPanelFrameIfNeeded()
-            return
-        }
-
-        // Save current frame for restore
-        panel.frameBeforeMaximize = panel.frame
-
-        let panelCenter = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(panelCenter) })
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-        guard let screen else { return }
-
-        let visibleFrame = screen.visibleFrame
-        let padding = CiderPanelDesign.shadowPadding
-
-        let maximizedFrame = NSRect(
-            x: visibleFrame.minX - padding,
-            y: visibleFrame.minY - CiderPanelDesign.bottomPadding - padding,
-            width: visibleFrame.width + padding * 2,
-            height: visibleFrame.height + CiderPanelDesign.topPadding + CiderPanelDesign.bottomPadding + padding
-        )
-
-        panel.setCollapsed(false, animated: false)
-        panel.setFrame(maximizedFrame, display: true)
-        panel.isMaximized = true
-        persistCurrentCiderPanelFrameIfNeeded()
+        maximizeCiderMainWindow()
     }
 
-    func expandCiderPanelForSlideOut(minimumWidth: CGFloat) {
-        guard let panel = ciderPanel, panel.isVisible else { return }
-        guard panel.frame.width < minimumWidth else { return }
+    func expandCiderPanelForSlideOut(minimumWidth: CGFloat) {}
 
-        // Save full frame so restore can return to exact position and size
-        frameBeforeSlideOut = panel.frame
-
-        let currentFrame = panel.frame
-        let delta = minimumWidth - currentFrame.width
-        let center = NSPoint(x: currentFrame.midX, y: currentFrame.midY)
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
-            ?? NSScreen.main ?? NSScreen.screens.first
-        let visibleFrame = screen?.visibleFrame ?? currentFrame
-
-        // Anchor the right edge when near screen edge; otherwise expand to the right
-        var newOriginX = currentFrame.minX
-        if currentFrame.maxX + delta > visibleFrame.maxX {
-            newOriginX = max(visibleFrame.minX, currentFrame.maxX - minimumWidth)
-        }
-
-        let newFrame = NSRect(
-            x: newOriginX,
-            y: currentFrame.minY,
-            width: minimumWidth,
-            height: currentFrame.height
-        )
-        // Expand instantly — the slideout's SwiftUI transition provides the animation.
-        // Running both simultaneously caused competing animations and visual jank.
-        panel.setFrame(newFrame, display: true)
-    }
-
-    func restoreCiderPanelAfterSlideOut() {
-        guard let panel = ciderPanel, let savedFrame = frameBeforeSlideOut else { return }
-        frameBeforeSlideOut = nil
-
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            panel.setFrame(savedFrame, display: true)
-            persistCurrentCiderPanelFrameIfNeeded()
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.0, 0.0, 0.2, 1.0)
-            panel.animator().setFrame(savedFrame, display: true)
-        }
-        persistCurrentCiderPanelFrameIfNeeded()
-    }
+    func restoreCiderPanelAfterSlideOut() {}
 
     func snapCiderPanel(to target: SnapTarget) {
-        guard let panel = ciderPanel, panel.isVisible else { return }
+        guard let window = ciderMainWindow else { return }
 
-        let panelCenter = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(panelCenter) })
+        let windowCenter = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(windowCenter) })
             ?? NSScreen.main
             ?? NSScreen.screens.first
         guard let screen else { return }
 
         let vf = screen.visibleFrame
         let gap: CGFloat = Spacing.lg
-        let minW = CiderPanelDesign.panelMinWidth
+        let minWidth = window.minSize.width
 
         let targetFrame: NSRect
         switch target {
@@ -310,41 +114,35 @@ extension AppDelegate {
             targetFrame = NSRect(
                 x: vf.minX + gap,
                 y: vf.minY + gap,
-                width: vf.width / 2 - gap * 2,
+                width: max(minWidth, vf.width / 2 - gap * 2),
                 height: vf.height - gap * 2
             )
         case .rightHalf:
+            let width = max(minWidth, vf.width / 2 - gap * 2)
             targetFrame = NSRect(
-                x: vf.midX + gap,
+                x: vf.maxX - gap - width,
                 y: vf.minY + gap,
-                width: vf.width / 2 - gap * 2,
+                width: width,
                 height: vf.height - gap * 2
             )
         case .leftEdge:
             targetFrame = NSRect(
                 x: vf.minX + gap,
                 y: vf.minY + gap,
-                width: minW,
+                width: minWidth,
                 height: vf.height - gap * 2
             )
         case .rightEdge:
             targetFrame = NSRect(
-                x: vf.maxX - gap - minW,
+                x: vf.maxX - gap - minWidth,
                 y: vf.minY + gap,
-                width: minW,
+                width: minWidth,
                 height: vf.height - gap * 2
             )
         }
 
-        panel.isMaximized = false
-        panel.frameBeforeMaximize = nil
-        panel.setCollapsed(false, animated: false)
-        panel.setFrame(targetFrame, display: true)
-        persistCurrentCiderPanelFrameIfNeeded()
+        window.setFrame(targetFrame, display: true, animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
-    func persistCurrentCiderPanelFrameIfNeeded() {
-        guard let panel = ciderPanel, panel.isVisible else { return }
-        ciderPanelPositionStore.setFrame(panel.persistableFrame)
-    }
+    func persistCurrentCiderPanelFrameIfNeeded() {}
 }

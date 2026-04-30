@@ -1,5 +1,16 @@
 import SwiftUI
 
+enum CiderReanchorSurfaceResolver {
+    static func canOpenInMainWindow(_ surface: CiderFloatableSurface) -> Bool {
+        switch surface {
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo:
+            true
+        case .clipboard, .aiAssistant, .dropZone:
+            false
+        }
+    }
+}
+
 extension CiderPanelView {
 
     // MARK: - Bookmark Details (Centralized)
@@ -60,6 +71,85 @@ extension CiderPanelView {
     var selectedDetailsBookmark: Bookmark? {
         guard let detailBookmarkID else { return nil }
         return bookmarksViewModel.bookmarks.first(where: { $0.id == detailBookmarkID })
+    }
+
+    func requestFloat(_ surface: CiderFloatableSurface) {
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: surface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: surface]
+        )
+    }
+
+    func floatBookmarkDetails() {
+        guard let bookmark = selectedDetailsBookmark else { return }
+        saveBookmarkDetails()
+        requestFloat(.bookmarkMetadata(bookmark.id))
+    }
+
+    func floatDateCardDetail() {
+        guard let dateCard = selectedDateCard else { return }
+        requestFloat(.dateCard(dateCard.id))
+    }
+
+    func floatContactDetail() {
+        guard let contact = selectedContact else { return }
+        requestFloat(.contact(contact.id))
+    }
+
+    func floatTodoDetail() {
+        guard let todoCard = selectedTodoCard else { return }
+        requestFloat(.todo(todoCard.id))
+    }
+
+    func floatNoteDetail() {
+        guard let note = notesViewModel.selectedNote ?? selectedNote else { return }
+        notesViewModel.flushSave()
+        requestFloat(.note(note.id))
+    }
+
+    func floatCurrentDetailForPageMode() {
+        if isDetailPageMode {
+            floatBookmarkDetails()
+        } else if selectedDateCard != nil {
+            floatDateCardDetail()
+        } else if selectedContact != nil {
+            floatContactDetail()
+        } else if selectedTodoCard != nil {
+            floatTodoDetail()
+        } else if isNoteDetailPageMode {
+            floatNoteDetail()
+        }
+    }
+
+    func openSurfaceInMainWindow(_ surface: CiderFloatableSurface) {
+        guard CiderReanchorSurfaceResolver.canOpenInMainWindow(surface) else { return }
+        closeAllDetails()
+
+        switch surface {
+        case .note(let id):
+            if let note = notesViewModel.notes.first(where: { $0.id == id }) {
+                openNoteDetail(note)
+            }
+        case .bookmark(let id), .bookmarkMetadata(let id):
+            if let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == id }) {
+                openBookmarkDetails(bookmark)
+            }
+        case .contact(let id):
+            if let contact = ContactStorage.shared.contacts.first(where: { $0.id == id }) {
+                openContactDetail(contact)
+            }
+        case .dateCard(let id):
+            if let dateCard = DateCardStorage.shared.dateCards.first(where: { $0.id == id }) {
+                openDateCardDetail(dateCard)
+            }
+        case .todo(let id):
+            if let todoCard = TodoCardStorage.shared.todoCards.first(where: { $0.id == id }) {
+                openTodoDetail(todoCard)
+            }
+        case .clipboard, .aiAssistant, .dropZone:
+            break
+        }
     }
 
     func openBookmarkDetails(_ bookmark: Bookmark) {

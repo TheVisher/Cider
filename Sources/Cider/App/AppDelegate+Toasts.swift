@@ -83,25 +83,25 @@ extension AppDelegate {
             return NSRect(x: x, y: y, width: w, height: h)
 
         case .bottomRightPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             let x = panelFrame.maxX - w - inset
             let y = panelFrame.minY + inset
             return NSRect(x: x, y: y, width: w, height: h)
 
         case .bottomLeftPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             let x = panelFrame.minX + inset
             let y = panelFrame.minY + inset
             return NSRect(x: x, y: y, width: w, height: h)
 
         case .topRightPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             let x = panelFrame.maxX - w - inset
             let y = panelFrame.maxY - h - inset
             return NSRect(x: x, y: y, width: w, height: h)
 
         case .topLeftPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             let x = panelFrame.minX + inset
             let y = panelFrame.maxY - h - inset
             return NSRect(x: x, y: y, width: w, height: h)
@@ -371,25 +371,37 @@ extension AppDelegate {
             return NSRect(x: x, y: y, width: panelWidth, height: panelHeight)
 
         case .bottomRightPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             return NSRect(x: panelFrame.maxX - panelWidth - inset, y: panelFrame.minY + inset,
                           width: panelWidth, height: panelHeight)
 
         case .bottomLeftPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             return NSRect(x: panelFrame.minX + inset, y: panelFrame.minY + inset,
                           width: panelWidth, height: panelHeight)
 
         case .topRightPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             return NSRect(x: panelFrame.maxX - panelWidth - inset, y: panelFrame.maxY - panelHeight - inset,
                           width: panelWidth, height: panelHeight)
 
         case .topLeftPanel:
-            guard let panelFrame = ciderPanel?.frame else { return .zero }
+            guard let panelFrame = ciderWorkspaceAnchorFrame() else { return .zero }
             return NSRect(x: panelFrame.minX + inset, y: panelFrame.maxY - panelHeight - inset,
                           width: panelWidth, height: panelHeight)
         }
+    }
+
+    private func ciderWorkspaceAnchorFrame() -> NSRect? {
+        if let frame = ciderMainWindow?.frame {
+            return frame
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        return screen?.visibleFrame
     }
 
     func compactURLDisplay(from url: URL) -> String {

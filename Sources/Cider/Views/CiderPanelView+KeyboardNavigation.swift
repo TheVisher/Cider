@@ -292,4 +292,22 @@ extension CiderPanelView {
     func setCollapsed(_ collapsed: Bool) {
         isCollapsed = collapsed
     }
+
+    func closeSurface() {
+        if surface == .mainWindow {
+            NotificationCenter.default.post(name: .dismissCiderMainWindow, object: nil)
+        }
+    }
+
+    func minimizeSurface() {
+        if surface == .mainWindow {
+            NotificationCenter.default.post(name: .minimizeCiderMainWindow, object: nil)
+        }
+    }
+
+    func maximizeSurface() {
+        if surface == .mainWindow {
+            NotificationCenter.default.post(name: .maximizeCiderMainWindow, object: nil)
+        }
+    }
 }

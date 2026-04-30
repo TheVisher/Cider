@@ -674,6 +674,7 @@ Everything here is tracked but not planned for 1.0. Ideas get promoted to the ro
 | Inline title (first H1 = display title) | R-09 | Apple Notes-style: first H1 in content becomes card title, filename stays decoupled (renameable via context menu) |
 | Plain text note format (.txt) | NOTES_VISION | `.txt` alongside `.md`, plain text editor, default format setting, +New picker |
 | Quick Note scratchpad (Alt+N) | USER_IDEA 2026-03 | Alt+N opens a small/narrow standalone NSPanel with just a note editor — no sidebar, no tabs. Fast scratchpad for jotting things down. Could use TipTap or plain text. Saves to vault like normal notes. May ship before or after 1.0. |
+| Universal floatability contract | USER_IDEA 2026-04 | Future detail surfaces should be authored so they can run embedded in the main app or floated in an `NSPanel` without duplicating business logic. Notes, bookmark metadata, contacts, todos, date cards, and future surfaces should share the same data/view-model boundary and only swap the window shell. |
 
 #### Bookmarks
 | Item | Source | Notes |
@@ -824,12 +825,14 @@ struct TodoItem: Identifiable, Codable {
 |------|--------|-------|
 | Electron app drag-out (Discord, Slack) | R-11 | Rework internal drop detection so text payload can carry the URL instead of Cider ID |
 | SavedViewTabContent drag providers | R-11 | Wire drag providers into saved view tab cards (needs selection state first) |
+| Drag/drop zone panel | USER_IDEA 2026-04 | Dragging files, links, text, or images near the desktop could reveal a floating save-to-Cider drop zone. This builds on the manual Drop Zone surface and should feel like a fast inbox target, not a modal import flow. |
 
 #### Desktop Stickies
 | Item | Source | Notes |
 |------|--------|-------|
 | Desktop sticky notes | USER_IDEA 2026-03 | Pin any card (bookmark, note, todo, event, contact) to the desktop as a small persistent window. Each sticky is a thin NSWindow wrapper around existing card views. ~2-3MB per sticky, zero CPU when idle. Reuses existing card views + vault data. Natural extension of drag-out — if you can drag a card to another app, you should be able to drop it on your desktop too. |
 | Sticky window level picker | USER_IDEA 2026-03 | User-configurable window level per sticky: Desktop (behind all windows, stuck to wallpaper), Normal (with other windows), or Floating (always on top, PiP-style). Enables niche use cases like a quick note overlay while gaming, reading instructions over a full-screen app, or a todo list pinned above your workspace. Maps to `NSWindow.Level`: `.desktop`, `.normal`, `.floating`. |
+| Sticky desktop widgets | USER_IDEA 2026-04 | Any todo, note, contact, bookmark card, or detail surface can be floated either above all apps or pinned to the desktop as a widget-like panel. This is the product version of universal floatability: small, persistent, glanceable, and directly backed by vault data. |
 | Drag-to-desktop sticky creation | USER_IDEA 2026-03 | Drag a card out of Cider onto the desktop → creates a desktop sticky for that card. Inverse of the current drag-out behavior (which exports URLs/files to other apps). |
 | Sticky position persistence | USER_IDEA 2026-03 | Remember per-card desktop position across restarts + handle multi-monitor. Track which cards are "pinned to desktop" in CiderConfig or a separate index. |
 | Sticky lifecycle management | USER_IDEA 2026-03 | Clean up sticky windows when cards are deleted/trashed. Update live when card data changes (shared storage observer, not per-sticky timers). |
@@ -844,6 +847,7 @@ struct TodoItem: Identifiable, Codable {
 | Search shortcut / recent searches | HOME_VISION | Persist recent queries |
 | Continue section resurfacing | HOME_VISION | Mix 1-2 forgotten items into Continue alongside recents |
 | Rediscovery / auto-surface forgotten items | USER_IDEA | View option or tab section that surfaces cards not opened in X days. Could also pair with auto-purge setting to clean stale content after a threshold. |
+| Clipboard as inbox | USER_IDEA 2026-04 | Copied text, images, and URLs become recoverable ingestion candidates for Cider. Clipboard history should act like an inbox queue with save/dismiss state, not just a viewer of transient pasteboard events. |
 
 #### Browser Integration
 | Item | Source | Notes |
@@ -4856,4 +4860,3 @@ These are genuine Cider advantages — not features to copy but reasons why user
 | Menu bar icon | ❌ | ✅ | Different philosophy |
 
 ---
-

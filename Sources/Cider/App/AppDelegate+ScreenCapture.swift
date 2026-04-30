@@ -22,10 +22,10 @@ extension AppDelegate {
     }
 
     func performScreenCapture() {
-        // Hide the Cider panel so it doesn't appear in the captured region
-        let wasVisible = ciderPanel?.isVisible ?? false
+        // Hide the main Cider window so it doesn't appear in the captured region.
+        let wasVisible = ciderMainWindow?.isVisible ?? false
         screenCaptureWasVisible = wasVisible
-        if wasVisible { hideCiderPanel() }
+        if wasVisible { hideCiderMainWindow() }
 
         Task { @MainActor in
             // Small delay to allow the panel to fully hide before capture
@@ -36,7 +36,7 @@ extension AppDelegate {
                 image = try await ScreenCaptureService.capture()
             } catch ScreenCaptureService.CaptureError.permissionDenied {
                 screenCaptureWasVisible = false
-                if wasVisible { self.showCiderPanel() }
+                if wasVisible { self.transitionToCiderMainWindow() }
                 self.showBookmarkCaptureToast(
                     message: "Enable Screen Recording for Cider in System Settings",
                     isSuccess: false
@@ -44,14 +44,14 @@ extension AppDelegate {
                 return
             } catch {
                 screenCaptureWasVisible = false
-                if wasVisible { self.showCiderPanel() }
+                if wasVisible { self.transitionToCiderMainWindow() }
                 return
             }
 
             guard let image else {
-                // User cancelled — restore panel immediately
+                // User cancelled — restore the main window immediately.
                 screenCaptureWasVisible = false
-                if wasVisible { self.showCiderPanel() }
+                if wasVisible { self.transitionToCiderMainWindow() }
                 return
             }
 
@@ -101,11 +101,11 @@ extension AppDelegate {
                     screenshot: image,
                     sourceURL: nil
                 )
-                self?.showCiderPanel()
+                self?.transitionToCiderMainWindow()
             },
             onCreateDateCard: { [weak self] in
                 self?.dismissScreenCaptureToast()
-                self?.showCiderPanel()
+                self?.transitionToCiderMainWindow()
                 var info: [String: Any] = ["initialStep": "event"]
                 if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
                 if !route.detectedDates.isEmpty { info["detectedDates"] = route.detectedDates }
@@ -117,7 +117,7 @@ extension AppDelegate {
             },
             onCreateContact: { [weak self] in
                 self?.dismissScreenCaptureToast()
-                self?.showCiderPanel()
+                self?.transitionToCiderMainWindow()
                 var info: [String: Any] = ["initialStep": "contact"]
                 if !route.suggestedTitle.isEmpty { info["suggestedTitle"] = route.suggestedTitle }
                 if !route.detectedEmails.isEmpty { info["detectedEmails"] = route.detectedEmails }
@@ -210,7 +210,7 @@ extension AppDelegate {
     func executeScreenCaptureDefaultAction() {
         let shouldRestorePanel = screenCaptureWasVisible
         dismissScreenCaptureToast()
-        if shouldRestorePanel { showCiderPanel() }
+        if shouldRestorePanel { transitionToCiderMainWindow() }
     }
 
     func dismissScreenCaptureToast() {

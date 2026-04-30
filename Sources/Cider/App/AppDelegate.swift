@@ -26,12 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var bookmarkClipboardReviewRemaining: TimeInterval = BookmarksToastDesign.reviewAutoHideDuration
     var bookmarkClipboardReviewLastTick: Date?
 
-    // Main Cider panel
-    var ciderPanel: CiderPanel?
-    var ciderShadowPanel: CiderShadowPanel?
-    var panelFrameObservation: NSKeyValueObservation?
-    let ciderPanelPositionStore = CiderPanelPositionStore.shared
-    var frameBeforeSlideOut: NSRect?
+    // Main Cider window
+    var ciderMainWindow: CiderMainWindow?
+    var floatingPanelManager: CiderFloatingPanelManager?
 
     // Undo toast
     var undoToastPanel: BookmarkCaptureToastPanel?
@@ -81,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.setActivationPolicy(.regular)
         AccessibilityHelpers.promptIfNeeded()
         VaultStructureMigration.migrateIfNeeded()
         VaultStructureMigration.migrateContentToInboxIfNeeded()
@@ -121,10 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureSettings()
         configureNotes()
         configureBookmarks()
-        configureCiderPanel()
+        configureCiderMainWindow()
         configureStatusItem()
         observeSettingsNotifications()
         observeBookmarksNotifications()
+        observeCiderMainWindowNotifications()
         observeCiderPanelNotifications()
         observeConfigChanges()
         observeWorkspaceApplicationActivation()
@@ -141,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureAIAssistantPanel()
         observeAIAssistantNotifications()
         startAIAssistantHotkeyDetection()
+        configureFloatingPanels()
 
         // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
         DispatchQueue.main.async { [weak self] in
@@ -151,7 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     item.action = #selector(self.openSettingsFromMenu)
                 }
             }
+            self.installCiderApplicationMenuItems()
         }
+
+        transitionToCiderMainWindow()
 
         // Build vault index if empty (first run or rebuild needed)
         if VaultIndexService.shared.entries.isEmpty {
@@ -248,6 +250,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardPanel?.orderOut(nil)
         aiAssistantShadowPanel?.orderOut(nil)
         aiAssistantPanel?.orderOut(nil)
+        floatingPanelManager?.closeDropZone()
+        ciderMainWindow?.orderOut(nil)
         if telegramBridgeStarted {
             Task {
                 await TelegramBridge.shared.stop()
@@ -262,6 +266,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         flushNotesDraftIfNeeded()
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        transitionToCiderMainWindow()
+        return true
+    }
+
     // MARK: - Spotlight Deep Links
 
     func application(_ application: NSApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
@@ -271,14 +280,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - File Open Handler
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        // Bring Cider panel to front for opened URLs
+        // Bring the main Cider window to front for opened URLs.
         if !urls.isEmpty {
-            NotificationCenter.default.post(name: .toggleCiderPanel, object: nil)
+            NotificationCenter.default.post(name: .openCiderMainWindow, object: nil)
         }
     }
 
     @objc func quit() {
         NSApp.terminate(nil)
+    }
+
+    private func installCiderApplicationMenuItems() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+
+        let ciderMenu: NSMenu
+        if let existing = mainMenu.item(withTitle: "Surfaces")?.submenu {
+            ciderMenu = existing
+            ciderMenu.removeAllItems()
+        } else {
+            ciderMenu = NSMenu(title: "Surfaces")
+            let ciderMenuItem = NSMenuItem(title: "Surfaces", action: nil, keyEquivalent: "")
+            ciderMenuItem.submenu = ciderMenu
+            let insertIndex = max(1, mainMenu.items.count - 1)
+            mainMenu.insertItem(ciderMenuItem, at: insertIndex)
+        }
+
+        ciderMenu.addItem(statusMenuItem(title: "Show Cider Window", action: #selector(openCiderMainWindowFromMenu), keyEquivalent: "1"))
+        ciderMenu.addItem(NSMenuItem.separator())
+        ciderMenu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: "3"))
+        ciderMenu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: "4"))
+        ciderMenu.addItem(statusMenuItem(title: "Show Drop Zone", action: #selector(showDropZoneFromMenu), keyEquivalent: "5"))
     }
 
     // MARK: - Status Item
@@ -297,10 +328,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 button.image = NSImage(systemSymbolName: "command", accessibilityDescription: "Cider")
             }
+
+            installStatusDropTarget(on: button)
         }
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Show Cider", action: #selector(toggleCiderPanelFromMenu), keyEquivalent: " "))
+        menu.addItem(statusMenuItem(title: "Show Cider Window", action: #selector(openCiderMainWindowFromMenu), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(statusMenuItem(title: "Show AI Panel", action: #selector(showAIAssistantPanelFromMenu), keyEquivalent: ""))
+        menu.addItem(statusMenuItem(title: "Show Clipboard Panel", action: #selector(showClipboardPanelFromMenu), keyEquivalent: ""))
+        menu.addItem(statusMenuItem(title: "Show Drop Zone", action: #selector(showDropZoneFromMenu), keyEquivalent: ""))
         #if DEBUG
         menu.addItem(NSMenuItem.separator())
         menu.addItem(debugMenuItem(title: "Simulate Update Available", action: #selector(simulateUpdateAvailableFromMenu)))
@@ -312,8 +349,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
+    private func installStatusDropTarget(on button: NSStatusBarButton) {
+        button.subviews
+            .compactMap { $0 as? CiderStatusDropTarget }
+            .forEach { $0.removeFromSuperview() }
+
+        let dropTarget = CiderStatusDropTarget { [weak self] in
+            Task { @MainActor in
+                self?.showDropZoneFromMenu()
+            }
+        }
+        dropTarget.frame = button.bounds
+        dropTarget.autoresizingMask = [.width, .height]
+        button.addSubview(dropTarget)
+    }
+
+    private func statusMenuItem(title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.target = self
+        return item
+    }
+
     @objc func toggleCiderPanelFromMenu() {
-        toggleCiderPanel()
+        performCiderActivation()
+    }
+
+    @objc func showCiderPanelFromMenu() {
+        transitionToCiderMainWindow()
+    }
+
+    @objc func showAIAssistantPanelFromMenu() {
+        showAIAssistantPanel()
+    }
+
+    @objc func showClipboardPanelFromMenu() {
+        showClipboardPanel()
+    }
+
+    @objc func showDropZoneFromMenu() {
+        NotificationCenter.default.post(name: .showCiderDropZone, object: nil)
+    }
+
+    func configureFloatingPanels() {
+        floatingPanelManager = CiderFloatingPanelManager()
     }
 
     #if DEBUG
@@ -325,12 +403,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func simulateUpdateAvailableFromMenu() {
         SparkleUpdaterService.shared.simulateSidebarUpdateAvailableForDebug()
-        showCiderPanel()
+        transitionToCiderMainWindow()
     }
 
     @objc func clearSimulatedUpdateFromMenu() {
         SparkleUpdaterService.shared.clearAvailableUpdate()
-        showCiderPanel()
+        transitionToCiderMainWindow()
     }
     #endif
 
@@ -464,10 +542,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode: config.activationMode
         ) { [weak self] in
             Task { @MainActor in
-                self?.toggleCiderPanel()
+                self?.performCiderActivation()
             }
         }
         doubleTapDetector?.start()
+    }
+
+    func performCiderActivation() {
+        guard let floatingPanelManager else {
+            transitionToCiderMainWindow()
+            return
+        }
+
+        floatingPanelManager.performSmartRecall { [weak self] in
+            self?.transitionToCiderMainWindow()
+        }
     }
 
     // MARK: - Settings
