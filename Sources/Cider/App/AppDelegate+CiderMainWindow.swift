@@ -65,6 +65,7 @@ extension AppDelegate {
                 }
 
                 self.transitionToCiderMainWindow()
+                self.floatingPanelManager?.dock(surface)
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(
                         name: .openCiderSurfaceInMainWindow,

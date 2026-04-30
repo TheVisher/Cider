@@ -84,29 +84,13 @@ final class CiderFloatingPanel: NSPanel {
     }
 
     func showNearMouse() {
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
-        let visibleFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-        var frame = frame
+        show(frame: CiderFloatingPanelPlacement.frameNearMouse(currentFrame: frame))
+    }
 
-        frame.origin = NSPoint(
-            x: mouse.x + 18,
-            y: mouse.y - frame.height - 18
-        )
-
-        if frame.maxX > visibleFrame.maxX {
-            frame.origin.x = visibleFrame.maxX - frame.width - 16
-        }
-        if frame.minX < visibleFrame.minX {
-            frame.origin.x = visibleFrame.minX + 16
-        }
-        if frame.minY < visibleFrame.minY {
-            frame.origin.y = visibleFrame.minY + 16
-        }
-        if frame.maxY > visibleFrame.maxY {
-            frame.origin.y = visibleFrame.maxY - frame.height - 16
-        }
-
+    func show(frame preferredFrame: NSRect) {
+        let screen = CiderFloatingPanelPlacement.preferredScreen(for: preferredFrame)
+        let visibleFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? preferredFrame
+        let frame = CiderFloatingPanelPlacement.clampedFrame(preferredFrame, in: visibleFrame)
         setFrame(frame, display: true)
         orderFrontRegardless()
     }

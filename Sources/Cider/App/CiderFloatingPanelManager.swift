@@ -59,11 +59,13 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
     private var surfacesByPanel: [ObjectIdentifier: CiderFloatableSurface] = [:]
     private var dropZoneContext: CiderDropZoneContext?
     private var dropZoneAutoDismissTimer: Timer?
+    private let positionStore: CiderPanelPositionStore
 
     private(set) var bookkeeping = Bookkeeping()
     private(set) var recallCoordinator = CiderSurfaceRecallCoordinator()
 
-    override init() {
+    init(positionStore: CiderPanelPositionStore = .shared) {
+        self.positionStore = positionStore
         super.init()
         installNotificationObservers()
     }
@@ -118,7 +120,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             if case .dropZone = surface, dropZoneContext?.isPinned == true {
                 panel.orderFrontRegardless()
             } else {
-                panel.showNearMouse()
+                show(panel, for: surface)
             }
             return panel
         }
@@ -134,7 +136,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         surfacesByPanel[ObjectIdentifier(panel)] = surface
         _ = bookkeeping.register(surface)
         recordRecallCandidate(surface)
-        panel.showNearMouse()
+        show(panel, for: surface)
         return panel
     }
 
@@ -147,6 +149,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         }
 
         surfacesByPanel.removeValue(forKey: ObjectIdentifier(panel))
+        persistFrameIfNeeded(for: surface, panel: panel)
         recordClosedRecallCandidate(surface)
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
@@ -189,6 +192,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         guard let surface = surfacesByPanel.removeValue(forKey: panelID) else { return }
 
         panelsByKey.removeValue(forKey: surface.stableKey)
+        persistFrameIfNeeded(for: surface, panel: panel)
         recordClosedRecallCandidate(surface)
         bookkeeping.unregister(surface)
         if case .dropZone = surface {
@@ -227,6 +231,48 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         case .clipboard, .aiAssistant, .dropZone:
             false
         }
+    }
+
+    private func show(_ panel: CiderFloatingPanel, for surface: CiderFloatableSurface) {
+        guard surface != .dropZone else {
+            panel.showNearMouse()
+            return
+        }
+
+        let config = CiderConfig.load()
+        guard config.rememberPanelPosition else {
+            panel.showNearMouse()
+            return
+        }
+
+        let key = surface.stableKey
+        if config.openOnMouseScreen,
+           let targetScreen = CiderFloatingPanelPlacement.mouseScreen() {
+            if let savedFrame = positionStore.frame(forFloatingSurfaceKey: key) {
+                let sourceScreen = CiderFloatingPanelPlacement.preferredScreen(for: savedFrame)
+                let preferredFrame = CiderFloatingPanelPlacement.translatedFrame(
+                    savedFrame,
+                    from: sourceScreen?.visibleFrame ?? targetScreen.visibleFrame,
+                    to: targetScreen.visibleFrame
+                )
+                panel.show(frame: preferredFrame)
+                return
+            }
+
+            panel.showNearMouse()
+            return
+        }
+
+        if let savedFrame = positionStore.frame(forFloatingSurfaceKey: key) {
+            panel.show(frame: savedFrame)
+        } else {
+            panel.showNearMouse()
+        }
+    }
+
+    private func persistFrameIfNeeded(for surface: CiderFloatableSurface, panel: CiderFloatingPanel) {
+        guard CiderSurfaceRecallCoordinator.isRecallable(surface) else { return }
+        positionStore.setFrame(panel.frame, forFloatingSurfaceKey: surface.stableKey)
     }
 
     private func installNotificationObservers() {
