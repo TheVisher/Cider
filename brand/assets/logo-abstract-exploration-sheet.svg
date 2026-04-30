@@ -1,0 +1,108 @@
+<svg width="2400" height="1600" viewBox="0 0 2400 1600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sheetBg" x1="0" y1="0" x2="2400" y2="1600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F1115"/>
+      <stop offset="0.52" stop-color="#14100D"/>
+      <stop offset="1" stop-color="#0F1115"/>
+    </linearGradient>
+    <linearGradient id="peel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFD99B"/>
+      <stop offset="0.34" stop-color="#F4A42B"/>
+      <stop offset="0.72" stop-color="#D97706"/>
+      <stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F4A42B"/>
+      <stop offset="1" stop-color="#FF6A3D"/>
+    </linearGradient>
+    <linearGradient id="cream" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF7E8"/>
+      <stop offset="1" stop-color="#EAD9B6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="scale(520 320)">
+      <stop offset="0" stop-color="#F4A42B" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#F4A42B" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+    <style>
+      .card { fill: rgba(28, 31, 36, 0.74); stroke: rgba(246, 239, 228, 0.12); stroke-width: 1; }
+      .label { font: 560 30px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.64); letter-spacing: 0; }
+      .note { font: 500 24px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.46); letter-spacing: 0; }
+      .word { font: 780 124px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: #F6EFE4; letter-spacing: -2px; }
+      .word-soft { font: 720 122px ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; fill: #F6EFE4; letter-spacing: -1px; }
+      .tag { font: 560 26px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: #F4A42B; letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1600" fill="url(#sheetBg)"/>
+  <circle cx="330" cy="170" r="520" fill="#F4A42B" opacity="0.075"/>
+  <circle cx="2050" cy="1320" r="540" fill="#7AA7FF" opacity="0.05"/>
+
+  <text x="140" y="150" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="64" font-weight="780" fill="#F6EFE4">Cider Abstract Logo Pass</text>
+  <text x="140" y="206" class="note">No leaves, folders, capture brackets, or productivity clip art. Just a mark with enough taste to survive being tiny.</text>
+
+  <g transform="translate(140 300)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#glow)" opacity="0.9"/>
+    <text x="48" y="66" class="label">A. Ember Loop</text>
+    <g transform="translate(112 132)" filter="url(#shadow)">
+      <g>
+        <path d="M63 155C17 97 50 25 125 22c62-3 104 48 83 100-18 45-76 58-112 25 50 75 154 63 195-7 35-59 9-132-63-155" fill="none" stroke="url(#peel)" stroke-width="45" stroke-linecap="round"/>
+        <circle cx="207" cy="64" r="13" fill="#FFD99B"/>
+      </g>
+      <text x="310" y="140" class="word-soft">Cider</text>
+      <text x="2" y="255" class="tag">Abstract, warm, a little fast.</text>
+    </g>
+  </g>
+
+  <g transform="translate(1260 300)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#glow)" opacity="0.85"/>
+    <text x="48" y="66" class="label">B. Folded Spark</text>
+    <g transform="translate(116 128)" filter="url(#shadow)">
+      <g>
+        <path d="M35 190L116 22c5-11 20-12 27-2l107 164c8 12-2 27-16 25l-85-13-68 51c-13 10-31-3-24-18l31-71-47 49c-14 15-34 1-26-17z" fill="url(#peel)"/>
+        <path d="M116 22l33 174-61-38z" fill="#FFF4D9" opacity="0.55"/>
+        <path d="M149 196l101-12c8 12-2 27-16 25z" fill="#7AA7FF" opacity="0.65"/>
+      </g>
+      <text x="310" y="144" class="word">Cider</text>
+      <text x="0" y="260" class="tag">A weird little signal. Less obvious, more ownable.</text>
+    </g>
+  </g>
+
+  <g transform="translate(140 900)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#glow)" opacity="0.8"/>
+    <text x="48" y="66" class="label">C. Pillar Glyph</text>
+    <g transform="translate(112 128)" filter="url(#shadow)">
+      <g>
+        <rect x="52" y="18" width="156" height="218" rx="78" fill="url(#peel)"/>
+        <path d="M52 95c44 32 98 34 156 4v56c-54 36-108 34-156-4z" fill="#0F1115" opacity="0.25"/>
+        <circle cx="178" cy="56" r="14" fill="#FFD99B"/>
+      </g>
+      <text x="310" y="144" class="word-soft">Cider</text>
+      <text x="0" y="260" class="tag">Simple silhouette, app-icon friendly.</text>
+    </g>
+  </g>
+
+  <g transform="translate(1260 900)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#glow)" opacity="0.82"/>
+    <text x="48" y="66" class="label">D. Orbit Slice</text>
+    <g transform="translate(112 128)" filter="url(#shadow)">
+      <g>
+        <ellipse cx="128" cy="126" rx="118" ry="62" transform="rotate(-28 128 126)" fill="none" stroke="url(#peel)" stroke-width="34"/>
+        <circle cx="128" cy="126" r="52" fill="url(#cream)"/>
+        <path d="M101 171c42-12 77-42 104-88-1 69-36 116-97 137-22-9-40-26-51-48 14 2 29 1 44-1z" fill="#D97706" opacity="0.48"/>
+        <circle cx="221" cy="62" r="13" fill="#7AA7FF"/>
+      </g>
+      <text x="310" y="144" class="word">Cider</text>
+      <text x="0" y="260" class="tag">More energetic, still not a literal app diagram.</text>
+    </g>
+  </g>
+</svg>

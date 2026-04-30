@@ -22,7 +22,9 @@ package-lock.json
 # Misc
 *.log
 *.tmp
+__pycache__/
 .claude/
 .superpowers/
 .cache/
 .research/
+brand/assets/tmp/

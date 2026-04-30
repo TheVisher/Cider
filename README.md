@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/assets/readme-banner-1600x400.png" alt="Cider - macOS Utility" width="800" />
+  <img src="brand/assets/readme-banner-v2.png" alt="Cider - macOS" width="800" />
 </p>
 
 <p align="center">

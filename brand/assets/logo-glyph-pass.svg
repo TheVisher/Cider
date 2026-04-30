@@ -1,0 +1,99 @@
+<svg width="2400" height="1500" viewBox="0 0 2400 1500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="2400" y2="1500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F1115"/>
+      <stop offset="0.55" stop-color="#15110E"/>
+      <stop offset="1" stop-color="#0F1115"/>
+    </linearGradient>
+    <linearGradient id="peel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFE2A3"/>
+      <stop offset="0.38" stop-color="#F4A42B"/>
+      <stop offset="0.72" stop-color="#E85D04"/>
+      <stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="peel2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF1C7"/>
+      <stop offset="0.45" stop-color="#F4A42B"/>
+      <stop offset="1" stop-color="#FF6A3D"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9DBBFF"/>
+      <stop offset="1" stop-color="#7AA7FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-35%" y="-35%" width="170%" height="170%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#000000" flood-opacity="0.42"/>
+    </filter>
+    <filter id="soft" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <style>
+      .tile { fill: rgba(28, 31, 36, 0.72); stroke: rgba(246, 239, 228, 0.12); stroke-width: 1; }
+      .label { font: 560 28px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.58); letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1500" fill="url(#bg)"/>
+  <circle cx="260" cy="160" r="500" fill="#F4A42B" opacity="0.07"/>
+  <circle cx="2150" cy="1320" r="520" fill="#7AA7FF" opacity="0.045"/>
+  <text x="130" y="128" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="58" font-weight="780" fill="#F6EFE4">Abstract Glyph Pass</text>
+  <text x="130" y="178" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="24" font-weight="500" fill="rgba(246, 239, 228, 0.45)">Six weird little marks. No app metaphor. No explanation. Just vibes with a job.</text>
+
+  <g transform="translate(130 270)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">A. Ember Knot</text>
+    <g transform="translate(310 255)" filter="url(#shadow)">
+      <path d="M-120 4C-96-92 26-132 92-64c64 66 19 172-75 174-62 1-93-58-59-103 23-31 70-28 88 3" fill="none" stroke="url(#peel)" stroke-width="54" stroke-linecap="round"/>
+      <path d="M-72 68C-6 44 48-8 86-80" fill="none" stroke="#FFF2C8" stroke-width="10" stroke-linecap="round" opacity="0.78"/>
+    </g>
+  </g>
+
+  <g transform="translate(890 270)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">B. Hot Comma</text>
+    <g transform="translate(310 255)" filter="url(#shadow)">
+      <path d="M-72-110C28-150 118-66 87 32C64 105-18 142-85 96c-46-32-47-100-4-130 30-20 70-9 84 26-17-10-37-7-49 7-20 24-7 63 24 72 52 15 98-37 79-89-16-44-71-60-121-32z" fill="url(#peel2)"/>
+      <circle cx="73" cy="-83" r="18" fill="url(#blue)"/>
+    </g>
+  </g>
+
+  <g transform="translate(1650 270)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">C. Signal Curl</text>
+    <g transform="translate(310 255)" filter="url(#shadow)">
+      <path d="M-116 72C-76-62 34-132 130-95C57-70 15-22 4 52c45-44 98-44 137-4-74-2-120 32-139 105-37-7-76-35-118-81z" fill="url(#peel)"/>
+      <path d="M-70 66C-17 20 40-19 101-50" fill="none" stroke="#FFF2C8" stroke-width="11" stroke-linecap="round" opacity="0.72"/>
+    </g>
+  </g>
+
+  <g transform="translate(130 870)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">D. Little Sunspot</text>
+    <g transform="translate(310 255)" filter="url(#shadow)">
+      <circle cx="0" cy="0" r="108" fill="url(#peel)"/>
+      <path d="M-92 35C-24 84 63 74 106 2v106H-92z" fill="#0F1115" opacity="0.22"/>
+      <path d="M-72 12C-14 47 56 29 92-35" fill="none" stroke="#FFF2C8" stroke-width="12" stroke-linecap="round" opacity="0.72"/>
+      <circle cx="58" cy="-62" r="18" fill="#FFF1C7"/>
+    </g>
+  </g>
+
+  <g transform="translate(890 870)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">E. Split Spark</text>
+    <g transform="translate(310 255)" filter="url(#shadow)">
+      <path d="M-98 96L-12-124c5-13 23-14 31-3l118 178c8 12-1 28-16 27L30 70-58 132c-20 14-48-13-35-36z" fill="url(#peel)"/>
+      <path d="M-12-124L30 70-58 132z" fill="#FFF1C7" opacity="0.52"/>
+      <path d="M30 70l107-19c8 12-1 28-16 27z" fill="url(#blue)" opacity="0.62"/>
+    </g>
+  </g>
+
+  <g transform="translate(1650 870)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">F. Offset Ring</text>
+    <g transform="translate(310 255)" filter="url(#shadow)">
+      <ellipse cx="0" cy="0" rx="125" ry="88" fill="none" stroke="url(#peel)" stroke-width="48"/>
+      <ellipse cx="-18" cy="12" rx="66" ry="46" fill="#0F1115" opacity="0.88"/>
+      <path d="M-62 56C-10 33 33-10 65-70" fill="none" stroke="#FFF2C8" stroke-width="11" stroke-linecap="round" opacity="0.74"/>
+      <circle cx="88" cy="-58" r="17" fill="url(#blue)"/>
+    </g>
+  </g>
+</svg>

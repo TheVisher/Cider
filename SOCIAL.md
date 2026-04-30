@@ -10,9 +10,39 @@ This is the working hub for Cider's public channels, launch notes, post ideas, a
 | GitHub | Live | https://github.com/TheVisher/Cider | Source, releases, issues, feedback, and public project credibility. |
 | Discord | Live | https://discord.gg/TzErWTgm4d | Community discussion, beta tester feedback, ideas, bugs, and general chat. |
 | Bluesky | Live | https://bsky.app/profile/ciderapp.bsky.social | Lightweight public updates, launch posts, build notes, and beta calls. |
-| Reddit | Planned | TBD | Thoughtful beta announcement and community-specific posts once the account/subreddit plan is ready. |
+| Reddit | Live | https://www.reddit.com/r/CiderApp/ | Official subreddit for Cider beta feedback, bug reports, feature ideas, and support. |
 
 ## Published Posts
+
+### Reddit
+
+- 2026-04-27: Welcome post
+  - URL: https://www.reddit.com/r/CiderApp/comments/1sx1fgp/welcome_to_rciderapp/
+  - Copy:
+
+```text
+Hey, welcome to the official Cider Subreddit.
+
+Cider is a native macOS app for catching the stuff your brain swears it will remember: links, notes, dates, contacts, ideas, and other small bits that usually end up scattered across tabs and good intentions.
+
+This subreddit is for:
+- Beta feedback
+- Bug reports
+- Feature ideas
+- Questions
+- Weird workflows Cider should probably handle better
+
+Useful links:
+- Website: https://cider.so
+- Beta download: https://github.com/TheVisher/Cider/releases/latest
+- GitHub: https://github.com/TheVisher/Cider
+- Discord: https://discord.gg/TzErWTgm4d
+- Bluesky: https://bsky.app/profile/ciderapp.bsky.social
+
+If you find something broken, tell me what happened, what you expected, and whether Cider was being clever or merely dramatic.
+
+Thanks for checking it out. This is early beta, which is a polite way of saying: it works, but it would love a few more real humans poking at it.
+```
 
 ### Bluesky
 
@@ -87,6 +117,137 @@ For pre-beta and early beta, keep it light:
 - GitHub: releases, issues, and changelog-like updates.
 - Reddit: occasional thoughtful posts once ready, not drive-by self-promo.
 
+## Weekly Social Checklist
+
+Use this as the weekly visual pass. The goal is consistency without turning Cider into a content treadmill.
+
+```text
+Week of: __________
+
+Build / GitHub
+[ ] Pick this week's product focus
+[ ] Commit meaningful work as it lands
+[ ] Push to main only when stable
+[ ] Decide if this week needs a beta release
+[ ] If releasing, create/update GitHub release notes
+
+Discord
+[ ] Check #bugs for anything urgent
+[ ] Check #ideas and #beta-feedback for patterns
+[ ] Post one useful update only if there is something users should know
+
+Bluesky
+[ ] Post one casual build/product update
+[ ] Post one beta/feedback/release update if there is news
+[ ] Reply to any real mentions or questions
+
+Reddit
+[ ] Check r/CiderApp for comments or spam
+[ ] Post at most one thoughtful thread if there is a real topic
+[ ] Avoid link-heavy posts unless necessary
+
+Maintenance
+[ ] Add any published posts to this file
+[ ] Note anything users asked for repeatedly
+[ ] Decide the next small social task
+```
+
+Minimum viable week:
+
+```text
+[ ] Ship or improve something
+[ ] Check Discord
+[ ] Post once on Bluesky
+[ ] Check Reddit
+```
+
+If the week is busy, do only the minimum viable week. The app matters more than feeding the social machines.
+
+## Release-Day Checklist
+
+Use this when a beta build goes out.
+
+```text
+Release: __________
+Date: __________
+
+Before posting
+[ ] Build passes
+[ ] App opens and core capture flow works
+[ ] GitHub release exists
+[ ] Download link works
+[ ] Known issues are written down
+
+GitHub
+[ ] Tag/release published
+[ ] Release notes include changes, fixes, and known issues
+
+Discord
+[ ] Post short announcement in announcements
+[ ] Mention the download link
+[ ] Ask for feedback in the right channel
+
+Bluesky
+[ ] Post short public update
+[ ] Mention one user-facing change
+[ ] Link to cider.so or the release, not both unless needed
+
+Reddit
+[ ] Only post if the release is meaningful
+[ ] Prefer a short r/CiderApp thread over outside subreddit posts
+[ ] Keep links minimal
+
+After posting
+[ ] Add post URLs and copy to Published Posts
+[ ] Watch for bug reports for 24 hours
+```
+
+## When To Post
+
+Post when one of these happened:
+
+- New beta release.
+- Noticeable feature added.
+- Bug fix users may care about.
+- Known issue users should avoid.
+- Specific feedback request.
+- Useful milestone.
+- Clear explanation of what Cider does.
+
+Skip posting when:
+
+- It is just a tiny internal refactor.
+- The update needs three paragraphs of caveats.
+- The only CTA is "please look at my app."
+- You are posting because the checklist exists, not because there is something useful to say.
+
+## Brand Assets
+
+Current visual direction:
+
+- Warm dark gradient background.
+- Abstract amber loop mark.
+- Keep layouts calm and sparse.
+- Prefer platform-specific crops over forcing one banner everywhere.
+- Avoid tiny text, crowded taglines, and anything that looks like generic gradient wallpaper.
+
+Current assets:
+
+```text
+Primary abstract mark: brand/assets/logo-winner-triangular-loop-isolated-softclean.png
+GitHub README banner: brand/assets/readme-banner-v2.png
+Reddit banner: brand/assets/social-banner-reddit-v3.png
+Bluesky banner: brand/assets/social-banner-bluesky-mark-v3-right.png
+Discord banner candidate: brand/assets/social-banner-discord-mark-v2-right.png
+```
+
+Platform notes:
+
+- GitHub README uses `brand/assets/readme-banner-v2.png`.
+- Reddit uses the Reddit-specific banner with the faint oversized mark on the left.
+- Bluesky uses the right-side faint mark so the avatar does not cover the main visual.
+- Discord currently only exposes preset color banners for the server profile. The image banner candidate is saved for later if custom server banners become available.
+
 ## Content Buckets
 
 Rotate through these so the feed does not become one long "please try my app" sign:
@@ -150,7 +311,11 @@ https://github.com/TheVisher/Cider
 
 ## Reddit Notes
 
-Do this later with care. Reddit posts should be written for the specific community, not copied from Bluesky.
+Official account: https://www.reddit.com/user/Ciderapp/
+
+Official subreddit: https://www.reddit.com/r/CiderApp/
+
+Reddit posts should be written for the specific community, not copied from Bluesky.
 
 Possible angles:
 

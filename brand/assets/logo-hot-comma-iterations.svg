@@ -1,0 +1,110 @@
+<svg width="2400" height="1500" viewBox="0 0 2400 1500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="2400" y2="1500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F1115"/>
+      <stop offset="0.55" stop-color="#15110E"/>
+      <stop offset="1" stop-color="#0F1115"/>
+    </linearGradient>
+    <linearGradient id="peel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFE2A3"/>
+      <stop offset="0.36" stop-color="#F4A42B"/>
+      <stop offset="0.72" stop-color="#E85D04"/>
+      <stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="deepPeel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF0C2"/>
+      <stop offset="0.32" stop-color="#F4A42B"/>
+      <stop offset="0.66" stop-color="#D97706"/>
+      <stop offset="1" stop-color="#7C2D12"/>
+    </linearGradient>
+    <linearGradient id="creamLine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF7E8"/>
+      <stop offset="1" stop-color="#FFD99B"/>
+    </linearGradient>
+    <radialGradient id="hot" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="scale(180 160)">
+      <stop offset="0" stop-color="#FFD99B" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#FFD99B" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-35%" y="-35%" width="170%" height="170%">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <style>
+      .tile { fill: rgba(28, 31, 36, 0.72); stroke: rgba(246, 239, 228, 0.12); stroke-width: 1; }
+      .label { font: 560 28px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.60); letter-spacing: 0; }
+      .word { font: 760 54px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: #F6EFE4; letter-spacing: -1px; }
+      .tiny { font: 500 20px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.42); letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1500" fill="url(#bg)"/>
+  <circle cx="260" cy="160" r="500" fill="#F4A42B" opacity="0.07"/>
+  <circle cx="2160" cy="1320" r="520" fill="#7AA7FF" opacity="0.04"/>
+  <text x="130" y="128" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="58" font-weight="780" fill="#F6EFE4">Hot Comma Iterations</text>
+  <text x="130" y="178" class="tiny" font-size="24">Focused pass. No blue dot. More depth. Still abstract enough to avoid “productivity logo crimes.”</text>
+
+  <g transform="translate(130 270)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">A. Clean Comma</text>
+    <g transform="translate(310 238)" filter="url(#shadow)">
+      <path d="M-72-118C34-154 126-62 88 38C61 109-22 145-88 95C-132 62-128-8-82-38c35-23 83-8 98 33-22-15-50-11-65 8-22 29-2 73 37 78 54 8 95-50 72-101-19-43-75-56-132-20z" fill="url(#peel)"/>
+      <path d="M-64 89C-4 66 48 21 78-48c11 73-30 132-91 148-20 5-38 1-51-11z" fill="#7C2D12" opacity="0.22"/>
+      <path d="M-54-83C6-112 72-92 91-35" fill="none" stroke="url(#creamLine)" stroke-width="10" stroke-linecap="round" opacity="0.72"/>
+    </g>
+    <text x="238" y="418" class="word">Cider</text>
+  </g>
+
+  <g transform="translate(890 270)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">B. Ember Curl</text>
+    <g transform="translate(310 238)" filter="url(#shadow)">
+      <path d="M-98-74C-46-132 48-142 105-82c58 62 42 165-37 201-62 29-135-6-142-72-6-56 44-95 94-73 32 14 46 48 34 81-10-25-35-39-60-30-35 13-40 62-9 84 49 34 119-5 123-67 4-58-47-101-106-86-38 10-68 34-90 70z" fill="url(#deepPeel)"/>
+      <path d="M-50-85C15-112 78-78 88-15" fill="none" stroke="url(#creamLine)" stroke-width="11" stroke-linecap="round" opacity="0.76"/>
+      <circle cx="-24" cy="43" r="78" fill="url(#hot)" opacity="0.9"/>
+    </g>
+    <text x="238" y="418" class="word">Cider</text>
+  </g>
+
+  <g transform="translate(1650 270)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">C. Split Curl</text>
+    <g transform="translate(310 238)" filter="url(#shadow)">
+      <path d="M-88-106C2-158 114-104 124-2C132 80 70 140-12 135c-71-4-119-63-94-126 18-47 76-60 115-31-33 1-58 20-65 50-9 40 25 76 67 67 57-12 78-86 35-128-36-34-91-32-144 27z" fill="url(#peel)"/>
+      <path d="M-20-124C36-91 73-44 91 16C74-50 34-95-20-124z" fill="#FFF0C2" opacity="0.52"/>
+      <path d="M-80 86C-25 82 20 57 55 13 30 79-11 119-68 132z" fill="#7C2D12" opacity="0.24"/>
+    </g>
+    <text x="238" y="418" class="word">Cider</text>
+  </g>
+
+  <g transform="translate(130 870)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">D. Almost C</text>
+    <g transform="translate(310 238)" filter="url(#shadow)">
+      <path d="M98-92C52-138-35-134-86-82c-60 61-56 158 8 212 60 50 148 39 194-21-53 25-111 19-151-19-42-41-40-109 4-147 39-34 100-30 132 9z" fill="url(#peel)"/>
+      <path d="M-96 12C-44 54 23 63 90 32" fill="none" stroke="url(#creamLine)" stroke-width="10" stroke-linecap="round" opacity="0.72"/>
+      <path d="M-6 127C41 120 82 98 116 60c-28 58-72 92-132 101z" fill="#7C2D12" opacity="0.22"/>
+    </g>
+    <text x="238" y="418" class="word">Cider</text>
+  </g>
+
+  <g transform="translate(890 870)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">E. Melted Loop</text>
+    <g transform="translate(310 238)" filter="url(#shadow)">
+      <path d="M-95 22C-82-78 23-137 101-83C170-36 162 72 90 118C30 156-56 141-88 76c45 39 105 40 151 4C109 44 107-20 64-47C19-75-46-50-68 8z" fill="url(#deepPeel)"/>
+      <path d="M-60 2C-12-48 50-66 105-48" fill="none" stroke="url(#creamLine)" stroke-width="11" stroke-linecap="round" opacity="0.72"/>
+      <path d="M-77 72C-27 111 41 112 90 78c-40 58-113 75-170 33z" fill="#7C2D12" opacity="0.24"/>
+    </g>
+    <text x="238" y="418" class="word">Cider</text>
+  </g>
+
+  <g transform="translate(1650 870)">
+    <rect class="tile" width="620" height="470" rx="32"/>
+    <text x="38" y="58" class="label">F. Sharp Comma</text>
+    <g transform="translate(310 238)" filter="url(#shadow)">
+      <path d="M-86-88C-14-150 102-124 130-30C151 40 113 112 42 133C-24 153-95 119-112 55C-126 1-88-45-37-42c34 2 59 27 62 63-18-22-47-28-70-10-29 23-18 72 19 84 56 19 108-38 89-95-17-51-83-70-149-29z" fill="url(#peel)"/>
+      <path d="M-78 96L-36 13C-12 40 20 49 58 40C25 83-18 108-78 96z" fill="#7C2D12" opacity="0.28"/>
+      <path d="M-51-86C11-108 74-83 103-28" fill="none" stroke="url(#creamLine)" stroke-width="9" stroke-linecap="round" opacity="0.76"/>
+    </g>
+    <text x="238" y="418" class="word">Cider</text>
+  </g>
+</svg>

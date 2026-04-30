@@ -1,0 +1,33 @@
+<svg width="2400" height="900" viewBox="0 0 2400 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="2400" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F1115"/>
+      <stop offset="0.55" stop-color="#171A20"/>
+      <stop offset="1" stop-color="#1C1F24"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1030 430) rotate(18) scale(720 380)">
+      <stop offset="0" stop-color="#F4A42B" stop-opacity="0.27"/>
+      <stop offset="0.50" stop-color="#D97706" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#B45309" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softBlur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="30"/>
+    </filter>
+    <filter id="markShadow" x="-24%" y="-24%" width="148%" height="148%">
+      <feDropShadow dx="0" dy="28" stdDeviation="34" flood-color="#000000" flood-opacity="0.44"/>
+    </filter>
+  </defs>
+  <rect width="2400" height="900" fill="url(#bg)"/>
+  <rect width="2400" height="900" fill="url(#glow)"/>
+  <circle cx="1780" cy="125" r="420" fill="#F4A42B" opacity="0.04" filter="url(#softBlur)"/>
+  <circle cx="2220" cy="690" r="520" fill="#B45309" opacity="0.045" filter="url(#softBlur)"/>
+  <g opacity="0.24">
+    <path d="M0 730C360 660 470 820 820 735C1130 660 1340 550 1680 628C1900 680 2080 790 2400 720" fill="none" stroke="#F4A42B" stroke-width="2"/>
+    <path d="M0 765C300 700 520 860 840 780C1130 708 1370 596 1680 660C1920 710 2100 830 2400 760" fill="none" stroke="#D97706" stroke-width="1"/>
+  </g>
+  <g filter="url(#markShadow)">
+    <image href="cider-c-isolated-cropped.png" x="606" y="214" width="300" height="370" preserveAspectRatio="xMidYMid meet"/>
+    <text x="872" y="503" font-family="New York, Georgia, 'Times New Roman', serif" font-size="190" font-weight="700" fill="#F7F3EA" letter-spacing="-2">ider</text>
+  </g>
+  <text x="735" y="608" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="40" font-weight="500" fill="#EAEAEA" letter-spacing="0">Double-tap Option. Capture. Organize. Done.</text>
+</svg>
