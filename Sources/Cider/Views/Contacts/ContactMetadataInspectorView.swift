@@ -63,6 +63,7 @@ struct ContactMetadataDraft: Equatable {
 struct ContactMetadataInspectorView: View {
     let contact: ContactCard
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
+    var onSaveContact: ((ContactCard) -> Void)?
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @State private var draft: ContactMetadataDraft
@@ -74,9 +75,14 @@ struct ContactMetadataInspectorView: View {
     @State private var isInfoExpanded = true
     @State private var saveError: String?
 
-    init(contact: ContactCard, onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil) {
+    init(
+        contact: ContactCard,
+        onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
+        onSaveContact: ((ContactCard) -> Void)? = nil
+    ) {
         self.contact = contact
         self.onOpenLinkedRef = onOpenLinkedRef
+        self.onSaveContact = onSaveContact
         _draft = State(initialValue: ContactMetadataDraft(contact: contact))
     }
 
@@ -391,6 +397,7 @@ struct ContactMetadataInspectorView: View {
             saveError = "Could not save contact."
             return
         }
+        onSaveContact?(ContactStorage.shared.contact(for: updated.id) ?? updated)
         isEditing = false
         saveError = nil
     }

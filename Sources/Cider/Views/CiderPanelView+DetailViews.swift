@@ -129,7 +129,11 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) },
                 metadata: {
-                    ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: openLinkedRef)
+                    ContactMetadataInspectorView(
+                        contact: contact,
+                        onOpenLinkedRef: openLinkedRef,
+                        onSaveContact: { selectedContact = $0 }
+                    )
                 }
             ) {
                 ContactDetailView(
@@ -214,7 +218,11 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: openLinkedRef)
+                    ContactMetadataInspectorView(
+                        contact: contact,
+                        onOpenLinkedRef: openLinkedRef,
+                        onSaveContact: { selectedContact = $0 }
+                    )
                 }
             ) {
                 ContactDetailView(
@@ -398,7 +406,11 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: openLinkedRef)
+                    ContactMetadataInspectorView(
+                        contact: contact,
+                        onOpenLinkedRef: openLinkedRef,
+                        onSaveContact: { selectedContact = $0 }
+                    )
                 }
             ) {
                 ContactDetailView(
