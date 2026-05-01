@@ -3,7 +3,7 @@ import Testing
 @testable import Cider
 
 struct CiderSurfaceRecallCoordinatorTests {
-    @Test("item surfaces are recallable and utility surfaces are ignored")
+    @Test("item and AI surfaces are recallable and utility surfaces are ignored")
     func recallabilityFiltersUtilitySurfaces() {
         #expect(CiderSurfaceRecallCoordinator.isRecallable(.note(UUID())))
         #expect(CiderSurfaceRecallCoordinator.isRecallable(.bookmark(UUID())))
@@ -11,9 +11,9 @@ struct CiderSurfaceRecallCoordinatorTests {
         #expect(CiderSurfaceRecallCoordinator.isRecallable(.contact(UUID())))
         #expect(CiderSurfaceRecallCoordinator.isRecallable(.dateCard(UUID())))
         #expect(CiderSurfaceRecallCoordinator.isRecallable(.todo(UUID())))
+        #expect(CiderSurfaceRecallCoordinator.isRecallable(.aiAssistant))
         #expect(!CiderSurfaceRecallCoordinator.isRecallable(.dropZone))
         #expect(!CiderSurfaceRecallCoordinator.isRecallable(.clipboard))
-        #expect(!CiderSurfaceRecallCoordinator.isRecallable(.aiAssistant))
     }
 
     @Test("activation opens main window when no recallable surface exists")

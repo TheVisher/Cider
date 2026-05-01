@@ -3,6 +3,9 @@ import SwiftUI
 /// Root view for the AI Assistant floating panel.
 struct AIAssistantPanelView: View {
     @ObservedObject var viewModel: AIAssistantViewModel
+    var onClose: (() -> Void)?
+    var onFloat: (() -> Void)?
+    var showsResizeOverlay = true
 
     @ObservedObject private var conversationStorage = AIConversationStorage.shared
     @ObservedObject private var modelManager = MLXModelManager.shared
@@ -31,11 +34,13 @@ struct AIAssistantPanelView: View {
             .clipShape(RoundedRectangle(cornerRadius: AIAssistantPanelDesign.cornerRadius, style: .continuous))
         }
         .overlay {
-            PanelEdgeResizeView(horizontalResizeEnabled: true)
+            if showsResizeOverlay {
+                PanelEdgeResizeView(horizontalResizeEnabled: true)
+            }
         }
         .background {
             Button("") {
-                NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+                close()
             }
             .keyboardShortcut(.escape, modifiers: [])
             .hidden()
@@ -57,7 +62,7 @@ struct AIAssistantPanelView: View {
     private var titleBar: some View {
         HStack(spacing: Spacing.sm) {
             Button {
-                NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+                close()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(CiderFont.bodySemibold)
@@ -114,6 +119,18 @@ struct AIAssistantPanelView: View {
                 hermesStatusControl
             }
 
+            if let onFloat {
+                Button {
+                    onFloat()
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Pop out")
+            }
+
             // New conversation
             Button {
                 withAnimation(reduceMotion ? .none : .snappy) {
@@ -159,6 +176,14 @@ struct AIAssistantPanelView: View {
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: AIAssistantPanelDesign.titleBarHeight)
+    }
+
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+        }
     }
 
     private var contextUsageIndicator: some View {

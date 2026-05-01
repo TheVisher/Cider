@@ -112,6 +112,17 @@ extension CiderPanelView {
             )
         } else if let tab = selectedTab {
             switch tab {
+            case .aiAssistant:
+                AIAssistantPanelView(
+                    viewModel: AIAssistantViewModel.shared,
+                    onClose: { closeTab(.aiAssistant) },
+                    onFloat: {
+                        requestFloat(.aiAssistant)
+                        closeTab(.aiAssistant)
+                    },
+                    showsResizeOverlay: false
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .savedView(let id, _):
                 if let savedView = savedViewStorage.savedView(for: id) {
                     if case .kanban(let boardID) = savedView.kind {

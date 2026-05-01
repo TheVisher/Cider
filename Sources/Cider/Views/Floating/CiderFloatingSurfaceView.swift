@@ -12,6 +12,13 @@ struct CiderFloatingSurfaceView: View {
                 onDock: onDock,
                 onReanchor: onReanchor
             )
+        } else if surface == .aiAssistant {
+            AIAssistantPanelView(
+                viewModel: AIAssistantViewModel.shared,
+                onClose: onDock,
+                showsResizeOverlay: false
+            )
+            .frame(minWidth: AIAssistantPanelDesign.minWidth, minHeight: AIAssistantPanelDesign.minHeight)
         } else {
             fallbackView
         }

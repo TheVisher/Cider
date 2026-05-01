@@ -41,6 +41,7 @@ final class AIAssistantViewModel: ObservableObject {
     private var provider: AIAssistantProvider
     private let storage = AIConversationStorage.shared
     private let hermesSessionService = HermesSessionService()
+    private let agentChatRegistry: CiderAgentChatRegistry
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
 
@@ -147,9 +148,13 @@ final class AIAssistantViewModel: ObservableObject {
         }
     }
 
-    init(provider: AIAssistantProvider? = nil) {
+    init(
+        provider: AIAssistantProvider? = nil,
+        agentChatRegistry: CiderAgentChatRegistry = .shared
+    ) {
         let initialRuntimeSelection = Self.loadPersistedRuntimeSelection()
         runtimeSelection = initialRuntimeSelection
+        self.agentChatRegistry = agentChatRegistry
         if let provider {
             self.provider = provider
         } else if initialRuntimeSelection == .codexCLI {
@@ -333,9 +338,27 @@ final class AIAssistantViewModel: ObservableObject {
     }
 
     private func activateHermesConversation() async {
-        if currentConversationID == nil,
-           let summary = storage.conversations.first(where: { $0.runtimeID == "hermes" }) {
-            loadConversation(summary.id)
+        do {
+            let mainBrain = try agentChatRegistry.loadOrCreateMainBrain()
+            saveCurrentConversation()
+            currentConversationID = mainBrain.conversationID
+            if let loadedMessages = storage.loadMessages(for: mainBrain.conversationID) {
+                messages = loadedMessages
+            } else {
+                messages = []
+            }
+            hermesConversationState = HermesConversationState(
+                conversationID: mainBrain.conversationID,
+                runtimeID: mainBrain.runtimeID,
+                activeRuntimeSessionID: mainBrain.activeRuntimeSessionID,
+                runtimeSessionLineage: mainBrain.runtimeSessionLineage,
+                title: mainBrain.title,
+                source: nil,
+                lastSyncedAt: nil
+            )
+        } catch {
+            logger.error("Failed to load Cider Main Brain: \(error.localizedDescription, privacy: .public)")
+            hermesSyncStatus = .error(error.localizedDescription)
         }
 
         await syncHermesConversation(attachIfNeeded: true)
@@ -366,6 +389,7 @@ final class AIAssistantViewModel: ObservableObject {
                     existingMessages: existingMessages
                 )
                 hermesConversationState = result.state
+                persistMainBrainState(result.state)
                 messages = result.messages
                 hermesSyncStatus = .idle
                 saveCurrentConversation()
@@ -399,6 +423,7 @@ final class AIAssistantViewModel: ObservableObject {
             let state = try await ensureHermesConversationState(attachIfNeeded: attachIfNeeded)
             let result = try await hermesSessionService.sync(state: state, existingMessages: messages)
             hermesConversationState = result.state
+            persistMainBrainState(result.state)
             messages = result.messages
             hermesSyncStatus = .idle
             saveCurrentConversation()
@@ -430,6 +455,7 @@ final class AIAssistantViewModel: ObservableObject {
             conversationID: conversationID
         )
         hermesConversationState = result.state
+        persistMainBrainState(result.state)
         messages = result.messages
         saveCurrentConversation()
         return result.state
@@ -661,6 +687,15 @@ final class AIAssistantViewModel: ObservableObject {
             model: providerName,
             hermesState: runtimeSelection == .hermes ? hermesConversationState : nil
         )
+    }
+
+    private func persistMainBrainState(_ state: HermesConversationState) {
+        guard runtimeSelection == .hermes else { return }
+        do {
+            _ = try agentChatRegistry.updateMainBrain(from: state)
+        } catch {
+            logger.error("Failed to persist Cider Main Brain: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Load a previous conversation by ID.

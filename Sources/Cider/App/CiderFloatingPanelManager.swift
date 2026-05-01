@@ -228,8 +228,10 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             DateCardStorage.shared.dateCards.contains { $0.id == id }
         case .todo(let id):
             TodoCardStorage.shared.todoCards.contains { $0.id == id }
-        case .clipboard, .aiAssistant, .dropZone:
+        case .clipboard, .dropZone:
             false
+        case .aiAssistant:
+            true
         }
     }
 
@@ -305,10 +307,8 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             return
         }
 
-        // These surfaces already have specialized panel controllers with their
-        // own sizing, shadows, hotkeys, and persistence. AppDelegate observes
-        // the same notification and opens those existing panels.
-        guard surface != .aiAssistant, surface != .clipboard else {
+        // Clipboard still has its own specialized panel controller.
+        guard surface != .clipboard else {
             return
         }
 
@@ -381,6 +381,8 @@ enum CiderFloatingPanelLayout {
             NSSize(width: 340, height: 360)
         case .note:
             NSSize(width: 820, height: 620)
+        case .aiAssistant:
+            NSSize(width: AIAssistantPanelDesign.defaultWidth, height: AIAssistantPanelDesign.defaultHeight)
         default:
             NSSize(width: 420, height: 520)
         }

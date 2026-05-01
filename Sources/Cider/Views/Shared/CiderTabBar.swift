@@ -286,6 +286,7 @@ struct CiderTabBar: View {
             return dateCardStorage.dateCards.filter { $0.urgency() != nil }.count
         case .search: return 0
         case .tag: return 0
+        case .aiAssistant: return 0
         }
     }
 }

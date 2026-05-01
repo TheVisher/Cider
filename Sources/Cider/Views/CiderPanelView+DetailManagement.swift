@@ -3,9 +3,9 @@ import SwiftUI
 enum CiderReanchorSurfaceResolver {
     static func canOpenInMainWindow(_ surface: CiderFloatableSurface) -> Bool {
         switch surface {
-        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo:
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .aiAssistant:
             true
-        case .clipboard, .aiAssistant, .dropZone:
+        case .clipboard, .dropZone:
             false
         }
     }
@@ -147,7 +147,9 @@ extension CiderPanelView {
             if let todoCard = TodoCardStorage.shared.todoCards.first(where: { $0.id == id }) {
                 openTodoDetail(todoCard)
             }
-        case .clipboard, .aiAssistant, .dropZone:
+        case .aiAssistant:
+            openOrSelectAIAssistantTab()
+        case .clipboard, .dropZone:
             break
         }
     }
