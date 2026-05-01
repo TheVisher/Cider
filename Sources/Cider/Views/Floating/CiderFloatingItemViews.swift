@@ -90,7 +90,7 @@ private struct FloatingNoteDetail: View {
             }
         ) {
             if presentation.usesInlineEditor {
-                InlineNoteEditorView(viewModel: viewModel)
+                InlineNoteEditorView(viewModel: viewModel, onOpenLinkedRef: floatLinkedRef)
             }
         }
         .onAppear { syncSelectedNote() }
@@ -119,6 +119,15 @@ private struct FloatingNoteDetail: View {
     private func renameNote(_ newTitle: String) {
         guard let selected = viewModel.selectedNote ?? NotesStorage.shared.notes.first(where: { $0.id == note.id }) else { return }
         NotesStorage.shared.rename(note: selected, to: newTitle)
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 
@@ -429,21 +438,35 @@ private struct FloatingDateCardDetail: View {
     let dateCard: DateCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var isMetadataVisible = true
 
     var body: some View {
         GenericItemDetailPanel(
             title: dateCard.title,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(eventTitle: dateCard.title)
+            },
+            metadata: {
+                BasicItemMetadataInspectorView(dateCard: dateCard, onOpenLinkedRef: floatLinkedRef)
             }
         ) {
             DateCardDetailView(dateCard: dateCard, onDismiss: { dock(surface, action: onDock) })
         }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 
@@ -451,21 +474,35 @@ private struct FloatingTodoDetail: View {
     let todo: TodoCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var isMetadataVisible = true
 
     var body: some View {
         GenericItemDetailPanel(
             title: todo.title,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(todoTitle: todo.title)
+            },
+            metadata: {
+                BasicItemMetadataInspectorView(todo: todo, onOpenLinkedRef: floatLinkedRef)
             }
         ) {
             TodoDetailView(todoCard: todo, onDismiss: { dock(surface, action: onDock) })
         }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 

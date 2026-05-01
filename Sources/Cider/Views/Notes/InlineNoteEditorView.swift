@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InlineNoteEditorView: View {
     @ObservedObject var viewModel: NotesViewModel
+    var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -39,7 +40,11 @@ struct InlineNoteEditorView: View {
             .frame(maxWidth: .infinity)
 
             if viewModel.isMetadataPanelVisible, let note = viewModel.selectedNote {
-                NoteMetadataSidebar(note: note, viewModel: viewModel)
+                NoteMetadataSidebar(
+                    note: note,
+                    viewModel: viewModel,
+                    onOpenLinkedRef: onOpenLinkedRef
+                )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -873,6 +878,7 @@ struct NoteSnapshotPopover: View {
 struct NoteMetadataSidebar: View {
     let note: Note
     @ObservedObject var viewModel: NotesViewModel
+    var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var labelStorage = CardLabelStorage.shared
@@ -880,6 +886,7 @@ struct NoteMetadataSidebar: View {
     @State private var isTitleExpanded = true
     @State private var isFolderExpanded = true
     @State private var isTagsExpanded = true
+    @State private var isLinkedExpanded = true
     @State private var isSourcesExpanded = true
     @State private var isHistoryExpanded = false
     @State private var showAllSnapshots = false
@@ -902,6 +909,9 @@ struct NoteMetadataSidebar: View {
                     sectionDivider
                     tagsSection
                         .padding(.vertical, Spacing.md)
+
+                    sectionDivider
+                    linkedSection
 
                     sectionDivider
                     sourcesSection
@@ -1123,6 +1133,28 @@ struct NoteMetadataSidebar: View {
                 }
             }
         }
+    }
+
+    // MARK: - Linked
+
+    @ViewBuilder
+    private var linkedSection: some View {
+        ItemMetadataSectionView(title: "Linked", isExpanded: $isLinkedExpanded) {
+            let rows = relatedRows
+            if rows.isEmpty {
+                Text("No linked items.")
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+            } else {
+                ItemMetadataRowsView(rows: rows, onOpenRef: onOpenLinkedRef)
+            }
+        }
+    }
+
+    private var relatedRows: [ItemMetadataRow] {
+        let ref = LibraryEntityRef(type: .note, entityID: note.id)
+        let refs = (try? ItemLinkService.shared.relatedRefs(for: ref)) ?? []
+        return ItemLinkService.shared.summaries(for: refs).map(ItemMetadataRow.related)
     }
 
     // MARK: - Sources (extracted links)

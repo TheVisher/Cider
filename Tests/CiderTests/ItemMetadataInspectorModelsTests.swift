@@ -47,4 +47,37 @@ struct ItemMetadataInspectorModelsTests {
         #expect(rows.map(\.id) == ["created", "updated", "type"])
         #expect(rows[2].value == "Contact")
     }
+
+    @Test("date card metadata rows include scheduled facts before optional facts")
+    func dateCardMetadataRowsIncludeScheduledFactsBeforeOptionalFacts() {
+        let dateCard = DateCard(
+            title: "Dentist",
+            startAt: Date(timeIntervalSince1970: 1_000),
+            allDay: true,
+            location: "Suite 4",
+            amount: 42.5
+        )
+
+        let rows = DateCardMetadataRows.rows(for: dateCard)
+
+        #expect(rows.map(\.id) == ["date", "time", "location", "amount"])
+        #expect(rows[1].value == "All day")
+        #expect(rows[2].value == "Suite 4")
+    }
+
+    @Test("todo metadata rows include status due date and priority")
+    func todoMetadataRowsIncludeStatusDueDateAndPriority() {
+        let todo = TodoCard(
+            title: "Ship task",
+            dueDate: Date(timeIntervalSince1970: 2_000),
+            priority: .high,
+            isCompleted: true
+        )
+
+        let rows = TodoMetadataRows.rows(for: todo)
+
+        #expect(rows.map(\.id) == ["status", "due", "priority"])
+        #expect(rows[0].value == "Completed")
+        #expect(rows[2].value == "High")
+    }
 }
