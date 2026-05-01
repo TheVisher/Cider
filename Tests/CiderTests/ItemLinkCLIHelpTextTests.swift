@@ -14,7 +14,7 @@ struct ItemLinkCLIHelpTextTests {
 
     @Test("link help exposes related command for metadata rails")
     func linkHelpExposesRelatedCommand() {
-        #expect(ItemLinkCLIHelpText.help.contains("link related"))
-        #expect(ItemLinkCLIHelpText.help.contains("link backlinks"))
+        #expect(ItemLinkCLIHelpText.link.contains("link related"))
+        #expect(ItemLinkCLIHelpText.link.contains("link backlinks"))
     }
 }

@@ -31,7 +31,7 @@ struct ContactCLIHelpTextTests {
     @Test("contact help exposes field and notes operations for agents")
     func contactHelpExposesFieldAndNotesOperations() {
         #expect(ContactCLIHelpText.contact.contains("contact field add"))
-        #expect(ContactCLIHelpText.contact.contains("contact update <id>"))
+        #expect(ContactCLIHelpText.contact.contains("contact update <id-prefix>"))
         #expect(ContactCLIHelpText.contact.contains("--notes"))
         #expect(ContactCLIHelpText.field.contains("contact field delete"))
     }
