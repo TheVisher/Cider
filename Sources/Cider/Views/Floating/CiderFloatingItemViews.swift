@@ -337,7 +337,8 @@ private struct FloatingBookmarkDetailContent: View {
             onCopyURL: copyURL,
             onSave: saveDraft,
             onCancel: {},
-            onOpenLinkedRef: floatLinkedRef
+            onOpenLinkedRef: floatLinkedRef,
+            canOpenLinkedRef: canFloatLinkedRef
         )
     }
 
@@ -383,6 +384,10 @@ private struct FloatingBookmarkDetailContent: View {
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
     }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
 }
 
 struct FloatingBookmarkDetailLayout {
@@ -419,7 +424,11 @@ private struct FloatingContactDetail: View {
                 AIDetailActionsButton(contactName: contact.displayName)
             },
             metadata: {
-                ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: floatLinkedRef)
+                ContactMetadataInspectorView(
+                    contact: contact,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef
+                )
             }
         ) {
             ContactDetailView(
@@ -439,6 +448,10 @@ private struct FloatingContactDetail: View {
             object: linkedSurface,
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
     }
 }
 

@@ -63,6 +63,7 @@ struct ContactMetadataDraft: Equatable {
 struct ContactMetadataInspectorView: View {
     let contact: ContactCard
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
+    var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
     var onSaveContact: ((ContactCard) -> Void)?
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
@@ -78,10 +79,12 @@ struct ContactMetadataInspectorView: View {
     init(
         contact: ContactCard,
         onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
         onSaveContact: ((ContactCard) -> Void)? = nil
     ) {
         self.contact = contact
         self.onOpenLinkedRef = onOpenLinkedRef
+        self.canOpenLinkedRef = canOpenLinkedRef
         self.onSaveContact = onSaveContact
         _draft = State(initialValue: ContactMetadataDraft(contact: contact))
     }
@@ -171,7 +174,11 @@ struct ContactMetadataInspectorView: View {
             if relatedRows.isEmpty {
                 emptyText("No linked items.")
             } else {
-                ItemMetadataRowsView(rows: relatedRows, onOpenRef: onOpenLinkedRef)
+                ItemMetadataRowsView(
+                    rows: relatedRows,
+                    onOpenRef: onOpenLinkedRef,
+                    canOpenRef: canOpenLinkedRef
+                )
             }
         }
     }
