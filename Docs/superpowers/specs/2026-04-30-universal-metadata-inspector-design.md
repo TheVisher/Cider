@@ -92,6 +92,19 @@ In edit mode, the same rail becomes the structured contact editor:
 
 The main body reflects saved structured fields. Unsaved edits should stay visually contained in the rail until the user saves.
 
+### Notes, Todos, And Date Cards
+
+The rail should not take over the primary workflow of item types that already have a clear body interaction. The rule is:
+
+- main card body: what the item is for
+- metadata rail: where the item lives, what it connects to, and supporting management
+
+For notes, the main body remains the Markdown editor and the existing formatting toolbar remains the place for Markdown editing controls. The metadata rail should not duplicate Markdown formatting buttons. Note metadata should include backlinks, folder, labels, created/modified info, and lightweight note properties such as word count if useful. Do not add a second "metadata note" field to notes in this pass.
+
+For todos, the main body remains focused on doing the task: title, completion state, due date, priority/status, and future task-specific details such as checklist items. The rail should manage backlinks, folder, labels, created/modified info, source/captured-from data if present, and supporting reminder or scheduling metadata. Completion should remain directly available on the todo body, not hidden in metadata.
+
+For date cards and event cards, the main body remains focused on the event: title, date/time, location, description, countdown/age/next occurrence, and recurrence summary where present. The rail should manage backlinks, folder, labels, created/modified info, related source/calendar data if present, and reminder/notification metadata. Recurrence editing can live in the rail when the body has a clear read-only summary.
+
 ## Data Model
 
 Use the existing item models and link system first.
@@ -143,6 +156,8 @@ Metadata notes are item-specific notes about the item, not necessarily the item 
 Bookmarks already use this pattern. Contacts should adopt the same pattern. Notes can still have their normal note body as the main content, but their metadata rail can also hold metadata notes if the underlying model supports it or if a follow-up adds that field.
 
 Contact metadata notes should render Markdown in read mode and switch to an editor in rail edit mode. Raw Markdown should not leak into read-only metadata or card previews unless the user is actively editing Markdown.
+
+Notes are the exception: a note's primary body is already Markdown content. For note items, the rail should not introduce a second metadata-notes field in this pass.
 
 ## UI Behavior
 
