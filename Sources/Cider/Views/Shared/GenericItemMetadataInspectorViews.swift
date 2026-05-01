@@ -19,99 +19,81 @@ struct BasicItemMetadataInspectorView: View {
     let typeLabel: String
     let createdAt: Date
     let updatedAt: Date
-    var folderName: String?
+    var folderID: UUID?
     var labelIDs: [UUID] = []
     var linkedRef: LibraryEntityRef
     var extraRows: [ItemMetadataRow] = []
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
+    var onFolderChanged: ((UUID?) -> Void)?
+    var onToggleLabel: ((UUID) -> Void)?
+    var onDelete: (() -> Void)?
 
-    @ObservedObject private var labelStorage = CardLabelStorage.shared
     @State private var isLinkedExpanded = true
     @State private var isFolderExpanded = true
     @State private var isLabelsExpanded = true
     @State private var isDetailsExpanded = true
-    @State private var isInfoExpanded = true
 
     var body: some View {
-        ItemMetadataInspectorView {
+        ItemMetadataPanel {
             Text(title)
                 .font(CiderFont.bodySemibold)
                 .foregroundColor(CiderColors.primary)
                 .lineLimit(3)
                 .padding(.bottom, Spacing.md)
 
-            sectionDivider
+            ItemMetadataDivider()
 
-            ItemMetadataSectionView(title: "Linked", isExpanded: $isLinkedExpanded) {
-                let rows = relatedRows
-                if rows.isEmpty {
-                    Text("No linked items.")
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.quaternary)
-                } else {
-                    ItemMetadataRowsView(
-                        rows: rows,
-                        onOpenRef: onOpenLinkedRef,
-                        canOpenRef: canOpenLinkedRef
-                    )
+            ItemMetadataSectionView(title: "Folder", isExpanded: $isFolderExpanded) {
+                ItemMetadataFolderPicker(folderID: folderID) { folderID in
+                    onFolderChanged?(folderID)
                 }
             }
 
-            if let folderName = trimmedFolderName {
-                sectionDivider
+            ItemMetadataDivider()
 
-                ItemMetadataSectionView(title: "Folder", isExpanded: $isFolderExpanded) {
-                    ItemMetadataRowsView(rows: [
-                        ItemMetadataRow(id: "folder", symbol: "folder", title: folderName)
-                    ])
-                }
+            ItemMetadataSectionView(title: "Tags", isExpanded: $isLabelsExpanded) {
+                ItemMetadataTagsPicker(
+                    labelIDs: labelIDs,
+                    onToggleLabel: { labelID in onToggleLabel?(labelID) },
+                    onCreateAndAssignLabel: createAndAssignLabel
+                )
             }
 
-            let labelRows = labelRows
-            if !labelRows.isEmpty {
-                sectionDivider
+            ItemMetadataDivider()
 
-                ItemMetadataSectionView(title: "Labels", isExpanded: $isLabelsExpanded) {
-                    ItemMetadataRowsView(rows: labelRows)
-                }
-            }
+            ItemMetadataLinkedSection(
+                rows: relatedRows,
+                isExpanded: $isLinkedExpanded,
+                onOpenLinkedRef: onOpenLinkedRef,
+                canOpenLinkedRef: canOpenLinkedRef
+            )
 
             if !extraRows.isEmpty {
-                sectionDivider
+                ItemMetadataDivider()
 
                 ItemMetadataSectionView(title: "Details", isExpanded: $isDetailsExpanded) {
                     ItemMetadataRowsView(rows: extraRows)
                 }
             }
-
-            sectionDivider
-
-            ItemMetadataSectionView(title: "Info", isExpanded: $isInfoExpanded) {
-                ItemMetadataRowsView(rows: ItemMetadataInfoRows.rows(
+        } footer: {
+            ItemMetadataInfoFooter(
+                rows: ItemMetadataInfoRows.rows(
                     createdAt: createdAt,
                     updatedAt: updatedAt,
                     typeLabel: typeLabel
-                ))
-            }
+                ),
+                onDelete: onDelete
+            )
         }
     }
 
-    private var sectionDivider: some View {
-        Divider().background(CiderColors.separator)
-    }
-
-    private var trimmedFolderName: String? {
-        guard let folderName else { return nil }
-        let trimmed = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private var labelRows: [ItemMetadataRow] {
-        labelIDs.compactMap { id in
-            guard let label = labelStorage.labels.first(where: { $0.id == id }) else { return nil }
-            return ItemMetadataRow(id: "label-\(label.id.uuidString)", symbol: "tag", title: label.name)
-        }
+    private func createAndAssignLabel() {
+        let label = CardLabelStorage.shared.createLabel(
+            name: "New Tag",
+            colorHex: CardLabelStorage.randomPresetColor()
+        )
+        onToggleLabel?(label.id)
     }
 
     private var relatedRows: [ItemMetadataRow] {
@@ -124,38 +106,50 @@ extension BasicItemMetadataInspectorView {
     init(
         dateCard: DateCard,
         onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
-        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
+        onFolderChanged: ((UUID?) -> Void)? = nil,
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
     ) {
         self.init(
             title: dateCard.title,
             typeLabel: "Date Card",
             createdAt: dateCard.createdAt,
             updatedAt: dateCard.updatedAt,
-            folderName: Self.folderName(for: dateCard.folderID),
+            folderID: dateCard.folderID,
             labelIDs: dateCard.labelIDs,
             linkedRef: .dateCard(dateCard.id),
             extraRows: DateCardMetadataRows.rows(for: dateCard),
             onOpenLinkedRef: onOpenLinkedRef,
-            canOpenLinkedRef: canOpenLinkedRef
+            canOpenLinkedRef: canOpenLinkedRef,
+            onFolderChanged: onFolderChanged,
+            onToggleLabel: onToggleLabel,
+            onDelete: onDelete
         )
     }
 
     init(
         todo: TodoCard,
         onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
-        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
+        onFolderChanged: ((UUID?) -> Void)? = nil,
+        onToggleLabel: ((UUID) -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
     ) {
         self.init(
             title: todo.title,
             typeLabel: "Todo",
             createdAt: todo.createdAt,
             updatedAt: todo.updatedAt,
-            folderName: Self.folderName(for: todo.folderID),
+            folderID: todo.folderID,
             labelIDs: todo.labelIDs,
             linkedRef: .todo(todo.id),
             extraRows: TodoMetadataRows.rows(for: todo),
             onOpenLinkedRef: onOpenLinkedRef,
-            canOpenLinkedRef: canOpenLinkedRef
+            canOpenLinkedRef: canOpenLinkedRef,
+            onFolderChanged: onFolderChanged,
+            onToggleLabel: onToggleLabel,
+            onDelete: onDelete
         )
     }
 
@@ -169,18 +163,13 @@ extension BasicItemMetadataInspectorView {
             typeLabel: "File",
             createdAt: file.createdAt,
             updatedAt: file.modifiedAt,
-            folderName: Self.folderName(for: file.folderID),
+            folderID: file.folderID,
             labelIDs: file.labelIDs,
             linkedRef: .vaultFile(file.id),
             extraRows: Self.fileRows(for: file),
             onOpenLinkedRef: onOpenLinkedRef,
             canOpenLinkedRef: canOpenLinkedRef
         )
-    }
-
-    private static func folderName(for folderID: UUID?) -> String? {
-        guard let folderID else { return nil }
-        return VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name
     }
 
     private static func fileRows(for file: VaultFile) -> [ItemMetadataRow] {
@@ -235,7 +224,6 @@ struct VaultFileMetadataInspectorView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
-    @ObservedObject private var labelStorage = CardLabelStorage.shared
     @State private var linkedSummaries: [ItemLinkSummary] = []
     @State private var titleDraft = ""
     @State private var notesDraft = ""
@@ -251,7 +239,6 @@ struct VaultFileMetadataInspectorView: View {
     @State private var isLinkedExpanded = true
     @State private var isNotesExpanded = true
     @State private var isIntelligenceExpanded = true
-    @State private var isInfoExpanded = true
 
     private var presentation: VaultFileMetadataPresentation {
         VaultFileMetadataPresentation(file: file)
@@ -282,11 +269,9 @@ struct VaultFileMetadataInspectorView: View {
                             .padding(.vertical, Spacing.md)
                     }
 
-                    if !linkedSummaries.isEmpty {
-                        sectionDivider
-                        linkedSection
-                            .padding(.vertical, Spacing.md)
-                    }
+                    sectionDivider
+                    linkedSection
+                        .padding(.vertical, Spacing.md)
 
                     sectionDivider
                     notesSection
@@ -384,11 +369,11 @@ struct VaultFileMetadataInspectorView: View {
                 )
 
                 HStack(spacing: Spacing.xs) {
-                    metadataButton(title: "Open", systemImage: "arrow.up.forward.app") {
+                    ItemMetadataActionButton(title: "Open", systemImage: "arrow.up.forward.app") {
                         NSWorkspace.shared.open(file.absoluteURL)
                     }
 
-                    metadataButton(title: "Finder", systemImage: "folder") {
+                    ItemMetadataActionButton(title: "Finder", systemImage: "folder") {
                         NSWorkspace.shared.activateFileViewerSelecting([file.absoluteURL])
                     }
                 }
@@ -401,34 +386,9 @@ struct VaultFileMetadataInspectorView: View {
             sectionHeader("Folder", isExpanded: $isFolderExpanded)
 
             if isFolderExpanded {
-                Menu {
-                    Button("No Folder") {
-                        assignFolder(nil)
-                    }
-                    if !folders.isEmpty { Divider() }
-                    ForEach(folders) { folder in
-                        Button(folder.name) {
-                            assignFolder(folder.id)
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Label(currentFolderName, systemImage: "folder")
-                            .font(CiderFont.body(scale: textScale))
-                            .foregroundColor(CiderColors.secondary)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(CiderFont.caption(scale: textScale))
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                    .padding(.horizontal, Spacing.sm)
-                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
+                ItemMetadataFolderPicker(folderID: folderIDDraft) { folderID in
+                    assignFolder(folderID)
                 }
-                .menuStyle(.borderlessButton)
             }
         }
     }
@@ -438,56 +398,11 @@ struct VaultFileMetadataInspectorView: View {
             sectionHeader("Tags", isExpanded: $isTagsExpanded)
 
             if isTagsExpanded {
-                TagFlowLayout(spacing: Spacing.xs) {
-                    ForEach(assignedLabels) { label in
-                        TagPillView(
-                            label: label,
-                            onRemove: { toggleLabel(label.id) }
-                        )
-                    }
-
-                    Menu {
-                        if unassignedLabels.isEmpty && labelStorage.labels.isEmpty {
-                            Button("New Tag...") {
-                                createAndAssignLabel()
-                            }
-                        } else {
-                            ForEach(unassignedLabels) { label in
-                                Button {
-                                    toggleLabel(label.id)
-                                } label: {
-                                    HStack(spacing: Spacing.xs) {
-                                        Circle()
-                                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
-                                            .frame(width: BookmarksDesign.tagColorDotSize, height: BookmarksDesign.tagColorDotSize)
-                                        Text(label.name)
-                                    }
-                                }
-                            }
-
-                            Divider()
-
-                            Button("New Tag...") {
-                                createAndAssignLabel()
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: Spacing.xxs) {
-                            Image(systemName: "plus")
-                                .font(CiderFont.badgeSemibold)
-                            Text("Add Tag")
-                                .font(CiderFont.caption(scale: textScale))
-                        }
-                        .foregroundColor(CiderColors.controlAccent)
-                        .padding(.horizontal, Spacing.xs)
-                        .padding(.vertical, Spacing.xxs)
-                        .background(
-                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
-                                .fill(CiderColors.accentSubtle)
-                        )
-                    }
-                    .menuStyle(.borderlessButton)
-                }
+                ItemMetadataTagsPicker(
+                    labelIDs: labelIDsDraft,
+                    onToggleLabel: toggleLabel,
+                    onCreateAndAssignLabel: createAndAssignLabel
+                )
             }
         }
     }
@@ -516,17 +431,12 @@ struct VaultFileMetadataInspectorView: View {
     }
 
     private var linkedSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            sectionHeader("Linked", isExpanded: $isLinkedExpanded)
-
-            if isLinkedExpanded {
-                ItemMetadataRowsView(
-                    rows: linkedSummaries.map(ItemMetadataRow.related),
-                    onOpenRef: onOpenLinkedRef,
-                    canOpenRef: canOpenLinkedRef
-                )
-            }
-        }
+        ItemMetadataLinkedSection(
+            rows: linkedSummaries.map(ItemMetadataRow.related),
+            isExpanded: $isLinkedExpanded,
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef
+        )
     }
 
     private var notesSection: some View {
@@ -608,48 +518,14 @@ struct VaultFileMetadataInspectorView: View {
     }
 
     private var footerSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Divider().background(CiderColors.separator)
-
-            sectionHeader("Info", isExpanded: $isInfoExpanded)
-
-            if isInfoExpanded {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    propertyRow("Created", value: file.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    propertyRow("Updated", value: file.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-                    propertyRow("Type", value: "File")
-                    propertyRow("Kind", value: presentation.kind)
-                    if let fileType = presentation.fileType {
-                        propertyRow("File Type", value: fileType)
-                    }
-                    propertyRow("Size", value: presentation.size)
-                }
-                .padding(.bottom, Spacing.xxs)
-            }
-
-            if let onDelete {
-                Divider().background(CiderColors.separator)
-
-                Button("Delete", action: onDelete)
-                    .buttonStyle(CiderDestructiveButtonStyle())
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(Spacing.md)
-    }
-
-    private func metadataButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(CiderFont.bodyMedium(scale: textScale))
-                .foregroundColor(CiderColors.secondary)
-                .frame(minHeight: BookmarksDesign.buttonTapTarget)
-                .padding(.horizontal, Spacing.sm)
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .fill(CiderColors.surfaceInput)
+        ItemMetadataInfoFooter(
+            rows: ItemMetadataInfoRows.rows(
+                createdAt: file.createdAt,
+                updatedAt: file.modifiedAt,
+                typeLabel: "File",
+                additionalRows: fileInfoRows
+            ),
+            onDelete: onDelete
         )
     }
 
@@ -704,45 +580,19 @@ struct VaultFileMetadataInspectorView: View {
         }
     }
 
-    private func propertyRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            Text(label)
-                .font(CiderFont.caption(scale: textScale))
-                .foregroundColor(CiderColors.tertiary)
-                .frame(width: BookmarksDesign.propertyLabelWidth, alignment: .leading)
-            Text(value)
-                .font(CiderFont.caption(scale: textScale))
-                .foregroundColor(CiderColors.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     private var hasIntelligence: Bool {
         presentation.ocrText != nil || !presentation.colors.isEmpty
     }
 
-    private var folderName: String? {
-        guard let folderID = folderIDDraft else { return nil }
-        return folders.first(where: { $0.id == folderID })?.name
-    }
-
-    private var currentFolderName: String {
-        folderName ?? "No Folder"
-    }
-
-    private var folders: [Folder] {
-        VaultFolderService.shared.legacyFolders
-    }
-
-    private var assignedLabels: [CardLabel] {
-        labelIDsDraft.compactMap { id in
-            labelStorage.labels.first(where: { $0.id == id })
+    private var fileInfoRows: [ItemMetadataRow] {
+        var rows = [
+            ItemMetadataRow(id: "kind", symbol: file.fileType.systemImageName, title: "Kind", value: presentation.kind)
+        ]
+        if let fileType = presentation.fileType {
+            rows.append(ItemMetadataRow(id: "file-type", symbol: "doc", title: "File Type", value: fileType))
         }
-    }
-
-    private var unassignedLabels: [CardLabel] {
-        let assigned = Set(labelIDsDraft)
-        return labelStorage.labels.filter { !assigned.contains($0.id) }
+        rows.append(ItemMetadataRow(id: "size", symbol: "externaldrive", title: "Size", value: presentation.size))
+        return rows
     }
 
     private func syncDrafts() {

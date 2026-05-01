@@ -105,7 +105,13 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) },
                 metadata: {
-                    BasicItemMetadataInspectorView(dateCard: dateCard, onOpenLinkedRef: openLinkedRef)
+                    BasicItemMetadataInspectorView(
+                        dateCard: dateCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailDateCardToFolder,
+                        onToggleLabel: toggleDetailDateCardLabel,
+                        onDelete: deleteDetailDateCard
+                    )
                 }
             ) {
                 DateCardDetailView(
@@ -136,7 +142,9 @@ extension CiderPanelView {
                     ContactMetadataInspectorView(
                         contact: contact,
                         onOpenLinkedRef: openLinkedRef,
-                        onSaveContact: { selectedContact = $0 }
+                        onSaveContact: { selectedContact = $0 },
+                        onFolderChanged: assignDetailContactToFolder,
+                        onDelete: deleteDetailContact
                     )
                 }
             ) {
@@ -161,7 +169,13 @@ extension CiderPanelView {
                 onModeChange: { _ in },
                 trailingExtra: { AIDetailActionsButton(todoTitle: todoCard.title) },
                 metadata: {
-                    BasicItemMetadataInspectorView(todo: todoCard, onOpenLinkedRef: openLinkedRef)
+                    BasicItemMetadataInspectorView(
+                        todo: todoCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailTodoToFolder,
+                        onToggleLabel: toggleDetailTodoLabel,
+                        onDelete: deleteDetailTodo
+                    )
                 }
             ) {
                 TodoDetailView(
@@ -215,7 +229,13 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    BasicItemMetadataInspectorView(dateCard: dateCard, onOpenLinkedRef: openLinkedRef)
+                    BasicItemMetadataInspectorView(
+                        dateCard: dateCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailDateCardToFolder,
+                        onToggleLabel: toggleDetailDateCardLabel,
+                        onDelete: deleteDetailDateCard
+                    )
                 }
             ) {
                 DateCardDetailView(
@@ -245,7 +265,9 @@ extension CiderPanelView {
                     ContactMetadataInspectorView(
                         contact: contact,
                         onOpenLinkedRef: openLinkedRef,
-                        onSaveContact: { selectedContact = $0 }
+                        onSaveContact: { selectedContact = $0 },
+                        onFolderChanged: assignDetailContactToFolder,
+                        onDelete: deleteDetailContact
                     )
                 }
             ) {
@@ -421,7 +443,13 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    BasicItemMetadataInspectorView(dateCard: dateCard, onOpenLinkedRef: openLinkedRef)
+                    BasicItemMetadataInspectorView(
+                        dateCard: dateCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailDateCardToFolder,
+                        onToggleLabel: toggleDetailDateCardLabel,
+                        onDelete: deleteDetailDateCard
+                    )
                 }
             ) {
                 DateCardDetailView(
@@ -449,7 +477,9 @@ extension CiderPanelView {
                     ContactMetadataInspectorView(
                         contact: contact,
                         onOpenLinkedRef: openLinkedRef,
-                        onSaveContact: { selectedContact = $0 }
+                        onSaveContact: { selectedContact = $0 },
+                        onFolderChanged: assignDetailContactToFolder,
+                        onDelete: deleteDetailContact
                     )
                 }
             ) {

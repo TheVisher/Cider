@@ -894,57 +894,38 @@ struct NoteMetadataSidebar: View {
     @State private var isHistoryExpanded = false
     @State private var showAllSnapshots = false
     @State private var isAIExpanded = true
-    @State private var isInfoExpanded = true
     @State private var showNewTagForm = false
     @State private var editingTitle: String = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    titleSection
-                        .padding(.bottom, Spacing.md)
+        ItemMetadataPanel {
+            titleSection
+                .padding(.bottom, Spacing.md)
 
-                    sectionDivider
-                    folderSection
-                        .padding(.vertical, Spacing.md)
+            sectionDivider
+            folderSection
+                .padding(.vertical, Spacing.md)
 
-                    sectionDivider
-                    tagsSection
-                        .padding(.vertical, Spacing.md)
+            sectionDivider
+            tagsSection
+                .padding(.vertical, Spacing.md)
 
-                    sectionDivider
-                    linkedSection
+            sectionDivider
+            linkedSection
 
-                    sectionDivider
-                    sourcesSection
-                        .padding(.vertical, Spacing.md)
+            sectionDivider
+            sourcesSection
+                .padding(.vertical, Spacing.md)
 
-                    sectionDivider
-                    historySection
-                        .padding(.vertical, Spacing.md)
+            sectionDivider
+            historySection
+                .padding(.vertical, Spacing.md)
 
-                    sectionDivider
-                    intelligenceSection
-                        .padding(.vertical, Spacing.md)
-                }
-                .padding(Spacing.md)
-                .background(
-                    HideScrollIndicatorsHelper()
-                        .frame(width: 0, height: 0)
-                )
-            }
-            .scrollIndicators(.never)
-            .frame(maxHeight: .infinity)
-
+            sectionDivider
+            intelligenceSection
+                .padding(.vertical, Spacing.md)
+        } footer: {
             footerSection
-        }
-        .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
-        .frame(maxHeight: .infinity)
-        .background(CiderColors.surfaceInput)
-        .overlay(alignment: .leading) {
-            CiderColors.separator
-                .frame(width: Spacing.hairline)
         }
         .onAppear { editingTitle = note.title }
         .onChange(of: note.id) { _, _ in
@@ -1305,72 +1286,17 @@ struct NoteMetadataSidebar: View {
 
     @ViewBuilder
     private var footerSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Divider()
-                .background(CiderColors.separator)
-
-            infoHeader
-
-            if isInfoExpanded {
-                infoGrid
-                    .padding(.bottom, Spacing.xxs)
-            }
-
-            Divider()
-                .background(CiderColors.separator)
-
-            Button("Delete") {
-                viewModel.deleteCurrentNote()
-            }
-            .buttonStyle(CiderDestructiveButtonStyle())
-            .frame(maxWidth: .infinity)
-        }
-        .padding(Spacing.md)
-    }
-
-    @ViewBuilder
-    private var infoHeader: some View {
-        Button {
-            withAnimation(reduceMotion ? .none : .snappy) {
-                isInfoExpanded.toggle()
-            }
-        } label: {
-            HStack(spacing: Spacing.xs) {
-                Text("Info")
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.tertiary)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.up")
-                    .font(CiderFont.micro)
-                    .foregroundColor(CiderColors.tertiary)
-                    .rotationEffect(.degrees(isInfoExpanded ? 0 : -90))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var infoGrid: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            propertyRow("Created", value: note.createdAt.formatted(date: .abbreviated, time: .shortened))
-            propertyRow("Modified", value: note.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-            propertyRow("Type", value: "Note")
-            propertyRow("Characters", value: "\(viewModel.charCount)")
-        }
-    }
-
-    private func propertyRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            Text(label)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.tertiary)
-                .frame(width: NoteEditorDesign.infoGridLabelWidth, alignment: .leading)
-            Text(value)
-                .font(CiderFont.caption)
-                .foregroundColor(CiderColors.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        ItemMetadataInfoFooter(
+            rows: ItemMetadataInfoRows.rows(
+                createdAt: note.createdAt,
+                updatedAt: note.modifiedAt,
+                typeLabel: "Note",
+                additionalRows: [
+                    ItemMetadataRow(id: "characters", symbol: "textformat.size", title: "Characters", value: "\(viewModel.charCount)")
+                ]
+            ),
+            onDelete: viewModel.deleteCurrentNote
+        )
     }
 }
 

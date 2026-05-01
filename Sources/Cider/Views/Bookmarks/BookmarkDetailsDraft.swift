@@ -113,11 +113,9 @@ struct BookmarkMetadataSidebar: View {
                             .padding(.vertical, Spacing.md)
                     }
 
-                    if !linkedSummaries.isEmpty {
-                        sectionDivider
-                        linkedItemsSection
-                            .padding(.vertical, Spacing.md)
-                    }
+                    sectionDivider
+                    linkedItemsSection
+                        .padding(.vertical, Spacing.md)
 
                     sectionDivider
                     notesSection
@@ -207,11 +205,15 @@ struct BookmarkMetadataSidebar: View {
             sectionHeader("Linked", isExpanded: $isLinkedItemsExpanded)
 
             if isLinkedItemsExpanded {
-                ItemMetadataRowsView(
-                    rows: linkedSummaries.map(ItemMetadataRow.related),
-                    onOpenRef: onOpenLinkedRef,
-                    canOpenRef: canOpenLinkedRef
-                )
+                if linkedSummaries.isEmpty {
+                    ItemMetadataEmptyText(text: "No linked items.")
+                } else {
+                    ItemMetadataRowsView(
+                        rows: linkedSummaries.map(ItemMetadataRow.related),
+                        onOpenRef: onOpenLinkedRef,
+                        canOpenRef: canOpenLinkedRef
+                    )
+                }
             }
         }
     }

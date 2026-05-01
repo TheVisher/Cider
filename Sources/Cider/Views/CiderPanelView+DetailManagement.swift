@@ -438,6 +438,30 @@ extension CiderPanelView {
         CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
     }
 
+    func deleteDetailDateCard() {
+        guard let dateCard = selectedDateCard else { return }
+        closeGenericDetail()
+        if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+        }
+    }
+
+    func deleteDetailContact() {
+        guard let contact = selectedContact else { return }
+        closeGenericDetail()
+        if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+        }
+    }
+
+    func deleteDetailTodo() {
+        guard let todo = selectedTodoCard else { return }
+        closeGenericDetail()
+        if let trashItem = TodoCardStorage.shared.deleteTodoCard(todo.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+        }
+    }
+
     func assignDetailBookmarkToFolder(_ folderID: UUID?) {
         guard let bookmark = selectedDetailsBookmark else { return }
         _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
@@ -460,6 +484,85 @@ extension CiderPanelView {
         if let updatedFile = VaultFileService.shared.file(for: file.id) {
             selectedVaultFile = updatedFile
         }
+    }
+
+    func assignDetailDateCardToFolder(_ folderID: UUID?) {
+        guard let dateCard = selectedDateCard else { return }
+        let oldFolderID = dateCard.folderID
+        guard oldFolderID != folderID else { return }
+        guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .dateCard,
+            itemID: dateCard.id,
+            title: dateCard.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updated = DateCardStorage.shared.dateCard(for: dateCard.id) {
+            selectedDateCard = updated
+        }
+    }
+
+    func assignDetailContactToFolder(_ folderID: UUID?) {
+        guard let contact = selectedContact else { return }
+        let oldFolderID = contact.folderID
+        guard oldFolderID != folderID else { return }
+        guard ContactStorage.shared.assignContact(contact.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .contact,
+            itemID: contact.id,
+            title: contact.displayName,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updated = ContactStorage.shared.contact(for: contact.id) {
+            selectedContact = updated
+        }
+    }
+
+    func assignDetailTodoToFolder(_ folderID: UUID?) {
+        guard let todo = selectedTodoCard else { return }
+        let oldFolderID = todo.folderID
+        guard oldFolderID != folderID else { return }
+        guard TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .todo,
+            itemID: todo.id,
+            title: todo.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updated = TodoCardStorage.shared.todoCard(for: todo.id) {
+            selectedTodoCard = updated
+        }
+    }
+
+    func toggleDetailDateCardLabel(_ labelID: UUID) {
+        guard var dateCard = selectedDateCard else { return }
+        if dateCard.labelIDs.contains(labelID) {
+            dateCard.labelIDs.removeAll { $0 == labelID }
+        } else {
+            dateCard.labelIDs.append(labelID)
+        }
+        guard DateCardStorage.shared.updateDateCard(dateCard) else { return }
+        selectedDateCard = DateCardStorage.shared.dateCard(for: dateCard.id) ?? dateCard
+    }
+
+    func toggleDetailTodoLabel(_ labelID: UUID) {
+        guard var todo = selectedTodoCard else { return }
+        if todo.labelIDs.contains(labelID) {
+            todo.labelIDs.removeAll { $0 == labelID }
+        } else {
+            todo.labelIDs.append(labelID)
+        }
+        guard TodoCardStorage.shared.updateTodoCard(todo) else { return }
+        selectedTodoCard = TodoCardStorage.shared.todoCard(for: todo.id) ?? todo
     }
 
     func copyDetailURL() {

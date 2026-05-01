@@ -31,9 +31,10 @@ struct ItemMetadataSection: Identifiable, Equatable {
     let title: String
     var rows: [ItemMetadataRow]
     var emptyActionTitle: String?
+    var showsWhenEmpty = false
 
     static func visibleSections(from sections: [ItemMetadataSection]) -> [ItemMetadataSection] {
-        sections.filter { !$0.rows.isEmpty || $0.emptyActionTitle != nil }
+        sections.filter { !$0.rows.isEmpty || $0.emptyActionTitle != nil || $0.showsWhenEmpty }
     }
 }
 
@@ -42,6 +43,7 @@ enum ItemMetadataInfoRows {
         createdAt: Date,
         updatedAt: Date,
         typeLabel: String,
+        additionalRows: [ItemMetadataRow] = [],
         calendar: Calendar = .current,
         locale: Locale = .current,
         timeZone: TimeZone = .current
@@ -57,6 +59,6 @@ enum ItemMetadataInfoRows {
             ItemMetadataRow(id: "created", symbol: "calendar.badge.plus", title: "Created", value: formatter.string(from: createdAt)),
             ItemMetadataRow(id: "updated", symbol: "clock", title: "Updated", value: formatter.string(from: updatedAt)),
             ItemMetadataRow(id: "type", symbol: "info.circle", title: "Type", value: typeLabel)
-        ]
+        ] + additionalRows
     }
 }

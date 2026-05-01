@@ -434,7 +434,10 @@ private struct FloatingContactDetail: View {
                 ContactMetadataInspectorView(
                     contact: contact,
                     onOpenLinkedRef: floatLinkedRef,
-                    canOpenLinkedRef: canFloatLinkedRef
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onSaveContact: { _ in },
+                    onFolderChanged: assignFolder,
+                    onDelete: deleteContact
                 )
             }
         ) {
@@ -460,6 +463,28 @@ private struct FloatingContactDetail: View {
     private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
         CiderFloatableSurface(linkedRef: ref) != nil
     }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = contact.folderID
+        guard oldFolderID != folderID else { return }
+        guard ContactStorage.shared.assignContact(contact.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .contact,
+            itemID: contact.id,
+            title: contact.displayName,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func deleteContact() {
+        if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+        }
+        dock(surface, action: onDock)
+    }
 }
 
 private struct FloatingDateCardDetail: View {
@@ -484,7 +509,10 @@ private struct FloatingDateCardDetail: View {
                 BasicItemMetadataInspectorView(
                     dateCard: dateCard,
                     onOpenLinkedRef: floatLinkedRef,
-                    canOpenLinkedRef: canFloatLinkedRef
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onFolderChanged: assignFolder,
+                    onToggleLabel: toggleLabel,
+                    onDelete: deleteDateCard
                 )
             }
         ) {
@@ -503,6 +531,38 @@ private struct FloatingDateCardDetail: View {
 
     private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
         CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = dateCard.folderID
+        guard oldFolderID != folderID else { return }
+        guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .dateCard,
+            itemID: dateCard.id,
+            title: dateCard.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func toggleLabel(_ labelID: UUID) {
+        var updated = dateCard
+        if updated.labelIDs.contains(labelID) {
+            updated.labelIDs.removeAll { $0 == labelID }
+        } else {
+            updated.labelIDs.append(labelID)
+        }
+        _ = DateCardStorage.shared.updateDateCard(updated)
+    }
+
+    private func deleteDateCard() {
+        if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+        }
+        dock(surface, action: onDock)
     }
 }
 
@@ -528,7 +588,10 @@ private struct FloatingTodoDetail: View {
                 BasicItemMetadataInspectorView(
                     todo: todo,
                     onOpenLinkedRef: floatLinkedRef,
-                    canOpenLinkedRef: canFloatLinkedRef
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onFolderChanged: assignFolder,
+                    onToggleLabel: toggleLabel,
+                    onDelete: deleteTodo
                 )
             }
         ) {
@@ -547,6 +610,38 @@ private struct FloatingTodoDetail: View {
 
     private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
         CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = todo.folderID
+        guard oldFolderID != folderID else { return }
+        guard TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .todo,
+            itemID: todo.id,
+            title: todo.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func toggleLabel(_ labelID: UUID) {
+        var updated = todo
+        if updated.labelIDs.contains(labelID) {
+            updated.labelIDs.removeAll { $0 == labelID }
+        } else {
+            updated.labelIDs.append(labelID)
+        }
+        _ = TodoCardStorage.shared.updateTodoCard(updated)
+    }
+
+    private func deleteTodo() {
+        if let trashItem = TodoCardStorage.shared.deleteTodoCard(todo.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+        }
+        dock(surface, action: onDock)
     }
 }
 

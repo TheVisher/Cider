@@ -74,44 +74,51 @@ struct ContactMetadataInspectorView: View {
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
     var onSaveContact: ((ContactCard) -> Void)?
+    var onFolderChanged: ((UUID?) -> Void)?
+    var onDelete: (() -> Void)?
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @State private var draft: ContactMetadataDraft
     @State private var isEditing = false
     @State private var isEssentialsExpanded = true
+    @State private var isFolderExpanded = true
     @State private var isLinkedExpanded = true
     @State private var isNotesExpanded = true
-    @State private var isLabelsExpanded = true
-    @State private var isInfoExpanded = true
+    @State private var isTagsExpanded = true
     @State private var saveError: String?
 
     init(
         contact: ContactCard,
         onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
         canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil,
-        onSaveContact: ((ContactCard) -> Void)? = nil
+        onSaveContact: ((ContactCard) -> Void)? = nil,
+        onFolderChanged: ((UUID?) -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
     ) {
         self.contact = contact
         self.onOpenLinkedRef = onOpenLinkedRef
         self.canOpenLinkedRef = canOpenLinkedRef
         self.onSaveContact = onSaveContact
+        self.onFolderChanged = onFolderChanged
+        self.onDelete = onDelete
         _draft = State(initialValue: ContactMetadataDraft(contact: contact))
     }
 
     var body: some View {
-        ItemMetadataInspectorView {
+        ItemMetadataPanel {
             titleSection
-            Divider().background(CiderColors.separator)
+            ItemMetadataDivider()
             essentialsSection
-            Divider().background(CiderColors.separator)
-            linkedSection
-            Divider().background(CiderColors.separator)
-            notesSection
-            Divider().background(CiderColors.separator)
+            ItemMetadataDivider()
+            folderSection
+            ItemMetadataDivider()
             labelsSection
-            Divider().background(CiderColors.separator)
-            infoSection
-            editFooter
+            ItemMetadataDivider()
+            linkedSection
+            ItemMetadataDivider()
+            notesSection
+        } footer: {
+            footerSection
         }
         .onChange(of: contact.id) { _, _ in
             draft = ContactMetadataDraft(contact: contact)
@@ -179,15 +186,18 @@ struct ContactMetadataInspectorView: View {
     }
 
     private var linkedSection: some View {
-        ItemMetadataSectionView(title: "Linked", isExpanded: $isLinkedExpanded) {
-            if relatedRows.isEmpty {
-                emptyText("No linked items.")
-            } else {
-                ItemMetadataRowsView(
-                    rows: relatedRows,
-                    onOpenRef: onOpenLinkedRef,
-                    canOpenRef: canOpenLinkedRef
-                )
+        ItemMetadataLinkedSection(
+            rows: relatedRows,
+            isExpanded: $isLinkedExpanded,
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef
+        )
+    }
+
+    private var folderSection: some View {
+        ItemMetadataSectionView(title: "Folder", isExpanded: $isFolderExpanded) {
+            ItemMetadataFolderPicker(folderID: contact.folderID) { folderID in
+                onFolderChanged?(folderID)
             }
         }
     }
@@ -215,49 +225,22 @@ struct ContactMetadataInspectorView: View {
     }
 
     private var labelsSection: some View {
-        ItemMetadataSectionView(title: "Labels", isExpanded: $isLabelsExpanded) {
-            if isEditing {
-                if labelStorage.labels.isEmpty {
-                    emptyText("No labels available.")
-                } else {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        ForEach(labelStorage.labels) { label in
-                            Toggle(label.name, isOn: labelBinding(for: label.id))
-                                .toggleStyle(.checkbox)
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.secondary)
-                        }
-                    }
-                }
-            } else {
-                let labels = labelStorage.labels.filter { contact.labelIDs.contains($0.id) }
-                if labels.isEmpty {
-                    emptyText("No labels.")
-                } else {
-                    ItemMetadataRowsView(rows: labels.map {
-                        ItemMetadataRow(id: "label-\($0.id.uuidString)", symbol: "tag", title: $0.name)
-                    })
-                }
-            }
+        ItemMetadataSectionView(title: "Tags", isExpanded: $isTagsExpanded) {
+            ItemMetadataTagsPicker(
+                labelIDs: draft.labelIDs,
+                onToggleLabel: toggleLabel,
+                onCreateAndAssignLabel: createAndAssignLabel
+            )
         }
     }
 
-    private var infoSection: some View {
-        ItemMetadataSectionView(title: "Info", isExpanded: $isInfoExpanded) {
-            ItemMetadataRowsView(rows: ItemMetadataInfoRows.rows(
-                createdAt: contact.createdAt,
-                updatedAt: contact.updatedAt,
-                typeLabel: "Contact"
-            ))
-        }
-    }
-
-    private var editFooter: some View {
+    private var footerSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             if let saveError {
                 Text(saveError)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.destructive)
+                    .padding(.horizontal, Spacing.md)
             }
 
             HStack(spacing: Spacing.sm) {
@@ -283,8 +266,18 @@ struct ContactMetadataInspectorView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.sm)
+
+            ItemMetadataInfoFooter(
+                rows: ItemMetadataInfoRows.rows(
+                    createdAt: contact.createdAt,
+                    updatedAt: contact.updatedAt,
+                    typeLabel: "Contact"
+                ),
+                onDelete: onDelete
+            )
         }
-        .padding(.top, Spacing.md)
     }
 
     private var customFieldsEditor: some View {
@@ -393,21 +386,6 @@ struct ContactMetadataInspectorView: View {
         )
     }
 
-    private func labelBinding(for id: UUID) -> Binding<Bool> {
-        Binding(
-            get: { draft.labelIDs.contains(id) },
-            set: { isSelected in
-                if isSelected {
-                    if !draft.labelIDs.contains(id) {
-                        draft.labelIDs.append(id)
-                    }
-                } else {
-                    draft.labelIDs.removeAll { $0 == id }
-                }
-            }
-        )
-    }
-
     private func emptyText(_ text: String) -> some View {
         Text(text)
             .font(CiderFont.body)
@@ -428,6 +406,26 @@ struct ContactMetadataInspectorView: View {
         onSaveContact?(ContactStorage.shared.contact(for: updated.id) ?? updated)
         isEditing = false
         saveError = nil
+    }
+
+    private func toggleLabel(_ id: UUID) {
+        if draft.labelIDs.contains(id) {
+            draft.labelIDs.removeAll { $0 == id }
+        } else {
+            draft.labelIDs.append(id)
+        }
+
+        if !isEditing {
+            save()
+        }
+    }
+
+    private func createAndAssignLabel() {
+        let label = CardLabelStorage.shared.createLabel(
+            name: "New Tag",
+            colorHex: CardLabelStorage.randomPresetColor()
+        )
+        toggleLabel(label.id)
     }
 
     private var relatedRows: [ItemMetadataRow] {

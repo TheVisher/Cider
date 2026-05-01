@@ -16,6 +16,16 @@ struct ItemMetadataInspectorModelsTests {
         #expect(ItemMetadataSection.visibleSections(from: sections).map(\.id) == ["notes", "info"])
     }
 
+    @Test("empty sections can opt into visibility")
+    func emptySectionsCanOptIntoVisibility() {
+        let sections = [
+            ItemMetadataSection(id: "linked", title: "Linked", rows: [], showsWhenEmpty: true),
+            ItemMetadataSection(id: "keywords", title: "Keywords", rows: [])
+        ]
+
+        #expect(ItemMetadataSection.visibleSections(from: sections).map(\.id) == ["linked"])
+    }
+
     @Test("related summaries become clickable metadata rows")
     func relatedSummariesBecomeRows() {
         let ref = LibraryEntityRef(type: .bookmark, entityID: UUID())
@@ -46,6 +56,26 @@ struct ItemMetadataInspectorModelsTests {
 
         #expect(rows.map(\.id) == ["created", "updated", "type"])
         #expect(rows[2].value == "Contact")
+    }
+
+    @Test("info rows append type-specific details after base rows")
+    func infoRowsAppendTypeSpecificDetails() {
+        let rows = ItemMetadataInfoRows.rows(
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 200),
+            typeLabel: "File",
+            additionalRows: [
+                ItemMetadataRow(id: "kind", symbol: "photo", title: "Kind", value: "Image"),
+                ItemMetadataRow(id: "size", symbol: "externaldrive", title: "Size", value: "1.5 MB")
+            ],
+            calendar: Calendar(identifier: .gregorian),
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: TimeZone(secondsFromGMT: 0)!
+        )
+
+        #expect(rows.map(\.id) == ["created", "updated", "type", "kind", "size"])
+        #expect(rows[3].value == "Image")
+        #expect(rows[4].value == "1.5 MB")
     }
 
     @Test("date card metadata rows include scheduled facts before optional facts")
