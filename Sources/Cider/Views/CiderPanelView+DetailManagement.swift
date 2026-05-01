@@ -431,9 +431,35 @@ extension CiderPanelView {
         bookmarksViewModel.deleteBookmarks([bookmark])
     }
 
+    func deleteDetailVaultFile() {
+        guard let file = selectedVaultFile else { return }
+        closeGenericDetail()
+        let trashItem = TrashStorage.shared.trashVaultFile(file)
+        CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+    }
+
     func assignDetailBookmarkToFolder(_ folderID: UUID?) {
         guard let bookmark = selectedDetailsBookmark else { return }
         _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+    }
+
+    func assignDetailVaultFileToFolder(_ folderID: UUID?) {
+        guard let file = selectedVaultFile else { return }
+        let oldFolderID = file.folderID
+        guard oldFolderID != folderID else { return }
+        VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .vaultFile,
+            itemID: file.id,
+            title: file.displayTitle,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updatedFile = VaultFileService.shared.file(for: file.id) {
+            selectedVaultFile = updatedFile
+        }
     }
 
     func copyDetailURL() {

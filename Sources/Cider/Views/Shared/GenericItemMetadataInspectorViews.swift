@@ -230,6 +230,8 @@ struct VaultFileMetadataInspectorView: View {
     let file: VaultFile
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
+    var onFolderChanged: ((UUID?) -> Void)?
+    var onDelete: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
@@ -237,6 +239,8 @@ struct VaultFileMetadataInspectorView: View {
     @State private var linkedSummaries: [ItemLinkSummary] = []
     @State private var titleDraft = ""
     @State private var notesDraft = ""
+    @State private var folderIDDraft: UUID?
+    @State private var labelIDsDraft: [UUID] = []
     @State private var isEditingNotes = false
     @State private var copiedHex: String?
 
@@ -264,11 +268,9 @@ struct VaultFileMetadataInspectorView: View {
                     sourceSection
                         .padding(.vertical, Spacing.md)
 
-                    if folderName != nil {
-                        sectionDivider
-                        folderSection
-                            .padding(.vertical, Spacing.md)
-                    }
+                    sectionDivider
+                    folderSection
+                        .padding(.vertical, Spacing.md)
 
                     sectionDivider
                     tagsSection
@@ -398,10 +400,35 @@ struct VaultFileMetadataInspectorView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeader("Folder", isExpanded: $isFolderExpanded)
 
-            if isFolderExpanded, let folderName {
-                ItemMetadataRowsView(rows: [
-                    ItemMetadataRow(id: "folder", symbol: "folder", title: folderName)
-                ])
+            if isFolderExpanded {
+                Menu {
+                    Button("No Folder") {
+                        assignFolder(nil)
+                    }
+                    if !folders.isEmpty { Divider() }
+                    ForEach(folders) { folder in
+                        Button(folder.name) {
+                            assignFolder(folder.id)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label(currentFolderName, systemImage: "folder")
+                            .font(CiderFont.body(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(CiderFont.caption(scale: textScale))
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .padding(.horizontal, Spacing.sm)
+                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                }
+                .menuStyle(.borderlessButton)
             }
         }
     }
@@ -411,16 +438,55 @@ struct VaultFileMetadataInspectorView: View {
             sectionHeader("Tags", isExpanded: $isTagsExpanded)
 
             if isTagsExpanded {
-                if assignedLabels.isEmpty {
-                    Text("No tags.")
-                        .font(CiderFont.body(scale: textScale))
-                        .foregroundColor(CiderColors.quaternary)
-                } else {
-                    TagFlowLayout(spacing: Spacing.xs) {
-                        ForEach(assignedLabels) { label in
-                            TagPillView(label: label)
-                        }
+                TagFlowLayout(spacing: Spacing.xs) {
+                    ForEach(assignedLabels) { label in
+                        TagPillView(
+                            label: label,
+                            onRemove: { toggleLabel(label.id) }
+                        )
                     }
+
+                    Menu {
+                        if unassignedLabels.isEmpty && labelStorage.labels.isEmpty {
+                            Button("New Tag...") {
+                                createAndAssignLabel()
+                            }
+                        } else {
+                            ForEach(unassignedLabels) { label in
+                                Button {
+                                    toggleLabel(label.id)
+                                } label: {
+                                    HStack(spacing: Spacing.xs) {
+                                        Circle()
+                                            .fill(Color(hex: label.colorHex) ?? CiderColors.secondary)
+                                            .frame(width: BookmarksDesign.tagColorDotSize, height: BookmarksDesign.tagColorDotSize)
+                                        Text(label.name)
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            Button("New Tag...") {
+                                createAndAssignLabel()
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: Spacing.xxs) {
+                            Image(systemName: "plus")
+                                .font(CiderFont.badgeSemibold)
+                            Text("Add Tag")
+                                .font(CiderFont.caption(scale: textScale))
+                        }
+                        .foregroundColor(CiderColors.controlAccent)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                .fill(CiderColors.accentSubtle)
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
                 }
             }
         }
@@ -560,6 +626,14 @@ struct VaultFileMetadataInspectorView: View {
                 }
                 .padding(.bottom, Spacing.xxs)
             }
+
+            if let onDelete {
+                Divider().background(CiderColors.separator)
+
+                Button("Delete", action: onDelete)
+                    .buttonStyle(CiderDestructiveButtonStyle())
+                    .frame(maxWidth: .infinity)
+            }
         }
         .padding(Spacing.md)
     }
@@ -648,19 +722,34 @@ struct VaultFileMetadataInspectorView: View {
     }
 
     private var folderName: String? {
-        guard let folderID = file.folderID else { return nil }
-        return VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name
+        guard let folderID = folderIDDraft else { return nil }
+        return folders.first(where: { $0.id == folderID })?.name
+    }
+
+    private var currentFolderName: String {
+        folderName ?? "No Folder"
+    }
+
+    private var folders: [Folder] {
+        VaultFolderService.shared.legacyFolders
     }
 
     private var assignedLabels: [CardLabel] {
-        file.labelIDs.compactMap { id in
+        labelIDsDraft.compactMap { id in
             labelStorage.labels.first(where: { $0.id == id })
         }
+    }
+
+    private var unassignedLabels: [CardLabel] {
+        let assigned = Set(labelIDsDraft)
+        return labelStorage.labels.filter { !assigned.contains($0.id) }
     }
 
     private func syncDrafts() {
         titleDraft = file.title?.isEmpty == false ? file.title ?? file.displayTitle : file.displayTitle
         notesDraft = file.notes
+        folderIDDraft = file.folderID
+        labelIDsDraft = file.labelIDs
     }
 
     private func saveTitle() {
@@ -673,6 +762,30 @@ struct VaultFileMetadataInspectorView: View {
     private func saveNotes() {
         VaultFileStorage.shared.updateNotes(file, notes: notesDraft)
         VaultFileService.shared.refreshMetadata()
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        folderIDDraft = folderID
+        onFolderChanged?(folderID)
+    }
+
+    private func toggleLabel(_ labelID: UUID) {
+        if let index = labelIDsDraft.firstIndex(of: labelID) {
+            labelIDsDraft.remove(at: index)
+            VaultFileStorage.shared.removeLabel(file, labelID: labelID)
+        } else {
+            labelIDsDraft.append(labelID)
+            VaultFileStorage.shared.assignLabel(file, labelID: labelID)
+        }
+        VaultFileService.shared.refreshMetadata()
+    }
+
+    private func createAndAssignLabel() {
+        let newLabel = CardLabelStorage.shared.createLabel(
+            name: "New Tag",
+            colorHex: CardLabelStorage.randomPresetColor()
+        )
+        toggleLabel(newLabel.id)
     }
 
     private func refreshLinkedSummaries() {

@@ -571,7 +571,9 @@ private struct FloatingVaultFileDetail: View {
                 VaultFileMetadataInspectorView(
                     file: file,
                     onOpenLinkedRef: floatLinkedRef,
-                    canOpenLinkedRef: canFloatLinkedRef
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onFolderChanged: assignFolder,
+                    onDelete: deleteFile
                 )
             }
         ) {
@@ -590,6 +592,27 @@ private struct FloatingVaultFileDetail: View {
 
     private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
         CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = file.folderID
+        guard oldFolderID != folderID else { return }
+        VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .vaultFile,
+            itemID: file.id,
+            title: file.displayTitle,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func deleteFile() {
+        let trashItem = TrashStorage.shared.trashVaultFile(file)
+        CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+        dock(surface, action: onDock)
     }
 }
 

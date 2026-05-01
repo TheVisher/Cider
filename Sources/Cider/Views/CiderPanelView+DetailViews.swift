@@ -189,7 +189,12 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    VaultFileMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
+                    VaultFileMetadataInspectorView(
+                        file: vaultFile,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailVaultFileToFolder,
+                        onDelete: deleteDetailVaultFile
+                    )
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
@@ -267,7 +272,12 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    VaultFileMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
+                    VaultFileMetadataInspectorView(
+                        file: vaultFile,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailVaultFileToFolder,
+                        onDelete: deleteDetailVaultFile
+                    )
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
@@ -464,7 +474,12 @@ extension CiderPanelView {
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    VaultFileMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
+                    VaultFileMetadataInspectorView(
+                        file: vaultFile,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailVaultFileToFolder,
+                        onDelete: deleteDetailVaultFile
+                    )
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
