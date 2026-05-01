@@ -319,7 +319,8 @@ private struct FloatingBookmarkDetailContent: View {
             onOpenURL: openURL,
             onCopyURL: copyURL,
             onSave: saveDraft,
-            onCancel: {}
+            onCancel: {},
+            onOpenLinkedRef: floatLinkedRef
         )
     }
 
@@ -355,6 +356,15 @@ private struct FloatingBookmarkDetailContent: View {
 
     private func assignFolder(_ folderID: UUID?) {
         _ = VaultBookmarkService.shared.assignBookmark(bookmark.id, toFolder: folderID)
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 

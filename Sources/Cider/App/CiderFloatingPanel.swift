@@ -93,6 +93,7 @@ final class CiderFloatingPanel: NSPanel {
         let frame = CiderFloatingPanelPlacement.clampedFrame(preferredFrame, in: visibleFrame)
         setFrame(frame, display: true)
         orderFrontRegardless()
+        makeKeyAndOrderFront(nil)
     }
 
     private func isInDraggableArea(_ locationInWindow: NSPoint) -> Bool {

@@ -48,6 +48,7 @@ extension CiderPanelView {
             onSave: saveBookmarkDetails,
             onFloat: floatBookmarkDetails,
             onCancel: closeBookmarkDetails,
+            onOpenLinkedRef: openLinkedRef,
             onModeChange: changeDetailViewMode
         )
         }
@@ -73,6 +74,7 @@ extension CiderPanelView {
                 onSave: saveBookmarkDetails,
                 onFloat: floatBookmarkDetails,
                 onCancel: closeBookmarkDetails,
+                onOpenLinkedRef: openLinkedRef,
                 onModeChange: changeDetailViewMode,
                 showDragHandle: false
             )
@@ -350,6 +352,7 @@ extension CiderPanelView {
             onSave: saveBookmarkDetails,
             onFloat: floatBookmarkDetails,
             onCancel: closeBookmarkDetails,
+            onOpenLinkedRef: openLinkedRef,
             onModeChange: changeDetailViewMode,
             showDragHandle: false
         )

@@ -22,6 +22,7 @@ struct DetailSlideOutView: View {
     var onSave: () -> Void
     var onFloat: (() -> Void)? = nil
     var onCancel: () -> Void
+    var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
     var onModeChange: (DetailViewMode) -> Void
     var showDragHandle: Bool = true
 
@@ -156,7 +157,8 @@ struct DetailSlideOutView: View {
                             onOpenURL: onOpenURL,
                             onCopyURL: onCopyURL,
                             onSave: onSave,
-                            onCancel: onCancel
+                            onCancel: onCancel,
+                            onOpenLinkedRef: onOpenLinkedRef
                         )
                         .background(CiderColors.surfaceInput)
                         .overlay(alignment: .leading) {
