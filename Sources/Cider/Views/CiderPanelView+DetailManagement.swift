@@ -251,6 +251,7 @@ extension CiderPanelView {
         detailsErrorMessage = nil
         detailWebViewStore.reset()
         selectedContact = nil
+        selectedTodoCard = nil
         selectedVaultFile = nil
         genericMetadataVisible = true
 

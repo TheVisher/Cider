@@ -42,6 +42,15 @@ struct ContactMetadataDraft: Equatable {
         customFields.removeAll { $0.id == id }
     }
 
+    mutating func moveField(id: UUID, by offset: Int) {
+        guard let index = customFields.firstIndex(where: { $0.id == id }) else { return }
+        let targetIndex = index + offset
+        guard customFields.indices.contains(targetIndex) else { return }
+
+        let field = customFields.remove(at: index)
+        customFields.insert(field, at: targetIndex)
+    }
+
     func apply(to contact: ContactCard) -> ContactCard {
         var updated = contact
         updated.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -196,18 +205,10 @@ struct ContactMetadataInspectorView: View {
                             .fill(CiderColors.surfaceSubtle)
                     )
             } else {
-                let lines = ContactProfileNotePreview.lines(from: contact.notes, contact: contact, includeRepresentedFacts: true)
-                if lines.isEmpty {
+                if contact.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     emptyText("No notes saved.")
                 } else {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(CiderFont.body)
-                                .foregroundColor(CiderColors.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    ContactMetadataMarkdownText(markdown: contact.notes, contact: contact)
                 }
             }
         }
@@ -305,15 +306,17 @@ struct ContactMetadataInspectorView: View {
                 emptyText("No custom fields.")
             } else {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    ForEach($draft.customFields) { $field in
-                        customFieldEditor(field: $field)
+                    ForEach(draft.customFields) { field in
+                        if let index = draft.customFields.firstIndex(where: { $0.id == field.id }) {
+                            customFieldEditor(field: $draft.customFields[index], position: index)
+                        }
                     }
                 }
             }
         }
     }
 
-    private func customFieldEditor(field: Binding<ContactCustomField>) -> some View {
+    private func customFieldEditor(field: Binding<ContactCustomField>, position: Int) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: Spacing.xs) {
                 TextField("Section", text: field.section)
@@ -321,6 +324,24 @@ struct ContactMetadataInspectorView: View {
 
                 TextField("Label", text: field.label)
                     .textFieldStyle(.roundedBorder)
+
+                Button {
+                    draft.moveField(id: field.wrappedValue.id, by: -1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(position == 0)
+                .help("Move field up")
+
+                Button {
+                    draft.moveField(id: field.wrappedValue.id, by: 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(position >= draft.customFields.count - 1)
+                .help("Move field down")
 
                 Button(role: .destructive) {
                     draft.deleteField(id: field.wrappedValue.id)
@@ -413,5 +434,90 @@ struct ContactMetadataInspectorView: View {
         let contactRef = LibraryEntityRef(type: .contact, entityID: contact.id)
         let refs = (try? ItemLinkService.shared.relatedRefs(for: contactRef)) ?? []
         return ItemLinkService.shared.summaries(for: refs).map(ItemMetadataRow.related)
+    }
+}
+
+private struct ContactMetadataMarkdownText: View {
+    let markdown: String
+    let contact: ContactCard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                switch line {
+                case .heading(let text):
+                    Text(inlineMarkdown(text))
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .bullet(let text):
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                        Text("•")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.quaternary)
+                        Text(inlineMarkdown(text))
+                            .font(CiderFont.body)
+                            .foregroundColor(CiderColors.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                case .paragraph(let text):
+                    Text(inlineMarkdown(text))
+                        .font(CiderFont.body)
+                        .foregroundColor(CiderColors.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var lines: [Line] {
+        let title = contact.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return markdown.components(separatedBy: .newlines).compactMap { rawLine in
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            if let heading = parseHeading(trimmed) {
+                guard heading.lowercased() != title else { return nil }
+                return .heading(heading)
+            }
+
+            if let bullet = parseBullet(trimmed) {
+                return .bullet(bullet)
+            }
+
+            return .paragraph(trimmed)
+        }
+    }
+
+    private func inlineMarkdown(_ text: String) -> AttributedString {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return AttributedString(text)
+    }
+
+    private func parseHeading(_ trimmed: String) -> String? {
+        guard trimmed.hasPrefix("#") else { return nil }
+        let text = trimmed.drop(while: { $0 == "#" })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private func parseBullet(_ trimmed: String) -> String? {
+        guard let first = trimmed.first, first == "-" || first == "*" else { return nil }
+        let text = trimmed.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private enum Line {
+        case heading(String)
+        case bullet(String)
+        case paragraph(String)
     }
 }

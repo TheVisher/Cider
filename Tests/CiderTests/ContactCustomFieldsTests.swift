@@ -120,6 +120,22 @@ struct ContactCustomFieldsTests {
         #expect(draft.customFields.isEmpty)
     }
 
+    @Test("contact metadata draft can reorder custom fields")
+    func metadataDraftCanReorderCustomFields() {
+        var draft = ContactMetadataDraft(contact: ContactCard(displayName: "Baine"))
+
+        let firstID = draft.addField(section: "Favorites", label: "Color", value: "Black", kind: .text, isPinned: true)
+        let secondID = draft.addField(section: "Sizes", label: "Shirt", value: "Youth M", kind: .text, isPinned: false)
+
+        draft.moveField(id: secondID, by: -1)
+
+        #expect(draft.customFields.map(\.id) == [secondID, firstID])
+
+        draft.moveField(id: secondID, by: -1)
+
+        #expect(draft.customFields.map(\.id) == [secondID, firstID])
+    }
+
     @Test("contact metadata draft applies notes and known fields")
     func metadataDraftAppliesNotesAndKnownFields() {
         var draft = ContactMetadataDraft(contact: ContactCard(displayName: "Baine"))

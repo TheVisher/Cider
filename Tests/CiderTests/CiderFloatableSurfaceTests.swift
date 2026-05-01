@@ -189,6 +189,35 @@ struct CiderFloatableSurfaceTests {
         #expect(size.height >= 560)
     }
 
+    @Test("floating metadata panels default wide enough for side rail")
+    func floatingMetadataPanelDefaultSizeFitsSideRail() {
+        let id = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let surfaces: [CiderFloatableSurface] = [
+            .contact(id),
+            .dateCard(id),
+            .todo(id)
+        ]
+
+        for surface in surfaces {
+            let size = CiderFloatingPanelLayout.defaultContentSize(for: surface)
+
+            #expect(size.width >= FloatingBookmarkDetailLayout.sideRailMinimumWidth)
+            #expect(size.height >= 560)
+        }
+    }
+
+    @Test("restored floating metadata frames expand from old narrow sizes")
+    func restoredFloatingMetadataFrameExpandsOldNarrowSizes() {
+        let id = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let narrowFrame = NSRect(x: 10, y: 20, width: 420, height: 520)
+
+        let restored = CiderFloatingPanelLayout.restoredFrame(narrowFrame, for: .contact(id))
+
+        #expect(restored.origin == narrowFrame.origin)
+        #expect(restored.width >= FloatingBookmarkDetailLayout.sideRailMinimumWidth)
+        #expect(restored.height >= 560)
+    }
+
     @Test("reanchor resolver accepts item surfaces")
     func reanchorResolverAcceptsItemSurfaces() {
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.note(UUID())))

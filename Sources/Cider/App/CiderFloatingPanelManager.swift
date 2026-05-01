@@ -255,7 +255,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
                     from: sourceScreen?.visibleFrame ?? targetScreen.visibleFrame,
                     to: targetScreen.visibleFrame
                 )
-                panel.show(frame: preferredFrame)
+                panel.show(frame: CiderFloatingPanelLayout.restoredFrame(preferredFrame, for: surface))
                 return
             }
 
@@ -264,7 +264,7 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
         }
 
         if let savedFrame = positionStore.frame(forFloatingSurfaceKey: key) {
-            panel.show(frame: savedFrame)
+            panel.show(frame: CiderFloatingPanelLayout.restoredFrame(savedFrame, for: surface))
         } else {
             panel.showNearMouse()
         }
@@ -381,8 +381,24 @@ enum CiderFloatingPanelLayout {
             NSSize(width: 340, height: 360)
         case .note:
             NSSize(width: 820, height: 620)
+        case .contact, .dateCard, .todo:
+            NSSize(width: 760, height: 560)
         default:
             NSSize(width: 420, height: 520)
         }
+    }
+
+    static func restoredFrame(_ frame: NSRect, for surface: CiderFloatableSurface) -> NSRect {
+        let defaultSize = defaultContentSize(for: surface)
+        guard defaultSize.width > frame.width || defaultSize.height > frame.height else {
+            return frame
+        }
+
+        return NSRect(
+            x: frame.origin.x,
+            y: frame.origin.y,
+            width: max(frame.width, defaultSize.width),
+            height: max(frame.height, defaultSize.height)
+        )
     }
 }
