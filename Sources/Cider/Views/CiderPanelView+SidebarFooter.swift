@@ -539,9 +539,10 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
                 HomeOverviewQuickActionButton(
                     title: "AI",
                     systemImage: "sparkles",
-                    detail: showAIQuickActions ? "Hide" : nil,
+                    detail: "Chat",
                     action: {
-                        showAIQuickActions.toggle()
+                        showAIQuickActions = false
+                        onOpenAI()
                     }
                 )
             }
@@ -672,23 +673,33 @@ private struct SidebarProfilePanel<ExpandedViewOptions: View, CompactViewOptions
 
     private var compactAIButton: some View {
         Button {
-            showAIQuickActions.toggle()
+            showAIQuickActions = false
+            onOpenAI()
         } label: {
             Image(systemName: "sparkles")
                 .font(CiderFont.bodySemibold)
-                .foregroundColor(showAIQuickActions ? CiderColors.controlAccent : CiderColors.secondary)
+                .foregroundColor(CiderColors.controlAccent)
                 .frame(width: CiderPanelDesign.trafficLightTapTarget, height: CiderPanelDesign.trafficLightTapTarget)
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .fill(showAIQuickActions ? CiderColors.controlAccent.opacity(0.12) : Color.clear)
+                        .fill(CiderColors.controlAccent.opacity(0.12))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("AI")
+        .help("Open AI chat")
         .contextMenu {
-            Button("Open Chat", action: onOpenAI)
+            Button(showAIQuickActions ? "Hide Quick Actions" : "Show Quick Actions") {
+                showAIQuickActions.toggle()
+            }
+            Button("Pop Out Chat") {
+                NotificationCenter.default.post(
+                    name: .floatCiderSurface,
+                    object: CiderFloatableSurface.aiAssistant,
+                    userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: CiderFloatableSurface.aiAssistant]
+                )
+            }
         }
     }
 
