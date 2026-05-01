@@ -9,6 +9,7 @@ struct AIAssistantPanelView: View {
     @State private var showConversationList = false
     @State private var showModelPicker = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let hermesSyncTimer = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -38,6 +39,16 @@ struct AIAssistantPanelView: View {
             }
             .keyboardShortcut(.escape, modifiers: [])
             .hidden()
+        }
+        .onAppear {
+            if viewModel.runtimeSelection == .hermes {
+                viewModel.syncHermesConversation()
+            }
+        }
+        .onReceive(hermesSyncTimer) { _ in
+            if viewModel.runtimeSelection == .hermes {
+                viewModel.syncHermesConversation()
+            }
         }
     }
 
@@ -97,6 +108,10 @@ struct AIAssistantPanelView: View {
             // Context usage indicator
             if viewModel.contextUsage > 0.1 {
                 contextUsageIndicator
+            }
+
+            if viewModel.runtimeSelection == .hermes {
+                hermesStatusControl
             }
 
             // New conversation
@@ -184,6 +199,27 @@ struct AIAssistantPanelView: View {
             Capsule(style: .continuous)
                 .fill(CiderColors.accentSubtle)
         )
+    }
+
+    private var hermesStatusControl: some View {
+        Button {
+            viewModel.syncHermesConversation()
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: hermesSyncIcon)
+                    .font(CiderFont.caption)
+                Text(viewModel.hermesStatusTitle)
+                    .font(CiderFont.caption)
+                    .lineLimit(1)
+                Text(viewModel.hermesSessionLabel)
+                    .font(CiderFont.microMonospaced)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+            .foregroundColor(hermesStatusColor)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isStreaming)
+        .help("Sync Hermes session")
     }
 
     // MARK: - Message List
@@ -335,7 +371,7 @@ struct AIAssistantPanelView: View {
                             .foregroundColor(CiderColors.tertiary)
                     }
                     Spacer()
-                    if !viewModel.isUsingLocalModel {
+                    if viewModel.runtimeSelection == .appleIntelligence {
                         Image(systemName: "checkmark")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.controlAccent)
@@ -368,10 +404,42 @@ struct AIAssistantPanelView: View {
                             .foregroundColor(CiderColors.tertiary)
                     }
                     Spacer()
-                    if viewModel.isUsingLocalModel {
+                    if viewModel.runtimeSelection == .localModel {
                         Image(systemName: "checkmark")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.success)
+                    }
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.horizontal, Spacing.md)
+
+            Button {
+                viewModel.switchRuntime(to: .hermes)
+                showModelPicker = false
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 14, alignment: .center)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Hermes")
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.primary)
+                        Text(hermesSubtitle)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer()
+                    if viewModel.runtimeSelection == .hermes {
+                        Image(systemName: "checkmark")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.controlAccent)
                     }
                 }
                 .padding(.horizontal, Spacing.md)
@@ -463,6 +531,16 @@ struct AIAssistantPanelView: View {
         }
     }
 
+    private var hermesSubtitle: String {
+        if viewModel.hermesConversationState != nil {
+            return "Attached to \(viewModel.hermesSessionLabel)"
+        }
+        if viewModel.isAvailable {
+            return "Attach latest Hermes session"
+        }
+        return "Hermes state not found"
+    }
+
     private var runtimePillTitle: String {
         switch viewModel.runtimeSelection {
         case .appleIntelligence:
@@ -471,6 +549,8 @@ struct AIAssistantPanelView: View {
             return "Local"
         case .codexCLI:
             return "Codex"
+        case .hermes:
+            return "Hermes"
         }
     }
 
@@ -491,6 +571,32 @@ struct AIAssistantPanelView: View {
             default:
                 return CiderColors.warning
             }
+        case .hermes:
+            return hermesStatusColor
+        }
+    }
+
+    private var hermesStatusColor: Color {
+        switch viewModel.hermesSyncStatus {
+        case .idle:
+            return viewModel.hermesConversationState == nil ? CiderColors.warning : CiderColors.success
+        case .syncing, .sending:
+            return CiderColors.warning
+        case .error:
+            return CiderColors.destructive
+        }
+    }
+
+    private var hermesSyncIcon: String {
+        switch viewModel.hermesSyncStatus {
+        case .idle:
+            return "arrow.clockwise"
+        case .syncing:
+            return "arrow.triangle.2.circlepath"
+        case .sending:
+            return "paperplane"
+        case .error:
+            return "exclamationmark.triangle"
         }
     }
 

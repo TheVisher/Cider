@@ -5,6 +5,14 @@ enum AIAgentRuntimeSelection: String, Sendable {
     case appleIntelligence
     case localModel
     case codexCLI
+    case hermes
+}
+
+enum HermesPanelSyncStatus: Equatable {
+    case idle
+    case syncing
+    case sending
+    case error(String)
 }
 
 /// ViewModel for the AI chat floating panel.
@@ -26,10 +34,13 @@ final class AIAssistantViewModel: ObservableObject {
     @Published var currentConversationID: UUID?
     @Published private(set) var runtimeSelection: AIAgentRuntimeSelection = .appleIntelligence
     @Published private(set) var runtimeHealth: AgentRuntimeHealth = .idle
+    @Published private(set) var hermesConversationState: HermesConversationState?
+    @Published private(set) var hermesSyncStatus: HermesPanelSyncStatus = .idle
 
     private let logger = Logger(subsystem: "com.cider.app", category: "AIAssistant")
     private var provider: AIAssistantProvider
     private let storage = AIConversationStorage.shared
+    private let hermesSessionService = HermesSessionService()
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
 
@@ -41,12 +52,18 @@ final class AIAssistantViewModel: ObservableObject {
     private var orchestratorThreadID: UUID?
 
     var isAvailable: Bool {
+        if runtimeSelection == .hermes {
+            return FileManager.default.fileExists(atPath: HermesPaths.defaultStateDatabaseURL.path)
+        }
         if useOrchestrator {
             return runtimeHealth.status != .unavailable
         }
         return provider.isAvailable
     }
     var providerName: String {
+        if runtimeSelection == .hermes {
+            return "Hermes"
+        }
         if useOrchestrator, let runtime = currentAgentRuntime {
             return runtime.displayName
         }
@@ -63,6 +80,32 @@ final class AIAssistantViewModel: ObservableObject {
 
     var isUsingProcessRuntime: Bool {
         useOrchestrator && runtimeSelection == .codexCLI
+    }
+
+    var hermesStatusTitle: String {
+        switch hermesSyncStatus {
+        case .idle:
+            guard runtimeSelection == .hermes else { return "" }
+            if let lastSyncedAt = hermesConversationState?.lastSyncedAt {
+                let formatter = RelativeDateTimeFormatter()
+                formatter.unitsStyle = .abbreviated
+                return "Synced \(formatter.localizedString(for: lastSyncedAt, relativeTo: Date()))"
+            }
+            return hermesConversationState == nil ? "Attach Hermes" : "Auto-sync on"
+        case .syncing:
+            return "Syncing..."
+        case .sending:
+            return "Sending..."
+        case .error(let message):
+            return message
+        }
+    }
+
+    var hermesSessionLabel: String {
+        guard let sessionID = hermesConversationState?.activeRuntimeSessionID else {
+            return "No session"
+        }
+        return String(sessionID.suffix(8))
     }
 
     /// Context window usage (0.0–1.0). Only available for Foundation Models.
@@ -99,6 +142,8 @@ final class AIAssistantViewModel: ObservableObject {
             return mlxRuntime
         case .codexCLI:
             return codexRuntime
+        case .hermes:
+            return nil
         }
     }
 
@@ -116,11 +161,19 @@ final class AIAssistantViewModel: ObservableObject {
         }
         // Auto-resume most recent conversation
         resumeLastConversation()
+        if initialRuntimeSelection == .hermes {
+            restoreHermesStateForCurrentConversation()
+            Task {
+                await activateHermesConversation()
+            }
+        }
     }
 
     /// Switch between Apple Intelligence and local MLX model.
     func switchProvider(useLocalModel: Bool) {
         clearConversation()
+        hermesConversationState = nil
+        hermesSyncStatus = .idle
         if useLocalModel {
             provider = mlxProvider
             runtimeSelection = .localModel
@@ -156,12 +209,25 @@ final class AIAssistantViewModel: ObservableObject {
         case .codexCLI:
             MLXModelManager.shared.isLocalModelEnabled = false
             MLXModelManager.shared.unloadModel()
+        case .hermes:
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
         }
 
         if useOrchestrator {
             Task {
                 await configureOrchestratorRuntime(startIfNeeded: selection == .codexCLI)
             }
+        }
+
+        if selection == .hermes {
+            Task {
+                await activateHermesConversation()
+            }
+        } else {
+            hermesConversationState = nil
+            hermesSyncStatus = .idle
         }
     }
 
@@ -183,10 +249,21 @@ final class AIAssistantViewModel: ObservableObject {
         case .codexCLI:
             MLXModelManager.shared.isLocalModelEnabled = false
             MLXModelManager.shared.unloadModel()
+        case .hermes:
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
         }
 
         if useOrchestrator {
             await configureOrchestratorRuntime(startIfNeeded: false)
+        }
+
+        if selection == .hermes {
+            await activateHermesConversation()
+        } else {
+            hermesConversationState = nil
+            hermesSyncStatus = .idle
         }
     }
 
@@ -194,7 +271,7 @@ final class AIAssistantViewModel: ObservableObject {
     func enableOrchestrator() {
         useOrchestrator = true
         orchestratorThreadID = currentConversationID ?? UUID()
-        if runtimeSelection != .codexCLI {
+        if runtimeSelection != .codexCLI && runtimeSelection != .hermes {
             runtimeSelection = MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence
         }
         Task {
@@ -218,6 +295,11 @@ final class AIAssistantViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
 
+        if runtimeSelection == .hermes {
+            sendViaHermes(trimmed)
+            return
+        }
+
         // Start a new conversation if none active
         if currentConversationID == nil {
             currentConversationID = UUID()
@@ -237,6 +319,120 @@ final class AIAssistantViewModel: ObservableObject {
         } else {
             sendViaLegacyProvider()
         }
+    }
+
+    func syncHermesConversation() {
+        guard runtimeSelection == .hermes,
+              !isStreaming,
+              hermesSyncStatus != .syncing,
+              hermesSyncStatus != .sending
+        else { return }
+        Task {
+            await syncHermesConversation(attachIfNeeded: true)
+        }
+    }
+
+    private func activateHermesConversation() async {
+        if currentConversationID == nil,
+           let summary = storage.conversations.first(where: { $0.runtimeID == "hermes" }) {
+            loadConversation(summary.id)
+        }
+
+        await syncHermesConversation(attachIfNeeded: true)
+    }
+
+    private func sendViaHermes(_ text: String) {
+        streamTask = Task {
+            isStreaming = true
+            streamingText = "Waiting for Hermes..."
+            displayedStreamingText = ""
+            hermesSyncStatus = .sending
+            startTypewriterLoop()
+
+            do {
+                let state = try await ensureHermesConversationState()
+                let pendingMessage = AIAssistantMessage(
+                    role: .user,
+                    content: text,
+                    sourceID: "hermes:pending:\(UUID().uuidString)",
+                    sourceName: "Hermes Pending"
+                )
+                messages.append(pendingMessage)
+
+                let existingMessages = messages.filter { $0.id != pendingMessage.id }
+                let result = try await hermesSessionService.send(
+                    text: text,
+                    state: state,
+                    existingMessages: existingMessages
+                )
+                hermesConversationState = result.state
+                messages = result.messages
+                hermesSyncStatus = .idle
+                saveCurrentConversation()
+            } catch is CancellationError {
+                logger.debug("Hermes send cancelled")
+            } catch {
+                logger.error("Hermes send error: \(error.localizedDescription, privacy: .public)")
+                hermesSyncStatus = .error(error.localizedDescription)
+                if !messages.contains(where: { $0.role == .user && $0.content == text }) {
+                    messages.append(AIAssistantMessage(role: .user, content: text))
+                }
+                messages.append(AIAssistantMessage(
+                    role: .assistant,
+                    content: "Hermes error: \(error.localizedDescription)"
+                ))
+                saveCurrentConversation()
+            }
+
+            await finishTypewriter()
+            streamingText = ""
+            displayedStreamingText = ""
+            isStreaming = false
+        }
+    }
+
+    private func syncHermesConversation(attachIfNeeded: Bool) async {
+        guard runtimeSelection == .hermes else { return }
+        hermesSyncStatus = .syncing
+
+        do {
+            let state = try await ensureHermesConversationState(attachIfNeeded: attachIfNeeded)
+            let result = try await hermesSessionService.sync(state: state, existingMessages: messages)
+            hermesConversationState = result.state
+            messages = result.messages
+            hermesSyncStatus = .idle
+            saveCurrentConversation()
+        } catch {
+            logger.error("Hermes sync error: \(error.localizedDescription, privacy: .public)")
+            hermesSyncStatus = .error(error.localizedDescription)
+        }
+    }
+
+    private func ensureHermesConversationState(attachIfNeeded: Bool = true) async throws -> HermesConversationState {
+        if let hermesConversationState {
+            return hermesConversationState
+        }
+
+        if currentConversationID == nil {
+            currentConversationID = UUID()
+        }
+
+        restoreHermesStateForCurrentConversation()
+        if let hermesConversationState {
+            return hermesConversationState
+        }
+
+        guard attachIfNeeded, let conversationID = currentConversationID else {
+            throw HermesSessionClientError.sessionNotFound("active Cider conversation")
+        }
+
+        let result = try await hermesSessionService.attachLatestTelegramConversation(
+            conversationID: conversationID
+        )
+        hermesConversationState = result.state
+        messages = result.messages
+        saveCurrentConversation()
+        return result.state
     }
 
     /// Route message through the AgentOrchestrator, streaming text back for typewriter.
@@ -420,7 +616,7 @@ final class AIAssistantViewModel: ObservableObject {
         streamTask = nil
         typewriterTask?.cancel()
         typewriterTask = nil
-        if !streamingText.isEmpty {
+        if runtimeSelection != .hermes, !streamingText.isEmpty {
             let partialMessage = AIAssistantMessage(role: .assistant, content: streamingText)
             messages.append(partialMessage)
         }
@@ -435,6 +631,8 @@ final class AIAssistantViewModel: ObservableObject {
         messages.removeAll()
         currentConversationID = nil
         orchestratorThreadID = nil
+        hermesConversationState = nil
+        hermesSyncStatus = .idle
         provider.resetSession()
     }
 
@@ -445,6 +643,8 @@ final class AIAssistantViewModel: ObservableObject {
         messages.removeAll()
         currentConversationID = nil
         orchestratorThreadID = nil
+        hermesConversationState = nil
+        hermesSyncStatus = .idle
         provider.resetSession()
     }
 
@@ -454,7 +654,13 @@ final class AIAssistantViewModel: ObservableObject {
     private func saveCurrentConversation() {
         guard let id = currentConversationID, !messages.isEmpty else { return }
         let title = conversationTitle
-        storage.save(id: id, title: title, messages: messages, model: providerName)
+        storage.save(
+            id: id,
+            title: title,
+            messages: messages,
+            model: providerName,
+            hermesState: runtimeSelection == .hermes ? hermesConversationState : nil
+        )
     }
 
     /// Load a previous conversation by ID.
@@ -466,6 +672,14 @@ final class AIAssistantViewModel: ObservableObject {
         stopStreaming()
         messages = loadedMessages
         currentConversationID = conversationID
+        restoreHermesStateForCurrentConversation()
+        if hermesConversationState != nil {
+            runtimeSelection = .hermes
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
+            persistRuntimeSelection(.hermes)
+        }
         provider.resetSession()
     }
 
@@ -492,6 +706,27 @@ final class AIAssistantViewModel: ObservableObject {
         let title = firstUserMessage.content
         if title.count <= 50 { return title }
         return String(title.prefix(47)) + "..."
+    }
+
+    private func restoreHermesStateForCurrentConversation() {
+        guard let currentConversationID,
+              let meta = storage.metadata(for: currentConversationID),
+              meta.runtimeID == "hermes",
+              let activeRuntimeSessionID = meta.activeRuntimeSessionID
+        else {
+            hermesConversationState = nil
+            return
+        }
+
+        hermesConversationState = HermesConversationState(
+            conversationID: currentConversationID,
+            runtimeID: meta.runtimeID ?? "hermes",
+            activeRuntimeSessionID: activeRuntimeSessionID,
+            runtimeSessionLineage: meta.runtimeSessionLineage,
+            title: meta.title,
+            source: meta.runtimeSource,
+            lastSyncedAt: meta.runtimeLastSyncedAt
+        )
     }
 
     // MARK: - Context Updates

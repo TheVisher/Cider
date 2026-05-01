@@ -6,17 +6,31 @@ struct AIAssistantMessage: Identifiable, Codable {
     let role: Role
     var content: String
     let timestamp: Date
+    var sourceID: String?
+    var sourceSessionID: String?
+    var sourceName: String?
 
     enum Role: String, Codable {
         case user
         case assistant
     }
 
-    init(id: UUID = UUID(), role: Role, content: String, timestamp: Date = Date()) {
+    init(
+        id: UUID = UUID(),
+        role: Role,
+        content: String,
+        timestamp: Date = Date(),
+        sourceID: String? = nil,
+        sourceSessionID: String? = nil,
+        sourceName: String? = nil
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
+        self.sourceID = sourceID
+        self.sourceSessionID = sourceSessionID
+        self.sourceName = sourceName
     }
 }
 
