@@ -24,5 +24,6 @@ package-lock.json
 *.tmp
 .claude/
 .superpowers/
+.worktrees/
 .cache/
 .research/
