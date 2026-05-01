@@ -876,6 +876,7 @@ struct NoteMetadataSidebar: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var labelStorage = CardLabelStorage.shared
+    @ObservedObject private var folderService = VaultFolderService.shared
 
     @State private var isTitleExpanded = true
     @State private var isFolderExpanded = true
@@ -1007,7 +1008,7 @@ struct NoteMetadataSidebar: View {
             sectionHeader("Folder", isExpanded: $isFolderExpanded)
 
             if isFolderExpanded {
-                let folders = VaultFolderService.shared.legacyFolders
+                let folders = folderService.legacyFolders
                 Menu {
                     Button("No Folder") {
                         viewModel.updateNoteFolder(nil)
@@ -1042,7 +1043,7 @@ struct NoteMetadataSidebar: View {
 
     private var currentFolderName: String {
         guard let fid = note.folderID else { return "No Folder" }
-        return VaultFolderService.shared.legacyFolders.first(where: { $0.id == fid })?.name ?? "No Folder"
+        return folderService.legacyFolders.first(where: { $0.id == fid })?.name ?? "No Folder"
     }
 
     // MARK: - Tags

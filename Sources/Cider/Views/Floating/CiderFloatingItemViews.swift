@@ -259,6 +259,7 @@ private struct FloatingBookmarkDetailContent: View {
     let bookmark: Bookmark
     @Binding var draft: BookmarkDetailsDraft
     @Binding var isMetadataVisible: Bool
+    @ObservedObject private var folderService = VaultFolderService.shared
 
     var body: some View {
         GeometryReader { proxy in
@@ -311,7 +312,7 @@ private struct FloatingBookmarkDetailContent: View {
             draft: $draft,
             bookmark: bookmark,
             errorMessage: nil,
-            folders: VaultFolderService.shared.legacyFolders,
+            folders: folderService.legacyFolders,
             width: FloatingBookmarkDetailLayout.metadataSidebarWidth,
             showBackground: false,
             onDelete: nil,

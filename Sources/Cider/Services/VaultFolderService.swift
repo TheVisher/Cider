@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os
 
@@ -6,7 +7,7 @@ import os
 /// the corresponding directory on disk. FSEvents watches for external changes
 /// (e.g. user modifies folders in Finder).
 @MainActor
-final class VaultFolderService {
+final class VaultFolderService: ObservableObject {
     static let shared = VaultFolderService()
 
     private let logger = Logger(
