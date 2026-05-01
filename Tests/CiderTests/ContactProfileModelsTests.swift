@@ -164,10 +164,16 @@ struct ContactProfileModelsTests {
         ])
     }
 
-    @Test("essentials rail hides on birthday tab")
-    func essentialsRailHidesOnBirthdayTab() {
+    @Test("contact profile tabs only include person profile sections")
+    func contactProfileTabsOnlyIncludePersonProfileSections() {
+        #expect(ContactProfileTab.allCases == [.overview, .birthday, .favorites])
+    }
+
+    @Test("essentials can show for every remaining contact profile tab")
+    func essentialsCanShowForEveryRemainingContactTab() {
         #expect(ContactProfileEssentials.shouldShowRail(for: .overview))
-        #expect(!ContactProfileEssentials.shouldShowRail(for: .birthday))
+        #expect(ContactProfileEssentials.shouldShowRail(for: .birthday))
+        #expect(ContactProfileEssentials.shouldShowRail(for: .favorites))
     }
 
     @Test("birthday facts compute age and next birthday")

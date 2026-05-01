@@ -406,8 +406,7 @@ private struct FloatingContactDetail: View {
                 onEdit: {
                     editorContext = ContactEditorContext(existingContact: contact)
                 },
-                onDismiss: { dock(surface, action: onDock) },
-                onOpenRelated: floatLinkedRef
+                onDismiss: { dock(surface, action: onDock) }
             )
         }
         .sheet(item: $editorContext) { context in

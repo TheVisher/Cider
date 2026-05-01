@@ -4,8 +4,6 @@ enum ContactProfileTab: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case birthday = "Birthday"
     case favorites = "Favorites"
-    case notes = "Notes"
-    case related = "Related"
 
     var id: String { rawValue }
 }
@@ -44,12 +42,7 @@ struct ContactProfileEssentialRow: Identifiable, Equatable {
 
 enum ContactProfileEssentials {
     static func shouldShowRail(for tab: ContactProfileTab) -> Bool {
-        switch tab {
-        case .birthday:
-            false
-        case .overview, .favorites, .notes, .related:
-            true
-        }
+        true
     }
 
     static func rows(
