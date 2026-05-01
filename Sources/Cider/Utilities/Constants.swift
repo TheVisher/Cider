@@ -315,7 +315,7 @@ enum BookmarksDesign {
     /// Carousel inline delete-button (×) hit-target
     static let carouselDeleteButtonSize: CGFloat = 16
     /// Width of the label column in the properties info grid
-    static let propertyLabelWidth: CGFloat = 52
+    static let propertyLabelWidth: CGFloat = 72
     /// Tag color indicator dot in menus and pickers
     static let tagColorDotSize: CGFloat = 8
     /// Hero carousel page-indicator dot diameter (larger surface, slightly bigger than card dot)

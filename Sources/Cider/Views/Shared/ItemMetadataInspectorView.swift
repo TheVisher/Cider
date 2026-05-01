@@ -384,6 +384,8 @@ struct ItemMetadataPropertyRows: View {
                     Text(row.title)
                         .font(CiderFont.caption(scale: textScale))
                         .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                         .frame(width: BookmarksDesign.propertyLabelWidth, alignment: .leading)
                     Text(row.value)
                         .font(CiderFont.caption(scale: textScale))
