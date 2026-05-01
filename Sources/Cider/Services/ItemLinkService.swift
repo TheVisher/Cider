@@ -107,6 +107,8 @@ final class ItemLinkService {
     func addLink(from source: LibraryEntityRef, to target: LibraryEntityRef) throws {
         try addDirectLink(from: source, to: target)
         try addDirectLink(from: target, to: source)
+        try syncInMemoryLinkedEntities(for: source)
+        try syncInMemoryLinkedEntities(for: target)
     }
 
     func removeDirectLink(from source: LibraryEntityRef, to target: LibraryEntityRef) throws {
@@ -122,6 +124,8 @@ final class ItemLinkService {
     func removeLink(from source: LibraryEntityRef, to target: LibraryEntityRef) throws {
         try removeDirectLink(from: source, to: target)
         try removeDirectLink(from: target, to: source)
+        try syncInMemoryLinkedEntities(for: source)
+        try syncInMemoryLinkedEntities(for: target)
     }
 
     func outgoingRefs(for ref: LibraryEntityRef) throws -> [LibraryEntityRef] {
@@ -291,6 +295,29 @@ final class ItemLinkService {
             result.append(ref)
         }
         return result
+    }
+
+    private func syncInMemoryLinkedEntities(for source: LibraryEntityRef) throws {
+        let refs = try outgoingRefs(for: source)
+        switch source.type {
+        case .dateCard:
+            guard var dateCard = dateCards.dateCard(for: source.entityID) else { return }
+            guard dateCard.linkedEntities != refs else { return }
+            dateCard.linkedEntities = refs
+            _ = dateCards.updateDateCard(dateCard)
+        case .contact:
+            guard var contact = contacts.contact(for: source.entityID) else { return }
+            guard contact.linkedEntities != refs else { return }
+            contact.linkedEntities = refs
+            _ = contacts.updateContact(contact)
+        case .todo:
+            guard var todo = todos.todoCard(for: source.entityID) else { return }
+            guard todo.linkedEntities != refs else { return }
+            todo.linkedEntities = refs
+            _ = todos.updateTodoCard(todo)
+        case .bookmark, .note, .vaultFile, .externalFile, .session:
+            return
+        }
     }
 
     private func displayName(for type: LibraryEntityType) -> String {

@@ -18,12 +18,16 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
     var onFloat: (() -> Void)? = nil
     var onClose: () -> Void
     var onModeChange: (DetailViewMode) -> Void
+    var metadataSourceRef: LibraryEntityRef? = nil
+    var onOpenMetadataRef: ((LibraryEntityRef) -> Void)? = nil
+    var metadataRailContent: (() -> AnyView)? = nil
     @ViewBuilder var toolbarExtra: () -> ToolbarExtra
     @ViewBuilder var trailingExtra: () -> TrailingExtra
     @ViewBuilder var content: () -> Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
+    @State private var isMetadataVisible = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -43,17 +47,36 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
                     .padding(.leading, Spacing.md + Spacing.xxs)
                     .padding(.trailing, Spacing.md + Spacing.xxs)
 
-                if scrollsContent {
-                    ScrollView {
+                HStack(alignment: .top, spacing: 0) {
+                    if scrollsContent {
+                        ScrollView {
+                            content()
+                                .padding(Spacing.md)
+                        }
+                        .scrollIndicators(.hidden)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
                         content()
-                            .padding(Spacing.md)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .scrollIndicators(.hidden)
-                    .frame(maxHeight: .infinity)
-                } else {
-                    content()
-                        .frame(maxHeight: .infinity)
+
+                    if hasMetadataRail, isMetadataVisible {
+                        if let metadataRailContent {
+                            metadataRailContent()
+                                .transition(
+                                    .detailSlideOutSidebar(
+                                        style: DetailSlideOutMotionPolicy.sidebarTransitionStyle()
+                                    )
+                                )
+                        } else if let metadataSourceRef {
+                            ItemLinkMetadataRail(
+                                sourceRef: metadataSourceRef,
+                                onOpenRef: onOpenMetadataRef
+                            )
+                        }
+                    }
                 }
+                .frame(maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -108,6 +131,25 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
 
                 trailingExtra()
 
+                if hasMetadataRail {
+                    Button {
+                        withAnimation(reduceMotion ? .none : .snappy) {
+                            isMetadataVisible.toggle()
+                        }
+                    } label: {
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(isMetadataVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
+                            .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
+                            .overlay {
+                                Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
+                                    .font(CiderFont.toolbarIcon)
+                                    .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
+                }
+
                 if let onFloat {
                     Button(action: onFloat) {
                         Image(systemName: "rectangle.on.rectangle")
@@ -125,6 +167,37 @@ struct GenericItemDetailPanel<Content: View, ToolbarExtra: View, TrailingExtra: 
         }
     }
 
+    private var hasMetadataRail: Bool {
+        metadataRailContent != nil || metadataSourceRef != nil
+    }
+
+}
+
+private struct ItemLinkMetadataRail: View {
+    let sourceRef: LibraryEntityRef
+    var onOpenRef: ((LibraryEntityRef) -> Void)?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                ItemLinkMetadataEditor(sourceRef: sourceRef, onOpenRef: onOpenRef)
+                    .padding(Spacing.md)
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+        .frame(maxHeight: .infinity)
+        .background(CiderColors.surfaceInput)
+        .overlay(alignment: .leading) {
+            CiderColors.separator
+                .frame(width: Spacing.hairline)
+        }
+        .transition(
+            .detailSlideOutSidebar(
+                style: DetailSlideOutMotionPolicy.sidebarTransitionStyle()
+            )
+        )
+    }
 }
 
 // MARK: - Convenience initializer for callers without toolbar extras
@@ -142,6 +215,9 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra 
         onFloat: (() -> Void)? = nil,
         onClose: @escaping () -> Void,
         onModeChange: @escaping (DetailViewMode) -> Void,
+        metadataSourceRef: LibraryEntityRef? = nil,
+        onOpenMetadataRef: ((LibraryEntityRef) -> Void)? = nil,
+        metadataRailContent: (() -> AnyView)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
@@ -155,6 +231,9 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView, TrailingExtra 
         self.onFloat = onFloat
         self.onClose = onClose
         self.onModeChange = onModeChange
+        self.metadataSourceRef = metadataSourceRef
+        self.onOpenMetadataRef = onOpenMetadataRef
+        self.metadataRailContent = metadataRailContent
         self.toolbarExtra = { EmptyView() }
         self.trailingExtra = { EmptyView() }
         self.content = content
@@ -231,6 +310,9 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
         onFloat: (() -> Void)? = nil,
         onClose: @escaping () -> Void,
         onModeChange: @escaping (DetailViewMode) -> Void,
+        metadataSourceRef: LibraryEntityRef? = nil,
+        onOpenMetadataRef: ((LibraryEntityRef) -> Void)? = nil,
+        metadataRailContent: (() -> AnyView)? = nil,
         @ViewBuilder trailingExtra: @escaping () -> TrailingExtra,
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -245,6 +327,9 @@ extension GenericItemDetailPanel where ToolbarExtra == EmptyView {
         self.onFloat = onFloat
         self.onClose = onClose
         self.onModeChange = onModeChange
+        self.metadataSourceRef = metadataSourceRef
+        self.onOpenMetadataRef = onOpenMetadataRef
+        self.metadataRailContent = metadataRailContent
         self.toolbarExtra = { EmptyView() }
         self.trailingExtra = trailingExtra
         self.content = content
@@ -264,6 +349,9 @@ extension GenericItemDetailPanel where TrailingExtra == EmptyView {
         onFloat: (() -> Void)? = nil,
         onClose: @escaping () -> Void,
         onModeChange: @escaping (DetailViewMode) -> Void,
+        metadataSourceRef: LibraryEntityRef? = nil,
+        onOpenMetadataRef: ((LibraryEntityRef) -> Void)? = nil,
+        metadataRailContent: (() -> AnyView)? = nil,
         @ViewBuilder toolbarExtra: @escaping () -> ToolbarExtra,
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -278,6 +366,9 @@ extension GenericItemDetailPanel where TrailingExtra == EmptyView {
         self.onFloat = onFloat
         self.onClose = onClose
         self.onModeChange = onModeChange
+        self.metadataSourceRef = metadataSourceRef
+        self.onOpenMetadataRef = onOpenMetadataRef
+        self.metadataRailContent = metadataRailContent
         self.toolbarExtra = toolbarExtra
         self.trailingExtra = { EmptyView() }
         self.content = content

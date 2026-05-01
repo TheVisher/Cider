@@ -880,6 +880,7 @@ struct NoteMetadataSidebar: View {
     @State private var isTitleExpanded = true
     @State private var isFolderExpanded = true
     @State private var isTagsExpanded = true
+    @State private var isLinksExpanded = true
     @State private var isSourcesExpanded = true
     @State private var isHistoryExpanded = false
     @State private var showAllSnapshots = false
@@ -901,6 +902,10 @@ struct NoteMetadataSidebar: View {
 
                     sectionDivider
                     tagsSection
+                        .padding(.vertical, Spacing.md)
+
+                    sectionDivider
+                    linksSection
                         .padding(.vertical, Spacing.md)
 
                     sectionDivider
@@ -995,6 +1000,21 @@ struct NoteMetadataSidebar: View {
                         guard !trimmed.isEmpty, trimmed != note.title else { return }
                         viewModel.updateNoteTitle(trimmed)
                     }
+            }
+        }
+    }
+
+    // MARK: - Links
+
+    private var linksSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Linked", isExpanded: $isLinksExpanded)
+
+            if isLinksExpanded {
+                ItemLinkMetadataEditor(
+                    sourceRef: LibraryEntityRef(type: .note, entityID: note.id),
+                    showsSectionHeader: false
+                )
             }
         }
     }

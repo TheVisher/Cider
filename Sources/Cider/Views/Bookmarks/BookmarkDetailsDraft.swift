@@ -71,7 +71,6 @@ struct BookmarkMetadataSidebar: View {
     @State private var isLinkedItemsExpanded = true
     @State private var isPropertiesExpanded = true
     @State private var isAIExpanded = true
-    @State private var linkedSummaries: [ItemLinkSummary] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -112,7 +111,7 @@ struct BookmarkMetadataSidebar: View {
                             .padding(.vertical, Spacing.md)
                     }
 
-                    if !linkedSummaries.isEmpty {
+                    if bookmark != nil {
                         sectionDivider
                         linkedItemsSection
                             .padding(.vertical, Spacing.md)
@@ -162,12 +161,10 @@ struct BookmarkMetadataSidebar: View {
             fileSize = nil
             newTagText = ""
             copiedHex = nil
-            linkedSummaries = []
         }
         .task(id: bookmark?.id) {
             fileSize = nil
             imageSourceExists = false
-            refreshLinkedSummaries()
             // Snapshot the URLs needed for background work before the async hop.
             let sizeURL = bookmark?.originalImageFileURL ?? bookmark?.thumbnailFileURL
             let originalFileURL = bookmark?.originalImageFileURL
@@ -206,50 +203,15 @@ struct BookmarkMetadataSidebar: View {
             sectionHeader("Linked", isExpanded: $isLinkedItemsExpanded)
 
             if isLinkedItemsExpanded {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    ForEach(linkedSummaries) { summary in
-                        Button {
-                            onOpenLinkedRef?(summary.ref)
-                        } label: {
-                            HStack(alignment: .top, spacing: Spacing.xs) {
-                                Image(systemName: summary.symbol)
-                                    .font(CiderFont.caption(scale: textScale))
-                                    .foregroundColor(CiderColors.tertiary)
-                                    .frame(width: Spacing.md, alignment: .center)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(summary.title)
-                                        .font(CiderFont.bodyMedium(scale: textScale))
-                                        .foregroundColor(CiderColors.primary)
-                                        .lineLimit(1)
-
-                                    if !summary.subtitle.isEmpty {
-                                        Text(summary.subtitle)
-                                            .font(CiderFont.caption(scale: textScale))
-                                            .foregroundColor(CiderColors.tertiary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(onOpenLinkedRef == nil)
-                    }
+                if let bookmark {
+                    ItemLinkMetadataEditor(
+                        sourceRef: LibraryEntityRef(type: .bookmark, entityID: bookmark.id),
+                        showsSectionHeader: false,
+                        onOpenRef: onOpenLinkedRef
+                    )
                 }
             }
         }
-    }
-
-    private func refreshLinkedSummaries() {
-        guard let bookmark else {
-            linkedSummaries = []
-            return
-        }
-        let ref = LibraryEntityRef(type: .bookmark, entityID: bookmark.id)
-        let refs = (try? ItemLinkService.shared.relatedRefs(for: ref)) ?? []
-        linkedSummaries = ItemLinkService.shared.summaries(for: refs)
     }
 
     // MARK: - Section Header

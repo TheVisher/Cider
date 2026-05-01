@@ -4,8 +4,8 @@ import Testing
 
 @MainActor
 struct ReminderReconcilerTests {
-    @Test("telegram configuration changes trigger a follow-up reconcile")
-    func telegramConfigurationChangesTriggerFollowUpReconcile() async throws {
+    @Test("telegram configuration changes do not wake the reconciler")
+    func telegramConfigurationChangesDoNotWakeReconciler() async throws {
         let reconciler = ReminderReconciler.shared
         var reconcileCount = 0
 
@@ -26,7 +26,7 @@ struct ReminderReconcilerTests {
         NotificationCenter.default.post(name: .telegramBridgeConfigurationChanged, object: nil)
         try await Task.sleep(for: .milliseconds(50))
 
-        #expect(reconcileCount == 2)
+        #expect(reconcileCount == 1)
     }
 
     @Test("daily digest scheduler wakes at configured hour on weekdays")

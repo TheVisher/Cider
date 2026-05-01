@@ -114,6 +114,46 @@ enum ContactProfileEssentials {
     }
 }
 
+enum ContactMetadataInspectorSectionID: Hashable {
+    case essentials
+    case folder
+    case tags
+    case linked
+    case notes
+    case fields
+    case info
+}
+
+enum ContactMetadataInspectorSections {
+    static func visibleIDs(
+        for contact: ContactCard,
+        labels: [CardLabel],
+        relatedRefs: [LibraryEntityRef]
+    ) -> [ContactMetadataInspectorSectionID] {
+        var sections: [ContactMetadataInspectorSectionID] = []
+
+        if !ContactProfileEssentials.rows(for: contact, labels: labels).isEmpty {
+            sections.append(.essentials)
+        }
+
+        sections.append(.folder)
+        sections.append(.tags)
+        sections.append(.linked)
+
+        if !contact.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sections.append(.notes)
+        }
+
+        if !ContactProfileCustomFields.groupedRows(for: contact).isEmpty {
+            sections.append(.fields)
+        }
+
+        sections.append(.info)
+        _ = relatedRefs
+        return sections
+    }
+}
+
 enum ContactProfileNotePreview {
     static func lines(
         from markdown: String,

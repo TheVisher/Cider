@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn Cider into a proactive reminder system. Recurring events and reminders fire as local notifications (on-screen) and as agent-delivered iMessages (remote). The iMessage agent can create, modify, and cancel reminders conversationally. No new data model — reminders are DateCards with surfacing rules.
+**Goal:** Turn Cider into a proactive reminder system. Recurring events and reminders fire as local notifications (on-screen) and as agent-delivered messages (remote). The agent can create, modify, and cancel reminders conversationally. No new data model for v1 — reminders are DateCards with surfacing rules.
+
+**Product direction:** Cider should own reminders as first-class local-first life-assistant data rather than treating Apple Reminders, cron jobs, Telegram, or iMessage as the primary system. Until Cider has native replacement capabilities, use the best macOS-native fallback to help the user now — Apple Reminders for reminders, Calendar for calendar events, Contacts for contacts, etc. These fallbacks are bridges, not the source of truth long-term. Gaps discovered through real requests should be documented and folded back into Cider. Example gap: “remind me to check out Open WebUI when I get home” needs location-aware/geofence triggers and Cider-owned notification delivery.
 
 **Architecture:** Five layers built in order:
 1. Fix notification scheduling to support multi-offset reminders with deterministic IDs
@@ -32,6 +34,28 @@
 - **CLI update semantics:** `--remind` flags on `event update` REPLACE existing reminder offsets (not append). `--clear-reminders` removes all reminder rules.
 - **Date parsing:** CLI uses the existing `yyyy-MM-dd` date format via `dateFormatter` (line 3391), not ISO 8601 timestamps. Plan examples must match.
 - **Async notification API:** `UNUserNotificationCenter.pendingNotificationRequests()` uses a completion handler. A `withCheckedContinuation` wrapper is required.
+
+---
+
+## Future Gap: Location-Aware Reminders / Geofencing
+
+This plan covers time/date reminders first. Real user request captured on 2026-05-01: “Remind me to check out Open WebUI when I get home.” Desired Cider-native behavior:
+
+- user can create a reminder with trigger `when_at_place: home`
+- Cider stores the reminder locally and links it to the relevant bookmark/note/project when applicable
+- mobile/location layer detects arrival or the host infers “home” via trusted signals where possible
+- Cider delivers the notification through its own Dashboard/mobile/agent notification pipeline
+- Apple Reminders should be the preferred temporary fallback for reminders; Telegram, iMessage, or cron may be transport/workaround options, but not the source of truth
+- external reminder fallbacks can fail or hang on OS authorization prompts, so agents must verify creation before claiming success
+- once macOS Reminders permission is granted, Apple Reminders can successfully deliver notifications through the user's Apple ecosystem, including Apple Watch; verified 2026-05-01 with a 9:30 AM test reminder that the user received on their watch and completed
+
+Likely additions beyond this v1 plan:
+
+- place model: home/work/saved locations with optional geofence radius
+- reminder trigger model beyond `remindBeforeMinutes`
+- mobile companion or system integration for location updates
+- privacy controls for location storage and trigger evaluation
+- CLI/AI affordance: `reminder create --title ... --when-at home`
 
 ---
 

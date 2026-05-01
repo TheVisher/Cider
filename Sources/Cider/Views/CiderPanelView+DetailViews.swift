@@ -102,6 +102,8 @@ extension CiderPanelView {
                 onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
+                metadataSourceRef: LibraryEntityRef(type: .dateCard, entityID: dateCard.id),
+                onOpenMetadataRef: openLinkedRef,
                 trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) }
             ) {
                 DateCardDetailView(
@@ -126,6 +128,9 @@ extension CiderPanelView {
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
+                metadataRailContent: {
+                    AnyView(ContactMetadataInspectorView(contact: contact, onOpenRelated: openLinkedRef))
+                },
                 trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) }
             ) {
                 ContactDetailView(
@@ -148,6 +153,8 @@ extension CiderPanelView {
                 onFloat: floatTodoDetail,
                 onClose: closeGenericDetail,
                 onModeChange: { _ in },
+                metadataSourceRef: LibraryEntityRef(type: .todo, entityID: todoCard.id),
+                onOpenMetadataRef: openLinkedRef,
                 trailingExtra: { AIDetailActionsButton(todoTitle: todoCard.title) }
             ) {
                 TodoDetailView(
@@ -170,7 +177,9 @@ extension CiderPanelView {
                     detailSlideOutWidth = clamped
                 },
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataSourceRef: LibraryEntityRef(type: .vaultFile, entityID: vaultFile.id),
+                onOpenMetadataRef: openLinkedRef
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
@@ -186,7 +195,9 @@ extension CiderPanelView {
                 showDragHandle: false,
                 onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataSourceRef: LibraryEntityRef(type: .dateCard, entityID: dateCard.id),
+                onOpenMetadataRef: openLinkedRef
             ) {
                 DateCardDetailView(
                     dateCard: dateCard,
@@ -208,7 +219,10 @@ extension CiderPanelView {
                 showDragHandle: false,
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataRailContent: {
+                    AnyView(ContactMetadataInspectorView(contact: contact, onOpenRelated: openLinkedRef))
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
@@ -230,7 +244,9 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataSourceRef: LibraryEntityRef(type: .vaultFile, entityID: vaultFile.id),
+                onOpenMetadataRef: openLinkedRef
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
@@ -369,7 +385,9 @@ extension CiderPanelView {
                 showDragHandle: false,
                 onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataSourceRef: LibraryEntityRef(type: .dateCard, entityID: dateCard.id),
+                onOpenMetadataRef: openLinkedRef
             ) {
                 DateCardDetailView(
                     dateCard: dateCard,
@@ -389,7 +407,10 @@ extension CiderPanelView {
                 showDragHandle: false,
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataRailContent: {
+                    AnyView(ContactMetadataInspectorView(contact: contact, onOpenRelated: openLinkedRef))
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
@@ -409,7 +430,9 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                metadataSourceRef: LibraryEntityRef(type: .vaultFile, entityID: vaultFile.id),
+                onOpenMetadataRef: openLinkedRef
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }

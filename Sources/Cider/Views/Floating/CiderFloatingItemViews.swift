@@ -396,6 +396,9 @@ private struct FloatingContactDetail: View {
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
+            metadataRailContent: {
+                AnyView(ContactMetadataInspectorView(contact: contact, onOpenRelated: floatLinkedRef))
+            },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(contactName: contact.displayName)
@@ -461,6 +464,8 @@ private struct FloatingDateCardDetail: View {
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
+            metadataSourceRef: LibraryEntityRef(type: .dateCard, entityID: dateCard.id),
+            onOpenMetadataRef: floatLinkedRef,
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(eventTitle: dateCard.title)
@@ -468,6 +473,15 @@ private struct FloatingDateCardDetail: View {
         ) {
             DateCardDetailView(dateCard: dateCard, onDismiss: { dock(surface, action: onDock) })
         }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 
@@ -483,6 +497,8 @@ private struct FloatingTodoDetail: View {
             showDragHandle: false,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
+            metadataSourceRef: LibraryEntityRef(type: .todo, entityID: todo.id),
+            onOpenMetadataRef: floatLinkedRef,
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(todoTitle: todo.title)
@@ -490,6 +506,15 @@ private struct FloatingTodoDetail: View {
         ) {
             TodoDetailView(todoCard: todo, onDismiss: { dock(surface, action: onDock) })
         }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
     }
 }
 

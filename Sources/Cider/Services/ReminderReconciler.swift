@@ -15,7 +15,6 @@ final class ReminderReconciler {
     private var wakeObserver: NSObjectProtocol?
     private var screenWakeObserver: NSObjectProtocol?
     private var timeZoneObserver: NSObjectProtocol?
-    private var telegramConfigurationObserver: NSObjectProtocol?
     private var reconcileHookForTesting: (() -> Void)?
     private var skipReconcileWorkForTesting = false
 
@@ -31,9 +30,6 @@ final class ReminderReconciler {
 
         // 2. Check outbox for agent-delivered reminders
         ReminderOutbox.shared.processReminders()
-        Task {
-            await TelegramBridge.shared.processReminders()
-        }
         Task {
             await AgentMemoryReviewService.shared.processScheduledReview(now: now)
         }
@@ -83,17 +79,6 @@ final class ReminderReconciler {
             }
         }
 
-        telegramConfigurationObserver = NotificationCenter.default.addObserver(
-            forName: .telegramBridgeConfigurationChanged,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Self.logger.debug("Telegram configuration changed — reconciling")
-            Task { @MainActor in
-                ReminderReconciler.shared.reconcile()
-            }
-        }
-
         // Initial reconcile
         reconcile()
     }
@@ -112,13 +97,9 @@ final class ReminderReconciler {
         if let timeZoneObserver {
             NotificationCenter.default.removeObserver(timeZoneObserver)
         }
-        if let telegramConfigurationObserver {
-            NotificationCenter.default.removeObserver(telegramConfigurationObserver)
-        }
         wakeObserver = nil
         screenWakeObserver = nil
         timeZoneObserver = nil
-        telegramConfigurationObserver = nil
     }
 
     private func scheduleDayRolloverTimer() {

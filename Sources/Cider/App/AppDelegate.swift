@@ -70,7 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var dateCardNotificationService: DateCardNotificationService?
     var dateCardNotificationCancellable: AnyCancellable?
     var todoReminderCancellable: AnyCancellable?
-    var telegramBridgeStarted = false
 
     // Settings
     var settingsWindow: SettingsWindow?
@@ -219,8 +218,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Register agent tools and enable orchestrator for AI panel
             await AgentToolRegistration.registerAll()
             AIAssistantViewModel.shared.enableOrchestrator()
-            await TelegramBridge.shared.startIfConfigured()
-            self.telegramBridgeStarted = true
             ReminderReconciler.shared.reconcile()
 
             // Re-reconcile on vault changes (debounced)
@@ -252,11 +249,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aiAssistantPanel?.orderOut(nil)
         floatingPanelManager?.closeDropZone()
         ciderMainWindow?.orderOut(nil)
-        if telegramBridgeStarted {
-            Task {
-                await TelegramBridge.shared.stop()
-            }
-        }
         Task {
             await AgentOrchestrator.shared.stopRuntimeIfNeeded()
         }

@@ -170,6 +170,39 @@ struct ContactProfileModelsTests {
         #expect(!ContactProfileEssentials.shouldShowRail(for: .birthday))
     }
 
+    @Test("metadata inspector keeps contact sections around linked items")
+    func metadataInspectorKeepsContactSectionsAroundLinkedItems() {
+        let contact = ContactCard(
+            displayName: "Baine",
+            relationshipLabel: "Son",
+            notes: "Favorite color: Black",
+            customFields: [
+                ContactCustomField(section: "Favorites", label: "Color", value: "Black", kind: .text)
+            ]
+        )
+
+        let sections = ContactMetadataInspectorSections.visibleIDs(
+            for: contact,
+            labels: [],
+            relatedRefs: [LibraryEntityRef(type: .bookmark, entityID: UUID())]
+        )
+
+        #expect(sections == [.essentials, .folder, .tags, .linked, .notes, .fields, .info])
+    }
+
+    @Test("metadata inspector still exposes linked and info for empty contacts")
+    func metadataInspectorStillExposesLinkedAndInfoForEmptyContacts() {
+        let contact = ContactCard(displayName: "Baine")
+
+        let sections = ContactMetadataInspectorSections.visibleIDs(
+            for: contact,
+            labels: [],
+            relatedRefs: []
+        )
+
+        #expect(sections == [.folder, .tags, .linked, .info])
+    }
+
     @Test("birthday facts compute age and next birthday")
     func birthdayFactsComputeAgeAndNextBirthday() {
         let birthday = Calendar.current.date(from: DateComponents(year: 2016, month: 6, day: 15))!
