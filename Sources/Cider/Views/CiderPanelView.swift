@@ -40,6 +40,7 @@ struct CiderPanelView: View {
     @State var detailsErrorMessage: String?
     @State var bookmarkHeroMode: BookmarkHeroMode = .thumbnail
     @State var bookmarkMetadataVisible: Bool = true
+    @State var genericMetadataVisible: Bool = true
     @StateObject var detailWebViewStore = DetailWebViewStore()
     @State var detailWidthSaveTask: Task<Void, Never>?
     @State var selectedDateCard: DateCard?

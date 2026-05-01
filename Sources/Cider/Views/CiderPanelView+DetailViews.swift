@@ -119,6 +119,7 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 width: min(detailSlideOutWidth, maxSlideOutWidth),
                 maxWidth: maxSlideOutWidth,
+                metadataVisible: $genericMetadataVisible,
                 onResize: { newWidth in
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
@@ -126,13 +127,15 @@ extension CiderPanelView {
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
-                trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) }
+                trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) },
+                metadata: {
+                    ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: openLinkedRef)
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
                     onEdit: {
-                        closeGenericDetail()
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                        genericMetadataVisible = true
                     },
                     onDismiss: closeGenericDetail
                 )
@@ -205,15 +208,19 @@ extension CiderPanelView {
                 title: contact.displayName,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: openLinkedRef)
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
                     onEdit: {
-                        closeGenericDetail()
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                        genericMetadataVisible = true
                     },
                     onDismiss: closeGenericDetail
                 )
@@ -385,15 +392,19 @@ extension CiderPanelView {
                 title: contact.displayName,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: openLinkedRef)
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
                     onEdit: {
-                        closeGenericDetail()
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                        genericMetadataVisible = true
                     },
                     onDismiss: closeGenericDetail
                 )

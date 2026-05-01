@@ -235,6 +235,7 @@ extension CiderPanelView {
         detailWebViewStore.reset()
         selectedContact = nil
         selectedVaultFile = nil
+        genericMetadataVisible = true
 
         selectedDateCard = dateCard
         if !wasExpanded, detailViewMode == .slideOut {
@@ -265,6 +266,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        genericMetadataVisible = true
 
         selectedContact = contact
         if !wasExpanded, detailViewMode == .slideOut {
@@ -292,6 +294,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedContact = nil
         selectedVaultFile = nil
+        genericMetadataVisible = true
 
         selectedTodoCard = todoCard
         if !wasExpanded {
@@ -320,6 +323,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
+        genericMetadataVisible = true
 
         selectedVaultFile = file
         if !wasExpanded, detailViewMode == .slideOut {

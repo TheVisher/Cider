@@ -387,57 +387,42 @@ private struct FloatingContactDetail: View {
     let contact: ContactCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
-    @State private var editorContext: ContactEditorContext?
+    @State private var isMetadataVisible = true
 
     var body: some View {
         GenericItemDetailPanel(
             title: contact.displayName,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(contactName: contact.displayName)
+            },
+            metadata: {
+                ContactMetadataInspectorView(contact: contact, onOpenLinkedRef: floatLinkedRef)
             }
         ) {
             ContactDetailView(
                 contact: contact,
                 onEdit: {
-                    editorContext = ContactEditorContext(existingContact: contact)
+                    isMetadataVisible = true
                 },
                 onDismiss: { dock(surface, action: onDock) }
             )
         }
-        .sheet(item: $editorContext) { context in
-            ContactEditorSheet(
-                existingContact: context.existingContact,
-                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
-                    LibraryItemEditor.saveContact(
-                        draftContactID: draftContactID,
-                        existingContact: context.existingContact,
-                        displayName: displayName,
-                        relationshipLabel: relationshipLabel,
-                        birthday: birthday,
-                        notes: notes,
-                        labelIDs: labelIDs,
-                        addBirthdayDateCard: addBirthdayDateCard,
-                        email: email,
-                        phone: phone,
-                        address: address,
-                        hasAvatar: hasAvatar,
-                        customFields: customFields
-                    )
-                },
-                onDelete: { contact in
-                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
-                    }
-                }
-            )
-        }
     }
 
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
+    }
 }
 
 private struct FloatingDateCardDetail: View {
