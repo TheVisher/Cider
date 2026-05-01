@@ -345,23 +345,7 @@ struct DetailSlideOutView: View {
                 )
             }
 
-            // Metadata sidebar toggle
-            Button {
-                withAnimation(reduceMotion ? .none : .snappy) {
-                    isMetadataVisible.toggle()
-                }
-            } label: {
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isMetadataVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
-                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
-                    .overlay {
-                        Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
-                            .font(CiderFont.toolbarIcon)
-                            .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                    }
-            }
-            .buttonStyle(.plain)
-            .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
+            ItemMetadataToggleButton(isVisible: $isMetadataVisible)
 
             if let onFloat {
                 Button(action: onFloat) {
@@ -426,22 +410,7 @@ struct BookmarkPageToolbar: View {
                 toolbarButton("rectangle.on.rectangle", active: false, help: "Float", action: onFloat)
             }
 
-            Button {
-                withAnimation(reduceMotion ? .none : .snappy) {
-                    isMetadataVisible.toggle()
-                }
-            } label: {
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isMetadataVisible ? CiderColors.accentSubtle : CiderColors.separatorSubtle)
-                    .frame(width: NotesDesign.toolbarButtonSize, height: NotesDesign.toolbarButtonSize)
-                    .overlay {
-                        Image(systemName: isMetadataVisible ? "info.circle.fill" : "info.circle")
-                            .font(CiderFont.toolbarIcon)
-                            .foregroundColor(isMetadataVisible ? CiderColors.controlAccent : CiderColors.secondary)
-                    }
-            }
-            .buttonStyle(.plain)
-            .help(isMetadataVisible ? "Hide metadata" : "Show metadata")
+            ItemMetadataToggleButton(isVisible: $isMetadataVisible)
         }
     }
 
