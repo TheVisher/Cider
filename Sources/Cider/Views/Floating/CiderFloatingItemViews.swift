@@ -13,6 +13,7 @@ struct CiderFloatingItemView: View {
     @ObservedObject private var dateCards = DateCardStorage.shared
     @ObservedObject private var contacts = ContactStorage.shared
     @ObservedObject private var todos = TodoCardStorage.shared
+    @ObservedObject private var vaultFiles = VaultFileService.shared
 
     var body: some View {
         Group {
@@ -46,6 +47,12 @@ struct CiderFloatingItemView: View {
                     FloatingTodoDetail(todo: todo, surface: surface)
                 } else {
                     FloatingMissingItemView(title: "Todo not found", surface: surface)
+                }
+            case .vaultFile(let id):
+                if let file = vaultFiles.file(for: id) {
+                    FloatingVaultFileDetail(file: file, surface: surface)
+                } else {
+                    FloatingMissingItemView(title: "File not found", surface: surface)
                 }
             case .clipboard:
                 FloatingMissingItemView(title: "Clipboard opens in its dedicated panel", surface: surface)
@@ -526,6 +533,49 @@ private struct FloatingTodoDetail: View {
             }
         ) {
             TodoDetailView(todoCard: todo, onDismiss: { dock(surface, action: onDock) })
+        }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
+}
+
+private struct FloatingVaultFileDetail: View {
+    let file: VaultFile
+    let surface: CiderFloatableSurface
+    @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var isMetadataVisible = true
+
+    var body: some View {
+        GenericItemDetailPanel(
+            title: file.filename,
+            detailViewMode: .slideOut,
+            showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
+            onClose: { dock(surface, action: onDock) },
+            onModeChange: { _ in },
+            trailingExtra: {
+                FloatingReanchorButton(surface: surface)
+            },
+            metadata: {
+                VaultFileMetadataInspectorView(
+                    file: file,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef
+                )
+            }
+        ) {
+            VaultFileDetailView(file: file, onDismiss: { dock(surface, action: onDock) })
         }
     }
 

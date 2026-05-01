@@ -3,7 +3,7 @@ import SwiftUI
 enum CiderReanchorSurfaceResolver {
     static func canOpenInMainWindow(_ surface: CiderFloatableSurface) -> Bool {
         switch surface {
-        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo:
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile:
             true
         case .clipboard, .aiAssistant, .dropZone:
             false
@@ -102,6 +102,11 @@ extension CiderPanelView {
         requestFloat(.todo(todoCard.id))
     }
 
+    func floatVaultFileDetail() {
+        guard let vaultFile = selectedVaultFile else { return }
+        requestFloat(.vaultFile(vaultFile.id))
+    }
+
     func floatNoteDetail() {
         guard let note = notesViewModel.selectedNote ?? selectedNote else { return }
         notesViewModel.flushSave()
@@ -117,6 +122,8 @@ extension CiderPanelView {
             floatContactDetail()
         } else if selectedTodoCard != nil {
             floatTodoDetail()
+        } else if selectedVaultFile != nil {
+            floatVaultFileDetail()
         } else if isNoteDetailPageMode {
             floatNoteDetail()
         }
@@ -146,6 +153,10 @@ extension CiderPanelView {
         case .todo(let id):
             if let todoCard = TodoCardStorage.shared.todoCards.first(where: { $0.id == id }) {
                 openTodoDetail(todoCard)
+            }
+        case .vaultFile(let id):
+            if let vaultFile = VaultFileService.shared.file(for: id) {
+                openVaultFileDetail(vaultFile)
             }
         case .clipboard, .aiAssistant, .dropZone:
             break

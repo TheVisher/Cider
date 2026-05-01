@@ -199,6 +199,489 @@ extension BasicItemMetadataInspectorView {
     }
 }
 
+struct VaultFileMetadataPresentation: Equatable {
+    let title: String
+    let sourcePath: String
+    let kind: String
+    let fileType: String?
+    let size: String
+    let colors: [String]
+    let notes: String?
+    let ocrText: String?
+    let keywords: [String]
+
+    init(file: VaultFile) {
+        title = file.displayTitle
+        sourcePath = file.relativePath
+        kind = file.fileType.displayName
+        let ext = (file.filename as NSString).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+        fileType = ext.isEmpty ? nil : ext.uppercased()
+        size = ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
+        colors = (file.dominantColors ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let trimmedNotes = file.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+        let trimmedOCR = (file.ocrText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        ocrText = trimmedOCR.isEmpty ? nil : trimmedOCR
+        keywords = file.tags.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+}
+
+struct VaultFileMetadataInspectorView: View {
+    let file: VaultFile
+    var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
+    var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.textScale) private var textScale
+    @ObservedObject private var labelStorage = CardLabelStorage.shared
+    @State private var linkedSummaries: [ItemLinkSummary] = []
+    @State private var titleDraft = ""
+    @State private var notesDraft = ""
+    @State private var isEditingNotes = false
+    @State private var copiedHex: String?
+
+    @State private var isSourceExpanded = true
+    @State private var isFolderExpanded = true
+    @State private var isTagsExpanded = true
+    @State private var isKeywordsExpanded = false
+    @State private var isLinkedExpanded = true
+    @State private var isNotesExpanded = true
+    @State private var isIntelligenceExpanded = true
+    @State private var isInfoExpanded = true
+
+    private var presentation: VaultFileMetadataPresentation {
+        VaultFileMetadataPresentation(file: file)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    titleSection
+                        .padding(.bottom, Spacing.md)
+
+                    sectionDivider
+                    sourceSection
+                        .padding(.vertical, Spacing.md)
+
+                    if folderName != nil {
+                        sectionDivider
+                        folderSection
+                            .padding(.vertical, Spacing.md)
+                    }
+
+                    sectionDivider
+                    tagsSection
+                        .padding(.vertical, Spacing.md)
+
+                    if !presentation.keywords.isEmpty {
+                        sectionDivider
+                        keywordsSection
+                            .padding(.vertical, Spacing.md)
+                    }
+
+                    if !linkedSummaries.isEmpty {
+                        sectionDivider
+                        linkedSection
+                            .padding(.vertical, Spacing.md)
+                    }
+
+                    sectionDivider
+                    notesSection
+                        .padding(.vertical, Spacing.md)
+
+                    if hasIntelligence {
+                        sectionDivider
+                        intelligenceSection
+                            .padding(.vertical, Spacing.md)
+                    }
+                }
+                .padding(Spacing.md)
+            }
+            .frame(maxHeight: .infinity)
+
+            footerSection
+        }
+        .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+        .frame(maxHeight: .infinity)
+        .background(CiderColors.surfaceInput)
+        .overlay(alignment: .leading) {
+            CiderColors.separator
+                .frame(width: Spacing.hairline)
+        }
+        .onAppear(perform: syncDrafts)
+        .onChange(of: file.id) { _, _ in
+            linkedSummaries = []
+            copiedHex = nil
+            isEditingNotes = false
+            syncDrafts()
+        }
+        .task(id: file.id) {
+            refreshLinkedSummaries()
+        }
+    }
+
+    private var sectionDivider: some View {
+        Divider().background(CiderColors.separator)
+    }
+
+    private func sectionHeader(_ title: String, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(reduceMotion ? .none : .snappy) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Text(title)
+                    .font(CiderFont.bodyMedium(scale: textScale))
+                    .foregroundColor(CiderColors.tertiary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : -90))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var titleSection: some View {
+        TextField("Title", text: $titleDraft, axis: .vertical)
+            .font(CiderFont.bodySemibold(scale: textScale))
+            .foregroundColor(CiderColors.primary)
+            .lineLimit(1...5)
+            .textFieldStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .padding(Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+            .onSubmit(saveTitle)
+    }
+
+    private var sourceSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Source", isExpanded: $isSourceExpanded)
+
+            if isSourceExpanded {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(presentation.sourcePath)
+                        .font(CiderFont.label(scale: textScale))
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: BookmarksDesign.detailsSheetURLMinHeight)
+                .padding(.horizontal, Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+
+                HStack(spacing: Spacing.xs) {
+                    metadataButton(title: "Open", systemImage: "arrow.up.forward.app") {
+                        NSWorkspace.shared.open(file.absoluteURL)
+                    }
+
+                    metadataButton(title: "Finder", systemImage: "folder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([file.absoluteURL])
+                    }
+                }
+            }
+        }
+    }
+
+    private var folderSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Folder", isExpanded: $isFolderExpanded)
+
+            if isFolderExpanded, let folderName {
+                ItemMetadataRowsView(rows: [
+                    ItemMetadataRow(id: "folder", symbol: "folder", title: folderName)
+                ])
+            }
+        }
+    }
+
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Tags", isExpanded: $isTagsExpanded)
+
+            if isTagsExpanded {
+                if assignedLabels.isEmpty {
+                    Text("No tags.")
+                        .font(CiderFont.body(scale: textScale))
+                        .foregroundColor(CiderColors.quaternary)
+                } else {
+                    TagFlowLayout(spacing: Spacing.xs) {
+                        ForEach(assignedLabels) { label in
+                            TagPillView(label: label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var keywordsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Keywords", isExpanded: $isKeywordsExpanded)
+
+            if isKeywordsExpanded {
+                TagFlowLayout(spacing: Spacing.xs) {
+                    ForEach(presentation.keywords, id: \.self) { tag in
+                        Text(tag)
+                            .font(CiderFont.label(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(1)
+                            .padding(.horizontal, Spacing.xs)
+                            .padding(.vertical, Spacing.xxs)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    private var linkedSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Linked", isExpanded: $isLinkedExpanded)
+
+            if isLinkedExpanded {
+                ItemMetadataRowsView(
+                    rows: linkedSummaries.map(ItemMetadataRow.related),
+                    onOpenRef: onOpenLinkedRef,
+                    canOpenRef: canOpenLinkedRef
+                )
+            }
+        }
+    }
+
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Notes", isExpanded: $isNotesExpanded)
+
+            if isNotesExpanded {
+                if isEditingNotes {
+                    VStack(alignment: .trailing, spacing: Spacing.xs) {
+                        TextEditor(text: $notesDraft)
+                            .font(CiderFont.label(scale: textScale))
+                            .frame(
+                                minHeight: BookmarksDesign.detailsSheetNotesMinHeight,
+                                idealHeight: BookmarksDesign.detailsSheetNotesHeight,
+                                maxHeight: BookmarksDesign.detailsSheetNotesHeight
+                            )
+                            .padding(Spacing.xxs)
+                            .background(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .fill(CiderColors.surfaceInput)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+
+                        Button("Done") {
+                            saveNotes()
+                            isEditingNotes = false
+                        }
+                        .buttonStyle(CiderSecondaryButtonStyle())
+                    }
+                } else if let notes = presentation.notes {
+                    Text(notes)
+                        .font(CiderFont.body(scale: textScale))
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                        .onTapGesture { isEditingNotes = true }
+                } else {
+                    Button {
+                        isEditingNotes = true
+                    } label: {
+                        Label("Add note", systemImage: "plus")
+                            .font(CiderFont.body(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                    .padding(.horizontal, Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(CiderColors.surfaceInput)
+                    )
+                }
+            }
+        }
+    }
+
+    private var intelligenceSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            sectionHeader("Intelligence", isExpanded: $isIntelligenceExpanded)
+
+            if isIntelligenceExpanded {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    if let ocrText = presentation.ocrText {
+                        Text(ocrText)
+                            .font(CiderFont.body(scale: textScale))
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(6)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !presentation.colors.isEmpty {
+                        colorsSubsection(colors: presentation.colors)
+                    }
+                }
+            }
+        }
+    }
+
+    private var footerSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Divider().background(CiderColors.separator)
+
+            sectionHeader("Info", isExpanded: $isInfoExpanded)
+
+            if isInfoExpanded {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    propertyRow("Created", value: file.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    propertyRow("Updated", value: file.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                    propertyRow("Type", value: "File")
+                    propertyRow("Kind", value: presentation.kind)
+                    if let fileType = presentation.fileType {
+                        propertyRow("File Type", value: fileType)
+                    }
+                    propertyRow("Size", value: presentation.size)
+                }
+                .padding(.bottom, Spacing.xxs)
+            }
+        }
+        .padding(Spacing.md)
+    }
+
+    private func metadataButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(CiderFont.bodyMedium(scale: textScale))
+                .foregroundColor(CiderColors.secondary)
+                .frame(minHeight: BookmarksDesign.buttonTapTarget)
+                .padding(.horizontal, Spacing.sm)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                .fill(CiderColors.surfaceInput)
+        )
+    }
+
+    private func colorsSubsection(colors: [String]) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text("Colors")
+                .font(CiderFont.caption(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+
+            HStack(spacing: Spacing.sm) {
+                ForEach(colors, id: \.self) { hex in
+                    if let color = Color(hex: hex) {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(hex.uppercased(), forType: .string)
+                            copiedHex = hex
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(1.2))
+                                guard !Task.isCancelled else { return }
+                                copiedHex = nil
+                            }
+                        } label: {
+                            VStack(spacing: Spacing.xxs) {
+                                RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                    .fill(color)
+                                    .frame(width: BookmarksDesign.colorSwatchWidth, height: BookmarksDesign.colorSwatchHeight)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: Radius.xs, style: .continuous)
+                                            .stroke(CiderColors.borderSubtle, lineWidth: CiderBorder.innerStrokeWidth)
+                                    )
+
+                                Group {
+                                    if copiedHex == hex {
+                                        Image(systemName: "checkmark")
+                                            .font(CiderFont.badgeSemibold)
+                                            .foregroundColor(CiderColors.success)
+                                    } else {
+                                        Text(hex.uppercased())
+                                            .font(CiderFont.caption(scale: textScale))
+                                            .foregroundColor(CiderColors.tertiary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .frame(height: BookmarksDesign.colorSwatchLabelHeight)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy \(hex.uppercased())")
+                    }
+                }
+            }
+        }
+    }
+
+    private func propertyRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            Text(label)
+                .font(CiderFont.caption(scale: textScale))
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: BookmarksDesign.propertyLabelWidth, alignment: .leading)
+            Text(value)
+                .font(CiderFont.caption(scale: textScale))
+                .foregroundColor(CiderColors.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var hasIntelligence: Bool {
+        presentation.ocrText != nil || !presentation.colors.isEmpty
+    }
+
+    private var folderName: String? {
+        guard let folderID = file.folderID else { return nil }
+        return VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name
+    }
+
+    private var assignedLabels: [CardLabel] {
+        file.labelIDs.compactMap { id in
+            labelStorage.labels.first(where: { $0.id == id })
+        }
+    }
+
+    private func syncDrafts() {
+        titleDraft = file.title?.isEmpty == false ? file.title ?? file.displayTitle : file.displayTitle
+        notesDraft = file.notes
+    }
+
+    private func saveTitle() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultTitle = (file.filename as NSString).deletingPathExtension
+        VaultFileStorage.shared.updateTitle(file, title: trimmed.isEmpty || trimmed == defaultTitle ? nil : trimmed)
+        VaultFileService.shared.refreshMetadata()
+    }
+
+    private func saveNotes() {
+        VaultFileStorage.shared.updateNotes(file, notes: notesDraft)
+        VaultFileService.shared.refreshMetadata()
+    }
+
+    private func refreshLinkedSummaries() {
+        let ref = LibraryEntityRef(type: .vaultFile, entityID: file.id)
+        let refs = (try? ItemLinkService.shared.relatedRefs(for: ref)) ?? []
+        linkedSummaries = ItemLinkService.shared.summaries(for: refs)
+    }
+}
+
 enum DateCardMetadataRows {
     static func rows(for dateCard: DateCard) -> [ItemMetadataRow] {
         var rows = [

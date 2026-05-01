@@ -7,6 +7,7 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
     case contact(UUID)
     case dateCard(UUID)
     case todo(UUID)
+    case vaultFile(UUID)
     case clipboard
     case aiAssistant
     case dropZone
@@ -27,6 +28,8 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
             "dateCard:\(id.uuidString)"
         case .todo(let id):
             "todo:\(id.uuidString)"
+        case .vaultFile(let id):
+            "vaultFile:\(id.uuidString)"
         case .clipboard:
             "clipboard"
         case .aiAssistant:
@@ -50,6 +53,8 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
             "Date Card"
         case .todo:
             "Todo"
+        case .vaultFile:
+            "File"
         case .clipboard:
             "Clipboard"
         case .aiAssistant:
@@ -66,7 +71,8 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
              .bookmarkMetadata(let id),
              .contact(let id),
              .dateCard(let id),
-             .todo(let id):
+             .todo(let id),
+             .vaultFile(let id):
             id.uuidString
         case .clipboard:
             "Floating clipboard surface"
@@ -91,7 +97,9 @@ extension CiderFloatableSurface {
             self = .dateCard(ref.entityID)
         case .todo:
             self = .todo(ref.entityID)
-        case .vaultFile, .externalFile, .session:
+        case .vaultFile:
+            self = .vaultFile(ref.entityID)
+        case .externalFile, .session:
             return nil
         }
     }

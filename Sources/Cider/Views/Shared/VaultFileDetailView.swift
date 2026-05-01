@@ -13,49 +13,8 @@ struct VaultFileDetailView: View {
     @State private var avPlayer: AVPlayer?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            // Preview area
-            previewArea
-
-            // File info
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text(file.filename)
-                    .font(CiderFont.subheadingSemibold)
-                    .foregroundColor(CiderColors.primary)
-                    .textSelection(.enabled)
-
-                metaRow(icon: file.fileType.systemImageName, text: file.fileType.displayName)
-                metaRow(icon: "doc", text: formattedSize)
-                metaRow(icon: "calendar", text: "Modified \(file.modifiedAt.formatted(.relative(presentation: .named)))")
-                metaRow(icon: "clock", text: "Created \(file.createdAt.formatted(.dateTime.month(.abbreviated).day().year()))")
-                metaRow(icon: "folder", text: file.relativePath)
-            }
-
-            Divider()
-
-            // Actions
-            HStack(spacing: Spacing.sm) {
-                Button {
-                    NSWorkspace.shared.open(file.absoluteURL)
-                } label: {
-                    Label("Open with Default App", systemImage: "arrow.up.forward.app")
-                }
-                .buttonStyle(.plain)
-                .font(CiderFont.bodyMedium)
-                .foregroundColor(CiderColors.controlAccent)
-
-                Spacer()
-
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([file.absoluteURL])
-                } label: {
-                    Label("Show in Finder", systemImage: "folder")
-                }
-                .buttonStyle(.plain)
-                .font(CiderFont.body)
-                .foregroundColor(CiderColors.secondary)
-            }
-        }
+        previewArea
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Spacing.lg)
         .task {
             await loadPreview()
@@ -120,24 +79,6 @@ struct VaultFileDetailView: View {
     }
 
     // MARK: - Helpers
-
-    private func metaRow(icon: String, text: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: icon)
-                .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.tertiary)
-                .frame(width: FolderSidebarItemDesign.metaIconWidth)
-            Text(text)
-                .font(CiderFont.body)
-                .foregroundColor(CiderColors.secondary)
-                .lineLimit(2)
-                .textSelection(.enabled)
-        }
-    }
-
-    private var formattedSize: String {
-        ByteCountFormatter.string(fromByteCount: file.fileSize, countStyle: .file)
-    }
 
     private func loadPreview() async {
         let url = file.absoluteURL

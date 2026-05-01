@@ -228,6 +228,8 @@ final class CiderFloatingPanelManager: NSObject, NSWindowDelegate {
             DateCardStorage.shared.dateCards.contains { $0.id == id }
         case .todo(let id):
             TodoCardStorage.shared.todoCards.contains { $0.id == id }
+        case .vaultFile(let id):
+            VaultFileService.shared.file(for: id) != nil
         case .clipboard, .aiAssistant, .dropZone:
             false
         }
@@ -381,7 +383,7 @@ enum CiderFloatingPanelLayout {
             NSSize(width: 340, height: 360)
         case .note:
             NSSize(width: 820, height: 620)
-        case .contact, .dateCard, .todo:
+        case .contact, .dateCard, .todo, .vaultFile:
             NSSize(width: 760, height: 560)
         default:
             NSSize(width: 420, height: 520)

@@ -184,11 +184,12 @@ extension CiderPanelView {
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
                 },
+                onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    BasicItemMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
+                    VaultFileMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
@@ -261,11 +262,12 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
                 metadataVisible: $genericMetadataVisible,
+                onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    BasicItemMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
+                    VaultFileMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
@@ -457,11 +459,12 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
                 metadataVisible: $genericMetadataVisible,
+                onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
                 trailingExtra: { EmptyView() },
                 metadata: {
-                    BasicItemMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
+                    VaultFileMetadataInspectorView(file: vaultFile, onOpenLinkedRef: openLinkedRef)
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
