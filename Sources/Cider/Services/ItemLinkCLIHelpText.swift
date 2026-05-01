@@ -1,6 +1,8 @@
 import Foundation
 
 enum ItemLinkCLIHelpText {
+    static let help = link
+
     static let link = """
     LINKS
       cider-cli link add <source-type> <source-ref> <target-type> <target-ref> [--json]

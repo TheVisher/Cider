@@ -27,4 +27,12 @@ struct ContactCLIHelpTextTests {
         #expect(text.contains("cider-cli contact field update <id|name> <field-id|label>"))
         #expect(text.contains("cider-cli contact field delete <id|name> <field-id|label>"))
     }
+
+    @Test("contact help exposes field and notes operations for agents")
+    func contactHelpExposesFieldAndNotesOperations() {
+        #expect(ContactCLIHelpText.contact.contains("contact field add"))
+        #expect(ContactCLIHelpText.contact.contains("contact update <id>"))
+        #expect(ContactCLIHelpText.contact.contains("--notes"))
+        #expect(ContactCLIHelpText.field.contains("contact field delete"))
+    }
 }

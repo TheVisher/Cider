@@ -5,7 +5,7 @@ enum ContactCLIHelpText {
     CONTACTS
       cider-cli contact list [--json]
       cider-cli contact create <name> [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>] [--folder <name|path>]
-      cider-cli contact update <id-prefix> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
+      cider-cli contact update <id> [--name <n>] [--email <e>] [--phone <p>] [--address <a>] [--birthday yyyy-MM-dd] [--relationship <r>] [--notes <n>]
       cider-cli contact delete <id-prefix>
       cider-cli contact profile show <id|name> [--json]
       cider-cli contact profile apply <id|name> --profile-json <json> [--create] [--json]
