@@ -187,33 +187,6 @@ struct ContactProfileModelsTests {
         #expect(facts.nextBirthdayComponents.day == 15)
     }
 
-    @Test("related summaries keep missing references visible")
-    func relatedSummaryMissingFallback() {
-        let id = UUID()
-        let ref = LibraryEntityRef(type: .bookmark, entityID: id)
-        let summary = ContactProfileRelatedItem(ref: ref, title: nil, subtitle: nil)
-
-        #expect(summary.title == "Missing bookmark")
-        #expect(summary.subtitle == id.uuidString)
-    }
-
-    @Test("related missing labels are human readable")
-    func relatedMissingLabelsAreHumanReadable() {
-        let bookmark = ContactProfileRelatedItem(
-            ref: LibraryEntityRef(type: .bookmark, entityID: UUID()),
-            title: nil,
-            subtitle: nil
-        )
-        let date = ContactProfileRelatedItem(
-            ref: LibraryEntityRef(type: .dateCard, entityID: UUID()),
-            title: nil,
-            subtitle: nil
-        )
-
-        #expect(bookmark.title == "Missing bookmark")
-        #expect(date.title == "Missing date card")
-    }
-
     @Test("related refs merge outgoing and backlinks without duplicates")
     func relatedRefsMergeOutgoingAndBacklinksWithoutDuplicates() {
         let contactRef = LibraryEntityRef(type: .contact, entityID: UUID())

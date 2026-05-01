@@ -438,14 +438,6 @@ private struct FloatingContactDetail: View {
         }
     }
 
-    private func floatLinkedRef(_ ref: LibraryEntityRef) {
-        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
-        NotificationCenter.default.post(
-            name: .floatCiderSurface,
-            object: linkedSurface,
-            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
-        )
-    }
 }
 
 private struct FloatingDateCardDetail: View {

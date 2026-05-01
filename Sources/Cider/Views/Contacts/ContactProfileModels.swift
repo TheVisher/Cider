@@ -387,29 +387,6 @@ private extension Array where Element == String {
     }
 }
 
-struct ContactProfileRelatedItem: Identifiable, Equatable {
-    let ref: LibraryEntityRef
-    let title: String
-    let subtitle: String
-    let symbol: String
-
-    var id: String { ref.id }
-
-    init(ref: LibraryEntityRef, title: String?, subtitle: String?, symbol: String? = nil) {
-        self.ref = ref
-        self.title = title?.isEmpty == false ? title! : "Missing \(ref.type.contactProfileDisplayName)"
-        self.subtitle = subtitle?.isEmpty == false ? subtitle! : ref.entityID.uuidString
-        self.symbol = symbol ?? ref.type.contactProfileSymbol
-    }
-
-    init(summary: ItemLinkSummary) {
-        self.ref = summary.ref
-        self.title = summary.title
-        self.subtitle = summary.subtitle
-        self.symbol = summary.symbol
-    }
-}
-
 enum ContactProfileRelatedRefs {
     static func merged(outgoing: [LibraryEntityRef], backlinks: [LibraryEntityRef], excluding excluded: LibraryEntityRef? = nil) -> [LibraryEntityRef] {
         var seen: Set<String> = []
@@ -421,47 +398,5 @@ enum ContactProfileRelatedRefs {
             result.append(ref)
         }
         return result
-    }
-}
-
-extension LibraryEntityType {
-    var contactProfileDisplayName: String {
-        switch self {
-        case .bookmark:
-            "bookmark"
-        case .note:
-            "note"
-        case .dateCard:
-            "date card"
-        case .contact:
-            "contact"
-        case .todo:
-            "todo"
-        case .vaultFile:
-            "file"
-        case .externalFile:
-            "file"
-        case .session:
-            "session"
-        }
-    }
-
-    var contactProfileSymbol: String {
-        switch self {
-        case .bookmark:
-            "bookmark"
-        case .note:
-            "note.text"
-        case .dateCard:
-            "calendar"
-        case .contact:
-            "person.crop.circle"
-        case .todo:
-            "checklist"
-        case .vaultFile, .externalFile:
-            "doc"
-        case .session:
-            "rectangle.stack"
-        }
     }
 }
