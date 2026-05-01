@@ -155,32 +155,49 @@ extension CiderPanelView {
     func openLinkedRef(_ ref: LibraryEntityRef) {
         switch ref.type {
         case .bookmark:
-            if let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == ref.entityID }) {
-                openBookmarkDetails(bookmark)
-            }
+            guard let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == ref.entityID }) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openBookmarkDetails(bookmark)
         case .note:
-            if let note = notesViewModel.notes.first(where: { $0.id == ref.entityID }) {
-                openNoteDetail(note)
-            }
+            guard let note = notesViewModel.notes.first(where: { $0.id == ref.entityID }) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openNoteDetail(note)
         case .dateCard:
-            if let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) {
-                openDateCardDetail(dateCard)
-            }
+            guard let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openDateCardDetail(dateCard)
         case .contact:
-            if let contact = ContactStorage.shared.contact(for: ref.entityID) {
-                openContactDetail(contact)
-            }
+            guard let contact = ContactStorage.shared.contact(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openContactDetail(contact)
         case .todo:
-            if let todo = TodoCardStorage.shared.todoCard(for: ref.entityID) {
-                openTodoDetail(todo)
-            }
+            guard let todo = TodoCardStorage.shared.todoCard(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openTodoDetail(todo)
         case .vaultFile:
-            if let file = VaultFileService.shared.file(for: ref.entityID) {
-                openVaultFileDetail(file)
-            }
+            guard let file = VaultFileService.shared.file(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openVaultFileDetail(file)
         case .externalFile, .session:
             break
         }
+    }
+
+    private func clearDetailStateBeforeOpeningLinkedRef() {
+        if isDetailOpen { saveBookmarkDetails() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
+
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        detailWebViewStore.reset()
+        selectedDateCard = nil
+        selectedContact = nil
+        selectedTodoCard = nil
+        selectedVaultFile = nil
+        selectedNote = nil
+        isEditingNoteTitle = false
+        AIAssistantViewModel.shared.clearContext()
     }
 
     func openBookmarkDetails(_ bookmark: Bookmark) {

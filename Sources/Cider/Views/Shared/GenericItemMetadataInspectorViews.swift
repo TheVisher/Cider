@@ -24,6 +24,7 @@ struct BasicItemMetadataInspectorView: View {
     var linkedRef: LibraryEntityRef
     var extraRows: [ItemMetadataRow] = []
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
+    var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
     @State private var isLinkedExpanded = true
@@ -49,7 +50,11 @@ struct BasicItemMetadataInspectorView: View {
                         .font(CiderFont.body)
                         .foregroundColor(CiderColors.quaternary)
                 } else {
-                    ItemMetadataRowsView(rows: rows, onOpenRef: onOpenLinkedRef)
+                    ItemMetadataRowsView(
+                        rows: rows,
+                        onOpenRef: onOpenLinkedRef,
+                        canOpenRef: canOpenLinkedRef
+                    )
                 }
             }
 
@@ -116,7 +121,11 @@ struct BasicItemMetadataInspectorView: View {
 }
 
 extension BasicItemMetadataInspectorView {
-    init(dateCard: DateCard, onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil) {
+    init(
+        dateCard: DateCard,
+        onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+    ) {
         self.init(
             title: dateCard.title,
             typeLabel: "Date Card",
@@ -126,11 +135,16 @@ extension BasicItemMetadataInspectorView {
             labelIDs: dateCard.labelIDs,
             linkedRef: .dateCard(dateCard.id),
             extraRows: DateCardMetadataRows.rows(for: dateCard),
-            onOpenLinkedRef: onOpenLinkedRef
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef
         )
     }
 
-    init(todo: TodoCard, onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil) {
+    init(
+        todo: TodoCard,
+        onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+    ) {
         self.init(
             title: todo.title,
             typeLabel: "Todo",
@@ -140,11 +154,16 @@ extension BasicItemMetadataInspectorView {
             labelIDs: todo.labelIDs,
             linkedRef: .todo(todo.id),
             extraRows: TodoMetadataRows.rows(for: todo),
-            onOpenLinkedRef: onOpenLinkedRef
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef
         )
     }
 
-    init(file: VaultFile, onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil) {
+    init(
+        file: VaultFile,
+        onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil,
+        canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
+    ) {
         self.init(
             title: file.displayTitle,
             typeLabel: "File",
@@ -154,7 +173,8 @@ extension BasicItemMetadataInspectorView {
             labelIDs: file.labelIDs,
             linkedRef: .vaultFile(file.id),
             extraRows: Self.fileRows(for: file),
-            onOpenLinkedRef: onOpenLinkedRef
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef
         )
     }
 

@@ -3,6 +3,7 @@ import SwiftUI
 struct InlineNoteEditorView: View {
     @ObservedObject var viewModel: NotesViewModel
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
+    var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -43,7 +44,8 @@ struct InlineNoteEditorView: View {
                 NoteMetadataSidebar(
                     note: note,
                     viewModel: viewModel,
-                    onOpenLinkedRef: onOpenLinkedRef
+                    onOpenLinkedRef: onOpenLinkedRef,
+                    canOpenLinkedRef: canOpenLinkedRef
                 )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -879,6 +881,7 @@ struct NoteMetadataSidebar: View {
     let note: Note
     @ObservedObject var viewModel: NotesViewModel
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
+    var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var labelStorage = CardLabelStorage.shared
@@ -1146,7 +1149,11 @@ struct NoteMetadataSidebar: View {
                     .font(CiderFont.body)
                     .foregroundColor(CiderColors.tertiary)
             } else {
-                ItemMetadataRowsView(rows: rows, onOpenRef: onOpenLinkedRef)
+                ItemMetadataRowsView(
+                    rows: rows,
+                    onOpenRef: onOpenLinkedRef,
+                    canOpenRef: canOpenLinkedRef
+                )
             }
         }
     }

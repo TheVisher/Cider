@@ -90,11 +90,14 @@ struct ItemMetadataSectionView<Content: View>: View {
 struct ItemMetadataRowsView: View {
     let rows: [ItemMetadataRow]
     var onOpenRef: ((LibraryEntityRef) -> Void)?
+    var canOpenRef: ((LibraryEntityRef) -> Bool)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             ForEach(rows) { row in
-                if let ref = row.ref, let onOpenRef {
+                if let ref = row.ref,
+                   let onOpenRef,
+                   canOpenRef?(ref) ?? true {
                     Button {
                         onOpenRef(ref)
                     } label: {

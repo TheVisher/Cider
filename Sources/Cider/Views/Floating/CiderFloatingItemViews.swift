@@ -90,7 +90,11 @@ private struct FloatingNoteDetail: View {
             }
         ) {
             if presentation.usesInlineEditor {
-                InlineNoteEditorView(viewModel: viewModel, onOpenLinkedRef: floatLinkedRef)
+                InlineNoteEditorView(
+                    viewModel: viewModel,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef
+                )
             }
         }
         .onAppear { syncSelectedNote() }
@@ -128,6 +132,10 @@ private struct FloatingNoteDetail: View {
             object: linkedSurface,
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
     }
 }
 
@@ -453,7 +461,11 @@ private struct FloatingDateCardDetail: View {
                 AIDetailActionsButton(eventTitle: dateCard.title)
             },
             metadata: {
-                BasicItemMetadataInspectorView(dateCard: dateCard, onOpenLinkedRef: floatLinkedRef)
+                BasicItemMetadataInspectorView(
+                    dateCard: dateCard,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef
+                )
             }
         ) {
             DateCardDetailView(dateCard: dateCard, onDismiss: { dock(surface, action: onDock) })
@@ -467,6 +479,10 @@ private struct FloatingDateCardDetail: View {
             object: linkedSurface,
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
     }
 }
 
@@ -489,7 +505,11 @@ private struct FloatingTodoDetail: View {
                 AIDetailActionsButton(todoTitle: todo.title)
             },
             metadata: {
-                BasicItemMetadataInspectorView(todo: todo, onOpenLinkedRef: floatLinkedRef)
+                BasicItemMetadataInspectorView(
+                    todo: todo,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef
+                )
             }
         ) {
             TodoDetailView(todoCard: todo, onDismiss: { dock(surface, action: onDock) })
@@ -503,6 +523,10 @@ private struct FloatingTodoDetail: View {
             object: linkedSurface,
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
     }
 }
 
