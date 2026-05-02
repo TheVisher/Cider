@@ -105,6 +105,72 @@ struct CiderAgentChatRegistryTests {
         #expect(loaded?.runtimeSessionLineage == updated.runtimeSessionLineage)
     }
 
+    @Test("named Hermes chat starts as stable local record without Hermes session")
+    func namedHermesChatStartsAsStableLocalRecordWithoutHermesSession() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let registry = CiderAgentChatRegistry(storageDirectoryURL: tempDir)
+
+        let chat = try registry.createHermesChat(title: "  Cider   Dashboard Worktree  ", scope: "project")
+        let loaded = try registry.loadChat(stableID: chat.stableID)
+
+        #expect(chat.stableID == "cider.cider-dashboard-worktree")
+        #expect(chat.title == "Cider Dashboard Worktree")
+        #expect(chat.hermesTitle == "Cider Dashboard Worktree")
+        #expect(chat.kind == CiderAgentChatRegistry.hermesChatKind)
+        #expect(chat.scope == "project")
+        #expect(chat.activeRuntimeSessionID.isEmpty)
+        #expect(chat.runtimeSessionLineage.isEmpty)
+        #expect(!chat.defaultInCider)
+        #expect(!chat.archived)
+        #expect(loaded == chat)
+    }
+
+    @Test("named Hermes chat stable IDs are unique and survive rename")
+    func namedHermesChatStableIDsAreUniqueAndSurviveRename() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let registry = CiderAgentChatRegistry(storageDirectoryURL: tempDir)
+
+        let first = try registry.createHermesChat(title: "Cider Scratchpad", scope: "scratchpad")
+        let second = try registry.createHermesChat(title: "Cider Scratchpad", scope: "scratchpad")
+        let renamed = try registry.renameChat(stableID: first.stableID, title: "Cider Web Review")
+
+        #expect(first.stableID == "cider.cider-scratchpad")
+        #expect(second.stableID == "cider.cider-scratchpad-2")
+        #expect(renamed.stableID == first.stableID)
+        #expect(renamed.title == "Cider Web Review")
+        #expect(renamed.hermesTitle == "Cider Web Review")
+    }
+
+    @Test("archived named chats disappear from default list")
+    func archivedNamedChatsDisappearFromDefaultList() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let registry = CiderAgentChatRegistry(storageDirectoryURL: tempDir)
+        let visible = try registry.createHermesChat(title: "Cider Web Review", scope: nil)
+        let archived = try registry.createHermesChat(title: "Cider Scratchpad", scope: nil)
+
+        try registry.archiveChat(stableID: archived.stableID)
+
+        #expect(try registry.listChats().map(\.stableID) == [visible.stableID])
+        #expect(try registry.listChats(includeArchived: true).map(\.stableID).contains(archived.stableID))
+    }
+
+    @Test("Telegram resume command uses Hermes visible title")
+    func telegramResumeCommandUsesHermesVisibleTitle() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let registry = CiderAgentChatRegistry(storageDirectoryURL: tempDir)
+        let chat = try registry.createHermesChat(title: "Cider Dashboard Worktree", scope: nil)
+
+        #expect(CiderAgentChatRegistry.telegramResumeCommand(for: chat) == "/resume Cider Dashboard Worktree")
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

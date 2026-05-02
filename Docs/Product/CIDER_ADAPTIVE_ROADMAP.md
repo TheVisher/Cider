@@ -68,6 +68,7 @@ This is not a rigid release contract. It is a living queue.
 - clear busy/send state so Cider does not blindly send into an active Hermes run
 - visible attach/relink/repair controls for stale or forked sessions
 - named Hermes side chats so scoped work can stay out of Main Brain while remaining resumable from Telegram by explicit `/resume <title>`
+- durable per-chat sync cursors such as last synced Hermes message/session markers, so lineage imports stay reliable as histories grow
 - documented source-of-truth policy between Hermes runtime history and Cider's mirrored UI history
 - architecture spike for the supported Hermes communication layer: API server, ACP, gateway/client API, event stream, or equivalent
 - streaming response path and native approval/confirmation prompt design
@@ -120,7 +121,7 @@ This is not a rigid release contract. It is a living queue.
 **Feature shape:**
 
 - stable logical chat ID such as `cider.main`
-- mapping from Cider chat to current Hermes session ID and continuation lineage
+- mapping from Cider chat to current Hermes session ID, continuation lineage, and eventually a durable sync cursor
 - read-only awareness of Hermes session history/lineage
 - safe message serialization so multiple clients do not race
 - clear UI when a session was resumed, compacted, or started fresh

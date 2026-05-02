@@ -629,6 +629,24 @@ final class HermesSessionService: @unchecked Sendable {
         return nextState
     }
 
+    func renameSession(sessionID: String, title: String) async throws {
+        let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
+        guard !trimmedSessionID.isEmpty else {
+            throw HermesSessionClientError.sessionNotFound("empty session id")
+        }
+        guard !trimmedTitle.isEmpty else {
+            throw HermesSessionClientError.hermesCommandFailed("Hermes session title is empty")
+        }
+
+        _ = try await runner.runHermes(arguments: [
+            "sessions",
+            "rename",
+            trimmedSessionID,
+            trimmedTitle
+        ])
+    }
+
     private func runNewSessionCommand(text: String, state: HermesConversationState) async throws -> HermesConversationState {
         let source = state.source?.isEmpty == false ? state.source! : "cider"
         _ = try await runner.runHermes(arguments: [

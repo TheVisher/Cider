@@ -167,6 +167,21 @@ struct HermesSessionClientTests {
         #expect(result.messages.map(\.content) == ["hello", "fresh response"])
     }
 
+    @Test("service renames Hermes session with sanitized title")
+    func serviceRenamesHermesSessionWithSanitizedTitle() async throws {
+        let runner = StubHermesRunner(data: Data()) { arguments in
+            #expect(arguments == [
+                "sessions",
+                "rename",
+                "session-a",
+                "Cider Dashboard Worktree"
+            ])
+        }
+        let service = HermesSessionService(runner: runner)
+
+        try await service.renameSession(sessionID: " session-a ", title: " Cider   Dashboard Worktree ")
+    }
+
     @Test("main brain sync follows newer Telegram branch")
     func mainBrainSyncFollowsNewerTelegramBranch() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -429,6 +429,12 @@ struct AIAssistantPanelView: View {
             }
 
             if viewModel.runtimeSelection == .hermes {
+                drawerActionButton(title: "New Hermes chat", systemImage: "bubble.left.and.text.bubble.right") {
+                    promptForNewHermesChat()
+                    visibleMessageLimit = 12
+                    showConversationList = false
+                }
+
                 drawerActionButton(title: "Attach latest Telegram", systemImage: "link") {
                     viewModel.attachLatestHermesTelegramSession()
                     showConversationList = false
@@ -453,6 +459,13 @@ struct AIAssistantPanelView: View {
                 drawerActionButton(title: "Sync now", systemImage: hermesSyncIcon) {
                     viewModel.syncHermesConversation()
                     showConversationList = false
+                }
+
+                if viewModel.hermesConversationState != nil {
+                    drawerActionButton(title: "Copy Telegram resume command", systemImage: "doc.on.doc") {
+                        viewModel.copyTelegramResumeCommandForCurrentHermesChat()
+                        showConversationList = false
+                    }
                 }
 
                 if isHermesIssueVisible {
@@ -480,24 +493,36 @@ struct AIAssistantPanelView: View {
             HStack {
                 drawerSectionTitle("Chats")
                 Spacer()
-                Text("\(conversationStorage.conversations.count)")
+                Text("\(drawerChatCount)")
                     .font(CiderFont.microMonospaced)
                     .foregroundColor(CiderColors.tertiary)
             }
 
-            if conversationStorage.conversations.isEmpty {
+            if drawerChatCount == 0 {
                 Text("No saved chats yet")
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.tertiary)
                     .padding(.vertical, Spacing.xs)
             } else {
                 LazyVStack(spacing: Spacing.xxs) {
-                    ForEach(conversationStorage.conversations) { conv in
-                        conversationRow(conv)
+                    if viewModel.runtimeSelection == .hermes {
+                        ForEach(viewModel.hermesChats, id: \.stableID) { chat in
+                            hermesChatRow(chat)
+                        }
+                    } else {
+                        ForEach(conversationStorage.conversations) { conv in
+                            conversationRow(conv)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private var drawerChatCount: Int {
+        viewModel.runtimeSelection == .hermes
+            ? viewModel.hermesChats.count
+            : conversationStorage.conversations.count
     }
 
     private func drawerSectionTitle(_ title: String) -> some View {
@@ -628,6 +653,24 @@ struct AIAssistantPanelView: View {
         let sessionID = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sessionID.isEmpty else { return }
         viewModel.attachHermesSession(id: sessionID)
+    }
+
+    private func promptForNewHermesChat() {
+        let alert = NSAlert()
+        alert.messageText = "New Hermes Chat"
+        alert.informativeText = "Name this Cider/Hermes chat. Telegram can resume it later by this title."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        input.placeholderString = "Cider Dashboard Worktree"
+        alert.accessoryView = input
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let title = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        viewModel.createNamedHermesChat(title: title, scope: "cider")
     }
 
     // MARK: - Message List
@@ -1261,6 +1304,78 @@ struct AIAssistantPanelView: View {
 
             Button("Delete", role: .destructive) {
                 viewModel.deleteConversation(conv.id)
+            }
+        }
+    }
+
+    private func hermesChatRow(_ chat: CiderAgentChatRecord) -> some View {
+        let isActive = viewModel.currentConversationID == chat.conversationID
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        let messageCount = conversationStorage
+            .conversations
+            .first(where: { $0.id == chat.conversationID })?
+            .messageCount ?? 0
+
+        return Button {
+            viewModel.loadHermesChat(stableID: chat.stableID)
+            showConversationList = false
+            visibleMessageLimit = 12
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(spacing: Spacing.xs) {
+                        Text(chat.title)
+                            .font(CiderFont.label)
+                            .foregroundColor(isActive ? CiderColors.controlAccent : CiderColors.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if chat.defaultInCider {
+                            Text("Main")
+                                .font(CiderFont.micro)
+                                .foregroundColor(CiderColors.tertiary)
+                        }
+                    }
+
+                    HStack(spacing: Spacing.xs) {
+                        Text(formatter.localizedString(for: chat.updatedAt, relativeTo: Date()))
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+
+                        Text("·")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.quaternary)
+
+                        Text("\(messageCount) msgs")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+
+                        if !chat.activeRuntimeSessionID.isEmpty {
+                            Text(String(chat.activeRuntimeSessionID.suffix(8)))
+                                .font(CiderFont.microMonospaced)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isActive ? CiderColors.accentSubtle : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Copy Telegram Resume Command") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(
+                    CiderAgentChatRegistry.telegramResumeCommand(for: chat),
+                    forType: .string
+                )
             }
         }
     }
