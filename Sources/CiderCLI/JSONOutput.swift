@@ -210,6 +210,58 @@ func outputJSON(_ value: Any) {
     ]
 }
 
+@MainActor func dashboardTopicToDict(_ topic: DashboardTopic) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": topic.ciderSyncId,
+        "title": topic.title,
+        "position": topic.position,
+        "createdAt": topic.createdAt,
+        "updatedAt": topic.updatedAt,
+    ]
+    if let icon = topic.icon { dict["icon"] = icon }
+    if let colorToken = topic.colorToken { dict["colorToken"] = colorToken }
+    if let isPinned = topic.isPinned { dict["isPinned"] = isPinned }
+    if let isArchived = topic.isArchived { dict["isArchived"] = isArchived }
+    if let deleted = topic.deleted { dict["deleted"] = deleted }
+    if let deletedAt = topic.deletedAt { dict["deletedAt"] = deletedAt }
+    return dict
+}
+
+@MainActor func dashboardCardToDict(_ card: DashboardCard) -> [String: Any] {
+    var dict: [String: Any] = [
+        "id": card.ciderSyncId,
+        "topicSyncIds": card.topicSyncIds,
+        "title": card.title,
+        "summary": card.summary,
+        "sourceKind": card.sourceKind.rawValue,
+        "status": card.status.rawValue,
+        "priority": card.priority.rawValue,
+        "createdAt": card.createdAt,
+        "updatedAt": card.updatedAt,
+    ]
+    if let subtitle = card.subtitle { dict["subtitle"] = subtitle }
+    if let whyItMatters = card.whyItMatters { dict["whyItMatters"] = whyItMatters }
+    if let sourceURL = card.sourceURL { dict["sourceURL"] = sourceURL }
+    if let sourceTitle = card.sourceTitle { dict["sourceTitle"] = sourceTitle }
+    if let relatedItemSyncId = card.relatedItemSyncId { dict["relatedItemSyncId"] = relatedItemSyncId }
+    if let relatedItemType = card.relatedItemType { dict["relatedItemType"] = relatedItemType }
+    if let score = card.score { dict["score"] = score }
+    if let feedback = card.feedback {
+        var feedbackDict: [String: Any] = ["updatedAt": feedback.updatedAt]
+        if let rating = feedback.rating { feedbackDict["rating"] = rating }
+        if let moreLikeThis = feedback.moreLikeThis { feedbackDict["moreLikeThis"] = moreLikeThis }
+        if let lessLikeThis = feedback.lessLikeThis { feedbackDict["lessLikeThis"] = lessLikeThis }
+        if let notInterested = feedback.notInterested { feedbackDict["notInterested"] = notInterested }
+        if let note = feedback.note { feedbackDict["note"] = note }
+        dict["feedback"] = feedbackDict
+    }
+    if let lastSeenAt = card.lastSeenAt { dict["lastSeenAt"] = lastSeenAt }
+    if let dismissedAt = card.dismissedAt { dict["dismissedAt"] = dismissedAt }
+    if let deleted = card.deleted { dict["deleted"] = deleted }
+    if let deletedAt = card.deletedAt { dict["deletedAt"] = deletedAt }
+    return dict
+}
+
 @MainActor func clipboardItemToDict(_ item: ClipboardItem) -> [String: Any] {
     var d: [String: Any] = [
         "id": item.id.uuidString,

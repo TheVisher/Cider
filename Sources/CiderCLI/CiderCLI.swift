@@ -125,6 +125,8 @@ struct CiderCLI {
             handleFolder(subcommand: "doctor", args: Array(args.dropFirst()))
         case "clipboard", "cb":
             handleClipboard(subcommand: subcommand, args: remaining)
+        case "dashboard", "dash":
+            handleDashboard(subcommand: subcommand, args: remaining)
         case "embeddings":
             if subcommand == "backfill" {
                 let store = EmbeddingStore.shared
@@ -143,6 +145,192 @@ struct CiderCLI {
             printUsage()
         default:
             print("Unknown command: \(command). Run 'cider-cli help' for usage.")
+        }
+    }
+
+    // MARK: - Dashboard Commands
+
+    static func handleDashboard(subcommand: String?, args: [String]) {
+        switch subcommand {
+        case "topic", "topics":
+            handleDashboardTopic(subcommand: args.first, args: Array(args.dropFirst()))
+        case "card", "cards":
+            handleDashboardCard(subcommand: args.first, args: Array(args.dropFirst()))
+        default:
+            print("Unknown dashboard command: \(subcommand ?? "nil")")
+            print("Commands: topic list, topic upsert, topic move, topic archive, card list, card upsert, card move, card seen, card dismiss, card archive, card delete, card feedback")
+        }
+    }
+
+    static func handleDashboardTopic(subcommand: String?, args: [String]) {
+        let storage = DashboardStorage.shared
+        switch subcommand {
+        case "list":
+            let topics = dashboardTopics(storage: storage)
+            if jsonOutput {
+                outputJSON(topics.map(dashboardTopicToDict))
+            } else {
+                for topic in topics {
+                    let archived = topic.isArchived == true ? " archived" : ""
+                    print("  [\(topic.ciderSyncId.prefix(8))] \(topic.title) pos=\(topic.position)\(archived)")
+                }
+            }
+
+        case "upsert":
+            guard let title = parseFlag("--title", from: args) ?? args.first(where: { !$0.hasPrefix("--") }) else {
+                print("Error: Usage: cider-cli dashboard topic upsert --title <title> [--id <id>] [--icon <sf-symbol>] [--position <n>] [--color <token>] [--pinned true|false]")
+                return
+            }
+            let explicitID = parseFlag("--id", from: args)?.lowercased()
+            let existing = explicitID.flatMap { id in
+                dashboardTopics(storage: storage).first { $0.ciderSyncId == id }
+            } ?? dashboardTopics(storage: storage).first { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }
+            let now = dashboardNowMilliseconds()
+            let topic = DashboardTopic(
+                ciderSyncId: explicitID ?? existing?.ciderSyncId,
+                title: title,
+                icon: parseFlag("--icon", from: args) ?? existing?.icon,
+                colorToken: parseFlag("--color", from: args) ?? existing?.colorToken,
+                position: parseFlag("--position", from: args).flatMap(Int.init) ?? existing?.position ?? dashboardTopics(storage: storage).count,
+                isPinned: parseOptionalBoolFlag("--pinned", from: args) ?? (args.contains("--pinned") ? true : existing?.isPinned),
+                isArchived: false,
+                createdAt: existing?.createdAt ?? now,
+                updatedAt: now
+            )
+            storage.upsertTopic(topic)
+            printDashboardTopicResult(topic)
+
+        case "move":
+            guard let ref = args.first,
+                  let position = parseFlag("--position", from: args).flatMap(Int.init) else {
+                print("Error: Usage: cider-cli dashboard topic move <id|title> --position <n>")
+                return
+            }
+            guard let topic = resolveDashboardTopic(ref, storage: storage) else { return }
+            if !storage.topics.contains(where: { $0.ciderSyncId == topic.ciderSyncId }) {
+                storage.upsertTopic(topic)
+            }
+            guard storage.moveTopic(topic.ciderSyncId, to: position) else {
+                print("Error: Could not move dashboard topic '\(ref)'")
+                return
+            }
+            printDashboardTopicResult(resolveDashboardTopic(topic.ciderSyncId, storage: storage) ?? topic)
+
+        case "archive", "delete":
+            guard let ref = args.first else {
+                print("Error: Usage: cider-cli dashboard topic archive <id|title>")
+                return
+            }
+            guard let topic = resolveDashboardTopic(ref, storage: storage) else { return }
+            if !storage.topics.contains(where: { $0.ciderSyncId == topic.ciderSyncId }) {
+                storage.upsertTopic(topic)
+            }
+            guard storage.archiveTopic(topic.ciderSyncId) else {
+                print("Error: Could not archive dashboard topic '\(ref)'")
+                return
+            }
+            printDashboardTopicResult(resolveDashboardTopic(topic.ciderSyncId, storage: storage) ?? topic)
+
+        default:
+            print("Unknown dashboard topic command: \(subcommand ?? "nil")")
+            print("Commands: list, upsert, move, archive")
+        }
+    }
+
+    static func handleDashboardCard(subcommand: String?, args: [String]) {
+        let storage = DashboardStorage.shared
+        switch subcommand {
+        case "list":
+            let topicRef = parseFlag("--topic", from: args)
+            let topicID = topicRef.flatMap { resolveDashboardTopic($0, storage: storage)?.ciderSyncId }
+            if topicRef != nil, topicID == nil { return }
+            let includeHidden = args.contains("--all") || args.contains("--include-hidden") || args.contains("--include-dismissed")
+            let cards = storage.cards
+                .filter { card in
+                    if let topicID, !card.topicSyncIds.contains(topicID) { return false }
+                    if includeHidden { return true }
+                    return card.deleted != true && card.status != .dismissed && card.status != .archived
+                }
+                .sorted { $0.updatedAt > $1.updatedAt }
+            if jsonOutput {
+                outputJSON(cards.map(dashboardCardToDict))
+            } else {
+                for card in cards {
+                    print("  [\(card.ciderSyncId.prefix(8))] \(card.title) (\(card.status.rawValue), \(card.priority.rawValue))")
+                }
+            }
+
+        case "upsert":
+            guard let payload = readDashboardCardPayload(from: args) else { return }
+            guard let card = dashboardCard(from: payload, storage: storage) else { return }
+            storage.upsertCard(card)
+            printDashboardCardResult(resolveDashboardCard(card.ciderSyncId, storage: storage) ?? card)
+
+        case "move":
+            guard let ref = args.first else {
+                print("Error: Usage: cider-cli dashboard card move <card-id> --topic <id|title> [--topic <id|title> ...]")
+                return
+            }
+            guard let card = resolveDashboardCard(ref, storage: storage) else { return }
+            let topicIDs = resolveDashboardTopicIDs(from: args, storage: storage)
+            guard !topicIDs.isEmpty else {
+                print("Error: At least one --topic <id|title> is required.")
+                return
+            }
+            guard storage.setCardTopics(card.ciderSyncId, topicSyncIds: topicIDs) else {
+                print("Error: Could not move dashboard card '\(ref)'")
+                return
+            }
+            printDashboardCardResult(resolveDashboardCard(card.ciderSyncId, storage: storage) ?? card)
+
+        case "seen":
+            mutateDashboardCard(args.first, storage: storage, usage: "cider-cli dashboard card seen <card-id>") { card in
+                storage.markSeen(card.ciderSyncId)
+            }
+
+        case "dismiss":
+            mutateDashboardCard(args.first, storage: storage, usage: "cider-cli dashboard card dismiss <card-id>") { card in
+                storage.dismissCard(card.ciderSyncId)
+            }
+
+        case "archive":
+            mutateDashboardCard(args.first, storage: storage, usage: "cider-cli dashboard card archive <card-id>") { card in
+                storage.archiveCard(card.ciderSyncId)
+            }
+
+        case "delete":
+            mutateDashboardCard(args.first, storage: storage, usage: "cider-cli dashboard card delete <card-id>") { card in
+                storage.deleteCard(card.ciderSyncId)
+            }
+
+        case "feedback":
+            guard let ref = args.first else {
+                print("Error: Usage: cider-cli dashboard card feedback <card-id> [--more-like-this|--less-like-this|--clear-preference] [--rating 1-5]")
+                return
+            }
+            guard let card = resolveDashboardCard(ref, storage: storage) else { return }
+            var changed = false
+            if args.contains("--more-like-this") {
+                changed = storage.markMoreLikeThis(card.ciderSyncId) || changed
+            }
+            if args.contains("--less-like-this") {
+                changed = storage.markLessLikeThis(card.ciderSyncId) || changed
+            }
+            if args.contains("--clear-preference") {
+                changed = storage.setCardPreference(card.ciderSyncId, moreLikeThis: false, lessLikeThis: false) || changed
+            }
+            if let rating = parseFlag("--rating", from: args).flatMap(Int.init) {
+                changed = storage.rateCard(card.ciderSyncId, rating: rating) || changed
+            }
+            guard changed else {
+                print("Error: No feedback change requested.")
+                return
+            }
+            printDashboardCardResult(resolveDashboardCard(card.ciderSyncId, storage: storage) ?? card)
+
+        default:
+            print("Unknown dashboard card command: \(subcommand ?? "nil")")
+            print("Commands: list, upsert, move, seen, dismiss, archive, delete, feedback")
         }
     }
 
@@ -4254,6 +4442,242 @@ struct CiderCLI {
         return args[flagIndex + 1]
     }
 
+    static func dashboardNowMilliseconds() -> Int64 {
+        Int64((Date().timeIntervalSince1970 * 1000).rounded())
+    }
+
+    static func dashboardTopics(storage: DashboardStorage) -> [DashboardTopic] {
+        let storedTopics = storage.topics
+            .filter { $0.deleted != true }
+        let storedIDs = Set(storedTopics.map(\.ciderSyncId))
+        let defaultTopics = DashboardDefaultTopics.topics.filter { storedIDs.contains($0.ciderSyncId) == false }
+        return (defaultTopics + storedTopics).sorted { lhs, rhs in
+            if lhs.position == rhs.position {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.position < rhs.position
+        }
+    }
+
+    static func resolveDashboardTopic(_ ref: String, storage: DashboardStorage) -> DashboardTopic? {
+        let lower = ref.lowercased()
+        let topics = dashboardTopics(storage: storage)
+        let idMatches = topics.filter { $0.ciderSyncId.hasPrefix(lower) }
+        if idMatches.count == 1 { return idMatches[0] }
+        if idMatches.count > 1 {
+            print("Error: Dashboard topic ID prefix '\(ref)' is ambiguous:")
+            idMatches.forEach { print("  [\($0.ciderSyncId.prefix(8))] \($0.title)") }
+            return nil
+        }
+        let titleMatches = topics.filter { $0.title.localizedCaseInsensitiveCompare(ref) == .orderedSame }
+        if titleMatches.count == 1 { return titleMatches[0] }
+        if titleMatches.count > 1 {
+            print("Error: Dashboard topic title '\(ref)' is ambiguous. Use an ID prefix.")
+            titleMatches.forEach { print("  [\($0.ciderSyncId.prefix(8))] \($0.title)") }
+            return nil
+        }
+        print("Error: No dashboard topic found for '\(ref)'")
+        return nil
+    }
+
+    static func resolveDashboardTopicIDs(from args: [String], storage: DashboardStorage) -> [String] {
+        let topicRefs = parseFlagAll("--topic", from: args)
+        let topicIDs = parseFlagAll("--topic-id", from: args).map { $0.lowercased() }
+        var resolved = topicIDs
+        for ref in topicRefs {
+            guard let topic = resolveDashboardTopic(ref, storage: storage) else { continue }
+            resolved.append(topic.ciderSyncId)
+        }
+        return Array(Set(resolved)).sorted()
+    }
+
+    static func resolveDashboardCard(_ ref: String, storage: DashboardStorage) -> DashboardCard? {
+        let lower = ref.lowercased()
+        let matches = storage.cards.filter { $0.ciderSyncId.hasPrefix(lower) }
+        if matches.count == 1 { return matches[0] }
+        if matches.count > 1 {
+            print("Error: Dashboard card ID prefix '\(ref)' is ambiguous:")
+            matches.forEach { print("  [\($0.ciderSyncId.prefix(8))] \($0.title)") }
+            return nil
+        }
+        print("Error: No dashboard card found for '\(ref)'")
+        return nil
+    }
+
+    static func readDashboardCardPayload(from args: [String]) -> DashboardCardUpsertPayload? {
+        if let inline = parseFlag("--json-payload", from: args) {
+            return decodeDashboardCardPayload(inline, source: "--json-payload")
+        }
+        if let path = parseFlag("--json-file", from: args) {
+            if path == "-" {
+                guard let string = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else {
+                    print("Error: Could not read dashboard card JSON from stdin.")
+                    return nil
+                }
+                return decodeDashboardCardPayload(string, source: "stdin")
+            }
+            let expanded = NSString(string: path).expandingTildeInPath
+            do {
+                let string = try String(contentsOfFile: expanded, encoding: .utf8)
+                return decodeDashboardCardPayload(string, source: expanded)
+            } catch {
+                print("Error: Could not read dashboard card JSON file '\(expanded)': \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        let topicRefs = parseFlagAll("--topic", from: args)
+        let topicIDs = parseFlagAll("--topic-id", from: args)
+        if parseFlag("--title", from: args) != nil || parseFlag("--summary", from: args) != nil || !topicRefs.isEmpty || !topicIDs.isEmpty {
+            return DashboardCardUpsertPayload(
+                ciderSyncId: parseFlag("--id", from: args),
+                topicSyncIds: topicIDs.isEmpty ? nil : topicIDs,
+                topics: topicRefs.isEmpty ? nil : topicRefs,
+                title: parseFlag("--title", from: args),
+                subtitle: parseFlag("--subtitle", from: args),
+                summary: parseFlag("--summary", from: args),
+                whyItMatters: parseFlag("--why", from: args),
+                sourceKind: parseFlag("--source-kind", from: args),
+                sourceURL: parseFlag("--source-url", from: args),
+                sourceTitle: parseFlag("--source-title", from: args),
+                relatedItemSyncId: parseFlag("--related-item-id", from: args),
+                relatedItemType: parseFlag("--related-item-type", from: args),
+                status: parseFlag("--status", from: args),
+                priority: parseFlag("--priority", from: args),
+                score: parseFlag("--score", from: args).flatMap(Double.init),
+                rating: parseFlag("--rating", from: args).flatMap(Int.init),
+                moreLikeThis: parseOptionalBoolFlag("--more-like-this", from: args),
+                lessLikeThis: parseOptionalBoolFlag("--less-like-this", from: args)
+            )
+        }
+
+        print("Error: Usage: cider-cli dashboard card upsert --json-file <path|-> OR --title <title> --summary <summary> --topic <id|title>")
+        return nil
+    }
+
+    static func decodeDashboardCardPayload(_ string: String, source: String) -> DashboardCardUpsertPayload? {
+        guard let data = string.data(using: .utf8) else {
+            print("Error: Dashboard card JSON from \(source) was not valid UTF-8.")
+            return nil
+        }
+        do {
+            return try JSONDecoder().decode(DashboardCardUpsertPayload.self, from: data)
+        } catch {
+            print("Error: Could not decode dashboard card JSON from \(source): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    static func dashboardCard(from payload: DashboardCardUpsertPayload, storage: DashboardStorage) -> DashboardCard? {
+        let existing = payload.ciderSyncId.flatMap { id in
+            storage.cards.first { $0.ciderSyncId == id.lowercased() }
+        }
+        let now = dashboardNowMilliseconds()
+        let resolvedTopicIDs = {
+            var ids = payload.topicSyncIds?.map { $0.lowercased() } ?? []
+            for ref in payload.topics ?? [] {
+                guard let topic = resolveDashboardTopic(ref, storage: storage) else { continue }
+                ids.append(topic.ciderSyncId)
+            }
+            return Array(Set(ids)).sorted()
+        }()
+
+        guard let title = payload.title ?? existing?.title, !title.isEmpty else {
+            print("Error: Dashboard card title is required for new cards.")
+            return nil
+        }
+        guard let summary = payload.summary ?? existing?.summary, !summary.isEmpty else {
+            print("Error: Dashboard card summary is required for new cards.")
+            return nil
+        }
+        let topicIDs = resolvedTopicIDs.isEmpty ? (existing?.topicSyncIds ?? []) : resolvedTopicIDs
+        guard !topicIDs.isEmpty else {
+            print("Error: At least one dashboard topic is required for new cards.")
+            return nil
+        }
+
+        let feedback: DashboardCardFeedback?
+        if payload.rating != nil || payload.moreLikeThis != nil || payload.lessLikeThis != nil {
+            var moreLikeThis = payload.moreLikeThis ?? existing?.feedback?.moreLikeThis
+            var lessLikeThis = payload.lessLikeThis ?? existing?.feedback?.lessLikeThis
+            if payload.moreLikeThis == true {
+                lessLikeThis = false
+            }
+            if payload.lessLikeThis == true {
+                moreLikeThis = false
+            }
+            feedback = DashboardCardFeedback(
+                rating: payload.rating ?? existing?.feedback?.rating,
+                moreLikeThis: moreLikeThis,
+                lessLikeThis: lessLikeThis,
+                notInterested: existing?.feedback?.notInterested,
+                note: existing?.feedback?.note,
+                updatedAt: now
+            )
+        } else {
+            feedback = existing?.feedback
+        }
+
+        return DashboardCard(
+            ciderSyncId: payload.ciderSyncId ?? existing?.ciderSyncId,
+            topicSyncIds: topicIDs,
+            title: title,
+            subtitle: payload.subtitle ?? existing?.subtitle,
+            summary: summary,
+            whyItMatters: payload.whyItMatters ?? existing?.whyItMatters,
+            sourceKind: payload.sourceKind.map(DashboardCardSourceKind.init(rawValue:)) ?? existing?.sourceKind ?? .manual,
+            sourceURL: payload.sourceURL ?? existing?.sourceURL,
+            sourceTitle: payload.sourceTitle ?? existing?.sourceTitle,
+            relatedItemSyncId: payload.relatedItemSyncId ?? existing?.relatedItemSyncId,
+            relatedItemType: payload.relatedItemType ?? existing?.relatedItemType,
+            status: payload.status.map(DashboardCardStatus.init(rawValue:)) ?? existing?.status ?? .new,
+            priority: payload.priority.map(DashboardCardPriority.init(rawValue:)) ?? existing?.priority ?? .normal,
+            score: payload.score ?? existing?.score,
+            feedback: feedback,
+            actionState: existing?.actionState,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now,
+            lastSeenAt: existing?.lastSeenAt,
+            dismissedAt: existing?.dismissedAt,
+            deleted: existing?.deleted,
+            deletedAt: existing?.deletedAt
+        )
+    }
+
+    static func mutateDashboardCard(
+        _ ref: String?,
+        storage: DashboardStorage,
+        usage: String,
+        mutation: (DashboardCard) -> Bool
+    ) {
+        guard let ref else {
+            print("Error: Usage: \(usage)")
+            return
+        }
+        guard let card = resolveDashboardCard(ref, storage: storage) else { return }
+        guard mutation(card) else {
+            print("Error: Could not update dashboard card '\(ref)'")
+            return
+        }
+        printDashboardCardResult(resolveDashboardCard(card.ciderSyncId, storage: storage) ?? card)
+    }
+
+    static func printDashboardTopicResult(_ topic: DashboardTopic) {
+        if jsonOutput {
+            outputJSON(dashboardTopicToDict(topic))
+        } else {
+            print("Dashboard topic: \(topic.title) (\(topic.ciderSyncId.prefix(8)))")
+        }
+    }
+
+    static func printDashboardCardResult(_ card: DashboardCard) {
+        if jsonOutput {
+            outputJSON(dashboardCardToDict(card))
+        } else {
+            print("Dashboard card: \(card.title) (\(card.ciderSyncId.prefix(8)))")
+        }
+    }
+
     static func resolveDatabaseBackup(
         _ selector: String,
         in backups: [DatabaseSafetyService.SQLiteBackupInfo]
@@ -5125,6 +5549,21 @@ struct CiderCLI {
           cider-cli board add-column <board> --name <col-name> [--done]
           cider-cli board rename-column <board> --column <col> --to <new-name>
           cider-cli board delete-column <board> --column <col>
+
+        DASHBOARD (alias: dash)
+          cider-cli dashboard topic list [--json]
+          cider-cli dashboard topic upsert --title <title> [--id <id>] [--icon <sf-symbol>] [--position <n>] [--color <token>] [--pinned true|false]
+          cider-cli dashboard topic move <id|title> --position <n>
+          cider-cli dashboard topic archive <id|title>
+          cider-cli dashboard card list [--topic <id|title>] [--include-hidden] [--json]
+          cider-cli dashboard card upsert --json-file <path|-> [--json]
+          cider-cli dashboard card upsert --title <title> --summary <summary> --topic <id|title> [--source-url <url>] [--priority low|normal|high|urgent]
+          cider-cli dashboard card move <card-id> --topic <id|title> [--topic <id|title> ...]
+          cider-cli dashboard card seen <card-id>
+          cider-cli dashboard card dismiss <card-id>
+          cider-cli dashboard card archive <card-id>
+          cider-cli dashboard card delete <card-id>
+          cider-cli dashboard card feedback <card-id> [--more-like-this|--less-like-this|--clear-preference] [--rating 1-5]
 
         LABELS (alias: tag)
           cider-cli label list

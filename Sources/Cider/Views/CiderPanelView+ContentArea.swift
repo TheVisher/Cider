@@ -128,28 +128,32 @@ extension CiderPanelView {
                     if case .kanban(let boardID) = savedView.kind {
                         KanbanBoardView(boardID: boardID)
                     } else if case .dashboard = savedView.kind {
-                        HomeOverviewDashboardView(
-                            snapshot: HomeOverviewDataProvider.makeSnapshot(
-                                items: libraryViewModel.items,
-                                recentItems: libraryViewModel.recentItems,
-                                folders: bookmarksViewModel.folders,
-                                savedViews: savedViewStorage.savedViews,
-                                tabOrder: savedViewStorage.tabOrder,
-                                surfacingDays: CiderConfig.load().dateCardSurfacingDays
-                            ),
-                            onOpenItem: { item in openDashboardItem(item) },
-                            onOpenTarget: { target in openDashboardTarget(target) },
-                            onOpenTab: { tab in openDashboardTab(tab) },
-                            onOpenSettings: {
-                                NotificationCenter.default.post(name: .openCiderSettings, object: nil)
-                            },
-                            onSyncNow: {
-                                SyncService.shared.syncNow()
-                            },
-                            onCreateNew: {
-                                showNewItemPicker = true
-                            }
-                        )
+                        DashboardHubView(onOpenSourceURL: { url in
+                            openURLSafely(url)
+                        }) {
+                            HomeOverviewDashboardView(
+                                snapshot: HomeOverviewDataProvider.makeSnapshot(
+                                    items: libraryViewModel.items,
+                                    recentItems: libraryViewModel.recentItems,
+                                    folders: bookmarksViewModel.folders,
+                                    savedViews: savedViewStorage.savedViews,
+                                    tabOrder: savedViewStorage.tabOrder,
+                                    surfacingDays: CiderConfig.load().dateCardSurfacingDays
+                                ),
+                                onOpenItem: { item in openDashboardItem(item) },
+                                onOpenTarget: { target in openDashboardTarget(target) },
+                                onOpenTab: { tab in openDashboardTab(tab) },
+                                onOpenSettings: {
+                                    NotificationCenter.default.post(name: .openCiderSettings, object: nil)
+                                },
+                                onSyncNow: {
+                                    SyncService.shared.syncNow()
+                                },
+                                onCreateNew: {
+                                    showNewItemPicker = true
+                                }
+                            )
+                        }
                     } else if savedView.isOnboarding {
                         OnboardingTabView(onDismiss: {
                             dismissOnboardingTab(id: id)

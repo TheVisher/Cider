@@ -47,6 +47,15 @@ Legend: Yes = shipped, No = not built, Planned = on roadmap, N/A = not applicabl
 | Hide card details (hover reveal) | Yes | Yes | No |
 | Keyboard shortcuts | Yes | Partial (Cmd+K search, Cmd+B sidebar) | No |
 
+## Dashboard
+
+| Feature | Desktop | Web | iOS |
+|---------|---------|-----|-----|
+| Dashboard main overview | Yes | Planned | No |
+| Dashboard topic/card views | MVP in progress | Planned consumer/editor after schema gate | Later |
+| Dashboard card feedback | MVP in progress | Planned | No |
+| Dashboard run provenance | Stored in MVP | Planned after schema gate | No |
+
 ## Capture & Input
 
 | Feature | Desktop | Web | iOS |

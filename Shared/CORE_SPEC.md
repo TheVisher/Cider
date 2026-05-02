@@ -66,6 +66,7 @@ These conventions must be identical across all three apps:
 | `CORE_SPEC.md` | You're reading it. Ecosystem, data model, design language. |
 | `SYNC.md` | Sync protocol (REST + Convex SDK), auth, request/response schemas, conflict resolution. |
 | `FEATURE_PARITY.md` | What features each app has. Updated regularly. |
+| `DASHBOARD.md` | Shared personal dashboard model, Desktop/Web roles, and schema-gated sync rules. |
 | `CLOUDFLARE_ENRICHMENT.md` | Backend enrichment service, referenced by web repo. |
 
 ### Cross-References

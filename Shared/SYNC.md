@@ -205,6 +205,8 @@ The "Connected Devices" view shows all devices with active sync tokens. Users ca
 
 All three clients sync bookmarks, folders, and notes through Convex. Desktop uses the **Convex Swift SDK** (`ConvexMobile`) over WebSocket, calling Convex actions (`sync:push`, `sync:pull`, etc.) directly. iOS uses the **REST HTTP endpoints** in `http.ts`. Web uses direct Convex mutations and real-time subscriptions (bypassing the REST/action layer entirely).
 
+Dashboard topics, cards, feedback, action state, and runs are not part of sync yet. Desktop persists the first dashboard MVP locally under `.cider/dashboard/_cider_dashboard.json`. Web dashboard work must go through a schema-gate review before changing Convex schema or sync payloads.
+
 ```
 Desktop (macOS)  -- Convex SDK (WebSocket) -->  Convex Backend  <-- REST (HTTP) --  iOS
                                                        ^
