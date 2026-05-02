@@ -11,6 +11,7 @@ struct CiderTabBar: View {
     var onAddTab: (() -> Void)?
     var onReopenTab: ((UUID) -> Void)?
     var onOpenBoard: ((KanbanBoard) -> Void)?
+    var onOpenAIAssistantTab: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var dateCardStorage = DateCardStorage.shared
     @ObservedObject private var savedViewStorage = SavedViewStorage.shared
@@ -182,6 +183,30 @@ struct CiderTabBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            if !tabs.contains(.aiAssistant), let onOpenAIAssistantTab {
+                Divider()
+                    .padding(.vertical, Spacing.xxs)
+
+                Button {
+                    onOpenAIAssistantTab()
+                    showAddTabPopover = false
+                } label: {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "sparkles")
+                            .font(CiderFont.bodyMedium)
+                            .frame(width: Spacing.lg, alignment: .center)
+                        Text("AI Assistant")
+                            .font(CiderFont.body)
+                    }
+                    .foregroundColor(CiderColors.secondary)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
 
             // Boards not yet open as tabs
             let openBoardIDs = Set(savedViewStorage.savedViews.compactMap { sv -> String? in

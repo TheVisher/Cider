@@ -111,7 +111,36 @@ final class AIConversationStorage: ObservableObject {
             ))
         }
 
-        conversations = summaries.sorted { $0.updated > $1.updated }
+        conversations = Self.collapsingDuplicateHermesRuntimeSummaries(summaries)
+            .sorted { $0.updated > $1.updated }
+    }
+
+    static func collapsingDuplicateHermesRuntimeSummaries(
+        _ summaries: [AIConversationSummary]
+    ) -> [AIConversationSummary] {
+        var unkeyed: [AIConversationSummary] = []
+        var keyed: [String: AIConversationSummary] = [:]
+
+        for summary in summaries {
+            guard summary.runtimeID == CiderAgentChatRegistry.hermesRuntimeID,
+                  let activeRuntimeSessionID = summary.activeRuntimeSessionID,
+                  !activeRuntimeSessionID.isEmpty
+            else {
+                unkeyed.append(summary)
+                continue
+            }
+
+            let key = "hermes:\(activeRuntimeSessionID)"
+            if let existing = keyed[key] {
+                if summary.updated > existing.updated {
+                    keyed[key] = summary
+                }
+            } else {
+                keyed[key] = summary
+            }
+        }
+
+        return unkeyed + keyed.values
     }
 
     // MARK: - Save Conversation

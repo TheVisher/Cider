@@ -256,7 +256,7 @@ struct AIAssistantPanelView: View {
     private var titleText: String {
         switch presentationStyle {
         case .embedded, .floatingSurface:
-            return "Main Brain"
+            return viewModel.currentChatTitle
         case .floatingPanel:
             return runtimePillTitle
         }
@@ -368,7 +368,7 @@ struct AIAssistantPanelView: View {
 
                 if viewModel.runtimeSelection == .hermes {
                     Button {
-                        viewModel.syncHermesConversation()
+                        performHermesStatusAction()
                     } label: {
                         HStack(spacing: Spacing.xs) {
                             Image(systemName: hermesSyncIcon)
@@ -429,8 +429,37 @@ struct AIAssistantPanelView: View {
             }
 
             if viewModel.runtimeSelection == .hermes {
+                drawerActionButton(title: "Attach latest Telegram", systemImage: "link") {
+                    viewModel.attachLatestHermesTelegramSession()
+                    showConversationList = false
+                }
+
+                drawerActionButton(title: "Choose existing session", systemImage: "text.cursor") {
+                    promptForHermesSession()
+                    showConversationList = false
+                }
+
+                drawerActionButton(title: "Start fresh Hermes session", systemImage: "plus.message") {
+                    viewModel.startFreshHermesSession()
+                    visibleMessageLimit = 12
+                    showConversationList = false
+                }
+
+                drawerActionButton(title: "Relink session", systemImage: "arrow.triangle.2.circlepath") {
+                    viewModel.relinkMainBrainToActiveHermesSession()
+                    showConversationList = false
+                }
+
                 drawerActionButton(title: "Sync now", systemImage: hermesSyncIcon) {
                     viewModel.syncHermesConversation()
+                    showConversationList = false
+                }
+
+                if isHermesIssueVisible {
+                    drawerActionButton(title: "Clear Hermes error", systemImage: "xmark.circle") {
+                        viewModel.clearHermesError()
+                        showConversationList = false
+                    }
                 }
             }
 
@@ -547,7 +576,7 @@ struct AIAssistantPanelView: View {
 
     private var hermesStatusControl: some View {
         Button {
-            viewModel.syncHermesConversation()
+            performHermesStatusAction()
         } label: {
             HStack(spacing: Spacing.xxs) {
                 Image(systemName: hermesSyncIcon)
@@ -563,7 +592,42 @@ struct AIAssistantPanelView: View {
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isStreaming)
-        .help("Sync Hermes session")
+        .help(viewModel.hermesConversationState == nil ? "Attach latest Hermes session" : "Sync Hermes session")
+    }
+
+    private var isHermesIssueVisible: Bool {
+        switch viewModel.hermesSyncStatus {
+        case .error, .staleSession, .disconnected:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func performHermesStatusAction() {
+        if viewModel.hermesConversationState == nil {
+            viewModel.attachLatestHermesTelegramSession()
+        } else {
+            viewModel.syncHermesConversation()
+        }
+    }
+
+    private func promptForHermesSession() {
+        let alert = NSAlert()
+        alert.messageText = "Choose Hermes Session"
+        alert.informativeText = "Paste an existing Hermes session ID."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Attach")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        input.placeholderString = "20260501_120144_e3d994"
+        alert.accessoryView = input
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let sessionID = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionID.isEmpty else { return }
+        viewModel.attachHermesSession(id: sessionID)
     }
 
     // MARK: - Message List
@@ -1078,8 +1142,10 @@ struct AIAssistantPanelView: View {
 
     private var hermesStatusColor: Color {
         switch viewModel.hermesSyncStatus {
-        case .idle, .syncing, .sending:
+        case .idle, .syncing, .sending, .running(_, _):
             return viewModel.hermesConversationState == nil ? CiderColors.warning : CiderColors.success
+        case .notAttached, .waitingForApproval(_), .staleSession(_), .disconnected(_):
+            return CiderColors.warning
         case .error:
             return CiderColors.destructive
         }
@@ -1087,12 +1153,22 @@ struct AIAssistantPanelView: View {
 
     private var hermesSyncIcon: String {
         switch viewModel.hermesSyncStatus {
+        case .notAttached:
+            return "link"
         case .idle:
             return "arrow.clockwise"
         case .syncing:
             return "arrow.triangle.2.circlepath"
         case .sending:
             return "paperplane"
+        case .running(_, _):
+            return "play.circle"
+        case .waitingForApproval(_):
+            return "checkmark.seal"
+        case .staleSession(_):
+            return "wrench.and.screwdriver"
+        case .disconnected(_):
+            return "wifi.slash"
         case .error:
             return "exclamationmark.triangle"
         }

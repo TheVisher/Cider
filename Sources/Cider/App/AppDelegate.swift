@@ -251,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aiAssistantShadowPanel?.orderOut(nil)
         aiAssistantPanel?.orderOut(nil)
         floatingPanelManager?.closeDropZone()
+        ciderMainWindow?.persistCurrentFrame()
         ciderMainWindow?.orderOut(nil)
         if telegramBridgeStarted {
             Task {

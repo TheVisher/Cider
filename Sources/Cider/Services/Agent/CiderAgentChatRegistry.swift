@@ -24,12 +24,6 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
     static let mainBrainTitle = "Main Brain"
     static let mainBrainKind = "main-brain"
     static let hermesRuntimeID = "hermes"
-    static let seedHermesLineage = [
-        "20260501_045533_cce0d1c1",
-        "20260501_100416_ebff7f",
-        "20260501_114444_443f9e",
-        "20260501_120144_e3d994"
-    ]
 
     private let storageDirectoryURL: URL
     private let fileManager: FileManager
@@ -56,31 +50,31 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         self.decoder = decoder
     }
 
-    func loadOrCreateMainBrain() throws -> CiderAgentChatRecord {
+    func loadMainBrain() throws -> CiderAgentChatRecord? {
         lock.lock()
         defer { lock.unlock() }
 
         try ensureDirectory()
         let url = recordURL(for: Self.mainBrainStableID)
-        if let data = try? Data(contentsOf: url),
-           let record = try? decoder.decode(CiderAgentChatRecord.self, from: data) {
-            return record
-        }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try decoder.decode(CiderAgentChatRecord.self, from: data)
+    }
 
-        let now = Date()
+    func createMainBrain(from state: HermesConversationState) throws -> CiderAgentChatRecord {
+        let now = persistedDate()
         let record = CiderAgentChatRecord(
             stableID: Self.mainBrainStableID,
             title: Self.mainBrainTitle,
             kind: Self.mainBrainKind,
-            conversationID: UUID(),
-            runtimeID: Self.hermesRuntimeID,
-            activeRuntimeSessionID: Self.seedHermesLineage.last ?? "",
-            runtimeSessionLineage: Self.seedHermesLineage,
+            conversationID: state.conversationID,
+            runtimeID: state.runtimeID,
+            activeRuntimeSessionID: state.activeRuntimeSessionID,
+            runtimeSessionLineage: state.runtimeSessionLineage,
             createdAt: now,
             updatedAt: now,
             defaultInCider: true
         )
-        try saveUnlocked(record)
+        try saveMainBrain(record)
         return record
     }
 
@@ -96,17 +90,24 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
     }
 
     func updateMainBrain(from state: HermesConversationState) throws -> CiderAgentChatRecord {
-        var record = try loadOrCreateMainBrain()
+        guard var record = try loadMainBrain() else {
+            return try createMainBrain(from: state)
+        }
+
         record.conversationID = state.conversationID
         record.runtimeID = state.runtimeID
         record.activeRuntimeSessionID = state.activeRuntimeSessionID
-        record.runtimeSessionLineage = mergedLineage(record.runtimeSessionLineage, state.runtimeSessionLineage)
+        record.runtimeSessionLineage = state.runtimeSessionLineage
         record.title = Self.mainBrainTitle
         record.kind = Self.mainBrainKind
         record.defaultInCider = true
-        record.updatedAt = Date()
+        record.updatedAt = persistedDate()
         try saveMainBrain(record)
         return record
+    }
+
+    private func persistedDate() -> Date {
+        Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
     }
 
     private func ensureDirectory() throws {
@@ -125,13 +126,4 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         return storageDirectoryURL.appendingPathComponent("\(filename).json")
     }
 
-    private func mergedLineage(_ existing: [String], _ incoming: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for id in existing + incoming where !id.isEmpty && !seen.contains(id) {
-            result.append(id)
-            seen.insert(id)
-        }
-        return result
-    }
 }

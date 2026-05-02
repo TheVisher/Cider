@@ -9,9 +9,14 @@ enum AIAgentRuntimeSelection: String, Sendable {
 }
 
 enum HermesPanelSyncStatus: Equatable {
+    case notAttached
     case idle
     case syncing
     case sending
+    case running(runID: String?, detail: String?)
+    case waitingForApproval(String?)
+    case staleSession(String)
+    case disconnected(String)
     case error(String)
 }
 
@@ -38,11 +43,14 @@ final class AIAssistantViewModel: ObservableObject {
     @Published private(set) var runtimeHealth: AgentRuntimeHealth = .idle
     @Published private(set) var hermesConversationState: HermesConversationState?
     @Published private(set) var hermesSyncStatus: HermesPanelSyncStatus = .idle
+    @Published private(set) var activeHermesRunID: String?
 
     private let logger = Logger(subsystem: "com.cider.app", category: "AIAssistant")
     private var provider: AIAssistantProvider
     private let storage = AIConversationStorage.shared
     private let hermesSessionService = HermesSessionService()
+    private let hermesBridgeTransport: any HermesBridgeTransport
+    private let hermesTurnCoordinator: HermesTurnCoordinator
     private let agentChatRegistry: CiderAgentChatRegistry
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
@@ -88,8 +96,13 @@ final class AIAssistantViewModel: ObservableObject {
 
     var hermesStatusTitle: String {
         switch hermesSyncStatus {
+        case .notAttached:
+            return "Attach Hermes"
         case .idle:
             guard runtimeSelection == .hermes else { return "" }
+            if hermesConversationState?.activeRuntimeSessionID.isEmpty == true {
+                return "Fresh session"
+            }
             if let lastSyncedAt = hermesConversationState?.lastSyncedAt {
                 let formatter = RelativeDateTimeFormatter()
                 formatter.unitsStyle = .abbreviated
@@ -100,6 +113,14 @@ final class AIAssistantViewModel: ObservableObject {
             return "Syncing..."
         case .sending:
             return "Sending..."
+        case .running(_, let detail):
+            return detail ?? "Hermes is running"
+        case .waitingForApproval(let detail):
+            return detail ?? "Waiting for approval"
+        case .staleSession(let detail):
+            return detail.isEmpty ? "Session needs repair" : detail
+        case .disconnected(let detail):
+            return detail.isEmpty ? "Hermes disconnected" : detail
         case .error(let message):
             return message
         }
@@ -109,7 +130,14 @@ final class AIAssistantViewModel: ObservableObject {
         guard let sessionID = hermesConversationState?.activeRuntimeSessionID else {
             return "No session"
         }
+        guard !sessionID.isEmpty else { return "Fresh" }
         return String(sessionID.suffix(8))
+    }
+
+    var currentChatTitle: String {
+        guard runtimeSelection == .hermes else { return "Main Brain" }
+        if hermesConversationState == nil { return "Hermes" }
+        return currentHermesConversationIsMainBrain() ? CiderAgentChatRegistry.mainBrainTitle : "Hermes Chat"
     }
 
     /// Context window usage (0.0–1.0). Only available for Foundation Models.
@@ -153,11 +181,15 @@ final class AIAssistantViewModel: ObservableObject {
 
     init(
         provider: AIAssistantProvider? = nil,
-        agentChatRegistry: CiderAgentChatRegistry = .shared
+        agentChatRegistry: CiderAgentChatRegistry = .shared,
+        hermesBridgeTransport: any HermesBridgeTransport = HermesRunTransport(),
+        hermesTurnCoordinator: HermesTurnCoordinator = .shared
     ) {
         let initialRuntimeSelection = Self.loadPersistedRuntimeSelection()
         runtimeSelection = initialRuntimeSelection
         self.agentChatRegistry = agentChatRegistry
+        self.hermesBridgeTransport = hermesBridgeTransport
+        self.hermesTurnCoordinator = hermesTurnCoordinator
         if let provider {
             self.provider = provider
         } else if initialRuntimeSelection == .codexCLI {
@@ -332,6 +364,7 @@ final class AIAssistantViewModel: ObservableObject {
 
     func syncHermesConversation() {
         guard runtimeSelection == .hermes,
+              hermesConversationState != nil,
               !isStreaming,
               !hermesSyncInFlight,
               hermesSyncStatus != .syncing,
@@ -339,7 +372,7 @@ final class AIAssistantViewModel: ObservableObject {
               shouldStartHermesSync()
         else { return }
         Task {
-            await syncHermesConversation(attachIfNeeded: true)
+            await syncHermesConversation(attachIfNeeded: false)
         }
     }
 
@@ -350,7 +383,15 @@ final class AIAssistantViewModel: ObservableObject {
 
     private func activateHermesConversation() async {
         do {
-            let mainBrain = try agentChatRegistry.loadOrCreateMainBrain()
+            guard let mainBrain = try agentChatRegistry.loadMainBrain() else {
+                saveCurrentConversation()
+                currentConversationID = currentConversationID ?? UUID()
+                messages = []
+                hermesConversationState = nil
+                hermesSyncStatus = .notAttached
+                return
+            }
+
             saveCurrentConversation()
             currentConversationID = mainBrain.conversationID
             if let loadedMessages = storage.loadMessages(for: mainBrain.conversationID) {
@@ -370,9 +411,104 @@ final class AIAssistantViewModel: ObservableObject {
         } catch {
             logger.error("Failed to load Cider Main Brain: \(error.localizedDescription, privacy: .public)")
             hermesSyncStatus = .error(error.localizedDescription)
+            return
         }
 
-        await syncHermesConversation(attachIfNeeded: true)
+        await syncHermesConversation(attachIfNeeded: false)
+    }
+
+    func attachLatestHermesTelegramSession() {
+        guard runtimeSelection == .hermes, !hermesSyncInFlight, !isStreaming else { return }
+        Task {
+            hermesSyncInFlight = true
+            defer { hermesSyncInFlight = false }
+            hermesSyncStatus = .syncing
+            do {
+                saveCurrentConversation()
+                let conversationID = try mainBrainConversationIDForAttachment()
+                currentConversationID = conversationID
+                let result = try await hermesSessionService.attachLatestTelegramConversation(
+                    conversationID: conversationID
+                )
+                hermesConversationState = result.state
+                persistMainBrainState(result.state)
+                messages = result.messages
+                hermesSyncStatus = .idle
+                saveCurrentConversation()
+                requestScrollToBottom()
+            } catch {
+                logger.error("Hermes attach error: \(error.localizedDescription, privacy: .public)")
+                hermesSyncStatus = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    func attachHermesSession(id sessionID: String) {
+        guard runtimeSelection == .hermes, !hermesSyncInFlight, !isStreaming else { return }
+        Task {
+            hermesSyncInFlight = true
+            defer { hermesSyncInFlight = false }
+            hermesSyncStatus = .syncing
+            do {
+                saveCurrentConversation()
+                let conversationID = try mainBrainConversationIDForAttachment()
+                currentConversationID = conversationID
+                let result = try await hermesSessionService.attachConversation(
+                    sessionID: sessionID,
+                    conversationID: conversationID
+                )
+                hermesConversationState = result.state
+                persistMainBrainState(result.state)
+                messages = result.messages
+                hermesSyncStatus = .idle
+                saveCurrentConversation()
+                requestScrollToBottom()
+            } catch {
+                logger.error("Hermes session attach error: \(error.localizedDescription, privacy: .public)")
+                hermesSyncStatus = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    func relinkMainBrainToActiveHermesSession() {
+        guard runtimeSelection == .hermes,
+              !hermesSyncInFlight,
+              !isStreaming
+        else { return }
+        if hermesConversationState == nil {
+            attachLatestHermesTelegramSession()
+        } else {
+            Task {
+                await syncHermesConversation(attachIfNeeded: false)
+            }
+        }
+    }
+
+    func startFreshHermesSession() {
+        guard runtimeSelection == .hermes, !isStreaming else { return }
+        saveCurrentConversation()
+        let conversationID = UUID()
+        currentConversationID = conversationID
+        messages = []
+        hermesConversationState = HermesConversationState(
+            conversationID: conversationID,
+            activeRuntimeSessionID: "",
+            runtimeSessionLineage: [],
+            title: "Hermes Chat",
+            source: "cider"
+        )
+        hermesSyncStatus = .idle
+        requestScrollToBottom()
+    }
+
+    func clearHermesError() {
+        if case .error = hermesSyncStatus {
+            hermesSyncStatus = hermesConversationState == nil ? .notAttached : .idle
+        } else if case .staleSession = hermesSyncStatus {
+            hermesSyncStatus = hermesConversationState == nil ? .notAttached : .idle
+        } else if case .disconnected = hermesSyncStatus {
+            hermesSyncStatus = hermesConversationState == nil ? .notAttached : .idle
+        }
     }
 
     private func sendViaHermes(_ text: String) {
@@ -381,12 +517,15 @@ final class AIAssistantViewModel: ObservableObject {
             streamingText = ""
             displayedStreamingText = ""
             hasLiveHermesResponseForActiveSend = false
+            activeHermesRunID = nil
             hermesSyncStatus = .sending
             requestScrollToBottom()
             startTypewriterLoop()
 
             do {
-                let state = try await ensureHermesConversationState()
+                let turnID = try await hermesTurnCoordinator.beginTurn()
+                do {
+                let state = try await ensureHermesConversationState(attachIfNeeded: false)
                 let pendingMessage = AIAssistantMessage(
                     role: .user,
                     content: text,
@@ -397,19 +536,30 @@ final class AIAssistantViewModel: ObservableObject {
                 requestScrollToBottom()
 
                 let existingMessages = messages.filter { $0.id != pendingMessage.id }
-                let progressTask = makeHermesSendProgressTask(baseMessages: existingMessages)
-                defer { progressTask.cancel() }
-                let commandState = try await hermesSessionService.runSendCommand(text: text, state: state)
-
-                let result = try await hermesSessionService.sync(
-                    state: commandState,
-                    existingMessages: existingMessages
+                let result = try await hermesBridgeTransport.send(
+                    text: text,
+                    state: state,
+                    existingMessages: existingMessages,
+                    onEvent: { [weak self] event in
+                        await MainActor.run {
+                            self?.applyHermesRunEvent(event)
+                        }
+                    }
                 )
-                applyHermesSyncResult(result, forceMessages: true)
-                hermesSyncStatus = .idle
+                await hermesTurnCoordinator.endTurn(turnID)
+                applyHermesSyncResult(
+                    HermesSyncResult(state: result.state, messages: result.messages),
+                    forceMessages: true
+                )
+                hermesSyncStatus = result.state.activeRuntimeSessionID.isEmpty ? .notAttached : .idle
                 saveCurrentConversation()
+                } catch {
+                    await hermesTurnCoordinator.endTurn(turnID)
+                    throw error
+                }
             } catch is CancellationError {
                 logger.debug("Hermes send cancelled")
+                hermesSyncStatus = hermesConversationState == nil ? .notAttached : .idle
             } catch {
                 logger.error("Hermes send error: \(error.localizedDescription, privacy: .public)")
                 hermesSyncStatus = .error(error.localizedDescription)
@@ -428,8 +578,39 @@ final class AIAssistantViewModel: ObservableObject {
             streamingText = ""
             displayedStreamingText = ""
             hasLiveHermesResponseForActiveSend = false
+            activeHermesRunID = nil
             isStreaming = false
         }
+    }
+
+    private func applyHermesRunEvent(_ event: HermesRunEvent) {
+        switch event {
+        case .runStarted(let runID):
+            activeHermesRunID = runID
+            hermesSyncStatus = .running(runID: runID, detail: nil)
+        case .messageDelta(let delta):
+            streamingText += delta
+            hasLiveHermesResponseForActiveSend = true
+        case .toolStarted(let name, let preview):
+            hermesSyncStatus = .running(runID: activeHermesRunID, detail: preview ?? name)
+        case .toolCompleted:
+            break
+        case .reasoningAvailable(let preview):
+            if !preview.isEmpty {
+                hermesSyncStatus = .running(runID: activeHermesRunID, detail: preview)
+            }
+        case .completed(let output):
+            if !output.isEmpty, streamingText.isEmpty {
+                streamingText = output
+            }
+            hasLiveHermesResponseForActiveSend = true
+            hermesSyncStatus = .idle
+        case .failed(let message):
+            hermesSyncStatus = .error(message)
+        case .cancelled:
+            hermesSyncStatus = hermesConversationState == nil ? .notAttached : .idle
+        }
+        requestScrollToBottom()
     }
 
     private func makeHermesSendProgressTask(baseMessages: [AIAssistantMessage]) -> Task<Void, Never> {
@@ -465,7 +646,7 @@ final class AIAssistantViewModel: ObservableObject {
     private func applyHermesSyncResult(_ result: HermesSyncResult, forceMessages: Bool) {
         let messagesChanged = messages != result.messages
         hermesConversationState = result.state
-        persistMainBrainState(result.state)
+        persistMainBrainStateIfCurrentConversationIsMainBrain(result.state)
 
         if forceMessages, messagesChanged {
             messages = result.messages
@@ -487,11 +668,26 @@ final class AIAssistantViewModel: ObservableObject {
 
         do {
             let state = try await ensureHermesConversationState(attachIfNeeded: attachIfNeeded)
-            let result = try await hermesSessionService.sync(state: state, existingMessages: messages)
+            guard !state.activeRuntimeSessionID.isEmpty else {
+                hermesSyncStatus = .idle
+                return
+            }
+            let result: HermesSyncResult
+            if currentHermesConversationIsMainBrain() {
+                result = try await hermesSessionService.syncMainBrain(
+                    state: state,
+                    existingMessages: messages
+                )
+            } else {
+                result = try await hermesSessionService.sync(
+                    state: state,
+                    existingMessages: messages
+                )
+            }
             let messagesChanged = messages != result.messages
             let stateChanged = hasDurableHermesStateChange(from: hermesConversationState, to: result.state)
             hermesConversationState = result.state
-            persistMainBrainState(result.state)
+            persistMainBrainStateIfCurrentConversationIsMainBrain(result.state)
             if messagesChanged {
                 messages = result.messages
             }
@@ -501,7 +697,18 @@ final class AIAssistantViewModel: ObservableObject {
             }
         } catch {
             logger.error("Hermes sync error: \(error.localizedDescription, privacy: .public)")
-            hermesSyncStatus = .error(error.localizedDescription)
+            if let hermesError = error as? HermesSessionClientError {
+                switch hermesError {
+                case .sessionNotFound:
+                    hermesSyncStatus = .staleSession(error.localizedDescription)
+                case .stateDatabaseUnavailable:
+                    hermesSyncStatus = .disconnected(error.localizedDescription)
+                default:
+                    hermesSyncStatus = .error(error.localizedDescription)
+                }
+            } else {
+                hermesSyncStatus = .error(error.localizedDescription)
+            }
         }
     }
 
@@ -519,8 +726,27 @@ final class AIAssistantViewModel: ObservableObject {
             return hermesConversationState
         }
 
+        if let mainBrain = try agentChatRegistry.loadMainBrain() {
+            saveCurrentConversation()
+            currentConversationID = mainBrain.conversationID
+            if let loadedMessages = storage.loadMessages(for: mainBrain.conversationID) {
+                messages = loadedMessages
+            }
+            let state = HermesConversationState(
+                conversationID: mainBrain.conversationID,
+                runtimeID: mainBrain.runtimeID,
+                activeRuntimeSessionID: mainBrain.activeRuntimeSessionID,
+                runtimeSessionLineage: mainBrain.runtimeSessionLineage,
+                title: mainBrain.title,
+                source: nil,
+                lastSyncedAt: nil
+            )
+            hermesConversationState = state
+            return state
+        }
+
         guard attachIfNeeded, let conversationID = currentConversationID else {
-            throw HermesSessionClientError.sessionNotFound("active Cider conversation")
+            throw HermesSessionClientError.sessionNotFound("Cider Main Brain is not attached to Hermes")
         }
 
         let result = try await hermesSessionService.attachLatestTelegramConversation(
@@ -727,12 +953,18 @@ final class AIAssistantViewModel: ObservableObject {
         streamTask = nil
         typewriterTask?.cancel()
         typewriterTask = nil
+        if runtimeSelection == .hermes, let runID = activeHermesRunID {
+            Task {
+                try? await hermesBridgeTransport.stop(runID: runID)
+            }
+        }
         if runtimeSelection != .hermes, !streamingText.isEmpty {
             let partialMessage = AIAssistantMessage(role: .assistant, content: streamingText)
             messages.append(partialMessage)
         }
         streamingText = ""
         displayedStreamingText = ""
+        activeHermesRunID = nil
         isStreaming = false
         saveCurrentConversation()
     }
@@ -781,6 +1013,26 @@ final class AIAssistantViewModel: ObservableObject {
         } catch {
             logger.error("Failed to persist Cider Main Brain: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func persistMainBrainStateIfCurrentConversationIsMainBrain(_ state: HermesConversationState) {
+        guard currentHermesConversationIsMainBrain() else { return }
+        persistMainBrainState(state)
+    }
+
+    private func mainBrainConversationIDForAttachment() throws -> UUID {
+        if let mainBrain = try agentChatRegistry.loadMainBrain() {
+            return mainBrain.conversationID
+        }
+        return UUID()
+    }
+
+    private func currentHermesConversationIsMainBrain() -> Bool {
+        guard runtimeSelection == .hermes,
+              let currentConversationID,
+              let mainBrain = try? agentChatRegistry.loadMainBrain()
+        else { return false }
+        return mainBrain.conversationID == currentConversationID
     }
 
     /// Load a previous conversation by ID.

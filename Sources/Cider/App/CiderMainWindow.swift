@@ -6,12 +6,15 @@ final class CiderMainWindow: NSWindow {
     /// Updated by CiderPanelShell when sidebar visibility changes.
     var isSidebarCurrentlyVisible = true
 
+    private let frameStore: CiderMainWindowFrameStore
+    private var shouldPersistFrame = false
     private var dragStartOrigin: NSPoint?
     private var dragStartMouse: NSPoint?
     private var isDragging = false
     private var dragExclusionRects: [String: NSRect] = [:]
 
-    init() {
+    init(frameStore: CiderMainWindowFrameStore = .shared) {
+        self.frameStore = frameStore
         let initialFrame = NSRect(x: 0, y: 0, width: 1180, height: 760)
 
         super.init(
@@ -28,23 +31,50 @@ final class CiderMainWindow: NSWindow {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFrameDidChange),
+            name: NSWindow.didMoveNotification,
+            object: self
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFrameDidChange),
+            name: NSWindow.didResizeNotification,
+            object: self
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
     func showCentered() {
-        let targetScreen = screenContainingMouse() ?? NSScreen.main
+        if !restoreSavedFrameIfAvailable() {
+            let targetScreen = screenContainingMouse() ?? NSScreen.main
 
-        if frame.origin == .zero || !isVisible(frame, on: targetScreen) {
-            center(on: targetScreen)
-        } else if let clampedFrame = frameClampedToVisibleScreen(frame, screen: targetScreen) {
-            setFrame(clampedFrame, display: true)
+            if frame.origin == .zero || !isVisible(frame, on: targetScreen) {
+                center(on: targetScreen)
+            } else if let clampedFrame = frameClampedToVisibleScreen(frame, screen: targetScreen) {
+                setFrame(clampedFrame, display: true)
+            }
         }
         if isMiniaturized {
             deminiaturize(nil)
         }
+        shouldPersistFrame = true
+        persistCurrentFrame()
         makeKeyAndOrderFront(nil)
+    }
+
+    func persistCurrentFrame() {
+        guard shouldPersistFrame, CiderConfig.load().rememberPanelPosition else { return }
+        let targetScreen = screen ?? CiderFloatingPanelPlacement.preferredScreen(for: frame)
+        frameStore.save(frame: frame, screen: targetScreen)
     }
 
     override func sendEvent(_ event: NSEvent) {
@@ -188,9 +218,40 @@ final class CiderMainWindow: NSWindow {
         setFrame(centeredFrame, display: true)
     }
 
+    private func restoreSavedFrameIfAvailable() -> Bool {
+        guard CiderConfig.load().rememberPanelPosition,
+              let snapshot = frameStore.snapshot() else {
+            return false
+        }
+
+        let targetScreen = screen(matching: snapshot.screenKey)
+            ?? CiderFloatingPanelPlacement.preferredScreen(for: snapshot.frame.rect)
+            ?? screenContainingMouse()
+            ?? NSScreen.main
+        guard let targetScreen else { return false }
+
+        let restoredFrame = CiderMainWindowPlacement.restoredFrame(
+            snapshot.frame.rect,
+            savedScreenVisibleFrame: snapshot.screenVisibleFrame.rect,
+            targetVisibleFrame: targetScreen.visibleFrame,
+            minimumSize: minSize
+        )
+        setFrame(restoredFrame, display: true)
+        return true
+    }
+
+    private func screen(matching key: String?) -> NSScreen? {
+        guard let key else { return nil }
+        return NSScreen.screens.first { CiderMainWindowFrameStore.screenKey(for: $0) == key }
+    }
+
     private func screenContainingMouse() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
+    }
+
+    @objc private func handleFrameDidChange() {
+        persistCurrentFrame()
     }
 }
 

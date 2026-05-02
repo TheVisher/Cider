@@ -35,6 +35,7 @@ struct HermesSessionContinuation: Equatable, Sendable {
     let lineage: [String]
     let title: String?
     let source: String?
+    let startedAt: Double
 }
 
 struct HermesTranscript: Equatable, Sendable {
@@ -114,8 +115,24 @@ struct HermesSessionContinuationResolver {
             activeSessionID: active.id,
             lineage: lineage,
             title: active.title,
-            source: active.source
+            source: active.source,
+            startedAt: active.startedAt
         )
+    }
+
+    func latestSession(source preferredSource: String, newerThan sessionID: String) throws -> HermesSessionContinuation? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        }
+        defer { sqlite3_close(db) }
+
+        guard let current = try sessionRecord(id: sessionID, db: db),
+              let latest = try latestSessionRecord(source: preferredSource, db: db),
+              latest.startedAt > current.startedAt
+        else { return nil }
+
+        return try resolveContinuation(from: latest.id)
     }
 
     func latestSession(source preferredSource: String? = "telegram") throws -> HermesSessionContinuation? {
@@ -136,7 +153,7 @@ struct HermesSessionContinuationResolver {
 
     private func sessionRecord(id: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
         var stmt: OpaquePointer?
-        let sql = "SELECT id, source, title FROM sessions WHERE id = ? LIMIT 1;"
+        let sql = "SELECT id, source, title, started_at FROM sessions WHERE id = ? LIMIT 1;"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw HermesSessionClientError.sqlitePrepare(errorMessage(db))
         }
@@ -155,7 +172,7 @@ struct HermesSessionContinuationResolver {
     private func newestChild(of sessionID: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
         var stmt: OpaquePointer?
         let sql = """
-        SELECT id, source, title
+        SELECT id, source, title, started_at
         FROM sessions
         WHERE parent_session_id = ?
         ORDER BY started_at DESC
@@ -181,14 +198,14 @@ struct HermesSessionContinuationResolver {
         let sql: String
         if source == nil {
             sql = """
-            SELECT id, source, title
+            SELECT id, source, title, started_at
             FROM sessions
             ORDER BY started_at DESC
             LIMIT 1;
             """
         } else {
             sql = """
-            SELECT id, source, title
+            SELECT id, source, title, started_at
             FROM sessions
             WHERE source = ?
             ORDER BY started_at DESC
@@ -292,10 +309,25 @@ enum HermesTranscriptMerger {
         incoming: [HermesTranscriptMessage]
     ) -> [AIAssistantMessage] {
         var seen = Set(existing.compactMap(\.sourceID))
+        var seenLiveExportFingerprints: [String: Set<HermesMessageSourceStyle>] = [:]
+        for message in existing {
+            guard let fingerprint = liveExportFingerprint(for: message),
+                  let style = HermesMessageSourceStyle(sourceID: message.sourceID)
+            else { continue }
+            seenLiveExportFingerprints[fingerprint, default: []].insert(style)
+        }
         var merged = existing
 
         for message in incoming.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard !seen.contains(message.externalID) else { continue }
+            let style = HermesMessageSourceStyle(sourceID: message.externalID)
+            let fingerprint = liveExportFingerprint(for: message)
+            if let style,
+               let fingerprint,
+               seenLiveExportFingerprints[fingerprint]?.contains(style.counterpart) == true {
+                continue
+            }
+
             merged.append(AIAssistantMessage(
                 role: message.role,
                 content: message.content,
@@ -306,9 +338,76 @@ enum HermesTranscriptMerger {
                 attachments: message.attachments
             ))
             seen.insert(message.externalID)
+            if let style, let fingerprint {
+                seenLiveExportFingerprints[fingerprint, default: []].insert(style)
+            }
         }
 
         return merged
+    }
+
+    private static func liveExportFingerprint(for message: AIAssistantMessage) -> String? {
+        guard let sourceSessionID = message.sourceSessionID,
+              HermesMessageSourceStyle(sourceID: message.sourceID) != nil
+        else { return nil }
+        return liveExportFingerprint(
+            sourceSessionID: sourceSessionID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func liveExportFingerprint(for message: HermesTranscriptMessage) -> String? {
+        guard HermesMessageSourceStyle(sourceID: message.externalID) != nil else { return nil }
+        return liveExportFingerprint(
+            sourceSessionID: message.sourceSessionID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func liveExportFingerprint(
+        sourceSessionID: String,
+        role: AIAssistantMessage.Role,
+        content: String,
+        attachmentCount: Int
+    ) -> String {
+        let normalizedContent = content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return [
+            sourceSessionID,
+            role.rawValue,
+            normalizedContent,
+            String(attachmentCount)
+        ].joined(separator: "|")
+    }
+}
+
+private enum HermesMessageSourceStyle: Hashable {
+    case export
+    case live
+
+    init?(sourceID: String?) {
+        guard let sourceID else { return nil }
+        if sourceID.hasPrefix("hermes-live:") {
+            self = .live
+        } else if sourceID.hasPrefix("hermes:") {
+            self = .export
+        } else {
+            return nil
+        }
+    }
+
+    var counterpart: HermesMessageSourceStyle {
+        switch self {
+        case .export:
+            return .live
+        case .live:
+            return .export
+        }
     }
 }
 
@@ -339,27 +438,64 @@ final class HermesSessionService: @unchecked Sendable {
         return try await sync(state: state, existingMessages: [])
     }
 
+    func attachConversation(
+        sessionID: String,
+        conversationID: UUID = UUID()
+    ) async throws -> HermesSyncResult {
+        let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSessionID.isEmpty else {
+            throw HermesSessionClientError.sessionNotFound("empty session id")
+        }
+        let continuation = try resolver.resolveContinuation(from: trimmedSessionID)
+        let state = HermesConversationState(
+            conversationID: conversationID,
+            activeRuntimeSessionID: continuation.activeSessionID,
+            runtimeSessionLineage: continuation.lineage,
+            title: continuation.title,
+            source: continuation.source
+        )
+        return try await sync(state: state, existingMessages: [])
+    }
+
     func sync(
         state: HermesConversationState,
         existingMessages: [AIAssistantMessage]
     ) async throws -> HermesSyncResult {
         let continuation = try resolver.resolveContinuation(from: state.activeRuntimeSessionID)
-        let transcriptData = try await runner.runHermes(arguments: [
-            "sessions", "export",
-            "--session-id", continuation.activeSessionID,
-            "-"
-        ])
-        let transcript = try HermesTranscriptParser.parse(transcriptData)
+        let transcript = try await transcript(for: continuation)
         let merged = HermesTranscriptMerger.merge(existing: existingMessages, incoming: transcript.messages)
 
         var nextState = state
         nextState.activeRuntimeSessionID = continuation.activeSessionID
-        nextState.runtimeSessionLineage = mergedLineage(state.runtimeSessionLineage, continuation.lineage)
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
         nextState.title = transcript.title ?? continuation.title ?? state.title
         nextState.source = transcript.source ?? continuation.source ?? state.source
         nextState.lastSyncedAt = Date()
 
         return HermesSyncResult(state: nextState, messages: merged)
+    }
+
+    func syncMainBrain(
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage]
+    ) async throws -> HermesSyncResult {
+        var stateToSync = state
+        if let latestTelegram = try resolver.latestSession(
+            source: "telegram",
+            newerThan: state.activeRuntimeSessionID
+        ) {
+            stateToSync.activeRuntimeSessionID = latestTelegram.activeSessionID
+            stateToSync.runtimeSessionLineage = reconciledLineage(
+                existing: state.runtimeSessionLineage,
+                continuation: latestTelegram.lineage
+            )
+            stateToSync.title = latestTelegram.title ?? state.title
+            stateToSync.source = latestTelegram.source ?? state.source
+        }
+        return try await sync(state: stateToSync, existingMessages: existingMessages)
     }
 
     func send(
@@ -372,6 +508,10 @@ final class HermesSessionService: @unchecked Sendable {
     }
 
     func runSendCommand(text: String, state: HermesConversationState) async throws -> HermesConversationState {
+        if state.activeRuntimeSessionID.isEmpty {
+            return try await runNewSessionCommand(text: text, state: state)
+        }
+
         let continuation = try resolver.resolveContinuation(from: state.activeRuntimeSessionID)
         _ = try await runner.runHermes(arguments: [
             "chat",
@@ -382,7 +522,34 @@ final class HermesSessionService: @unchecked Sendable {
 
         var nextState = state
         nextState.activeRuntimeSessionID = continuation.activeSessionID
-        nextState.runtimeSessionLineage = mergedLineage(state.runtimeSessionLineage, continuation.lineage)
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
+        return nextState
+    }
+
+    private func runNewSessionCommand(text: String, state: HermesConversationState) async throws -> HermesConversationState {
+        let source = state.source?.isEmpty == false ? state.source! : "cider"
+        _ = try await runner.runHermes(arguments: [
+            "chat",
+            "--query", text,
+            "--quiet",
+            "--source", source
+        ], timeout: 180)
+
+        guard let continuation = try resolver.latestSession(source: source) else {
+            throw HermesSessionClientError.sessionNotFound("new \(source) session")
+        }
+
+        var nextState = state
+        nextState.activeRuntimeSessionID = continuation.activeSessionID
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
+        nextState.title = continuation.title ?? state.title
+        nextState.source = continuation.source ?? state.source
         return nextState
     }
 
@@ -401,7 +568,10 @@ final class HermesSessionService: @unchecked Sendable {
 
         var nextState = state
         nextState.activeRuntimeSessionID = continuation.activeSessionID
-        nextState.runtimeSessionLineage = mergedLineage(state.runtimeSessionLineage, continuation.lineage)
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
         nextState.title = transcript.title ?? continuation.title ?? state.title
         nextState.source = transcript.source ?? continuation.source ?? state.source
         nextState.lastSyncedAt = Date()
@@ -409,14 +579,37 @@ final class HermesSessionService: @unchecked Sendable {
         return HermesSyncResult(state: nextState, messages: merged)
     }
 
-    private func mergedLineage(_ existing: [String], _ incoming: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for id in existing + incoming where !seen.contains(id) {
-            result.append(id)
-            seen.insert(id)
+    private func reconciledLineage(existing: [String], continuation: [String]) -> [String] {
+        guard let continuationHead = continuation.first else { return [] }
+        guard let overlap = existing.firstIndex(of: continuationHead) else {
+            return continuation
         }
-        return result
+        return Array(existing.prefix(through: overlap)) + continuation.dropFirst()
+    }
+
+    private func transcript(for continuation: HermesSessionContinuation) async throws -> HermesTranscript {
+        let transcriptData = try await runner.runHermes(arguments: [
+            "sessions", "export",
+            "--session-id", continuation.activeSessionID,
+            "-"
+        ])
+        let exported = try HermesTranscriptParser.parse(transcriptData)
+        if !exported.messages.isEmpty {
+            return exported
+        }
+
+        let sessionFileURL = HermesPaths.sessionFileURL(sessionID: continuation.activeSessionID)
+        guard let sessionFileData = try? Data(contentsOf: sessionFileURL),
+              let liveTranscript = try? HermesTranscriptParser.parseSessionFile(
+                sessionFileData,
+                sessionID: continuation.activeSessionID
+              ),
+              !liveTranscript.messages.isEmpty
+        else {
+            return exported
+        }
+
+        return liveTranscript
     }
 }
 
@@ -573,11 +766,13 @@ private struct HermesSessionRecord {
     let id: String
     let source: String?
     let title: String?
+    let startedAt: Double
 
     init(stmt: OpaquePointer?) {
         id = String(cString: sqlite3_column_text(stmt, 0))
         source = Self.optionalString(stmt, 1)
         title = Self.optionalString(stmt, 2)
+        startedAt = sqlite3_column_double(stmt, 3)
     }
 
     private static func optionalString(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
