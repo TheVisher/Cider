@@ -238,6 +238,112 @@ struct HermesSessionClientTests {
         #expect(result.messages.map(\.content) == ["sent from telegram"])
     }
 
+    @Test("main brain sync imports updated Telegram lineage without leaving active Cider child")
+    func mainBrainSyncImportsUpdatedTelegramLineageWithoutLeavingActiveCiderChild() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "telegram-parent",
+            parent: nil,
+            source: "telegram",
+            title: "Main Brain Telegram",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "cider-child",
+            parent: "telegram-parent",
+            source: "cli",
+            title: "Main Brain Cider",
+            startedAt: 200,
+            dbURL: dbURL
+        )
+
+        let runner = MappingHermesRunner(exports: [
+            "cider-child": Data("""
+            {
+              "id": "cider-child",
+              "source": "cli",
+              "title": "Main Brain Cider",
+              "messages": [
+                {
+                  "id": 1,
+                  "session_id": "cider-child",
+                  "role": "assistant",
+                  "content": "copied parent answer",
+                  "timestamp": 1777662105.25
+                }
+              ]
+            }
+            """.utf8),
+            "telegram-parent": Data("""
+            {
+              "id": "telegram-parent",
+              "source": "telegram",
+              "title": "Main Brain Telegram",
+              "messages": [
+                {
+                  "id": 1,
+                  "session_id": "telegram-parent",
+                  "role": "assistant",
+                  "content": "copied parent answer",
+                  "timestamp": 1777662105.25
+                },
+                {
+                  "id": 2,
+                  "session_id": "telegram-parent",
+                  "role": "user",
+                  "content": "new telegram question",
+                  "timestamp": 1777662205.25
+                },
+                {
+                  "id": 3,
+                  "session_id": "telegram-parent",
+                  "role": "assistant",
+                  "content": "new telegram answer",
+                  "timestamp": 1777662206.25
+                }
+              ]
+            }
+            """.utf8)
+        ])
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let state = HermesConversationState(
+            activeRuntimeSessionID: "cider-child",
+            runtimeSessionLineage: ["telegram-parent", "cider-child"],
+            title: "Main Brain",
+            source: "cli"
+        )
+        let existing = [
+            AIAssistantMessage(
+                role: .assistant,
+                content: "copied parent answer",
+                sourceID: "hermes:cider-child:1",
+                sourceSessionID: "cider-child",
+                sourceName: "Hermes"
+            )
+        ]
+
+        let result = try await service.syncMainBrain(state: state, existingMessages: existing)
+
+        #expect(result.state.activeRuntimeSessionID == "cider-child")
+        #expect(result.state.runtimeSessionLineage == ["telegram-parent", "cider-child"])
+        #expect(result.messages.map(\.content) == [
+            "copied parent answer",
+            "new telegram question",
+            "new telegram answer"
+        ])
+        #expect(result.messages.map(\.sourceSessionID) == [
+            "cider-child",
+            "telegram-parent",
+            "telegram-parent"
+        ])
+    }
+
     @Test("transcript parser imports chat messages and skips tool rows")
     func transcriptParserImportsChatMessagesAndSkipsToolRows() throws {
         let json = """
@@ -451,6 +557,45 @@ struct HermesSessionClientTests {
         #expect(merged.map(\.sourceID) == ["hermes:session-a:41", "hermes:session-a:42"])
     }
 
+    @Test("message merge deduplicates copied Hermes rows across lineage sessions")
+    func messageMergeDeduplicatesCopiedHermesRowsAcrossLineageSessions() {
+        let existing = [
+            AIAssistantMessage(
+                role: .assistant,
+                content: "same copied answer",
+                sourceID: "hermes:cider-child:42",
+                sourceSessionID: "cider-child",
+                sourceName: "Hermes"
+            )
+        ]
+        let incoming = [
+            HermesTranscriptMessage(
+                externalID: "hermes:telegram-parent:42",
+                sourceSessionID: "telegram-parent",
+                role: .assistant,
+                content: "same copied answer",
+                attachments: [],
+                timestamp: Date(timeIntervalSince1970: 11)
+            ),
+            HermesTranscriptMessage(
+                externalID: "hermes:telegram-parent:43",
+                sourceSessionID: "telegram-parent",
+                role: .assistant,
+                content: "same copied answer",
+                attachments: [],
+                timestamp: Date(timeIntervalSince1970: 12)
+            )
+        ]
+
+        let merged = HermesTranscriptMerger.merge(existing: existing, incoming: incoming)
+
+        #expect(merged.count == 2)
+        #expect(merged.map(\.sourceID) == [
+            "hermes:cider-child:42",
+            "hermes:telegram-parent:43"
+        ])
+    }
+
     private func makeHermesStateDB(at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -537,6 +682,23 @@ private struct StubHermesRunner: HermesCommandRunning {
 
     func runHermes(arguments: [String], timeout: TimeInterval) async throws -> Data {
         try await onRun?(arguments)
+        return data
+    }
+}
+
+private struct MappingHermesRunner: HermesCommandRunning {
+    let exports: [String: Data]
+
+    func runHermes(arguments: [String], timeout: TimeInterval) async throws -> Data {
+        #expect(arguments.count == 5)
+        #expect(arguments[0] == "sessions")
+        #expect(arguments[1] == "export")
+        #expect(arguments[2] == "--session-id")
+        #expect(arguments[4] == "-")
+
+        guard let data = exports[arguments[3]] else {
+            throw HermesSessionClientError.sessionNotFound(arguments[3])
+        }
         return data
     }
 }

@@ -151,6 +151,26 @@ struct HermesSessionContinuationResolver {
         return try resolveContinuation(from: any.id)
     }
 
+    func sessionIDs(source preferredSource: String, in sessionIDs: [String]) throws -> [String] {
+        guard !sessionIDs.isEmpty else { return [] }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        }
+        defer { sqlite3_close(db) }
+
+        var matching = Set<String>()
+        for sessionID in sessionIDs {
+            guard let record = try sessionRecord(id: sessionID, db: db),
+                  record.source == preferredSource
+            else { continue }
+            matching.insert(record.id)
+        }
+
+        return sessionIDs.filter { matching.contains($0) }
+    }
+
     private func sessionRecord(id: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
         var stmt: OpaquePointer?
         let sql = "SELECT id, source, title, started_at FROM sessions WHERE id = ? LIMIT 1;"
@@ -310,11 +330,20 @@ enum HermesTranscriptMerger {
     ) -> [AIAssistantMessage] {
         var seen = Set(existing.compactMap(\.sourceID))
         var seenLiveExportFingerprints: [String: Set<HermesMessageSourceStyle>] = [:]
+        var seenLineageCopyFingerprints = Set<String>()
         for message in existing {
             guard let fingerprint = liveExportFingerprint(for: message),
                   let style = HermesMessageSourceStyle(sourceID: message.sourceID)
-            else { continue }
+            else {
+                if let fingerprint = lineageCopyFingerprint(for: message) {
+                    seenLineageCopyFingerprints.insert(fingerprint)
+                }
+                continue
+            }
             seenLiveExportFingerprints[fingerprint, default: []].insert(style)
+            if let fingerprint = lineageCopyFingerprint(for: message) {
+                seenLineageCopyFingerprints.insert(fingerprint)
+            }
         }
         var merged = existing
 
@@ -325,6 +354,11 @@ enum HermesTranscriptMerger {
             if let style,
                let fingerprint,
                seenLiveExportFingerprints[fingerprint]?.contains(style.counterpart) == true {
+                continue
+            }
+            let lineageCopyFingerprint = lineageCopyFingerprint(for: message)
+            if let lineageCopyFingerprint,
+               seenLineageCopyFingerprints.contains(lineageCopyFingerprint) {
                 continue
             }
 
@@ -341,9 +375,60 @@ enum HermesTranscriptMerger {
             if let style, let fingerprint {
                 seenLiveExportFingerprints[fingerprint, default: []].insert(style)
             }
+            if let lineageCopyFingerprint {
+                seenLineageCopyFingerprints.insert(lineageCopyFingerprint)
+            }
         }
 
         return merged
+    }
+
+    private static func lineageCopyFingerprint(for message: AIAssistantMessage) -> String? {
+        lineageCopyFingerprint(
+            sourceID: message.sourceID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func lineageCopyFingerprint(for message: HermesTranscriptMessage) -> String? {
+        lineageCopyFingerprint(
+            sourceID: message.externalID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func lineageCopyFingerprint(
+        sourceID: String?,
+        role: AIAssistantMessage.Role,
+        content: String,
+        attachmentCount: Int
+    ) -> String? {
+        guard HermesMessageSourceStyle(sourceID: sourceID) == .export,
+              let messageID = hermesMessageID(sourceID: sourceID),
+              !messageID.hasPrefix("line-")
+        else { return nil }
+
+        let normalizedContent = content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return [
+            messageID,
+            role.rawValue,
+            normalizedContent,
+            String(attachmentCount)
+        ].joined(separator: "|")
+    }
+
+    private static func hermesMessageID(sourceID: String?) -> String? {
+        guard let sourceID,
+              sourceID.hasPrefix("hermes:"),
+              let separatorIndex = sourceID.lastIndex(of: ":")
+        else { return nil }
+        return String(sourceID[sourceID.index(after: separatorIndex)...])
     }
 
     private static func liveExportFingerprint(for message: AIAssistantMessage) -> String? {
@@ -495,7 +580,22 @@ final class HermesSessionService: @unchecked Sendable {
             stateToSync.title = latestTelegram.title ?? state.title
             stateToSync.source = latestTelegram.source ?? state.source
         }
-        return try await sync(state: stateToSync, existingMessages: existingMessages)
+
+        let synced = try await sync(state: stateToSync, existingMessages: existingMessages)
+        let supplementalSessionIDs = try resolver.sessionIDs(
+            source: "telegram",
+            in: synced.state.runtimeSessionLineage
+        ).filter { $0 != synced.state.activeRuntimeSessionID }
+
+        guard !supplementalSessionIDs.isEmpty else { return synced }
+
+        var merged = synced.messages
+        for sessionID in supplementalSessionIDs {
+            let transcript = try await transcript(sessionID: sessionID)
+            merged = HermesTranscriptMerger.merge(existing: merged, incoming: transcript.messages)
+        }
+
+        return HermesSyncResult(state: synced.state, messages: merged)
     }
 
     func send(
@@ -588,9 +688,13 @@ final class HermesSessionService: @unchecked Sendable {
     }
 
     private func transcript(for continuation: HermesSessionContinuation) async throws -> HermesTranscript {
+        try await transcript(sessionID: continuation.activeSessionID)
+    }
+
+    private func transcript(sessionID: String) async throws -> HermesTranscript {
         let transcriptData = try await runner.runHermes(arguments: [
             "sessions", "export",
-            "--session-id", continuation.activeSessionID,
+            "--session-id", sessionID,
             "-"
         ])
         let exported = try HermesTranscriptParser.parse(transcriptData)
@@ -598,11 +702,11 @@ final class HermesSessionService: @unchecked Sendable {
             return exported
         }
 
-        let sessionFileURL = HermesPaths.sessionFileURL(sessionID: continuation.activeSessionID)
+        let sessionFileURL = HermesPaths.sessionFileURL(sessionID: sessionID)
         guard let sessionFileData = try? Data(contentsOf: sessionFileURL),
               let liveTranscript = try? HermesTranscriptParser.parseSessionFile(
                 sessionFileData,
-                sessionID: continuation.activeSessionID
+                sessionID: sessionID
               ),
               !liveTranscript.messages.isEmpty
         else {
