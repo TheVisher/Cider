@@ -13,13 +13,14 @@
 
 ```
 1. Is it a URL?
-   → Is it a restaurant/food place?     → Food/Restaurants/{Cuisine}/
+   → Is it a restaurant/food place?     → Food/Restaurants/{City}/
    → Is it a recipe?                     → Food/Recipes/
    → Is it a product/shopping link?      → Life/Shopping/
    → Is it a game/gaming related?        → Hobbies/Gaming/
    → Is it a tech tool/tutorial?         → Tech/{Topic}/
-   → Is it a travel destination?         → Life/Travel/
-   → Is it a wallpaper/design asset?     → Hobbies/Wallpapers/ or Hobbies/Design Inspiration/
+   → Is it a travel destination?         → Life/Travel/ or Trip ideas/
+   → Is it a movie/TV/watchlist item?     → Media/Movies/ or Media/TV Shows/
+   → Is it a wallpaper/design asset?     → Wallpapers/ or Personal/Wallpapers/
    → Can't tell?                         → Inbox/Bookmarks/
 
 2. Is it a note/text?
@@ -61,9 +62,18 @@ The agent uses these to decide quickly:
 Restaurants are common enough to deserve specific rules:
 
 1. Extract: name, cuisine type, city/neighborhood
-2. Route to: `Food/Restaurants/{Cuisine}/{Restaurant Name}.webloc`
-3. If cuisine is unclear, use `Food/Restaurants/` directly
-4. Cuisine subfolders: `Chinese`, `Japanese`, `Korean`, `Thai`, `Vietnamese`, `Indian`, `Mexican`, `Italian`, `American`, `Burgers`, `Coffee`, `Desserts`, `Seafood` — create others as needed
+2. Route to: `Food/Restaurants/{City}/{Restaurant Name}.webloc` when the city is known
+3. If city is unclear, use `Food/Restaurants/` directly or `Inbox/Bookmarks/` if the item still needs triage
+4. Cuisine belongs in metadata/tags unless the live vault taxonomy explicitly contains cuisine folders. Do not create cuisine folders just because a restaurant has a cuisine.
+
+## Media / Watchlist Routing
+
+IMDb, Letterboxd, trailer posts, and explicit movie/TV recommendations should route to media folders when the item type is clear:
+
+1. Movies → `Media/Movies/{Title}.webloc`
+2. TV series / shows → `Media/TV Shows/{Title}.webloc`
+3. Ambiguous entertainment links where movie vs TV is unclear → `Inbox/Bookmarks/` until clarified
+4. Do not mix image/media-file storage with watchlist bookmarks: `Inbox/Images` and other file Inbox folders are for captured files; `Media/Movies` and `Media/TV Shows` are for watchlist/reference bookmarks.
 
 ## Person Routing
 
@@ -99,8 +109,8 @@ Restaurants are common enough to deserve specific rules:
 
 ### "Here's a great Chinese restaurant in Bellevue"
 → oEmbed/fetch metadata
-→ `Food/Restaurants/Chinese/{Name}.webloc`
-→ Sidecar with notes, city, cuisine, source
+→ `Food/Restaurants/Bellevue/{Name}.webloc`
+→ Metadata/tags with cuisine, city, source
 
 ### "Ashley's shoe size is 8.5"
 → Check `People/Ashley/profile.md`

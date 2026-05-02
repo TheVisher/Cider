@@ -54,11 +54,10 @@ extension CiderPanelView {
 
     func openNoteDetail(_ note: Note) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isDetailOpen { saveBookmarkDetails() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
         let wasExpanded = isAnyDetailOpen
-        // Clear other detail state silently
-        detailBookmarkID = nil; detailsDraft = nil; detailsErrorMessage = nil
-        selectedDateCard = nil; selectedContact = nil
-        // Open note
+        clearDetailSelectionState(except: .note)
         notesViewModel.selectNote(note)
         selectedNote = note
         isEditingNoteTitle = false

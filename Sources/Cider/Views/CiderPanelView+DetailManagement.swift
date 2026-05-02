@@ -1,5 +1,20 @@
 import SwiftUI
 
+enum CiderDetailSurfaceKind: CaseIterable, Hashable {
+    case bookmark
+    case note
+    case dateCard
+    case contact
+    case todo
+    case vaultFile
+}
+
+enum CiderDetailNavigationPolicy {
+    static func surfacesToClear(whenOpening target: CiderDetailSurfaceKind) -> Set<CiderDetailSurfaceKind> {
+        Set(CiderDetailSurfaceKind.allCases.filter { $0 != target })
+    }
+}
+
 enum CiderReanchorSurfaceResolver {
     static func canOpenInMainWindow(_ surface: CiderFloatableSurface) -> Bool {
         switch surface {
@@ -217,7 +232,10 @@ extension CiderPanelView {
         if isSearchPaletteVisible {
             isSearchPaletteVisible = false
         }
-        if isNoteDetailOpen { closeNoteDetail() }
+        if isDetailOpen { saveBookmarkDetails() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
+        let wasExpanded = isAnyDetailOpen
+        clearDetailSelectionState(except: .bookmark)
         detailBookmarkID = bookmark.id
         detailsDraft = BookmarkDetailsDraft(bookmark: bookmark)
         detailsErrorMessage = nil
@@ -228,7 +246,7 @@ extension CiderPanelView {
         // Reset stale web state immediately (cheap — just nils properties).
         // Preload is deferred — DetailSlideOutView.onChange handles it after animation settles.
         detailWebViewStore.reset()
-        if detailViewMode == .slideOut {
+        if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
                 name: .expandCiderPanelForSlideOut,
                 object: nil,
@@ -255,17 +273,10 @@ extension CiderPanelView {
 
     func openDateCardDetail(_ dateCard: DateCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
-        if isNoteDetailOpen { closeNoteDetail() }
-        if isDetailOpen { saveBookmarkDetails() } // Flush pending bookmark edits
+        if isNoteDetailOpen { notesViewModel.flushSave() }
+        if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
-        // Clear all detail state silently (no restore notification — we're about to show a new detail)
-        detailBookmarkID = nil
-        detailsDraft = nil
-        detailsErrorMessage = nil
-        detailWebViewStore.reset()
-        selectedContact = nil
-        selectedTodoCard = nil
-        selectedVaultFile = nil
+        clearDetailSelectionState(except: .dateCard)
         genericMetadataVisible = true
 
         selectedDateCard = dateCard
@@ -287,16 +298,10 @@ extension CiderPanelView {
 
     func openContactDetail(_ contact: ContactCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
-        if isNoteDetailOpen { closeNoteDetail() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
         if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
-        detailBookmarkID = nil
-        detailsDraft = nil
-        detailsErrorMessage = nil
-        detailWebViewStore.reset()
-        selectedDateCard = nil
-        selectedTodoCard = nil
-        selectedVaultFile = nil
+        clearDetailSelectionState(except: .contact)
         genericMetadataVisible = true
 
         selectedContact = contact
@@ -315,16 +320,10 @@ extension CiderPanelView {
 
     func openTodoDetail(_ todoCard: TodoCard) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
-        if isNoteDetailOpen { closeNoteDetail() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
         if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
-        detailBookmarkID = nil
-        detailsDraft = nil
-        detailsErrorMessage = nil
-        detailWebViewStore.reset()
-        selectedDateCard = nil
-        selectedContact = nil
-        selectedVaultFile = nil
+        clearDetailSelectionState(except: .todo)
         genericMetadataVisible = true
 
         selectedTodoCard = todoCard
@@ -344,16 +343,10 @@ extension CiderPanelView {
 
     func openVaultFileDetail(_ file: VaultFile) {
         if isSearchPaletteVisible { isSearchPaletteVisible = false }
-        if isNoteDetailOpen { closeNoteDetail() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
         if isDetailOpen { saveBookmarkDetails() }
         let wasExpanded = isAnyDetailOpen
-        detailBookmarkID = nil
-        detailsDraft = nil
-        detailsErrorMessage = nil
-        detailWebViewStore.reset()
-        selectedDateCard = nil
-        selectedContact = nil
-        selectedTodoCard = nil
+        clearDetailSelectionState(except: .vaultFile)
         genericMetadataVisible = true
 
         selectedVaultFile = file
@@ -363,6 +356,38 @@ extension CiderPanelView {
                 object: nil,
                 userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
             )
+        }
+    }
+
+    func clearDetailSelectionState(except target: CiderDetailSurfaceKind) {
+        let surfacesToClear = CiderDetailNavigationPolicy.surfacesToClear(whenOpening: target)
+
+        if surfacesToClear.contains(.bookmark) {
+            detailBookmarkID = nil
+            detailsDraft = nil
+            detailsErrorMessage = nil
+            detailWebViewStore.reset()
+        }
+
+        if surfacesToClear.contains(.note) {
+            selectedNote = nil
+            isEditingNoteTitle = false
+        }
+
+        if surfacesToClear.contains(.dateCard) {
+            selectedDateCard = nil
+        }
+
+        if surfacesToClear.contains(.contact) {
+            selectedContact = nil
+        }
+
+        if surfacesToClear.contains(.todo) {
+            selectedTodoCard = nil
+        }
+
+        if surfacesToClear.contains(.vaultFile) {
+            selectedVaultFile = nil
         }
     }
 
