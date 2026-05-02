@@ -65,6 +65,7 @@ struct BasicItemMetadataInspectorView: View {
             ItemMetadataLinkedSection(
                 rows: relatedRows,
                 isExpanded: $isLinkedExpanded,
+                sourceRef: linkedRef,
                 onOpenLinkedRef: onOpenLinkedRef,
                 canOpenLinkedRef: canOpenLinkedRef
             )
@@ -271,7 +272,6 @@ struct VaultFileMetadataInspectorView: View {
 
                     sectionDivider
                     linkedSection
-                        .padding(.vertical, Spacing.md)
 
                     sectionDivider
                     notesSection
@@ -434,8 +434,10 @@ struct VaultFileMetadataInspectorView: View {
         ItemMetadataLinkedSection(
             rows: linkedSummaries.map(ItemMetadataRow.related),
             isExpanded: $isLinkedExpanded,
+            sourceRef: LibraryEntityRef(type: .vaultFile, entityID: file.id),
             onOpenLinkedRef: onOpenLinkedRef,
-            canOpenLinkedRef: canOpenLinkedRef
+            canOpenLinkedRef: canOpenLinkedRef,
+            onLinkedItemsChanged: refreshLinkedSummaries
         )
     }
 

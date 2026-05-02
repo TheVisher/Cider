@@ -189,6 +189,7 @@ struct ContactMetadataInspectorView: View {
         ItemMetadataLinkedSection(
             rows: relatedRows,
             isExpanded: $isLinkedExpanded,
+            sourceRef: LibraryEntityRef(type: .contact, entityID: contact.id),
             onOpenLinkedRef: onOpenLinkedRef,
             canOpenLinkedRef: canOpenLinkedRef
         )

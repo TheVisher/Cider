@@ -1138,20 +1138,13 @@ struct NoteMetadataSidebar: View {
 
     @ViewBuilder
     private var linkedSection: some View {
-        ItemMetadataSectionView(title: "Linked", isExpanded: $isLinkedExpanded) {
-            let rows = relatedRows
-            if rows.isEmpty {
-                Text("No linked items.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.tertiary)
-            } else {
-                ItemMetadataRowsView(
-                    rows: rows,
-                    onOpenRef: onOpenLinkedRef,
-                    canOpenRef: canOpenLinkedRef
-                )
-            }
-        }
+        ItemMetadataLinkedSection(
+            rows: relatedRows,
+            isExpanded: $isLinkedExpanded,
+            sourceRef: LibraryEntityRef(type: .note, entityID: note.id),
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef
+        )
     }
 
     private var relatedRows: [ItemMetadataRow] {

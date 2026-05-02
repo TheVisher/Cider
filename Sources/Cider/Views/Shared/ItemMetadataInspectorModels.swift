@@ -38,6 +38,37 @@ struct ItemMetadataSection: Identifiable, Equatable {
     }
 }
 
+struct ItemMetadataLinkCandidate: Identifiable, Equatable {
+    let ref: LibraryEntityRef
+    let title: String
+    let subtitle: String
+
+    var id: String { ref.id }
+}
+
+struct ItemMetadataLinkCandidateGroup: Identifiable, Equatable {
+    let title: String
+    let candidates: [ItemMetadataLinkCandidate]
+
+    var id: String { title }
+}
+
+enum ItemMetadataLinkingActions {
+    static func visibleGroups(
+        source: LibraryEntityRef,
+        relatedRefs: [LibraryEntityRef],
+        groups: [ItemMetadataLinkCandidateGroup]
+    ) -> [ItemMetadataLinkCandidateGroup] {
+        let blockedIDs = Set(([source] + relatedRefs).map(\.id))
+
+        return groups.compactMap { group in
+            let candidates = group.candidates.filter { !blockedIDs.contains($0.ref.id) }
+            guard !candidates.isEmpty else { return nil }
+            return ItemMetadataLinkCandidateGroup(title: group.title, candidates: candidates)
+        }
+    }
+}
+
 enum ItemMetadataInfoRows {
     static func rows(
         createdAt: Date,

@@ -40,6 +40,38 @@ struct ItemMetadataInspectorModelsTests {
         #expect(row.ref == ref)
     }
 
+    @Test("link candidate groups omit source and already related refs")
+    func linkCandidateGroupsOmitSourceAndRelatedRefs() {
+        let source = LibraryEntityRef(type: .contact, entityID: UUID())
+        let linkedBookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let addableBookmark = LibraryEntityRef(type: .bookmark, entityID: UUID())
+
+        let groups = [
+            ItemMetadataLinkCandidateGroup(
+                title: "Bookmarks",
+                candidates: [
+                    ItemMetadataLinkCandidate(ref: linkedBookmark, title: "Existing", subtitle: "Bookmark"),
+                    ItemMetadataLinkCandidate(ref: addableBookmark, title: "Gift", subtitle: "Bookmark")
+                ]
+            ),
+            ItemMetadataLinkCandidateGroup(
+                title: "Contacts",
+                candidates: [
+                    ItemMetadataLinkCandidate(ref: source, title: "Current", subtitle: "Contact")
+                ]
+            )
+        ]
+
+        let visible = ItemMetadataLinkingActions.visibleGroups(
+            source: source,
+            relatedRefs: [linkedBookmark],
+            groups: groups
+        )
+
+        #expect(visible.map(\.title) == ["Bookmarks"])
+        #expect(visible.first?.candidates.map(\.ref) == [addableBookmark])
+    }
+
     @Test("info rows use stable created updated type order")
     func infoRowsUseStableOrder() {
         let created = Date(timeIntervalSince1970: 100)

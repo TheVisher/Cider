@@ -115,7 +115,6 @@ struct BookmarkMetadataSidebar: View {
 
                     sectionDivider
                     linkedItemsSection
-                        .padding(.vertical, Spacing.md)
 
                     sectionDivider
                     notesSection
@@ -205,21 +204,14 @@ struct BookmarkMetadataSidebar: View {
 
     @ViewBuilder
     private var linkedItemsSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            sectionHeader("Linked", isExpanded: $isLinkedItemsExpanded)
-
-            if isLinkedItemsExpanded {
-                if linkedSummaries.isEmpty {
-                    ItemMetadataEmptyText(text: "No linked items.")
-                } else {
-                    ItemMetadataRowsView(
-                        rows: linkedSummaries.map(ItemMetadataRow.related),
-                        onOpenRef: onOpenLinkedRef,
-                        canOpenRef: canOpenLinkedRef
-                    )
-                }
-            }
-        }
+        ItemMetadataLinkedSection(
+            rows: linkedSummaries.map(ItemMetadataRow.related),
+            isExpanded: $isLinkedItemsExpanded,
+            sourceRef: bookmark.map { LibraryEntityRef(type: .bookmark, entityID: $0.id) },
+            onOpenLinkedRef: onOpenLinkedRef,
+            canOpenLinkedRef: canOpenLinkedRef,
+            onLinkedItemsChanged: refreshLinkedSummaries
+        )
     }
 
     private func refreshLinkedSummaries() {

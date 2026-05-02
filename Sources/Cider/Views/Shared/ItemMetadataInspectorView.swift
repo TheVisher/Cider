@@ -307,20 +307,229 @@ struct ItemMetadataTagsPicker: View {
 struct ItemMetadataLinkedSection: View {
     var rows: [ItemMetadataRow]
     @Binding var isExpanded: Bool
+    var sourceRef: LibraryEntityRef?
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
     var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)?
+    var onLinkedItemsChanged: (() -> Void)?
+
+    @ObservedObject private var bookmarks = VaultBookmarkService.shared
+    @ObservedObject private var notes = NotesStorage.shared
+    @ObservedObject private var dateCards = DateCardStorage.shared
+    @ObservedObject private var contacts = ContactStorage.shared
+    @ObservedObject private var todos = TodoCardStorage.shared
+    @ObservedObject private var files = VaultFileService.shared
+
+    @State private var refreshID = UUID()
+    @State private var errorMessage: String?
 
     var body: some View {
         ItemMetadataSectionView(title: "Linked", isExpanded: $isExpanded) {
-            if rows.isEmpty {
-                ItemMetadataEmptyText(text: "No linked items.")
-            } else {
-                ItemMetadataRowsView(
-                    rows: rows,
-                    onOpenRef: onOpenLinkedRef,
-                    canOpenRef: canOpenLinkedRef
-                )
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.destructive)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if sourceRef != nil {
+                    addMenu
+                }
+
+                if !linkedRows.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ForEach(linkedRows) { row in
+                            linkedRow(row)
+                        }
+                    }
+                }
             }
+        }
+        .id(refreshID)
+    }
+
+    private var addMenu: some View {
+        Menu {
+            if visibleCandidateGroups.isEmpty {
+                Text("No items available")
+            } else {
+                ForEach(visibleCandidateGroups) { group in
+                    Menu(group.title) {
+                        ForEach(group.candidates) { candidate in
+                            Button(candidate.title) {
+                                add(candidate.ref)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: "plus")
+                    .font(CiderFont.badgeSemibold)
+                Text("Add Link")
+                    .font(CiderFont.caption)
+            }
+            .foregroundColor(visibleCandidateGroups.isEmpty ? CiderColors.quaternary : CiderColors.controlAccent)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(visibleCandidateGroups.isEmpty)
+        .help(visibleCandidateGroups.isEmpty ? "No items available to link" : "Add linked item")
+    }
+
+    private func linkedRow(_ row: ItemMetadataRow) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            if let ref = row.ref,
+               let onOpenLinkedRef,
+               canOpenLinkedRef?(ref) ?? true {
+                Button {
+                    onOpenLinkedRef(ref)
+                } label: {
+                    metadataRow(row)
+                }
+                .buttonStyle(.plain)
+            } else {
+                metadataRow(row)
+            }
+
+            if let ref = row.ref, sourceRef != nil {
+                Button {
+                    remove(ref)
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Remove link")
+            }
+        }
+    }
+
+    private func metadataRow(_ row: ItemMetadataRow) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            Image(systemName: row.symbol)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: Spacing.md)
+
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
+                Text(row.title)
+                    .font(CiderFont.bodyMedium)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+                if !row.value.isEmpty {
+                    Text(row.value)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var linkedRows: [ItemMetadataRow] {
+        _ = refreshID
+        guard let sourceRef else { return rows }
+        let refs = (try? ItemLinkService.shared.relatedRefs(for: sourceRef)) ?? []
+        return ItemLinkService.shared.summaries(for: refs).map(ItemMetadataRow.related)
+    }
+
+    private var relatedRefs: [LibraryEntityRef] {
+        _ = refreshID
+        guard let sourceRef else { return rows.compactMap(\.ref) }
+        return (try? ItemLinkService.shared.relatedRefs(for: sourceRef)) ?? []
+    }
+
+    private var visibleCandidateGroups: [ItemMetadataLinkCandidateGroup] {
+        guard let sourceRef else { return [] }
+        return ItemMetadataLinkingActions.visibleGroups(
+            source: sourceRef,
+            relatedRefs: relatedRefs,
+            groups: candidateGroups
+        )
+    }
+
+    private var candidateGroups: [ItemMetadataLinkCandidateGroup] {
+        [
+            candidateGroup(title: "Bookmarks", candidates: bookmarks.bookmarks.map {
+                ItemMetadataLinkCandidate(
+                    ref: LibraryEntityRef(type: .bookmark, entityID: $0.id),
+                    title: $0.title,
+                    subtitle: $0.hostDisplay
+                )
+            }),
+            candidateGroup(title: "Notes", candidates: notes.notes.map {
+                ItemMetadataLinkCandidate(
+                    ref: LibraryEntityRef(type: .note, entityID: $0.id),
+                    title: $0.title,
+                    subtitle: $0.relativePath.isEmpty ? "Note" : $0.relativePath
+                )
+            }),
+            candidateGroup(title: "Todos", candidates: todos.todoCards.map {
+                ItemMetadataLinkCandidate(
+                    ref: LibraryEntityRef(type: .todo, entityID: $0.id),
+                    title: $0.title,
+                    subtitle: "Todo"
+                )
+            }),
+            candidateGroup(title: "Date Cards", candidates: dateCards.dateCards.map {
+                ItemMetadataLinkCandidate(
+                    ref: LibraryEntityRef(type: .dateCard, entityID: $0.id),
+                    title: $0.title,
+                    subtitle: "Date card"
+                )
+            }),
+            candidateGroup(title: "Contacts", candidates: contacts.contacts.map {
+                ItemMetadataLinkCandidate(
+                    ref: LibraryEntityRef(type: .contact, entityID: $0.id),
+                    title: $0.displayName,
+                    subtitle: $0.relationshipLabel.isEmpty ? "Contact" : $0.relationshipLabel
+                )
+            }),
+            candidateGroup(title: "Files", candidates: files.files.map {
+                ItemMetadataLinkCandidate(
+                    ref: LibraryEntityRef(type: .vaultFile, entityID: $0.id),
+                    title: $0.displayTitle,
+                    subtitle: $0.relativePath
+                )
+            })
+        ]
+    }
+
+    private func candidateGroup(
+        title: String,
+        candidates: [ItemMetadataLinkCandidate]
+    ) -> ItemMetadataLinkCandidateGroup {
+        ItemMetadataLinkCandidateGroup(title: title, candidates: candidates)
+    }
+
+    private func add(_ target: LibraryEntityRef) {
+        guard let sourceRef else { return }
+        do {
+            try ItemLinkService.shared.addLink(from: sourceRef, to: target)
+            errorMessage = nil
+            refreshID = UUID()
+            onLinkedItemsChanged?()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func remove(_ target: LibraryEntityRef) {
+        guard let sourceRef else { return }
+        do {
+            try ItemLinkService.shared.removeLink(from: sourceRef, to: target)
+            errorMessage = nil
+            refreshID = UUID()
+            onLinkedItemsChanged?()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
