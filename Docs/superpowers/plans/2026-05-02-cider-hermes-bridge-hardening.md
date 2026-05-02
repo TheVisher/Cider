@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Cider a reliable first-class Hermes chat client by removing wrong-session bootstrapping risk, proving the supported Hermes API/Runs contract, and replacing the fragile send/progress path with explicit attach, run, stream, stop, and repair states.
+**Goal:** Make Cider a reliable first-class Hermes chat client by removing wrong-session bootstrapping risk, supporting named Hermes side chats, proving the supported Hermes API/Runs contract, and replacing the fragile send/progress path with explicit attach, run, stream, stop, and repair states.
 
 **Architecture:** Hermes remains the runtime and source of truth for agent execution, session continuity, tools, memory, compaction, approvals, and run state. Cider owns stable chat identity, native UI, local mirrored display history, search/offline affordances, attach/relink/repair controls, and vault actions. Keep all direct Hermes details behind small client types in `Sources/Cider/Services/Agent/`; the existing CLI/export/session-file bridge remains a fallback while the preferred transport becomes Hermes API server Runs/SSE when capabilities prove available.
 
@@ -21,6 +21,7 @@ Cider already has a usable Main Brain v0:
 - The AI panel can live in the main window or float like other Cider surfaces.
 - Telegram-origin Hermes messages appear in Cider after sync.
 - The live/export dedupe fix is already implemented in `HermesTranscriptMerger` and covered by `HermesSessionClientTests`.
+- Hermes session titles are global enough for cross-client recall: Cider-created sessions can be resumed from Telegram by explicit `/resume <Hermes session title>` if Cider writes the friendly name into Hermes as the actual session title.
 
 The remaining risk is product trust, not feature count. The first hardening pass must prevent Cider from silently attaching `cider.main` to the wrong Hermes session.
 
@@ -37,6 +38,7 @@ Cider chat should eventually feel like a real Hermes client, not a nicer file wa
 - structured tool progress separate from final assistant text,
 - native stop/cancel when Hermes supports it,
 - native approval UI when Hermes exposes a supported approval event/response path,
+- named side chats so scoped work can avoid flooding Main Brain while still being resumable from Telegram,
 - local mirrored transcript for UI/search/offline use without competing with Hermes runtime history.
 
 ## Discovered Hermes Contract
@@ -66,9 +68,9 @@ The installed gateway is running, but the API server was not reachable at `127.0
 ## File Structure
 
 - `Sources/Cider/Services/Agent/CiderAgentChatRegistry.swift`
-  Owns stable `cider.main` registry persistence. Remove seeded Hermes IDs and add explicit load/create/update APIs.
+  Owns stable Hermes chat registry persistence. Remove seeded Hermes IDs, keep `cider.main` as the default record, and add named side-chat create/load/update/archive APIs.
 - `Sources/Cider/Services/Agent/HermesSessionClient.swift`
-  Keeps existing CLI/export/state.db fallback and transcript parsing.
+  Keeps existing CLI/export/state.db fallback and transcript parsing. Add Hermes session rename support for named chats.
 - `Sources/Cider/Services/Agent/HermesAPIClient.swift`
   New API-server client for health, capabilities, run creation, run polling, stop, and SSE event parsing.
 - `Sources/Cider/Services/Agent/HermesBridgeTransport.swift`
@@ -1533,7 +1535,178 @@ git commit -m "docs: clarify Cider Hermes bridge ownership"
 
 ---
 
-## Task 10: Verification
+## Task 10: Add Named Hermes Chat Registry
+
+**Purpose:** Users should be able to create named Cider/Hermes side chats for scoped work without flooding Main Brain, and then resume those chats from Telegram by explicit title.
+
+**Files:**
+- Modify: `Sources/Cider/Services/Agent/CiderAgentChatRegistry.swift`
+- Modify: `Sources/Cider/Services/Agent/HermesSessionClient.swift`
+- Modify: `Sources/Cider/ViewModels/AIAssistantViewModel.swift`
+- Modify: `Sources/Cider/Views/AIAssistant/AIAssistantPanelView.swift`
+- Modify: `Sources/Cider/Services/AI/AIConversationStorage.swift` if sidebar summaries need registry metadata
+- Modify/Add: `Tests/CiderTests/CiderAgentChatRegistryTests.swift`
+- Modify/Add: `Tests/CiderTests/HermesSessionClientTests.swift`
+
+**Product rule:** Cider must store its own stable logical chat record and also write the user-facing name into Hermes as the actual session title. A Cider-only display name is not enough.
+
+**Naming rule:** No special Telegram naming convention is required. Use a human-readable, unique Hermes title such as `Cider Dashboard Worktree` or `Cider Scratchpad`. Keep titles trimmed, whitespace-collapsed, control-character-free, and under Hermes' 100-character title limit. Avoid generic titles like `Dashboard` or `Scratchpad`.
+
+**Cross-client rule:** Telegram may not show Cider-created sessions in a bare `/resume` list if that list is filtered by source, but explicit resume by title should work:
+
+```text
+/resume Cider Dashboard Worktree
+```
+
+- [ ] **Step 1: Extend chat records for named Hermes chats**
+
+Update `CiderAgentChatRecord` to support:
+
+```swift
+var stableID: String                 // e.g. cider.dashboard-worktree
+var title: String                    // Cider display name
+var hermesTitle: String?             // e.g. Cider Dashboard Worktree
+var kind: String                     // main-brain, hermes-chat, project-chat, scratchpad
+var conversationID: UUID
+var runtimeID: String
+var activeRuntimeSessionID: String   // may be empty until first send
+var runtimeSessionLineage: [String]
+var scope: String?                   // global, cider, project, scratchpad
+var archived: Bool
+var createdAt: Date
+var updatedAt: Date
+var defaultInCider: Bool
+```
+
+Keep backward decoding compatible with existing `cider.main.json` by giving new fields defaults when missing.
+
+- [ ] **Step 2: Turn the registry into a real named chat registry**
+
+Add APIs:
+
+```swift
+func listChats(includeArchived: Bool = false) throws -> [CiderAgentChatRecord]
+func loadChat(stableID: String) throws -> CiderAgentChatRecord?
+func createHermesChat(title: String, scope: String?) throws -> CiderAgentChatRecord
+func updateChat(_ record: CiderAgentChatRecord) throws
+func archiveChat(stableID: String) throws
+func renameChat(stableID: String, title: String) throws -> CiderAgentChatRecord
+```
+
+Keep `loadMainBrain()`, `createMainBrain(from:)`, and `updateMainBrain(from:)` as convenience wrappers over the generalized registry.
+
+- [ ] **Step 3: Generate stable IDs from titles**
+
+Create stable IDs like:
+
+```text
+cider.dashboard-worktree
+cider.web-review
+cider.scratchpad
+```
+
+Rules:
+
+- lowercase,
+- ASCII slug where possible,
+- collapse whitespace/punctuation to hyphens,
+- prefix with `cider.`,
+- preserve uniqueness by appending `-2`, `-3`, etc.,
+- never change the stable ID when the user renames the chat.
+
+- [ ] **Step 4: Create Cider chat immediately, create Hermes session on first message**
+
+Flow:
+
+```text
+User clicks New Hermes Chat
+→ Cider asks for a name
+→ Cider creates CiderAgentChatRecord with empty activeRuntimeSessionID
+→ Cider opens that local chat
+→ first send runs Hermes with source cider
+→ Cider captures the new Hermes session ID
+→ Cider renames that Hermes session to the record's hermesTitle
+→ Cider stores activeRuntimeSessionID and lineage
+```
+
+Do not create empty Hermes sessions just because the user made a named Cider chat.
+
+- [ ] **Step 5: Rename the actual Hermes session after first send**
+
+Add a service method equivalent to:
+
+```swift
+func renameSession(sessionID: String, title: String) async throws
+```
+
+CLI fallback:
+
+```bash
+hermes sessions rename <session_id> "Cider Dashboard Worktree"
+```
+
+Call it after a first-send-created session and whenever the user renames a chat that already has a backing Hermes session.
+
+- [ ] **Step 6: Add Copy Telegram resume command**
+
+Expose an action for named Hermes chats:
+
+```text
+Copy Telegram resume command
+```
+
+It copies:
+
+```text
+/resume Cider Dashboard Worktree
+```
+
+Use the Hermes-visible title, not the Cider stable ID.
+
+- [ ] **Step 7: Update the chat switcher**
+
+The Cider chat list should show registry-backed Hermes chats alongside regular chat summaries, with Main Brain pinned or clearly marked. Named Hermes side chats should not duplicate every sync under separate rows for each backing runtime session.
+
+Minimum expected rows:
+
+```text
+Main Brain
+Cider Dashboard Worktree
+Cider Web Review
+Cider Scratchpad
+```
+
+- [ ] **Step 8: Preserve Main Brain behavior**
+
+Main Brain remains `cider.main` and continues to use the explicit attach/latest Telegram behavior already implemented. Do not turn Main Brain into a random side chat or require a new name.
+
+- [ ] **Step 9: Test named registry and Hermes rename behavior**
+
+Cover:
+
+1. Creating a named chat stores a stable Cider record with no Hermes session yet.
+2. Stable IDs are unique and do not change on rename.
+3. First send fills `activeRuntimeSessionID` and lineage.
+4. First send renames the Hermes session to `hermesTitle`.
+5. Renaming a backed chat calls Hermes session rename.
+6. Copy Telegram command uses `/resume <hermesTitle>`.
+7. Archived chats disappear from the default list.
+8. Main Brain convenience APIs still pass existing tests.
+
+- [ ] **Step 10: Commit**
+
+Run:
+
+```bash
+swift test --filter CiderAgentChatRegistryTests
+swift test --filter HermesSessionClientTests
+git add Sources/Cider/Services/Agent/CiderAgentChatRegistry.swift Sources/Cider/Services/Agent/HermesSessionClient.swift Sources/Cider/ViewModels/AIAssistantViewModel.swift Sources/Cider/Views/AIAssistant/AIAssistantPanelView.swift Sources/Cider/Services/AI/AIConversationStorage.swift Tests/CiderTests/CiderAgentChatRegistryTests.swift Tests/CiderTests/HermesSessionClientTests.swift
+git commit -m "feat: add named Hermes chats"
+```
+
+---
+
+## Task 11: Verification
 
 **Purpose:** Prove the hardened bridge did not break existing AI, Hermes parsing, or floating surface behavior.
 
@@ -1600,18 +1773,21 @@ Verify:
 ```text
 1. Fresh registry starts unattached.
 2. Attach latest Telegram creates a non-seeded cider.main record.
-3. Sending through Hermes works with API server enabled.
-4. Sending through Hermes falls back to CLI/export when API server is disabled.
-5. Repeated identical Hermes messages are not collapsed.
-6. Live/export duplicates do not appear.
-7. Stop cancels an active API run.
-8. Stale session errors expose repair actions.
+3. Named Hermes chat can be created without creating an empty Hermes session.
+4. First send in a named Hermes chat creates/attaches a Hermes session and renames it.
+5. Telegram can explicitly resume the named chat with `/resume <Hermes title>`.
+6. Sending through Hermes works with API server enabled.
+7. Sending through Hermes falls back to CLI/export when API server is disabled.
+8. Repeated identical Hermes messages are not collapsed.
+9. Live/export duplicates do not appear.
+10. Stop cancels an active API run.
+11. Stale session errors expose repair actions.
 ```
 
 ---
 
 ## Self-Review
 
-- Spec coverage: The plan covers seeded-session removal, fresh attach behavior, API/Runs capability discovery, run state, streaming, stop, repair controls, dedupe preservation, and source-of-truth docs.
+- Spec coverage: The plan covers seeded-session removal, fresh attach behavior, named Hermes side chats resumable by Telegram title, API/Runs capability discovery, run state, streaming, stop, repair controls, dedupe preservation, and source-of-truth docs.
 - Placeholder scan: The plan avoids open-ended implementation placeholders; approval UI is intentionally deferred until Hermes exposes an app-client approval response path, and the current phase documents that boundary instead of faking it.
 - Type consistency: `HermesAPIClient`, `HermesRunTransport`, `HermesBridgeTransport`, `HermesRunEvent`, and `HermesRunSnapshot` are introduced before later tasks reference them.

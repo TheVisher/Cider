@@ -67,6 +67,7 @@ This is not a rigid release contract. It is a living queue.
 - stronger dedupe between live Hermes session-file rows and final export rows
 - clear busy/send state so Cider does not blindly send into an active Hermes run
 - visible attach/relink/repair controls for stale or forked sessions
+- named Hermes side chats so scoped work can stay out of Main Brain while remaining resumable from Telegram by explicit `/resume <title>`
 - documented source-of-truth policy between Hermes runtime history and Cider's mirrored UI history
 - architecture spike for the supported Hermes communication layer: API server, ACP, gateway/client API, event stream, or equivalent
 - streaming response path and native approval/confirmation prompt design
