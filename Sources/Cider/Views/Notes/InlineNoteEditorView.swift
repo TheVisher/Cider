@@ -934,14 +934,28 @@ struct NoteMetadataSidebar: View {
             CiderColors.separator
                 .frame(width: Spacing.hairline)
         }
-        .onAppear { editingTitle = note.title }
+        .onAppear {
+            editingTitle = note.title
+            resetSectionExpansionDefaults()
+        }
         .onChange(of: note.id) { _, _ in
             editingTitle = note.title
             showAllSnapshots = false
+            resetSectionExpansionDefaults()
         }
         .onChange(of: note.title) { _, newTitle in
             if editingTitle != newTitle { editingTitle = newTitle }
         }
+    }
+
+    private func resetSectionExpansionDefaults() {
+        isTitleExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .title, hasContent: true)
+        isFolderExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .folder, hasContent: note.folderID != nil)
+        isTagsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .tags, hasContent: !note.labelIDs.isEmpty)
+        isSourcesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .sources, hasContent: !viewModel.extractedLinks.isEmpty)
+        isHistoryExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .history, hasContent: !snapshotChoices.isEmpty)
+        isAIExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .intelligence, hasContent: false)
+        isInfoExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .info, hasContent: true)
     }
 
     // MARK: - Section Header

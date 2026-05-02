@@ -86,8 +86,9 @@ Default metrics:
 - `Events`
 - `Unfiled`
 - `Urgent`
+- `Docs Health`
 
-Future dashboard settings can allow users to show or hide metrics, but `v1` can ship with a fixed default set.
+Future dashboard settings can allow users to show or hide metrics, but `v1` can ship with a fixed default set. `Docs Health` should summarize documentation rot: stale docs, broken references, duplicate/conflicting docs, and docs that no longer match current code.
 
 ### Hero row
 
@@ -165,13 +166,15 @@ Purpose: operational triage.
 
 Content:
 
-- compact metrics like `Unfiled`, `Missing tags`, `Due today`, and `Untitled notes`
+- compact metrics like `Unfiled`, `Missing tags`, `Due today`, `Untitled notes`, and `Docs Health`
 - direct shortcuts into high-priority queues
+- report-only documentation rot findings: stale docs, broken references, duplicate/conflicting docs, and docs that no longer match current code
 
 Behavior:
 
 - highly actionable
 - answers "what requires intervention right now?"
+- documentation findings should show short reasons and suggested actions, but should not auto-edit/delete docs unless the user approves cleanup
 
 ### Recent Activity
 

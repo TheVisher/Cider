@@ -155,6 +155,9 @@ struct BookmarkMetadataSidebar: View {
             x: 0,
             y: showBackground ? BookmarksDesign.detailsFloatingLiftYOffset : 0
         )
+        .onAppear {
+            resetSectionExpansionDefaults()
+        }
         .onChange(of: draft) { _, _ in scheduleSave() }
         .onChange(of: draft.id) { _, _ in
             isEditingNotes = false
@@ -163,6 +166,7 @@ struct BookmarkMetadataSidebar: View {
             newTagText = ""
             copiedHex = nil
             linkedSummaries = []
+            resetSectionExpansionDefaults()
         }
         .task(id: bookmark?.id) {
             fileSize = nil
@@ -250,6 +254,19 @@ struct BookmarkMetadataSidebar: View {
         let ref = LibraryEntityRef(type: .bookmark, entityID: bookmark.id)
         let refs = (try? ItemLinkService.shared.relatedRefs(for: ref)) ?? []
         linkedSummaries = ItemLinkService.shared.summaries(for: refs)
+        isLinkedItemsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .linked, hasContent: !linkedSummaries.isEmpty)
+    }
+
+    private func resetSectionExpansionDefaults() {
+        isSourceExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .source, hasContent: draft.hasURL)
+        isImagesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .images, hasContent: hasCarouselImages)
+        isFolderExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .folder, hasContent: draft.folderID != nil)
+        isTagsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .tags, hasContent: !draft.labelIDs.isEmpty)
+        isKeywordsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .keywords, hasContent: !parsedTags.isEmpty)
+        isNotesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .notes, hasContent: hasBookmarkNotes)
+        isLinkedItemsExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .linked, hasContent: !linkedSummaries.isEmpty)
+        isAIExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .intelligence, hasContent: hasIntelligenceContent)
+        isPropertiesExpanded = MetadataRailExpansionPolicy.defaultExpanded(for: .info, hasContent: true)
     }
 
     // MARK: - Section Header
@@ -798,6 +815,22 @@ struct BookmarkMetadataSidebar: View {
         if !draft.hasURL { return "Image" }
         if draft.originalURLString.lowercased().hasPrefix("file:") { return "File" }
         return "Bookmark"
+    }
+
+    private var hasBookmarkNotes: Bool {
+        !draft.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasCarouselImages: Bool {
+        guard let bookmark, bookmark.isCarousel else { return false }
+        return !(bookmark.carouselImagePaths ?? []).isEmpty
+    }
+
+    private var hasIntelligenceContent: Bool {
+        guard let bookmark else { return false }
+        let hasSummary = !(bookmark.aiSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasColors = !(bookmark.dominantColors ?? []).isEmpty
+        return hasSummary || hasColors
     }
 
     private var currentFolderName: String {

@@ -28,9 +28,10 @@
 
 ### Agent Rules
 
-- Check this doc when asked "what should we work on?" — point to next `Not Started` item
+- For adjustable feature direction beyond the strict 1.0 release list, check `Docs/Product/CIDER_ADAPTIVE_ROADMAP.md` first.
+- Check this doc when asked "what should we work on?" for 1.0 release gating — point to next `Not Started` item
 - Also check `Shared/FEATURE_PARITY.md` to see if iOS or Web are missing something Desktop already has
-- Redirect post-1.0 ideas to the backlog section below
+- Redirect post-1.0 ideas to the adaptive roadmap/backlog instead of scattering them across new docs
 - Never mark features Complete — only the user does that after testing
 - Run code review after implementing any feature
 - Update this doc after gate transitions
@@ -4339,6 +4340,66 @@ One product, three clear value propositions, zero overlap. This is the kind of p
 Summary
 Cider's AI architecture is a tiered opt-in system that serves every type of user without compromise. The open file format philosophy is both the technical foundation and the competitive moat. Local AI — specifically MLX + Phi-4 Mini or Qwen3 — gives users real capability without cloud dependency. And power users don't need any of it, because their LLM already speaks the language of files.
 The strategy is: start with what Apple gives you for free, go deeper when users want it, and never lock anyone in.
+
+### Personal Dashboard / Recommendation Loop Vision
+
+This is a Cider product direction, not a separate standalone app. The idea is strong enough to stand alone, but it fits Cider's second-brain mission best: Cider should become the user's personal dashboard for curated discovery, memory, projects, actions, and reminders.
+
+Cider's long-term life-assistant surface should move beyond a single dense feed or Telegram digest. The preferred model is a calm, browseable, multi-tab dashboard that the user can check daily, every few days, or weekly. This dashboard should work in Cider Desktop and also be a strong fit for the Cider web app: desktop/local agents collect and sync dashboard cards, while the web app lets the user browse from anywhere.
+
+Potential dashboard tabs:
+
+- Tech / AI / vibe-coding tools
+- Electronics and devices
+- Sports
+- Entertainment and media
+- Comedy and live events
+- Local events and places
+- Cider / Chost / personal project ideas
+- Projects / roadmaps / kanban / bugs
+
+Each dashboard item should be a card with enough structure for both browsing and learning:
+
+- title, source, URL, date, and topic
+- short summary
+- why Cider thinks it may matter to the user
+- status: new, seen, saved, dismissed, reminded
+- user feedback: rating, more like this, less like this, not interested
+- actions: save article to Cider, save as lightweight memory, create event, create todo/reminder, open source, ask AI about it
+
+Dashboard topics should be user-configurable rather than hardcoded. The user should be able to add, remove, reorder, hide, pin, or rename topic tabs as their interests change. A card may belong to multiple topics, and topics should be able to start broad (Tech, Sports, Entertainment) then become more specific (COSMIC DE, Mariners, AI app builders, comedy shows) as Cider learns.
+
+Telegram should remain a lightweight command/notification surface. Examples:
+
+- “What’s my tech dashboard news today?”
+- “Anything new on COSMIC DE?”
+- “Any Mariners news worth knowing?”
+- “Save this to memory, not bookmarks.”
+- “Create an event if Shane Gillis tickets go on sale near Seattle.”
+
+The core product loop:
+
+1. Cider/Hermes monitors trusted sources for user-interest topics.
+2. Cider creates ranked dashboard cards instead of overwhelming Telegram with long digests.
+3. The user rates, saves, dismisses, or turns cards into events/todos.
+4. Saved items become permanent vault knowledge.
+5. Events like local comedy shows, ticket-sale dates, sports games, or release dates can become Cider events/reminders.
+6. User feedback tunes future recommendations and source weighting.
+
+Project dashboards should use the same pattern for the user's own work. Cider can show per-project roadmaps, kanban boards, bug lists, open questions, recent commits, build/test status, stale tasks, and next suggested actions. Background/cron agents can periodically inspect project repos for code changes, docs changes, failing tests, new TODOs, or uncommitted work, then update project dashboard cards without spamming Telegram. If a project has not been touched, the dashboard can cheaply confirm that no code or docs changed since the last scan and keep the project status current without inventing work. This makes Cider not just a second brain for external information, but a living command center for the user's active projects.
+
+Cider should also help prevent project documentation rot. Many active app projects accumulate large numbers of Markdown files: old plans, outdated specs, stale implementation notes, abandoned ideas, and docs that no longer match the code. Project dashboard agents should be able to audit Markdown-heavy projects, compare docs against recent code/git activity, flag likely-outdated or low-value files, suggest consolidation/archive candidates, and surface docs that need refresh. The goal is not automatic destructive cleanup; it is keeping project knowledge trustworthy and keeping the project moving.
+
+For stale bugs or maintenance cards, Cider can support an escalation policy. If a bug has remained unfixed past a user-defined age or priority threshold, an agent can propose a fix plan, open a branch, run the relevant tests, and optionally implement the bug fix autonomously when the project policy allows it. Riskier changes should still require approval, but low-risk stale bugs can become agent-owned maintenance work instead of lingering forever.
+
+Example project dashboard cards:
+
+- “Cider: 3 files changed since yesterday; dashboard vision docs updated; no build run yet.”
+- “Chost: continuation-session fix committed; consider adding a regression test around Hermes compaction.”
+- “Cider Bugs board: 2 high-priority cards stale for 7+ days.”
+- “Roadmap: next Not Started 1.0 item is X; ask before moving work into Implementing.”
+
+Example target behavior: if a Shane Gillis show in Seattle or a ticket-sale announcement appears, Cider surfaces it as a dashboard card with actions to save the article, create an event, and set a reminder for ticket sales or show date. Telegram should only provide lightweight nudges such as “Dashboard updated: 3 high-signal items,” not the whole feed.
 
 
 ---

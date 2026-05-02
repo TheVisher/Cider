@@ -230,10 +230,11 @@ Results are logged in `Docs/QA/AUDIT_REPORTS.md`.
 
 ## Documentation Health Loop
 
-Automated audit for keeping docs accurate, consolidated, and in sync with the actual codebase.
+Automated audit for keeping docs accurate, consolidated, and in sync with the actual codebase. This loop should support both deep cleanup sessions and a lightweight recurring `Docs Health` dashboard/digest so stale project documentation does not silently pile up.
 
 ### When to run
 - After major feature work or refactors
+- Weekly as a report-only recurring health check
 - Quarterly maintenance
 - When docs feel stale or contradictory
 - Before onboarding someone new to the project
@@ -241,6 +242,8 @@ Automated audit for keeping docs accurate, consolidated, and in sync with the ac
 ### How to run
 
 Tell Claude: **"Run the docs health loop"** — it will read this doc and know what to do.
+
+For recurring unattended runs, default to report-only mode: inspect, rank, and summarize issues, but do not edit or delete docs without explicit user approval.
 
 ### Setup
 
