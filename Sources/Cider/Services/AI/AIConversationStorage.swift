@@ -10,6 +10,11 @@ struct AIConversationMeta: Codable {
     var model: String
     var messageCount: Int
     let type: String // always "metadata"
+    var runtimeID: String?
+    var activeRuntimeSessionID: String?
+    var runtimeSessionLineage: [String]?
+    var runtimeSource: String?
+    var runtimeLastSyncedAt: Date?
 
     init(id: UUID = UUID(), title: String = "New Chat", model: String = "apple-intelligence") {
         self.id = id
@@ -30,6 +35,11 @@ struct AIConversationSummary: Identifiable {
     var updated: Date
     var messageCount: Int
     let filename: String
+    var runtimeID: String?
+    var activeRuntimeSessionID: String?
+    var runtimeSessionLineage: [String]?
+    var runtimeSource: String?
+    var runtimeLastSyncedAt: Date?
 }
 
 /// Persists AI conversations as JSONL files in the vault.
@@ -92,7 +102,12 @@ final class AIConversationStorage: ObservableObject {
                 created: meta.created,
                 updated: meta.updated,
                 messageCount: meta.messageCount,
-                filename: file.lastPathComponent
+                filename: file.lastPathComponent,
+                runtimeID: meta.runtimeID,
+                activeRuntimeSessionID: meta.activeRuntimeSessionID,
+                runtimeSessionLineage: meta.runtimeSessionLineage,
+                runtimeSource: meta.runtimeSource,
+                runtimeLastSyncedAt: meta.runtimeLastSyncedAt
             ))
         }
 
@@ -102,16 +117,30 @@ final class AIConversationStorage: ObservableObject {
     // MARK: - Save Conversation
 
     /// Save a full conversation (overwrites existing file if same ID).
-    func save(id: UUID, title: String, messages: [AIAssistantMessage], model: String) {
+    func save(
+        id: UUID,
+        title: String,
+        messages: [AIAssistantMessage],
+        model: String,
+        hermesState: HermesConversationState? = nil
+    ) {
         ensureDirectory()
-        let meta = AIConversationMeta(
+        let existingMeta = metadata(for: id)
+        let meta = existingMeta ?? AIConversationMeta(
             id: id,
             title: title,
             model: model
         )
         var updatedMeta = meta
+        updatedMeta.title = title
+        updatedMeta.model = model
         updatedMeta.updated = Date()
         updatedMeta.messageCount = messages.count
+        updatedMeta.runtimeID = hermesState?.runtimeID
+        updatedMeta.activeRuntimeSessionID = hermesState?.activeRuntimeSessionID
+        updatedMeta.runtimeSessionLineage = hermesState?.runtimeSessionLineage
+        updatedMeta.runtimeSource = hermesState?.source
+        updatedMeta.runtimeLastSyncedAt = hermesState?.lastSyncedAt
 
         var lines: [String] = []
 
@@ -148,6 +177,12 @@ final class AIConversationStorage: ObservableObject {
         guard let summary = conversations.first(where: { $0.id == conversationID }) else { return nil }
         let fileURL = conversationsDir.appendingPathComponent(summary.filename)
         return loadMessages(from: fileURL)
+    }
+
+    func metadata(for conversationID: UUID) -> AIConversationMeta? {
+        guard let summary = conversations.first(where: { $0.id == conversationID }) else { return nil }
+        let fileURL = conversationsDir.appendingPathComponent(summary.filename)
+        return readMeta(from: fileURL)
     }
 
     private func loadMessages(from fileURL: URL) -> [AIAssistantMessage]? {

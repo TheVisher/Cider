@@ -25,6 +25,19 @@ extension CiderPanelView {
         }
     }
 
+    func openOrSelectAIAssistantTab() {
+        if let existing = allTabs.first(where: { $0 == .aiAssistant }) {
+            selectedFolderID = nil
+            selectedTagIDs.removeAll()
+            selectedTab = existing
+        } else {
+            dynamicTabs.append(.aiAssistant)
+            selectedFolderID = nil
+            selectedTagIDs.removeAll()
+            selectedTab = .aiAssistant
+        }
+    }
+
     func closeTab(_ tab: CiderTab) {
         let wasSelected = selectedTab == tab
 

@@ -5,6 +5,14 @@ enum AIAgentRuntimeSelection: String, Sendable {
     case appleIntelligence
     case localModel
     case codexCLI
+    case hermes
+}
+
+enum HermesPanelSyncStatus: Equatable {
+    case idle
+    case syncing
+    case sending
+    case error(String)
 }
 
 /// ViewModel for the AI chat floating panel.
@@ -21,17 +29,24 @@ final class AIAssistantViewModel: ObservableObject {
     @Published var streamingText = ""
     /// Text revealed to the UI via typewriter effect — lags behind `streamingText`.
     @Published var displayedStreamingText = ""
+    @Published private(set) var scrollToBottomSignal = UUID()
+    @Published private(set) var hasLiveHermesResponseForActiveSend = false
 
     /// Current conversation ID (nil = no active conversation yet).
     @Published var currentConversationID: UUID?
     @Published private(set) var runtimeSelection: AIAgentRuntimeSelection = .appleIntelligence
     @Published private(set) var runtimeHealth: AgentRuntimeHealth = .idle
+    @Published private(set) var hermesConversationState: HermesConversationState?
+    @Published private(set) var hermesSyncStatus: HermesPanelSyncStatus = .idle
 
     private let logger = Logger(subsystem: "com.cider.app", category: "AIAssistant")
     private var provider: AIAssistantProvider
     private let storage = AIConversationStorage.shared
+    private let hermesSessionService = HermesSessionService()
+    private let agentChatRegistry: CiderAgentChatRegistry
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
+    private var hermesSyncInFlight = false
 
     /// When true, messages are routed through AgentOrchestrator instead of
     /// the legacy AIAssistantProvider path.
@@ -41,12 +56,18 @@ final class AIAssistantViewModel: ObservableObject {
     private var orchestratorThreadID: UUID?
 
     var isAvailable: Bool {
+        if runtimeSelection == .hermes {
+            return FileManager.default.fileExists(atPath: HermesPaths.defaultStateDatabaseURL.path)
+        }
         if useOrchestrator {
             return runtimeHealth.status != .unavailable
         }
         return provider.isAvailable
     }
     var providerName: String {
+        if runtimeSelection == .hermes {
+            return "Hermes"
+        }
         if useOrchestrator, let runtime = currentAgentRuntime {
             return runtime.displayName
         }
@@ -63,6 +84,32 @@ final class AIAssistantViewModel: ObservableObject {
 
     var isUsingProcessRuntime: Bool {
         useOrchestrator && runtimeSelection == .codexCLI
+    }
+
+    var hermesStatusTitle: String {
+        switch hermesSyncStatus {
+        case .idle:
+            guard runtimeSelection == .hermes else { return "" }
+            if let lastSyncedAt = hermesConversationState?.lastSyncedAt {
+                let formatter = RelativeDateTimeFormatter()
+                formatter.unitsStyle = .abbreviated
+                return "Synced \(formatter.localizedString(for: lastSyncedAt, relativeTo: Date()))"
+            }
+            return hermesConversationState == nil ? "Attach Hermes" : "Auto-sync on"
+        case .syncing:
+            return "Syncing..."
+        case .sending:
+            return "Sending..."
+        case .error(let message):
+            return message
+        }
+    }
+
+    var hermesSessionLabel: String {
+        guard let sessionID = hermesConversationState?.activeRuntimeSessionID else {
+            return "No session"
+        }
+        return String(sessionID.suffix(8))
     }
 
     /// Context window usage (0.0–1.0). Only available for Foundation Models.
@@ -99,12 +146,18 @@ final class AIAssistantViewModel: ObservableObject {
             return mlxRuntime
         case .codexCLI:
             return codexRuntime
+        case .hermes:
+            return nil
         }
     }
 
-    init(provider: AIAssistantProvider? = nil) {
+    init(
+        provider: AIAssistantProvider? = nil,
+        agentChatRegistry: CiderAgentChatRegistry = .shared
+    ) {
         let initialRuntimeSelection = Self.loadPersistedRuntimeSelection()
         runtimeSelection = initialRuntimeSelection
+        self.agentChatRegistry = agentChatRegistry
         if let provider {
             self.provider = provider
         } else if initialRuntimeSelection == .codexCLI {
@@ -116,11 +169,19 @@ final class AIAssistantViewModel: ObservableObject {
         }
         // Auto-resume most recent conversation
         resumeLastConversation()
+        if initialRuntimeSelection == .hermes {
+            restoreHermesStateForCurrentConversation()
+            Task {
+                await activateHermesConversation()
+            }
+        }
     }
 
     /// Switch between Apple Intelligence and local MLX model.
     func switchProvider(useLocalModel: Bool) {
         clearConversation()
+        hermesConversationState = nil
+        hermesSyncStatus = .idle
         if useLocalModel {
             provider = mlxProvider
             runtimeSelection = .localModel
@@ -156,12 +217,25 @@ final class AIAssistantViewModel: ObservableObject {
         case .codexCLI:
             MLXModelManager.shared.isLocalModelEnabled = false
             MLXModelManager.shared.unloadModel()
+        case .hermes:
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
         }
 
         if useOrchestrator {
             Task {
                 await configureOrchestratorRuntime(startIfNeeded: selection == .codexCLI)
             }
+        }
+
+        if selection == .hermes {
+            Task {
+                await activateHermesConversation()
+            }
+        } else {
+            hermesConversationState = nil
+            hermesSyncStatus = .idle
         }
     }
 
@@ -183,10 +257,21 @@ final class AIAssistantViewModel: ObservableObject {
         case .codexCLI:
             MLXModelManager.shared.isLocalModelEnabled = false
             MLXModelManager.shared.unloadModel()
+        case .hermes:
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
         }
 
         if useOrchestrator {
             await configureOrchestratorRuntime(startIfNeeded: false)
+        }
+
+        if selection == .hermes {
+            await activateHermesConversation()
+        } else {
+            hermesConversationState = nil
+            hermesSyncStatus = .idle
         }
     }
 
@@ -194,7 +279,7 @@ final class AIAssistantViewModel: ObservableObject {
     func enableOrchestrator() {
         useOrchestrator = true
         orchestratorThreadID = currentConversationID ?? UUID()
-        if runtimeSelection != .codexCLI {
+        if runtimeSelection != .codexCLI && runtimeSelection != .hermes {
             runtimeSelection = MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence
         }
         Task {
@@ -218,6 +303,11 @@ final class AIAssistantViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
 
+        if runtimeSelection == .hermes {
+            sendViaHermes(trimmed)
+            return
+        }
+
         // Start a new conversation if none active
         if currentConversationID == nil {
             currentConversationID = UUID()
@@ -225,6 +315,7 @@ final class AIAssistantViewModel: ObservableObject {
 
         let userMessage = AIAssistantMessage(role: .user, content: trimmed)
         messages.append(userMessage)
+        requestScrollToBottom()
 
         isStreaming = true
         streamingText = ""
@@ -237,6 +328,209 @@ final class AIAssistantViewModel: ObservableObject {
         } else {
             sendViaLegacyProvider()
         }
+    }
+
+    func syncHermesConversation() {
+        guard runtimeSelection == .hermes,
+              !isStreaming,
+              !hermesSyncInFlight,
+              hermesSyncStatus != .syncing,
+              hermesSyncStatus != .sending,
+              shouldStartHermesSync()
+        else { return }
+        Task {
+            await syncHermesConversation(attachIfNeeded: true)
+        }
+    }
+
+    private func shouldStartHermesSync() -> Bool {
+        guard let lastSyncedAt = hermesConversationState?.lastSyncedAt else { return true }
+        return Date().timeIntervalSince(lastSyncedAt) > 5
+    }
+
+    private func activateHermesConversation() async {
+        do {
+            let mainBrain = try agentChatRegistry.loadOrCreateMainBrain()
+            saveCurrentConversation()
+            currentConversationID = mainBrain.conversationID
+            if let loadedMessages = storage.loadMessages(for: mainBrain.conversationID) {
+                messages = loadedMessages
+            } else {
+                messages = []
+            }
+            hermesConversationState = HermesConversationState(
+                conversationID: mainBrain.conversationID,
+                runtimeID: mainBrain.runtimeID,
+                activeRuntimeSessionID: mainBrain.activeRuntimeSessionID,
+                runtimeSessionLineage: mainBrain.runtimeSessionLineage,
+                title: mainBrain.title,
+                source: nil,
+                lastSyncedAt: nil
+            )
+        } catch {
+            logger.error("Failed to load Cider Main Brain: \(error.localizedDescription, privacy: .public)")
+            hermesSyncStatus = .error(error.localizedDescription)
+        }
+
+        await syncHermesConversation(attachIfNeeded: true)
+    }
+
+    private func sendViaHermes(_ text: String) {
+        streamTask = Task {
+            isStreaming = true
+            streamingText = ""
+            displayedStreamingText = ""
+            hasLiveHermesResponseForActiveSend = false
+            hermesSyncStatus = .sending
+            requestScrollToBottom()
+            startTypewriterLoop()
+
+            do {
+                let state = try await ensureHermesConversationState()
+                let pendingMessage = AIAssistantMessage(
+                    role: .user,
+                    content: text,
+                    sourceID: "hermes:pending:\(UUID().uuidString)",
+                    sourceName: "Hermes Pending"
+                )
+                messages.append(pendingMessage)
+                requestScrollToBottom()
+
+                let existingMessages = messages.filter { $0.id != pendingMessage.id }
+                let progressTask = makeHermesSendProgressTask(baseMessages: existingMessages)
+                defer { progressTask.cancel() }
+                let commandState = try await hermesSessionService.runSendCommand(text: text, state: state)
+
+                let result = try await hermesSessionService.sync(
+                    state: commandState,
+                    existingMessages: existingMessages
+                )
+                applyHermesSyncResult(result, forceMessages: true)
+                hermesSyncStatus = .idle
+                saveCurrentConversation()
+            } catch is CancellationError {
+                logger.debug("Hermes send cancelled")
+            } catch {
+                logger.error("Hermes send error: \(error.localizedDescription, privacy: .public)")
+                hermesSyncStatus = .error(error.localizedDescription)
+                if !messages.contains(where: { $0.role == .user && $0.content == text }) {
+                    messages.append(AIAssistantMessage(role: .user, content: text))
+                }
+                messages.append(AIAssistantMessage(
+                    role: .assistant,
+                    content: "Hermes error: \(error.localizedDescription)"
+                ))
+                requestScrollToBottom()
+                saveCurrentConversation()
+            }
+
+            await finishTypewriter()
+            streamingText = ""
+            displayedStreamingText = ""
+            hasLiveHermesResponseForActiveSend = false
+            isStreaming = false
+        }
+    }
+
+    private func makeHermesSendProgressTask(baseMessages: [AIAssistantMessage]) -> Task<Void, Never> {
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(650))
+            while !Task.isCancelled {
+                await self?.syncHermesSendProgress(baseMessages: baseMessages)
+                try? await Task.sleep(for: .milliseconds(900))
+            }
+        }
+    }
+
+    private func syncHermesSendProgress(baseMessages: [AIAssistantMessage]) async {
+        guard runtimeSelection == .hermes,
+              let state = hermesConversationState
+        else { return }
+
+        do {
+            let result = try await hermesSessionService.syncFromSessionFile(
+                state: state,
+                existingMessages: baseMessages
+            )
+            let baseSourceIDs = Set(baseMessages.compactMap(\.sourceID))
+            if result.messages.contains(where: { $0.role == .assistant && !baseSourceIDs.contains($0.sourceID ?? "") }) {
+                hasLiveHermesResponseForActiveSend = true
+            }
+            applyHermesSyncResult(result, forceMessages: result.messages.count >= messages.count)
+        } catch {
+            logger.debug("Hermes live send sync skipped: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func applyHermesSyncResult(_ result: HermesSyncResult, forceMessages: Bool) {
+        let messagesChanged = messages != result.messages
+        hermesConversationState = result.state
+        persistMainBrainState(result.state)
+
+        if forceMessages, messagesChanged {
+            messages = result.messages
+            requestScrollToBottom()
+            saveCurrentConversation()
+        }
+    }
+
+    func requestScrollToBottom() {
+        scrollToBottomSignal = UUID()
+    }
+
+    private func syncHermesConversation(attachIfNeeded: Bool) async {
+        guard runtimeSelection == .hermes else { return }
+        guard !hermesSyncInFlight else { return }
+        hermesSyncInFlight = true
+        defer { hermesSyncInFlight = false }
+        hermesSyncStatus = .syncing
+
+        do {
+            let state = try await ensureHermesConversationState(attachIfNeeded: attachIfNeeded)
+            let result = try await hermesSessionService.sync(state: state, existingMessages: messages)
+            let messagesChanged = messages != result.messages
+            let stateChanged = hasDurableHermesStateChange(from: hermesConversationState, to: result.state)
+            hermesConversationState = result.state
+            persistMainBrainState(result.state)
+            if messagesChanged {
+                messages = result.messages
+            }
+            hermesSyncStatus = .idle
+            if messagesChanged || stateChanged {
+                saveCurrentConversation()
+            }
+        } catch {
+            logger.error("Hermes sync error: \(error.localizedDescription, privacy: .public)")
+            hermesSyncStatus = .error(error.localizedDescription)
+        }
+    }
+
+    private func ensureHermesConversationState(attachIfNeeded: Bool = true) async throws -> HermesConversationState {
+        if let hermesConversationState {
+            return hermesConversationState
+        }
+
+        if currentConversationID == nil {
+            currentConversationID = UUID()
+        }
+
+        restoreHermesStateForCurrentConversation()
+        if let hermesConversationState {
+            return hermesConversationState
+        }
+
+        guard attachIfNeeded, let conversationID = currentConversationID else {
+            throw HermesSessionClientError.sessionNotFound("active Cider conversation")
+        }
+
+        let result = try await hermesSessionService.attachLatestTelegramConversation(
+            conversationID: conversationID
+        )
+        hermesConversationState = result.state
+        persistMainBrainState(result.state)
+        messages = result.messages
+        saveCurrentConversation()
+        return result.state
     }
 
     /// Route message through the AgentOrchestrator, streaming text back for typewriter.
@@ -407,6 +701,19 @@ final class AIAssistantViewModel: ObservableObject {
         }
     }
 
+    private func hasDurableHermesStateChange(
+        from oldState: HermesConversationState?,
+        to newState: HermesConversationState
+    ) -> Bool {
+        guard let oldState else { return true }
+        return oldState.conversationID != newState.conversationID
+            || oldState.runtimeID != newState.runtimeID
+            || oldState.activeRuntimeSessionID != newState.activeRuntimeSessionID
+            || oldState.runtimeSessionLineage != newState.runtimeSessionLineage
+            || oldState.title != newState.title
+            || oldState.source != newState.source
+    }
+
     private func finishTypewriter() async {
         typewriterTask?.cancel()
         typewriterTask = nil
@@ -420,7 +727,7 @@ final class AIAssistantViewModel: ObservableObject {
         streamTask = nil
         typewriterTask?.cancel()
         typewriterTask = nil
-        if !streamingText.isEmpty {
+        if runtimeSelection != .hermes, !streamingText.isEmpty {
             let partialMessage = AIAssistantMessage(role: .assistant, content: streamingText)
             messages.append(partialMessage)
         }
@@ -435,6 +742,8 @@ final class AIAssistantViewModel: ObservableObject {
         messages.removeAll()
         currentConversationID = nil
         orchestratorThreadID = nil
+        hermesConversationState = nil
+        hermesSyncStatus = .idle
         provider.resetSession()
     }
 
@@ -445,6 +754,8 @@ final class AIAssistantViewModel: ObservableObject {
         messages.removeAll()
         currentConversationID = nil
         orchestratorThreadID = nil
+        hermesConversationState = nil
+        hermesSyncStatus = .idle
         provider.resetSession()
     }
 
@@ -454,7 +765,22 @@ final class AIAssistantViewModel: ObservableObject {
     private func saveCurrentConversation() {
         guard let id = currentConversationID, !messages.isEmpty else { return }
         let title = conversationTitle
-        storage.save(id: id, title: title, messages: messages, model: providerName)
+        storage.save(
+            id: id,
+            title: title,
+            messages: messages,
+            model: providerName,
+            hermesState: runtimeSelection == .hermes ? hermesConversationState : nil
+        )
+    }
+
+    private func persistMainBrainState(_ state: HermesConversationState) {
+        guard runtimeSelection == .hermes else { return }
+        do {
+            _ = try agentChatRegistry.updateMainBrain(from: state)
+        } catch {
+            logger.error("Failed to persist Cider Main Brain: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Load a previous conversation by ID.
@@ -466,6 +792,14 @@ final class AIAssistantViewModel: ObservableObject {
         stopStreaming()
         messages = loadedMessages
         currentConversationID = conversationID
+        restoreHermesStateForCurrentConversation()
+        if hermesConversationState != nil {
+            runtimeSelection = .hermes
+            provider = foundationModelsProvider
+            MLXModelManager.shared.isLocalModelEnabled = false
+            MLXModelManager.shared.unloadModel()
+            persistRuntimeSelection(.hermes)
+        }
         provider.resetSession()
     }
 
@@ -492,6 +826,27 @@ final class AIAssistantViewModel: ObservableObject {
         let title = firstUserMessage.content
         if title.count <= 50 { return title }
         return String(title.prefix(47)) + "..."
+    }
+
+    private func restoreHermesStateForCurrentConversation() {
+        guard let currentConversationID,
+              let meta = storage.metadata(for: currentConversationID),
+              meta.runtimeID == "hermes",
+              let activeRuntimeSessionID = meta.activeRuntimeSessionID
+        else {
+            hermesConversationState = nil
+            return
+        }
+
+        hermesConversationState = HermesConversationState(
+            conversationID: currentConversationID,
+            runtimeID: meta.runtimeID ?? "hermes",
+            activeRuntimeSessionID: activeRuntimeSessionID,
+            runtimeSessionLineage: meta.runtimeSessionLineage,
+            title: meta.title,
+            source: meta.runtimeSource,
+            lastSyncedAt: meta.runtimeLastSyncedAt
+        )
     }
 
     // MARK: - Context Updates

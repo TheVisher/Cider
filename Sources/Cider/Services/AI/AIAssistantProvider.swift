@@ -1,22 +1,91 @@
 import Foundation
 
 /// A message in an AI assistant conversation.
-struct AIAssistantMessage: Identifiable, Codable {
+struct AIAssistantMessage: Identifiable, Codable, Equatable {
     let id: UUID
     let role: Role
     var content: String
     let timestamp: Date
+    var sourceID: String?
+    var sourceSessionID: String?
+    var sourceName: String?
+    var attachments: [AIAssistantAttachment]
 
-    enum Role: String, Codable {
+    enum Role: String, Codable, Equatable {
         case user
         case assistant
     }
 
-    init(id: UUID = UUID(), role: Role, content: String, timestamp: Date = Date()) {
+    enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case content
+        case timestamp
+        case sourceID
+        case sourceSessionID
+        case sourceName
+        case attachments
+    }
+
+    init(
+        id: UUID = UUID(),
+        role: Role,
+        content: String,
+        timestamp: Date = Date(),
+        sourceID: String? = nil,
+        sourceSessionID: String? = nil,
+        sourceName: String? = nil,
+        attachments: [AIAssistantAttachment] = []
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
+        self.sourceID = sourceID
+        self.sourceSessionID = sourceSessionID
+        self.sourceName = sourceName
+        self.attachments = attachments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        role = try container.decode(Role.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        sourceID = try container.decodeIfPresent(String.self, forKey: .sourceID)
+        sourceSessionID = try container.decodeIfPresent(String.self, forKey: .sourceSessionID)
+        sourceName = try container.decodeIfPresent(String.self, forKey: .sourceName)
+        attachments = try container.decodeIfPresent([AIAssistantAttachment].self, forKey: .attachments) ?? []
+    }
+}
+
+struct AIAssistantAttachment: Identifiable, Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case image
+    }
+
+    let id: String
+    let kind: Kind
+    var mimeType: String?
+    var localFilePath: String?
+    var remoteURL: String?
+    var altText: String?
+
+    init(
+        id: String,
+        kind: Kind,
+        mimeType: String? = nil,
+        localFilePath: String? = nil,
+        remoteURL: String? = nil,
+        altText: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.mimeType = mimeType
+        self.localFilePath = localFilePath
+        self.remoteURL = remoteURL
+        self.altText = altText
     }
 }
 

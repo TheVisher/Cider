@@ -1,52 +1,147 @@
+import AppKit
 import SwiftUI
+
+enum AIAssistantPresentationStyle {
+    case floatingPanel
+    case embedded
+    case floatingSurface
+}
 
 /// Root view for the AI Assistant floating panel.
 struct AIAssistantPanelView: View {
     @ObservedObject var viewModel: AIAssistantViewModel
+    var onClose: (() -> Void)?
+    var onFloat: (() -> Void)?
+    var showsResizeOverlay = true
+    var presentationStyle: AIAssistantPresentationStyle = .floatingPanel
 
     @ObservedObject private var conversationStorage = AIConversationStorage.shared
     @ObservedObject private var modelManager = MLXModelManager.shared
     @State private var showConversationList = false
     @State private var showModelPicker = false
+    @State private var visibleMessageLimit = 12
+    @State private var composerHeight: CGFloat = 64
+    @State private var showStreamingIndicator = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let hermesSyncTimer = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
-            AcrylicPanelBackground(
-                cornerRadius: AIAssistantPanelDesign.cornerRadius
-            )
+            backgroundLayer
 
             VStack(spacing: 0) {
                 titleBar
-                Divider().background(CiderColors.separator)
                 messageList
-                Divider().background(CiderColors.separator)
-                AIAssistantInputView(
-                    isStreaming: viewModel.isStreaming,
-                    onSend: { viewModel.send($0) },
-                    onStop: { viewModel.stopStreaming() }
-                )
             }
-            .clipShape(RoundedRectangle(cornerRadius: AIAssistantPanelDesign.cornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+
+            if showConversationList, usesCenteredChatLayout {
+                chatDrawerOverlay
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
-            PanelEdgeResizeView(horizontalResizeEnabled: true)
+            if showsResizeOverlay, presentationStyle == .floatingPanel {
+                PanelEdgeResizeView(horizontalResizeEnabled: true)
+            }
         }
         .background {
             Button("") {
-                NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+                close()
             }
             .keyboardShortcut(.escape, modifiers: [])
             .hidden()
         }
+        .onAppear {
+            if viewModel.runtimeSelection == .hermes, viewModel.messages.isEmpty {
+                viewModel.syncHermesConversation()
+            }
+        }
+        .onReceive(hermesSyncTimer) { _ in
+            if viewModel.runtimeSelection == .hermes {
+                viewModel.syncHermesConversation()
+            }
+        }
+        .onChange(of: viewModel.currentConversationID) { _, _ in
+            visibleMessageLimit = 12
+        }
+        .onChange(of: viewModel.isStreaming) { _, isStreaming in
+            if isStreaming {
+                showStreamingIndicator = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if viewModel.isStreaming {
+                        showStreamingIndicator = true
+                        viewModel.requestScrollToBottom()
+                    }
+                }
+            } else {
+                showStreamingIndicator = false
+            }
+        }
+        .animation(reduceMotion ? .none : .snappy, value: showConversationList)
+    }
+
+    @ViewBuilder
+    private var backgroundLayer: some View {
+        switch presentationStyle {
+        case .floatingPanel:
+            AcrylicPanelBackground(cornerRadius: AIAssistantPanelDesign.cornerRadius)
+        case .embedded:
+            CiderColors.opaqueBackground.opacity(0.001)
+        case .floatingSurface:
+            AcrylicPanelBackground(cornerRadius: AIAssistantPanelDesign.cornerRadius)
+        }
+    }
+
+    private var cornerRadius: CGFloat {
+        switch presentationStyle {
+        case .floatingPanel, .floatingSurface:
+            AIAssistantPanelDesign.cornerRadius
+        case .embedded:
+            0
+        }
+    }
+
+    private var inputBarMaxWidth: CGFloat {
+        usesCenteredChatLayout ? 800 : .infinity
+    }
+
+    private var usesCenteredChatLayout: Bool {
+        presentationStyle == .embedded || presentationStyle == .floatingSurface
     }
 
     // MARK: - Title Bar
 
+    @ViewBuilder
     private var titleBar: some View {
+        switch presentationStyle {
+        case .embedded:
+            EmptyView()
+        case .floatingSurface:
+            floatingSurfaceTitleBar
+        case .floatingPanel:
+            floatingTitleBar
+        }
+    }
+
+    private var floatingSurfaceTitleBar: some View {
+        HStack(alignment: .top, spacing: CiderPanelDesign.trafficLightSpacing) {
+            PanelTrafficLightButton(color: .systemRed, symbol: "xmark", help: "Close chat", action: close)
+            PanelTrafficLightButton(color: .systemYellow, symbol: "minus", help: "Hide chat", action: close)
+            PanelTrafficLightButton(color: .systemGreen, symbol: "plus", help: "Zoom", action: zoomWindow)
+
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.sm)
+        .padding(.top, Spacing.sm)
+        .frame(height: AIAssistantPanelDesign.titleBarHeight)
+    }
+
+    private var floatingTitleBar: some View {
         HStack(spacing: Spacing.sm) {
             Button {
-                NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+                close()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(CiderFont.bodySemibold)
@@ -59,7 +154,7 @@ struct AIAssistantPanelView: View {
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.controlAccent)
 
-            Text("AI Assistant")
+            Text(titleText)
                 .font(CiderFont.navTitle)
                 .foregroundColor(CiderColors.primary)
 
@@ -67,7 +162,6 @@ struct AIAssistantPanelView: View {
                 contextBadge
             }
 
-            // Model selector pill
             Button {
                 showModelPicker.toggle()
             } label: {
@@ -94,12 +188,26 @@ struct AIAssistantPanelView: View {
 
             Spacer()
 
-            // Context usage indicator
             if viewModel.contextUsage > 0.1 {
                 contextUsageIndicator
             }
 
-            // New conversation
+            if viewModel.runtimeSelection == .hermes {
+                hermesStatusControl
+            }
+
+            if let onFloat {
+                Button {
+                    onFloat()
+                } label: {
+                    Image(systemName: "rectangle.on.rectangle")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Pop out")
+            }
+
             Button {
                 withAnimation(reduceMotion ? .none : .snappy) {
                     viewModel.newConversation()
@@ -112,7 +220,6 @@ struct AIAssistantPanelView: View {
             .buttonStyle(.plain)
             .help("New conversation")
 
-            // Conversation history
             if !conversationStorage.conversations.isEmpty {
                 Button {
                     showConversationList.toggle()
@@ -144,6 +251,258 @@ struct AIAssistantPanelView: View {
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: AIAssistantPanelDesign.titleBarHeight)
+    }
+
+    private var titleText: String {
+        switch presentationStyle {
+        case .embedded, .floatingSurface:
+            return "Main Brain"
+        case .floatingPanel:
+            return runtimePillTitle
+        }
+    }
+
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            NotificationCenter.default.post(name: .dismissAIAssistantPanel, object: nil)
+        }
+    }
+
+    private func minimizeWindow() {
+        NSApp.keyWindow?.miniaturize(nil)
+    }
+
+    private func zoomWindow() {
+        NSApp.keyWindow?.zoom(nil)
+    }
+
+    private var chatDrawerOverlay: some View {
+        ZStack(alignment: .trailing) {
+            Color.black.opacity(0.001)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        showConversationList = false
+                    }
+                }
+
+            chatDrawer
+                .frame(width: 320)
+                .frame(maxHeight: .infinity)
+                .background(
+                    ZStack {
+                        VisualEffectView(material: .underWindowBackground, blendingMode: .withinWindow)
+                        CiderColors.surfaceSubtle.opacity(0.92)
+                    }
+                )
+                .overlay(alignment: .leading) {
+                    CiderColors.separator
+                        .frame(width: Spacing.hairline)
+                }
+                .shadow(color: .black.opacity(0.22), radius: 22, x: -8, y: 0)
+        }
+    }
+
+    private var chatDrawer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Spacing.sm) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text("Chat")
+                        .font(CiderFont.navTitle)
+                        .foregroundColor(CiderColors.primary)
+                    Text(titleText)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        showConversationList = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.secondary)
+                        .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                }
+                .buttonStyle(.plain)
+                .help("Close chat details")
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.top, Spacing.lg)
+            .padding(.bottom, Spacing.sm)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    drawerCurrentSection
+                    drawerActionsSection
+                    drawerHistorySection
+                }
+                .padding(.horizontal, Spacing.lg)
+                .padding(.vertical, Spacing.md)
+            }
+        }
+    }
+
+    private var drawerCurrentSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            drawerSectionTitle("Current")
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.xs) {
+                    Circle()
+                        .fill(runtimePillColor)
+                        .frame(width: 7, height: 7)
+                    Text(titleText)
+                        .font(CiderFont.labelMedium)
+                        .foregroundColor(CiderColors.primary)
+                    Text(runtimePillTitle)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                    Spacer()
+                }
+
+                if viewModel.runtimeSelection == .hermes {
+                    Button {
+                        viewModel.syncHermesConversation()
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: hermesSyncIcon)
+                                .font(CiderFont.caption)
+                            Text(viewModel.hermesStatusTitle)
+                                .font(CiderFont.captionMedium)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(viewModel.hermesSessionLabel)
+                                .font(CiderFont.microMonospaced)
+                                .foregroundColor(CiderColors.quaternary)
+                        }
+                        .foregroundColor(hermesStatusColor)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isStreaming)
+                }
+
+                HStack(spacing: Spacing.xs) {
+                    Text("\(viewModel.messages.count) messages")
+                        .font(CiderFont.caption)
+                    Spacer()
+                    if let id = viewModel.currentConversationID {
+                        Text(String(id.uuidString.prefix(8)))
+                            .font(CiderFont.microMonospaced)
+                    } else {
+                        Text("unsaved")
+                            .font(CiderFont.microMonospaced)
+                    }
+                }
+                .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+        }
+    }
+
+    private var drawerActionsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            drawerSectionTitle("Actions")
+
+            drawerActionButton(title: "New chat", systemImage: "square.and.pencil") {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    viewModel.newConversation()
+                    visibleMessageLimit = 12
+                    showConversationList = false
+                }
+            }
+
+            if let onFloat {
+                drawerActionButton(title: presentationStyle == .floatingSurface ? "Dock chat" : "Pop out chat", systemImage: "rectangle.on.rectangle") {
+                    showConversationList = false
+                    onFloat()
+                }
+            }
+
+            if viewModel.runtimeSelection == .hermes {
+                drawerActionButton(title: "Sync now", systemImage: hermesSyncIcon) {
+                    viewModel.syncHermesConversation()
+                }
+            }
+
+            if !viewModel.messages.isEmpty {
+                drawerActionButton(title: "Clear current chat", systemImage: "trash", role: .destructive) {
+                    withAnimation(reduceMotion ? .none : .snappy) {
+                        viewModel.clearConversation()
+                        visibleMessageLimit = 12
+                        showConversationList = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var drawerHistorySection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack {
+                drawerSectionTitle("Chats")
+                Spacer()
+                Text("\(conversationStorage.conversations.count)")
+                    .font(CiderFont.microMonospaced)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+
+            if conversationStorage.conversations.isEmpty {
+                Text("No saved chats yet")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .padding(.vertical, Spacing.xs)
+            } else {
+                LazyVStack(spacing: Spacing.xxs) {
+                    ForEach(conversationStorage.conversations) { conv in
+                        conversationRow(conv)
+                    }
+                }
+            }
+        }
+    }
+
+    private func drawerSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(CiderFont.captionSemibold)
+            .foregroundColor(CiderColors.tertiary)
+            .textCase(.uppercase)
+    }
+
+    private func drawerActionButton(
+        title: String,
+        systemImage: String,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: systemImage)
+                    .font(CiderFont.caption)
+                    .frame(width: 14)
+                Text(title)
+                    .font(CiderFont.label)
+                Spacer()
+            }
+            .foregroundColor(role == .destructive ? CiderColors.destructive : CiderColors.primary)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private var contextUsageIndicator: some View {
@@ -186,52 +545,199 @@ struct AIAssistantPanelView: View {
         )
     }
 
+    private var hermesStatusControl: some View {
+        Button {
+            viewModel.syncHermesConversation()
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: hermesSyncIcon)
+                    .font(CiderFont.caption)
+                Text(viewModel.hermesStatusTitle)
+                    .font(CiderFont.caption)
+                    .lineLimit(1)
+                Text(viewModel.hermesSessionLabel)
+                    .font(CiderFont.microMonospaced)
+                    .foregroundColor(CiderColors.quaternary)
+            }
+            .foregroundColor(hermesStatusColor)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isStreaming)
+        .help("Sync Hermes session")
+    }
+
     // MARK: - Message List
 
     private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                if viewModel.messages.isEmpty && !viewModel.isStreaming {
-                    emptyState
-                } else {
-                    LazyVStack(spacing: Spacing.md) {
-                        ForEach(viewModel.messages) { message in
-                            AIAssistantBubbleView(message: message)
+        GeometryReader { geometry in
+            let width = max(geometry.size.width, 1)
+            let columnWidth = messageColumnWidth(for: width)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    if viewModel.messages.isEmpty && !viewModel.isStreaming {
+                        emptyState
+                    } else {
+                        LazyVStack(spacing: Spacing.lg) {
+                            if hiddenMessageCount > 0 {
+                                loadEarlierButton
+                            }
+
+                            ForEach(visibleMessages) { message in
+                                AIAssistantBubbleView(
+                                    message: message,
+                                    presentationStyle: presentationStyle,
+                                    maxBubbleWidth: maxBubbleWidth(for: message, contentWidth: columnWidth)
+                                )
                                 .id(message.id)
-                        }
+                            }
 
-                        if modelManager.isDownloading || modelManager.isLoading {
-                            modelLoadingView
-                                .id("loading")
-                        } else if viewModel.isStreaming {
-                            AIAssistantBubbleView(
-                                message: AIAssistantMessage(
-                                    role: .assistant,
-                                    content: viewModel.displayedStreamingText.isEmpty
-                                        ? "…" : viewModel.displayedStreamingText
-                                ),
-                                isStreaming: true
-                            )
-                            .id("streaming")
-                        }
+                            if modelManager.isDownloading || modelManager.isLoading {
+                                modelLoadingView
+                                    .id("loading")
+                            } else if viewModel.isStreaming && showStreamingIndicator && !viewModel.hasLiveHermesResponseForActiveSend {
+                                AIAssistantBubbleView(
+                                    message: AIAssistantMessage(
+                                        role: .assistant,
+                                        content: viewModel.displayedStreamingText.isEmpty
+                                            ? streamingWaitingText : viewModel.displayedStreamingText
+                                    ),
+                                    presentationStyle: presentationStyle,
+                                    maxBubbleWidth: maxBubbleWidth(
+                                        for: AIAssistantMessage(role: .assistant, content: ""),
+                                        contentWidth: columnWidth
+                                    ),
+                                    isStreaming: true
+                                )
+                                .id("streaming")
+                            }
 
-                        // Invisible anchor at the very bottom
-                        Color.clear
-                            .frame(height: 1)
-                            .id("bottom")
+                            // Keep the scroll target at the true bottom, including space for the floating composer.
+                            Color.clear
+                                .frame(height: composerHeight + Spacing.xl)
+                                .id("bottom")
+                        }
+                        .id(layoutBucket(for: width))
+                        .frame(width: columnWidth, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, Spacing.lg)
                     }
-                    .padding(Spacing.md)
                 }
-            }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: viewModel.messages.count) { _, _ in
-                scrollToBottom(proxy: proxy)
-            }
-            .onChange(of: viewModel.displayedStreamingText) { _, _ in
-                scrollToBottom(proxy: proxy)
+                .defaultScrollAnchor(.bottom)
+                .overlay(alignment: .bottom) {
+                    floatingComposer
+                        .frame(maxWidth: inputBarMaxWidth)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, usesCenteredChatLayout ? Spacing.xxl : Spacing.md)
+                        .padding(.bottom, usesCenteredChatLayout ? Spacing.lg : Spacing.sm)
+                        .padding(.top, Spacing.sm)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    CiderColors.opaqueBackground.opacity(0),
+                                    CiderColors.opaqueBackground.opacity(0.72)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .allowsHitTesting(false)
+                        )
+                        .readHeight { setComposerHeight($0) }
+                }
+                .onChange(of: viewModel.isStreaming) { _, isStreaming in
+                    if isStreaming {
+                        scrollToBottomBurst(proxy: proxy, animated: false)
+                    }
+                }
+                .onChange(of: viewModel.messages.count) { _, _ in
+                    scrollToBottomBurst(proxy: proxy)
+                }
+                .onChange(of: viewModel.displayedStreamingText) { _, _ in
+                    scrollToBottom(proxy: proxy, delay: 0.05)
+                }
+                .onChange(of: viewModel.scrollToBottomSignal) { _, _ in
+                    scrollToBottomBurst(proxy: proxy, animated: false)
+                }
+                .onChange(of: showStreamingIndicator) { _, isVisible in
+                    if isVisible {
+                        scrollToBottomBurst(proxy: proxy, animated: false)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var streamingWaitingText: String {
+        "\(runtimePillTitle) is working"
+    }
+
+    private var floatingComposer: some View {
+        AIAssistantInputView(
+            isStreaming: viewModel.isStreaming,
+            agentTitle: runtimePillTitle,
+            runtimeTitle: runtimePillTitle,
+            runtimeColor: runtimePillColor,
+            onSend: { viewModel.send($0) },
+            onStop: { viewModel.stopStreaming() },
+            onFloat: usesCenteredChatLayout ? onFloat : nil,
+            onOpenDrawer: {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    showConversationList.toggle()
+                }
+            },
+            agentPickerContent: AnyView(modelPickerPopover),
+            showAgentPicker: $showModelPicker
+        )
+    }
+
+    private func messageColumnWidth(for width: CGFloat) -> CGFloat {
+        let sidePadding = usesCenteredChatLayout ? Spacing.xl : Spacing.md
+        let availableWidth = max(width - (sidePadding * 2), 1)
+        guard usesCenteredChatLayout else { return availableWidth }
+        return min(availableWidth, 800)
+    }
+
+    private func maxBubbleWidth(for message: AIAssistantMessage, contentWidth: CGFloat) -> CGFloat {
+        guard usesCenteredChatLayout else { return contentWidth * 0.92 }
+        let ratio: CGFloat = message.role == .user ? 0.72 : 0.86
+        return min(contentWidth * ratio, message.role == .user ? 560 : 680)
+    }
+
+    private func layoutBucket(for width: CGFloat) -> Int {
+        Int(width / 80)
+    }
+
+    private var visibleMessages: [AIAssistantMessage] {
+        Array(viewModel.messages.suffix(visibleMessageLimit))
+    }
+
+    private var hiddenMessageCount: Int {
+        max(viewModel.messages.count - visibleMessageLimit, 0)
+    }
+
+    private var loadEarlierButton: some View {
+        Button {
+            visibleMessageLimit += 12
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "clock.arrow.circlepath")
+                Text("Load earlier messages")
+                Text("\(hiddenMessageCount)")
+                    .font(CiderFont.captionMonospacedMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .font(CiderFont.captionMedium)
+            .foregroundColor(CiderColors.secondary)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput)
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var emptyState: some View {
@@ -262,9 +768,39 @@ struct AIAssistantPanelView: View {
         .padding(Spacing.lg)
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        withAnimation(reduceMotion ? .none : .snappy) {
-            proxy.scrollTo("bottom", anchor: .bottom)
+    private func setComposerHeight(_ height: CGFloat) {
+        guard abs(composerHeight - height) > 0.5 else { return }
+        DispatchQueue.main.async {
+            guard abs(composerHeight - height) > 0.5 else { return }
+            composerHeight = height
+        }
+    }
+
+    private func scrollToBottom(
+        proxy: ScrollViewProxy,
+        animated: Bool = true,
+        delay: TimeInterval = 0
+    ) {
+        let action = {
+            if reduceMotion || !animated || viewModel.messages.count > visibleMessageLimit {
+                proxy.scrollTo("bottom", anchor: .bottom)
+            } else {
+                withAnimation(.snappy) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+        }
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+        } else {
+            DispatchQueue.main.async(execute: action)
+        }
+    }
+
+    private func scrollToBottomBurst(proxy: ScrollViewProxy, animated: Bool = true) {
+        for delay in [0, 0.04, 0.12, 0.28, 0.55] {
+            scrollToBottom(proxy: proxy, animated: animated && delay == 0.12, delay: delay)
         }
     }
 
@@ -335,7 +871,7 @@ struct AIAssistantPanelView: View {
                             .foregroundColor(CiderColors.tertiary)
                     }
                     Spacer()
-                    if !viewModel.isUsingLocalModel {
+                    if viewModel.runtimeSelection == .appleIntelligence {
                         Image(systemName: "checkmark")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.controlAccent)
@@ -368,10 +904,42 @@ struct AIAssistantPanelView: View {
                             .foregroundColor(CiderColors.tertiary)
                     }
                     Spacer()
-                    if viewModel.isUsingLocalModel {
+                    if viewModel.runtimeSelection == .localModel {
                         Image(systemName: "checkmark")
                             .font(CiderFont.captionSemibold)
                             .foregroundColor(CiderColors.success)
+                    }
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.horizontal, Spacing.md)
+
+            Button {
+                viewModel.switchRuntime(to: .hermes)
+                showModelPicker = false
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.controlAccent)
+                        .frame(width: 14, alignment: .center)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Hermes")
+                            .font(CiderFont.label)
+                            .foregroundColor(CiderColors.primary)
+                        Text(hermesSubtitle)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    Spacer()
+                    if viewModel.runtimeSelection == .hermes {
+                        Image(systemName: "checkmark")
+                            .font(CiderFont.captionSemibold)
+                            .foregroundColor(CiderColors.controlAccent)
                     }
                 }
                 .padding(.horizontal, Spacing.md)
@@ -463,6 +1031,16 @@ struct AIAssistantPanelView: View {
         }
     }
 
+    private var hermesSubtitle: String {
+        if viewModel.hermesConversationState != nil {
+            return "Attached to \(viewModel.hermesSessionLabel)"
+        }
+        if viewModel.isAvailable {
+            return "Attach latest Hermes session"
+        }
+        return "Hermes state not found"
+    }
+
     private var runtimePillTitle: String {
         switch viewModel.runtimeSelection {
         case .appleIntelligence:
@@ -471,6 +1049,8 @@ struct AIAssistantPanelView: View {
             return "Local"
         case .codexCLI:
             return "Codex"
+        case .hermes:
+            return "Hermes"
         }
     }
 
@@ -491,6 +1071,30 @@ struct AIAssistantPanelView: View {
             default:
                 return CiderColors.warning
             }
+        case .hermes:
+            return hermesStatusColor
+        }
+    }
+
+    private var hermesStatusColor: Color {
+        switch viewModel.hermesSyncStatus {
+        case .idle, .syncing, .sending:
+            return viewModel.hermesConversationState == nil ? CiderColors.warning : CiderColors.success
+        case .error:
+            return CiderColors.destructive
+        }
+    }
+
+    private var hermesSyncIcon: String {
+        switch viewModel.hermesSyncStatus {
+        case .idle:
+            return "arrow.clockwise"
+        case .syncing:
+            return "arrow.triangle.2.circlepath"
+        case .sending:
+            return "paperplane"
+        case .error:
+            return "exclamationmark.triangle"
         }
     }
 
@@ -527,6 +1131,7 @@ struct AIAssistantPanelView: View {
         return Button {
             viewModel.loadConversation(conv.id)
             showConversationList = false
+            visibleMessageLimit = 12
         } label: {
             HStack(spacing: Spacing.sm) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -582,5 +1187,25 @@ struct AIAssistantPanelView: View {
                 viewModel.deleteConversation(conv.id)
             }
         }
+    }
+}
+
+private struct HeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    func readHeight(_ onChange: @escaping (CGFloat) -> Void) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: HeightPreferenceKey.self, value: proxy.size.height)
+            }
+        )
+        .onPreferenceChange(HeightPreferenceKey.self, perform: onChange)
     }
 }

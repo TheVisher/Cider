@@ -53,7 +53,7 @@ enum CiderFloatableSurface: Hashable, Identifiable, Sendable {
         case .clipboard:
             "Clipboard"
         case .aiAssistant:
-            "AI Assistant"
+            "Chat"
         case .dropZone:
             "Drop Zone"
         }

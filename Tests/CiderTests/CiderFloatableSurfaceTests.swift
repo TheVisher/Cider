@@ -189,20 +189,20 @@ struct CiderFloatableSurfaceTests {
         #expect(size.height >= 560)
     }
 
-    @Test("reanchor resolver accepts item surfaces")
-    func reanchorResolverAcceptsItemSurfaces() {
+    @Test("reanchor resolver accepts item and AI surfaces")
+    func reanchorResolverAcceptsItemAndAISurfaces() {
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.note(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.bookmark(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.bookmarkMetadata(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.contact(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.dateCard(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.todo(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.aiAssistant))
     }
 
     @Test("reanchor resolver rejects utility surfaces")
     func reanchorResolverRejectsUtilitySurfaces() {
         #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.dropZone))
         #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.clipboard))
-        #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.aiAssistant))
     }
 }
