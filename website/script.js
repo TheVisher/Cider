@@ -1,6 +1,20 @@
 const canvas = document.querySelector("#cider-river");
 const ctx = canvas.getContext("2d");
 const reveals = document.querySelectorAll(".reveal");
+const navLinks = Array.from(document.querySelectorAll(".site-header nav a"));
+const primaryNav = document.querySelector(".site-header nav");
+const sectionNavLinks = navLinks.filter(link => {
+  const url = new URL(link.getAttribute("href"), window.location.href);
+  return url.pathname === window.location.pathname && url.hash;
+});
+const navCurrent = primaryNav ? document.createElement("span") : null;
+let preferredNavHash = window.location.hash;
+
+if (navCurrent) {
+  navCurrent.className = "nav-current";
+  navCurrent.setAttribute("aria-hidden", "true");
+  primaryNav.prepend(navCurrent);
+}
 
 let width = 0;
 let height = 0;
@@ -29,6 +43,59 @@ function resize() {
 function updateScroll() {
   const max = document.documentElement.scrollHeight - height;
   scrollProgress = max > 0 ? window.scrollY / max : 0;
+}
+
+function updateActiveNav() {
+  if (sectionNavLinks.length === 0) return;
+
+  let activeLink = preferredNavHash
+    ? sectionNavLinks.find(link => new URL(link.href).hash === preferredNavHash) || null
+    : null;
+  const headerOffset = 110;
+  const firstSectionTarget = document.querySelector(new URL(sectionNavLinks[0].href).hash);
+  const firstSectionTop = firstSectionTarget
+    ? firstSectionTarget.getBoundingClientRect().top + window.scrollY
+    : 0;
+
+  if (window.scrollY < firstSectionTop - headerOffset) {
+    preferredNavHash = "";
+    activeLink = null;
+  }
+
+  for (const link of sectionNavLinks) {
+    const target = document.querySelector(new URL(link.href).hash);
+    if (!target) continue;
+    if (target.getBoundingClientRect().top <= headerOffset) {
+      activeLink = link;
+    }
+  }
+
+  if (!activeLink && preferredNavHash) {
+    activeLink = sectionNavLinks.find(link => new URL(link.href).hash === preferredNavHash) || null;
+  }
+
+  for (const link of navLinks) {
+    link.classList.toggle("is-active", link === activeLink);
+  }
+
+  updateNavCurrent(activeLink);
+}
+
+function updateNavCurrent(activeLink) {
+  if (!primaryNav || !navCurrent || !activeLink) {
+    primaryNav?.style.setProperty("--nav-current-opacity", "0");
+    return;
+  }
+
+  const navRect = primaryNav.getBoundingClientRect();
+  const activeRect = activeLink.getBoundingClientRect();
+  const pad = 18;
+  const x = activeRect.left - navRect.left - pad;
+  const itemWidth = activeRect.width + pad * 2;
+
+  primaryNav.style.setProperty("--nav-current-x", `${x}px`);
+  primaryNav.style.setProperty("--nav-current-width", `${itemWidth}px`);
+  primaryNav.style.setProperty("--nav-current-opacity", "1");
 }
 
 function easeInOut(t) {
@@ -183,10 +250,33 @@ for (const reveal of reveals) {
 window.addEventListener("resize", () => {
   resize();
   updateScroll();
+  updateActiveNav();
 });
 
-window.addEventListener("scroll", updateScroll, { passive: true });
+for (const link of sectionNavLinks) {
+  link.addEventListener("click", () => {
+    preferredNavHash = new URL(link.href).hash;
+    updateActiveNav();
+  });
+}
+
+window.addEventListener("scroll", () => {
+  updateScroll();
+  preferredNavHash = "";
+  updateActiveNav();
+}, { passive: true });
+
+window.addEventListener("hashchange", () => {
+  preferredNavHash = window.location.hash;
+  updateActiveNav();
+});
 
 resize();
 updateScroll();
+updateActiveNav();
+window.addEventListener("load", () => {
+  updateScroll();
+  updateActiveNav();
+  requestAnimationFrame(updateActiveNav);
+});
 animate();

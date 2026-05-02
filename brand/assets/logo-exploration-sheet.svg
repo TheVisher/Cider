@@ -1,0 +1,100 @@
+<svg width="2400" height="1600" viewBox="0 0 2400 1600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sheetBg" x1="0" y1="0" x2="2400" y2="1600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F1115"/>
+      <stop offset="0.48" stop-color="#14100D"/>
+      <stop offset="1" stop-color="#0F1115"/>
+    </linearGradient>
+    <linearGradient id="peel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFD99B"/>
+      <stop offset="0.38" stop-color="#F4A42B"/>
+      <stop offset="0.72" stop-color="#D97706"/>
+      <stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F4A42B"/>
+      <stop offset="1" stop-color="#FF6A3D"/>
+    </linearGradient>
+    <radialGradient id="cardGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="scale(480 280)">
+      <stop offset="0" stop-color="#F4A42B" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#F4A42B" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="28" stdDeviation="32" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+    <style>
+      .card { fill: rgba(28, 31, 36, 0.74); stroke: rgba(246, 239, 228, 0.12); stroke-width: 1; }
+      .label { font: 500 30px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.62); letter-spacing: 0; }
+      .note { font: 500 24px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: rgba(246, 239, 228, 0.46); letter-spacing: 0; }
+      .word { font: 760 124px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: #F6EFE4; letter-spacing: -1px; }
+      .word-serif { font: 740 134px "New York", Georgia, "Times New Roman", serif; fill: #F6EFE4; letter-spacing: -2px; }
+      .tag { font: 560 28px -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif; fill: #F4A42B; letter-spacing: 0; }
+    </style>
+  </defs>
+  <rect width="2400" height="1600" fill="url(#sheetBg)"/>
+  <circle cx="350" cy="170" r="500" fill="#F4A42B" opacity="0.08"/>
+  <circle cx="2050" cy="1320" r="520" fill="#7AA7FF" opacity="0.055"/>
+  <text x="140" y="150" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="64" font-weight="760" fill="#F6EFE4">Cider Logo Directions</text>
+  <text x="140" y="206" class="note">Small set, beta friendly. Enough direction to choose a lane without wandering into logo swamp.</text>
+
+  <g transform="translate(140 300)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#cardGlow)" opacity="0.8"/>
+    <text x="48" y="66" class="label">A. Refined C Wordmark</text>
+    <g transform="translate(112 148)" filter="url(#shadow)">
+      <image href="cider-c-isolated-cropped.png" x="0" y="-58" width="215" height="265" preserveAspectRatio="xMidYMid meet"/>
+      <text x="198" y="146" class="word-serif">ider</text>
+      <text x="22" y="235" class="tag">Native macOS capture, without the tab soup.</text>
+    </g>
+  </g>
+
+  <g transform="translate(1260 300)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#cardGlow)" opacity="0.75"/>
+    <text x="48" y="66" class="label">B. Capture Mark</text>
+    <g transform="translate(112 140)" filter="url(#shadow)">
+      <g transform="translate(0 0)">
+        <path d="M42 4H4v38" fill="none" stroke="#F4A42B" stroke-width="18" stroke-linecap="round"/>
+        <path d="M170 4h38v38" fill="none" stroke="#F4A42B" stroke-width="18" stroke-linecap="round"/>
+        <path d="M4 170v38h38" fill="none" stroke="#F4A42B" stroke-width="18" stroke-linecap="round"/>
+        <path d="M208 170v38h-38" fill="none" stroke="#F4A42B" stroke-width="18" stroke-linecap="round"/>
+        <circle cx="106" cy="106" r="58" fill="url(#peel)"/>
+        <path d="M82 126c38-10 64-38 78-72 4 56-22 98-70 120-22-8-37-24-45-44 12 2 24 1 37-4z" fill="#0F1115" opacity="0.24"/>
+      </g>
+      <text x="270" y="142" class="word">Cider</text>
+      <text x="4" y="255" class="tag">The mark says quick capture, not just a pretty C.</text>
+    </g>
+  </g>
+
+  <g transform="translate(140 900)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#cardGlow)" opacity="0.7"/>
+    <text x="48" y="66" class="label">C. Vault Leaf</text>
+    <g transform="translate(108 136)" filter="url(#shadow)">
+      <g>
+        <rect x="16" y="28" width="202" height="150" rx="44" fill="rgba(246, 239, 228, 0.08)" stroke="rgba(246, 239, 228, 0.22)" stroke-width="4"/>
+        <path d="M72 148C72 82 118 36 202 28c-6 82-52 126-130 120z" fill="url(#peel)"/>
+        <path d="M94 134c34-18 62-48 86-88" fill="none" stroke="#FFE3A8" stroke-width="9" stroke-linecap="round"/>
+        <circle cx="62" cy="70" r="12" fill="#7AA7FF" opacity="0.95"/>
+      </g>
+      <text x="270" y="142" class="word">Cider</text>
+      <text x="4" y="255" class="tag">More knowledge vault, less candy-app-icon.</text>
+    </g>
+  </g>
+
+  <g transform="translate(1260 900)">
+    <rect class="card" width="1000" height="500" rx="28"/>
+    <rect width="1000" height="500" rx="28" fill="url(#cardGlow)" opacity="0.75"/>
+    <text x="48" y="66" class="label">D. Command Peel</text>
+    <g transform="translate(110 136)" filter="url(#shadow)">
+      <g>
+        <rect x="12" y="12" width="216" height="216" rx="58" fill="rgba(246, 239, 228, 0.08)" stroke="rgba(246, 239, 228, 0.18)" stroke-width="4"/>
+        <path d="M70 154c78 10 126-38 142-118-84 12-134 54-142 118z" fill="url(#peel)"/>
+        <path d="M78 154c38-24 76-60 112-106" fill="none" stroke="#FFE3A8" stroke-width="10" stroke-linecap="round"/>
+        <path d="M46 54h48M70 30v48M42 178h38M61 159v38" stroke="#F4A42B" stroke-width="10" stroke-linecap="round" opacity="0.9"/>
+      </g>
+      <text x="270" y="142" class="word">Cider</text>
+      <text x="4" y="255" class="tag">Warm Mac utility. Tiny bit opinionated.</text>
+    </g>
+  </g>
+</svg>

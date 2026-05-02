@@ -1,0 +1,36 @@
+<svg width="2400" height="900" viewBox="0 0 2400 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="2400" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101216"/>
+      <stop offset="0.45" stop-color="#0F1115"/>
+      <stop offset="1" stop-color="#1C1F24"/>
+    </linearGradient>
+    <linearGradient id="ciderC" x1="710" y1="255" x2="925" y2="540" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD76A"/>
+      <stop offset="0.42" stop-color="#F4A42B"/>
+      <stop offset="1" stop-color="#E85D04"/>
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1180 450) rotate(8) scale(760 390)">
+      <stop offset="0" stop-color="#F4A42B" stop-opacity="0.22"/>
+      <stop offset="0.48" stop-color="#D97706" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#B45309" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="42"/>
+    </filter>
+    <filter id="shadow" x="-24%" y="-24%" width="148%" height="148%">
+      <feDropShadow dx="0" dy="30" stdDeviation="40" flood-color="#000000" flood-opacity="0.42"/>
+    </filter>
+  </defs>
+  <rect width="2400" height="900" fill="url(#bg)"/>
+  <rect width="2400" height="900" fill="url(#coreGlow)"/>
+  <g opacity="0.24" filter="url(#blur)">
+    <path d="M410 704C720 480 865 260 1214 300C1588 342 1708 620 2044 380" fill="none" stroke="#F4A42B" stroke-width="72" stroke-linecap="round"/>
+    <path d="M438 744C760 542 884 352 1210 384C1510 414 1678 592 1962 452" fill="none" stroke="#D97706" stroke-width="42" stroke-linecap="round"/>
+  </g>
+  <g filter="url(#shadow)">
+    <text x="715" y="502" font-family="New York, Georgia, 'Times New Roman', serif" font-size="250" font-weight="700" fill="url(#ciderC)" stroke="#FFCC55" stroke-width="2" letter-spacing="-14">C</text>
+    <text x="905" y="502" font-family="New York, Georgia, 'Times New Roman', serif" font-size="188" font-weight="700" fill="#F7F3EA" letter-spacing="-2">ider</text>
+  </g>
+  <text x="900" y="612" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="38" font-weight="600" fill="#F4A42B" letter-spacing="0">macOS Utility</text>
+</svg>

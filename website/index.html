@@ -3,12 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cider - Your Mac's living knowledge vault</title>
+    <meta name="color-scheme" content="dark" />
+    <title>Cider - Your living knowledge vault</title>
     <meta
       name="description"
-      content="Cider is a native macOS knowledge vault for capturing bookmarks, notes, files, and ideas without losing your flow."
+      content="Cider is a living knowledge vault for capturing bookmarks, notes, files, and ideas across Mac, web, and iOS."
     />
     <link rel="icon" href="./assets/favicon-32.png" />
+    <style>
+      :root { background: #0f1115; color: #f6efe4; color-scheme: dark; }
+      html, body { background: #0f1115; color: #f6efe4; }
+    </style>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -20,11 +25,9 @@
         <span>Cider</span>
       </a>
       <nav aria-label="Primary navigation">
-        <a href="#vault">Vault</a>
-        <a href="#features">Features</a>
-        <a href="#ai">AI</a>
-        <span class="nav-soon" aria-disabled="true">Web App <small>Soon</small></span>
-        <span class="nav-soon" aria-disabled="true">iOS App <small>Soon</small></span>
+        <a href="#macos">macOS App</a>
+        <a class="nav-testing" href="#web">Web App <small>Testing</small></a>
+        <a class="nav-soon" href="#ios">iOS App <small>Soon</small></a>
       </nav>
       <div class="header-actions">
         <a class="social-token" href="https://github.com/TheVisher/Cider" aria-label="Cider on GitHub">
@@ -42,35 +45,30 @@
             <path d="M6.3 3.2C8.6 4.9 11 8.4 12 10.2c1-1.8 3.4-5.3 5.7-7 1.7-1.2 4.3-2.1 4.3.84 0 .58-.34 4.9-.54 5.6-.7 2.48-3.18 3.1-5.4 2.72 3.88.66 4.86 2.86 2.74 5.06-4.02 4.18-5.78-1.04-6.22-2.38-.08-.24-.12-.36-.18-.36s-.1.12-.18.36c-.44 1.34-2.2 6.56-6.22 2.38-2.12-2.2-1.14-4.4 2.74-5.06-2.22.38-4.7-.24-5.4-2.72-.2-.7-.54-5.02-.54-5.6 0-2.94 2.6-2.04 4.3-.84Z" />
           </svg>
         </a>
-        <span class="social-token social-token-soon" aria-label="Cider on Reddit coming soon">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M21.6 11.8c0-1.28-1.04-2.32-2.32-2.32-.62 0-1.18.24-1.6.64-1.34-.9-3.14-1.48-5.14-1.56l.88-4.14 2.86.62a1.68 1.68 0 1 0 .22-1.02l-3.42-.72a.52.52 0 0 0-.62.4l-1.1 5.16c-2.04.06-3.88.64-5.24 1.56a2.28 2.28 0 0 0-1.6-.64 2.32 2.32 0 0 0-.9 4.46 4.1 4.1 0 0 0-.06.7c0 3.52 4.22 6.38 9.42 6.38s9.42-2.86 9.42-6.38c0-.24-.02-.46-.06-.7a2.33 2.33 0 0 0 1.44-2.14Zm-14.6 2.1a1.62 1.62 0 1 1 3.24 0 1.62 1.62 0 0 1-3.24 0Zm8.94 4.08c-1.14 1.14-4.72 1.14-5.88 0a.58.58 0 0 1 .82-.82c.74.74 3.5.74 4.24 0a.58.58 0 0 1 .82.82Zm-.22-2.46a1.62 1.62 0 1 1 0-3.24 1.62 1.62 0 0 1 0 3.24Z" />
-          </svg>
-          <small>Soon</small>
-        </span>
         <a class="header-cta" href="https://github.com/TheVisher/Cider/releases/tag/v0.1.0-beta.3">Download Beta</a>
       </div>
     </header>
 
     <main id="top">
-      <section class="hero section">
+      <section class="hero section intro-hero">
         <div class="hero-copy reveal">
-          <p class="eyebrow">Native macOS capture, organized by your own files</p>
-          <h1>Let everything worth keeping flow back to you.</h1>
+          <p class="eyebrow">One vault for everything worth keeping</p>
+          <h1>Cider keeps your saved world close.</h1>
           <p class="lede">
-            Cider floats above your Mac, catches links, notes, screenshots, files, dates, and contacts,
-            then turns them into a fast local knowledge vault you actually want to revisit.
+            Capture links, notes, files, screenshots, ideas, dates, and contacts into one living vault.
+            Start with the native Mac app, open it from the web while you are out, and soon catch things
+            from iPhone too.
           </p>
           <div class="cta-row">
             <a class="primary-cta" href="https://github.com/TheVisher/Cider/releases/tag/v0.1.0-beta.3">
-              Download Beta
-              <span>macOS 26 · Apple Silicon</span>
+              Download macOS Beta
+              <span>Native app available now</span>
             </a>
-            <a class="secondary-cta" href="#flow">See the flow</a>
+            <a class="secondary-cta" href="#web">See Web App</a>
           </div>
         </div>
 
-        <div class="hero-stage reveal" aria-label="Cider app preview">
+        <div class="hero-stage reveal" aria-label="Cider product preview">
           <div class="app-window app-window-main">
             <div class="window-chrome">
               <span></span><span></span><span></span>
@@ -79,31 +77,31 @@
             <div class="app-shell">
               <aside class="mock-sidebar">
                 <div class="mock-search">Search</div>
-                <b>Folders</b>
-                <span>Applications <em>11</em></span>
-                <span>Development <em>8</em></span>
-                <span>Food <em>5</em></span>
-                <span>Projects <em>1</em></span>
-                <span>Tech <em>7</em></span>
+                <b>Vault</b>
+                <span>Inbox <em>18</em></span>
+                <span>Reading <em>12</em></span>
+                <span>Projects <em>9</em></span>
+                <span>Ideas <em>7</em></span>
                 <div class="mock-spacer"></div>
-                <span>Settings</span>
-                <span>AI</span>
+                <span>Mac</span>
+                <span>Web</span>
+                <span>iOS</span>
               </aside>
               <div class="app-content">
                 <div class="mock-tabs">
                   <b>Dashboard</b>
-                  <span>Inbox</span>
                   <span>Library</span>
-                  <em>200 bookmarks</em>
+                  <span>Capture</span>
+                  <em>One vault</em>
                 </div>
                 <section class="daily-brief">
                   <small>Today's Brief</small>
-                  <h3>Evening, dev. Tidy the loose ends.</h3>
-                  <p><b>2 time-sensitive</b> · <b>45 unfiled</b> · <b>4 resurfaced</b></p>
+                  <h3>Everything you saved is still findable.</h3>
+                  <p><b>Mac capture</b> · <b>Web access</b> · <b>iOS soon</b></p>
                   <div class="brief-row">
-                    <span>Pay Rent</span>
-                    <span>Time-sensitive</span>
-                    <span>Unfiled captures</span>
+                    <span>Quick note</span>
+                    <span>Saved link</span>
+                    <span>Screenshot</span>
                   </div>
                 </section>
                 <div class="dashboard-grid">
@@ -127,18 +125,26 @@
               </div>
             </div>
           </div>
-          <p class="shot-note">Cinematic product preview. Real screenshots live below for proof.</p>
+          <p class="shot-note">Cider starts on Mac, then follows the same vault across web and mobile.</p>
         </div>
       </section>
 
-      <section id="flow" class="river-section section">
+      <section id="macos" class="product-section macos-section section">
         <div class="narrative reveal">
-          <p class="eyebrow">First-person capture flow</p>
-          <h2>Double-tap Option. The stream opens wherever you are.</h2>
+          <p class="eyebrow">macOS app · Beta available</p>
+          <h2>The native Mac app is where Cider feels most alive.</h2>
           <p>
-            The page starts close to the cider current, then pulls back as the product appears:
-            capture from Safari, write a note, drop a file, ask AI, and watch it all settle into your vault.
+            Double-tap Option and Cider floats over whatever you are doing. Save browser tabs,
+            copied URLs, Markdown notes, screenshots with OCR, images, files, and reminders without
+            turning capture into a whole side quest.
           </p>
+          <div class="cta-row">
+            <a class="primary-cta" href="https://github.com/TheVisher/Cider/releases/tag/v0.1.0-beta.3">
+              Download Beta
+              <span>macOS 26 · Apple Silicon</span>
+            </a>
+            <a class="secondary-cta" href="#macos-screenshots">See Mac views</a>
+          </div>
         </div>
         <div class="flow-lanes">
           <div class="flow-card reveal">
@@ -159,7 +165,7 @@
         </div>
       </section>
 
-      <section id="vault" class="vault section">
+      <section class="vault section macos-vault">
         <div class="split-copy reveal">
           <p class="eyebrow">Your data stays yours</p>
           <h2>A vault made of real files, backed by SQLite.</h2>
@@ -181,10 +187,10 @@
         </div>
       </section>
 
-      <section id="screenshots" class="screenshots section" aria-label="App screenshots">
+      <section id="macos-screenshots" class="screenshots section" aria-label="macOS app screenshots">
         <div class="section-heading reveal">
-          <p class="eyebrow">Product moments</p>
-          <h2>Real views, not vapor.</h2>
+          <p class="eyebrow">macOS product moments</p>
+          <h2>Real views from the app you can use today.</h2>
         </div>
         <div class="shot-grid">
           <figure class="screenshot-slot screenshot-dashboard wide reveal">
@@ -202,40 +208,136 @@
         </div>
       </section>
 
-      <section id="features" class="features section">
+      <section id="web" class="hero web-hero section">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Web app · Testing now</p>
+          <h2>Your vault, anywhere with a browser.</h2>
+          <p class="lede">
+            Cider Web is the companion for the moments when you are not on your Mac.
+            Browse saved links, capture references, and keep the same vault nearby from another computer.
+          </p>
+          <div class="cta-row">
+            <a class="primary-cta" href="https://app.cider.so/home">
+              Open Web App
+              <span>Testing at app.cider.so</span>
+            </a>
+            <a class="secondary-cta" href="https://app.cider.so/login">Sign in</a>
+            <a class="secondary-cta" href="https://app.cider.so/signup">Create account</a>
+          </div>
+        </div>
+
+        <div class="hero-stage web-stage reveal" aria-label="Cider Web preview">
+          <div class="app-window app-window-main web-window">
+            <div class="window-chrome">
+              <span></span><span></span><span></span>
+              <strong>app.cider.so</strong>
+            </div>
+            <div class="app-shell">
+              <aside class="mock-sidebar">
+                <div class="mock-search">Search vault</div>
+                <b>Cider Web</b>
+                <span>Inbox <em>18</em></span>
+                <span>Reading <em>12</em></span>
+                <span>Design <em>9</em></span>
+                <span>Recipes <em>5</em></span>
+                <div class="mock-spacer"></div>
+                <span>Sync</span>
+                <span>Settings</span>
+              </aside>
+              <div class="app-content">
+                <div class="mock-tabs">
+                  <b>Library</b>
+                  <span>Tags</span>
+                  <span>Capture</span>
+                  <em>Live testing</em>
+                </div>
+                <section class="daily-brief web-brief">
+                  <small>Browser vault</small>
+                  <h3>Pick up the thread from any machine.</h3>
+                  <p><b>Synced captures</b> · <b>Web access</b> · <b>Fast search</b></p>
+                  <div class="brief-row">
+                    <span>New capture</span>
+                    <span>Reading queue</span>
+                    <span>Shared vault</span>
+                  </div>
+                </section>
+                <div class="web-preview-grid">
+                  <article>
+                    <small>Saved link</small>
+                    <b>Build notes for launch</b>
+                    <span>cider.so/docs</span>
+                  </article>
+                  <article>
+                    <small>Status</small>
+                    <b>Testing</b>
+                    <span>Open while features settle</span>
+                  </article>
+                  <article>
+                    <small>Capture</small>
+                    <b>Paste a URL</b>
+                    <span>Save now, sort later</span>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="shot-note">The marketing page stays on cider.so. The working app opens on app.cider.so when you choose it.</p>
+        </div>
+      </section>
+
+      <section id="ios" class="product-section ios-section section">
+        <div class="narrative reveal">
+          <p class="eyebrow">iOS app · Coming soon</p>
+          <h2>The pocket capture layer for the same Cider vault.</h2>
+          <p>
+            The iOS app will make saving feel instant when you are away from the desk: share-sheet capture,
+            fast inbox triage, mobile reading, and reminders that flow back into the same library.
+          </p>
+          <div class="cta-row">
+            <span class="secondary-cta disabled-cta">Coming soon</span>
+            <a class="secondary-cta" href="https://discord.gg/TzErWTgm4d">Follow progress</a>
+          </div>
+        </div>
+
+        <div class="ios-preview reveal" aria-label="Cider iOS preview">
+          <div class="ios-device">
+            <div class="ios-notch"></div>
+            <div class="ios-screen">
+              <small>Cider Mobile</small>
+              <h3>Save now. Sort later.</h3>
+              <div class="ios-card">Shared from Safari</div>
+              <div class="ios-card">Quick note</div>
+              <div class="ios-card">Reading queue</div>
+              <div class="ios-tabbar">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="features section product-summary">
         <div class="section-heading reveal">
-          <p class="eyebrow">Powerful without feeling heavy</p>
-          <h2>Built like a Mac app, not a web app in a coat.</h2>
+          <p class="eyebrow">One product family</p>
+          <h2>Capture anywhere. Keep one vault.</h2>
         </div>
         <div class="feature-grid">
           <article class="feature reveal">
-            <h3>Native floating panel</h3>
-            <p>Double-tap Option and Cider appears on the screen where you are already working.</p>
+            <h3>macOS app</h3>
+            <p>The fast native workspace for capture, organization, files, screenshots, notes, and AI.</p>
           </article>
           <article class="feature reveal">
-            <h3>Universal library</h3>
-            <p>Bookmarks, notes, files, date cards, contacts, and folders live in one searchable feed.</p>
+            <h3>Web app</h3>
+            <p>Browser access for your vault while the cross-platform sync story is being tested.</p>
           </article>
           <article class="feature reveal">
-            <h3>Fast capture</h3>
-            <p>Save browser tabs, copied URLs, screenshots with OCR, images, and rich notes from anywhere.</p>
-          </article>
-          <article class="feature reveal">
-            <h3>Flexible views</h3>
-            <p>Switch between list, grid, masonry, tags, folders, and custom saved tabs.</p>
-          </article>
-          <article class="feature reveal">
-            <h3>Spotlight-ready</h3>
-            <p>Index your saved knowledge so the Mac itself can help you find what you captured.</p>
-          </article>
-          <article class="feature reveal">
-            <h3>Portable by design</h3>
-            <p>Delete the app tomorrow and your files still make sense in Finder, editors, and AI tools.</p>
+            <h3>iOS app</h3>
+            <p>Planned mobile capture for the things you find when you are nowhere near your desk.</p>
           </article>
         </div>
       </section>
 
-      <section id="ai" class="ai section">
+      <section class="ai section">
         <div class="ai-panel reveal">
           <p class="eyebrow">Optional intelligence</p>
           <h2>Ask your vault questions without handing it away.</h2>
@@ -258,42 +360,15 @@
           <img src="./assets/icon-1024.png" alt="" />
           <p class="eyebrow">Cider beta</p>
           <h2>Start building a vault your future self can actually use.</h2>
-          <p>Native Swift. Local-first storage. No subscription. No Electron.</p>
+          <p>Native Swift. Local-first storage. Browser companion in testing. iOS on the way.</p>
           <a class="primary-cta" href="https://github.com/TheVisher/Cider/releases/tag/v0.1.0-beta.3">
             Download Cider Beta
             <span>Latest release on GitHub</span>
           </a>
-          <div class="social-row" aria-label="Cider links">
-            <a class="social-card" href="https://github.com/TheVisher/Cider">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 .8a11.2 11.2 0 0 0-3.54 21.82c.56.1.76-.24.76-.54v-2.1c-3.1.68-3.75-1.34-3.75-1.34-.5-1.3-1.24-1.64-1.24-1.64-1.02-.7.08-.68.08-.68 1.12.08 1.72 1.16 1.72 1.16 1 1.7 2.62 1.2 3.26.92.1-.72.4-1.2.72-1.48-2.48-.28-5.08-1.24-5.08-5.52 0-1.22.44-2.22 1.16-3-.12-.28-.5-1.42.1-2.96 0 0 .94-.3 3.08 1.14a10.6 10.6 0 0 1 5.62 0c2.14-1.44 3.08-1.14 3.08-1.14.6 1.54.22 2.68.1 2.96.72.78 1.16 1.78 1.16 3 0 4.3-2.6 5.24-5.1 5.52.4.34.76 1.02.76 2.06v3.1c0 .3.2.64.78.54A11.2 11.2 0 0 0 12 .8Z" />
-              </svg>
-              <span>GitHub</span>
-            </a>
-            <a class="social-card" href="https://discord.gg/TzErWTgm4d">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M19.6 4.8A16 16 0 0 0 15.7 3l-.2.36c1.32.34 1.94.82 1.94.82a12.5 12.5 0 0 0-10.88 0s.62-.48 1.94-.82L8.3 3a16 16 0 0 0-3.9 1.8C1.92 8.46 1.24 12.04 1.58 15.56A15.8 15.8 0 0 0 6.34 18l.96-1.28c-.54-.2-1.06-.44-1.54-.74l.36-.28c2.98 1.38 6.2 1.38 9.14 0l.38.28c-.48.3-1 .54-1.56.74L15.04 18a15.7 15.7 0 0 0 4.78-2.44c.4-4.08-.68-7.62-2.22-10.76Zm-11.3 8.6c-.92 0-1.68-.84-1.68-1.88s.74-1.88 1.68-1.88c.94 0 1.7.84 1.68 1.88 0 1.04-.74 1.88-1.68 1.88Zm7.4 0c-.92 0-1.68-.84-1.68-1.88s.74-1.88 1.68-1.88c.94 0 1.7.84 1.68 1.88 0 1.04-.74 1.88-1.68 1.88Z" />
-              </svg>
-              <span>Discord</span>
-            </a>
-            <a class="social-card" href="https://bsky.app/profile/ciderapp.bsky.social">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6.3 3.2C8.6 4.9 11 8.4 12 10.2c1-1.8 3.4-5.3 5.7-7 1.7-1.2 4.3-2.1 4.3.84 0 .58-.34 4.9-.54 5.6-.7 2.48-3.18 3.1-5.4 2.72 3.88.66 4.86 2.86 2.74 5.06-4.02 4.18-5.78-1.04-6.22-2.38-.08-.24-.12-.36-.18-.36s-.1.12-.18.36c-.44 1.34-2.2 6.56-6.22 2.38-2.12-2.2-1.14-4.4 2.74-5.06-2.22.38-4.7-.24-5.4-2.72-.2-.7-.54-5.02-.54-5.6 0-2.94 2.6-2.04 4.3-.84Z" />
-              </svg>
-              <span>Bluesky</span>
-            </a>
-            <span class="social-card social-card-muted social-card-soon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M21.6 11.8c0-1.28-1.04-2.32-2.32-2.32-.62 0-1.18.24-1.6.64-1.34-.9-3.14-1.48-5.14-1.56l.88-4.14 2.86.62a1.68 1.68 0 1 0 .22-1.02l-3.42-.72a.52.52 0 0 0-.62.4l-1.1 5.16c-2.04.06-3.88.64-5.24 1.56a2.28 2.28 0 0 0-1.6-.64 2.32 2.32 0 0 0-.9 4.46 4.1 4.1 0 0 0-.06.7c0 3.52 4.22 6.38 9.42 6.38s9.42-2.86 9.42-6.38c0-.24-.02-.46-.06-.7a2.33 2.33 0 0 0 1.44-2.14Zm-14.6 2.1a1.62 1.62 0 1 1 3.24 0 1.62 1.62 0 0 1-3.24 0Zm8.94 4.08c-1.14 1.14-4.72 1.14-5.88 0a.58.58 0 0 1 .82-.82c.74.74 3.5.74 4.24 0a.58.58 0 0 1 .82.82Zm-.22-2.46a1.62 1.62 0 1 1 0-3.24 1.62 1.62 0 0 1 0 3.24Z" />
-              </svg>
-              <span>Reddit</span>
-              <small>Soon</small>
-            </span>
-          </div>
         </div>
       </section>
     </main>
 
-    <script src="./script.js"></script>
+    <script src="./script.js?v=20260429-6"></script>
   </body>
 </html>
