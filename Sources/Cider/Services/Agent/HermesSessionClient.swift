@@ -10,6 +10,9 @@ struct HermesConversationState: Codable, Equatable, Sendable {
     var title: String?
     var source: String?
     var lastSyncedAt: Date?
+    var lastSyncedMessageID: String?
+    var lastSyncedTimestamp: Date?
+    var lastImportedRuntimeSessionID: String?
 
     init(
         conversationID: UUID = UUID(),
@@ -18,7 +21,10 @@ struct HermesConversationState: Codable, Equatable, Sendable {
         runtimeSessionLineage: [String]? = nil,
         title: String? = nil,
         source: String? = nil,
-        lastSyncedAt: Date? = nil
+        lastSyncedAt: Date? = nil,
+        lastSyncedMessageID: String? = nil,
+        lastSyncedTimestamp: Date? = nil,
+        lastImportedRuntimeSessionID: String? = nil
     ) {
         self.conversationID = conversationID
         self.runtimeID = runtimeID
@@ -27,6 +33,9 @@ struct HermesConversationState: Codable, Equatable, Sendable {
         self.title = title
         self.source = source
         self.lastSyncedAt = lastSyncedAt
+        self.lastSyncedMessageID = lastSyncedMessageID
+        self.lastSyncedTimestamp = lastSyncedTimestamp
+        self.lastImportedRuntimeSessionID = lastImportedRuntimeSessionID
     }
 }
 
@@ -559,6 +568,7 @@ final class HermesSessionService: @unchecked Sendable {
         nextState.title = transcript.title ?? continuation.title ?? state.title
         nextState.source = transcript.source ?? continuation.source ?? state.source
         nextState.lastSyncedAt = Date()
+        nextState.updateSyncCursor(from: transcript.messages, importedSessionID: continuation.activeSessionID)
 
         return HermesSyncResult(state: nextState, messages: merged)
     }
@@ -589,13 +599,15 @@ final class HermesSessionService: @unchecked Sendable {
 
         guard !supplementalSessionIDs.isEmpty else { return synced }
 
+        var nextState = synced.state
         var merged = synced.messages
         for sessionID in supplementalSessionIDs {
             let transcript = try await transcript(sessionID: sessionID)
             merged = HermesTranscriptMerger.merge(existing: merged, incoming: transcript.messages)
+            nextState.updateSyncCursor(from: transcript.messages, importedSessionID: sessionID)
         }
 
-        return HermesSyncResult(state: synced.state, messages: merged)
+        return HermesSyncResult(state: nextState, messages: merged)
     }
 
     func send(
@@ -693,6 +705,7 @@ final class HermesSessionService: @unchecked Sendable {
         nextState.title = transcript.title ?? continuation.title ?? state.title
         nextState.source = transcript.source ?? continuation.source ?? state.source
         nextState.lastSyncedAt = Date()
+        nextState.updateSyncCursor(from: transcript.messages, importedSessionID: continuation.activeSessionID)
 
         return HermesSyncResult(state: nextState, messages: merged)
     }
@@ -738,6 +751,20 @@ final class HermesSessionService: @unchecked Sendable {
 struct HermesSyncResult: Sendable {
     let state: HermesConversationState
     let messages: [AIAssistantMessage]
+}
+
+private extension HermesConversationState {
+    mutating func updateSyncCursor(
+        from messages: [HermesTranscriptMessage],
+        importedSessionID: String
+    ) {
+        lastImportedRuntimeSessionID = importedSessionID
+        guard let newestHermesMessage = messages.max(by: { $0.timestamp < $1.timestamp })
+        else { return }
+
+        lastSyncedMessageID = newestHermesMessage.externalID
+        lastSyncedTimestamp = newestHermesMessage.timestamp
+    }
 }
 
 protocol HermesCommandRunning: Sendable {

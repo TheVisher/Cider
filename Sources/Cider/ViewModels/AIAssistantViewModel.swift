@@ -415,7 +415,10 @@ final class AIAssistantViewModel: ObservableObject {
                 runtimeSessionLineage: mainBrain.runtimeSessionLineage,
                 title: mainBrain.title,
                 source: nil,
-                lastSyncedAt: nil
+                lastSyncedAt: nil,
+                lastSyncedMessageID: mainBrain.lastSyncedMessageID,
+                lastSyncedTimestamp: mainBrain.lastSyncedTimestamp,
+                lastImportedRuntimeSessionID: mainBrain.lastImportedRuntimeSessionID
             )
         } catch {
             logger.error("Failed to load Cider Main Brain: \(error.localizedDescription, privacy: .public)")
@@ -609,7 +612,10 @@ final class AIAssistantViewModel: ObservableObject {
                             runtimeSessionLineage: result.state.runtimeSessionLineage,
                             title: hermesTitle,
                             source: result.state.source,
-                            lastSyncedAt: result.state.lastSyncedAt
+                            lastSyncedAt: result.state.lastSyncedAt,
+                            lastSyncedMessageID: result.state.lastSyncedMessageID,
+                            lastSyncedTimestamp: result.state.lastSyncedTimestamp,
+                            lastImportedRuntimeSessionID: result.state.lastImportedRuntimeSessionID
                         ),
                         messages: result.messages
                     )
@@ -804,7 +810,10 @@ final class AIAssistantViewModel: ObservableObject {
                 runtimeSessionLineage: currentRecord.runtimeSessionLineage,
                 title: currentRecord.hermesTitle ?? currentRecord.title,
                 source: nil,
-                lastSyncedAt: nil
+                lastSyncedAt: nil,
+                lastSyncedMessageID: currentRecord.lastSyncedMessageID,
+                lastSyncedTimestamp: currentRecord.lastSyncedTimestamp,
+                lastImportedRuntimeSessionID: currentRecord.lastImportedRuntimeSessionID
             )
             hermesConversationState = state
             return state
@@ -824,7 +833,10 @@ final class AIAssistantViewModel: ObservableObject {
                 runtimeSessionLineage: mainBrain.runtimeSessionLineage,
                 title: mainBrain.title,
                 source: nil,
-                lastSyncedAt: nil
+                lastSyncedAt: nil,
+                lastSyncedMessageID: mainBrain.lastSyncedMessageID,
+                lastSyncedTimestamp: mainBrain.lastSyncedTimestamp,
+                lastImportedRuntimeSessionID: mainBrain.lastImportedRuntimeSessionID
             )
             hermesConversationState = state
             return state
@@ -1023,6 +1035,9 @@ final class AIAssistantViewModel: ObservableObject {
             || oldState.runtimeSessionLineage != newState.runtimeSessionLineage
             || oldState.title != newState.title
             || oldState.source != newState.source
+            || oldState.lastSyncedMessageID != newState.lastSyncedMessageID
+            || oldState.lastSyncedTimestamp != newState.lastSyncedTimestamp
+            || oldState.lastImportedRuntimeSessionID != newState.lastImportedRuntimeSessionID
     }
 
     private func finishTypewriter() async {
@@ -1120,6 +1135,9 @@ final class AIAssistantViewModel: ObservableObject {
             record.runtimeID = state.runtimeID
             record.activeRuntimeSessionID = state.activeRuntimeSessionID
             record.runtimeSessionLineage = state.runtimeSessionLineage
+            record.lastSyncedMessageID = state.lastSyncedMessageID
+            record.lastSyncedTimestamp = state.lastSyncedTimestamp
+            record.lastImportedRuntimeSessionID = state.lastImportedRuntimeSessionID
             record.updatedAt = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
             try agentChatRegistry.updateChat(record)
             refreshHermesChats()
@@ -1164,7 +1182,10 @@ final class AIAssistantViewModel: ObservableObject {
             runtimeSessionLineage: record.runtimeSessionLineage,
             title: record.hermesTitle ?? record.title,
             source: record.activeRuntimeSessionID.isEmpty ? "cider" : nil,
-            lastSyncedAt: nil
+            lastSyncedAt: nil,
+            lastSyncedMessageID: record.lastSyncedMessageID,
+            lastSyncedTimestamp: record.lastSyncedTimestamp,
+            lastImportedRuntimeSessionID: record.lastImportedRuntimeSessionID
         )
         hermesSyncStatus = record.activeRuntimeSessionID.isEmpty ? .idle : .syncing
         provider.resetSession()
@@ -1247,7 +1268,10 @@ final class AIAssistantViewModel: ObservableObject {
             runtimeSessionLineage: meta.runtimeSessionLineage,
             title: meta.title,
             source: meta.runtimeSource,
-            lastSyncedAt: meta.runtimeLastSyncedAt
+            lastSyncedAt: meta.runtimeLastSyncedAt,
+            lastSyncedMessageID: meta.runtimeLastSyncedMessageID,
+            lastSyncedTimestamp: meta.runtimeLastSyncedTimestamp,
+            lastImportedRuntimeSessionID: meta.runtimeLastImportedSessionID
         )
     }
 

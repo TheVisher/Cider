@@ -9,6 +9,9 @@ struct CiderAgentChatRecord: Codable, Equatable, Sendable {
     var runtimeID: String
     var activeRuntimeSessionID: String
     var runtimeSessionLineage: [String]
+    var lastSyncedMessageID: String?
+    var lastSyncedTimestamp: Date?
+    var lastImportedRuntimeSessionID: String?
     var scope: String?
     var archived: Bool
     var createdAt: Date
@@ -24,6 +27,9 @@ struct CiderAgentChatRecord: Codable, Equatable, Sendable {
         runtimeID: String,
         activeRuntimeSessionID: String,
         runtimeSessionLineage: [String],
+        lastSyncedMessageID: String? = nil,
+        lastSyncedTimestamp: Date? = nil,
+        lastImportedRuntimeSessionID: String? = nil,
         scope: String? = nil,
         archived: Bool = false,
         createdAt: Date,
@@ -38,6 +44,9 @@ struct CiderAgentChatRecord: Codable, Equatable, Sendable {
         self.runtimeID = runtimeID
         self.activeRuntimeSessionID = activeRuntimeSessionID
         self.runtimeSessionLineage = runtimeSessionLineage
+        self.lastSyncedMessageID = lastSyncedMessageID
+        self.lastSyncedTimestamp = lastSyncedTimestamp
+        self.lastImportedRuntimeSessionID = lastImportedRuntimeSessionID
         self.scope = scope
         self.archived = archived
         self.createdAt = createdAt
@@ -54,6 +63,9 @@ struct CiderAgentChatRecord: Codable, Equatable, Sendable {
         case runtimeID
         case activeRuntimeSessionID
         case runtimeSessionLineage
+        case lastSyncedMessageID
+        case lastSyncedTimestamp
+        case lastImportedRuntimeSessionID
         case scope
         case archived
         case createdAt
@@ -71,6 +83,9 @@ struct CiderAgentChatRecord: Codable, Equatable, Sendable {
         runtimeID = try container.decode(String.self, forKey: .runtimeID)
         activeRuntimeSessionID = try container.decode(String.self, forKey: .activeRuntimeSessionID)
         runtimeSessionLineage = try container.decode([String].self, forKey: .runtimeSessionLineage)
+        lastSyncedMessageID = try container.decodeIfPresent(String.self, forKey: .lastSyncedMessageID)
+        lastSyncedTimestamp = try container.decodeIfPresent(Date.self, forKey: .lastSyncedTimestamp)
+        lastImportedRuntimeSessionID = try container.decodeIfPresent(String.self, forKey: .lastImportedRuntimeSessionID)
         scope = try container.decodeIfPresent(String.self, forKey: .scope)
         archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
@@ -168,6 +183,9 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
             runtimeID: state.runtimeID,
             activeRuntimeSessionID: state.activeRuntimeSessionID,
             runtimeSessionLineage: state.runtimeSessionLineage,
+            lastSyncedMessageID: state.lastSyncedMessageID,
+            lastSyncedTimestamp: state.lastSyncedTimestamp,
+            lastImportedRuntimeSessionID: state.lastImportedRuntimeSessionID,
             scope: "main",
             createdAt: now,
             updatedAt: now,
@@ -197,6 +215,9 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         record.runtimeID = state.runtimeID
         record.activeRuntimeSessionID = state.activeRuntimeSessionID
         record.runtimeSessionLineage = state.runtimeSessionLineage
+        record.lastSyncedMessageID = state.lastSyncedMessageID
+        record.lastSyncedTimestamp = state.lastSyncedTimestamp
+        record.lastImportedRuntimeSessionID = state.lastImportedRuntimeSessionID
         record.title = Self.mainBrainTitle
         record.hermesTitle = record.hermesTitle ?? "Cider Main Brain"
         record.kind = Self.mainBrainKind
@@ -221,6 +242,9 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
             runtimeID: Self.hermesRuntimeID,
             activeRuntimeSessionID: "",
             runtimeSessionLineage: [],
+            lastSyncedMessageID: nil,
+            lastSyncedTimestamp: nil,
+            lastImportedRuntimeSessionID: nil,
             scope: scope,
             archived: false,
             createdAt: now,

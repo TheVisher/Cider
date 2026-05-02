@@ -28,7 +28,10 @@ struct CiderAgentChatRegistryTests {
             runtimeSessionLineage: ["fresh-session-1", "fresh-session-2"],
             title: "Latest Telegram",
             source: "telegram",
-            lastSyncedAt: Date(timeIntervalSince1970: 1_777_680_000)
+            lastSyncedAt: Date(timeIntervalSince1970: 1_777_680_000),
+            lastSyncedMessageID: "fresh-session-2:msg-9",
+            lastSyncedTimestamp: Date(timeIntervalSince1970: 1_777_680_001),
+            lastImportedRuntimeSessionID: "fresh-session-2"
         )
 
         let created = try registry.createMainBrain(from: state)
@@ -41,6 +44,9 @@ struct CiderAgentChatRegistryTests {
         #expect(created.runtimeID == "hermes")
         #expect(created.activeRuntimeSessionID == "fresh-session-2")
         #expect(created.runtimeSessionLineage == ["fresh-session-1", "fresh-session-2"])
+        #expect(created.lastSyncedMessageID == "fresh-session-2:msg-9")
+        #expect(created.lastSyncedTimestamp == Date(timeIntervalSince1970: 1_777_680_001))
+        #expect(created.lastImportedRuntimeSessionID == "fresh-session-2")
         #expect(created.defaultInCider)
         #expect(loaded == created)
     }
@@ -103,6 +109,70 @@ struct CiderAgentChatRegistryTests {
         #expect(loaded?.conversationID == updated.conversationID)
         #expect(loaded?.activeRuntimeSessionID == updated.activeRuntimeSessionID)
         #expect(loaded?.runtimeSessionLineage == updated.runtimeSessionLineage)
+    }
+
+    @Test("Hermes updates persist sync cursor without changing logical chat")
+    func hermesUpdatesPersistSyncCursorWithoutChangingLogicalChat() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let registry = CiderAgentChatRegistry(storageDirectoryURL: tempDir)
+        let first = try registry.createMainBrain(from: HermesConversationState(
+            activeRuntimeSessionID: "session-a",
+            runtimeSessionLineage: ["session-a"],
+            title: "Main Brain",
+            source: "telegram"
+        ))
+        let cursorTime = Date(timeIntervalSince1970: 1_777_690_000)
+
+        let updated = try registry.updateMainBrain(from: HermesConversationState(
+            conversationID: first.conversationID,
+            activeRuntimeSessionID: "session-b",
+            runtimeSessionLineage: ["session-a", "session-b"],
+            title: "Main Brain",
+            source: "telegram",
+            lastSyncedAt: cursorTime,
+            lastSyncedMessageID: "session-b:assistant:42",
+            lastSyncedTimestamp: cursorTime,
+            lastImportedRuntimeSessionID: "session-b"
+        ))
+
+        #expect(updated.stableID == first.stableID)
+        #expect(updated.conversationID == first.conversationID)
+        #expect(updated.activeRuntimeSessionID == "session-b")
+        #expect(updated.lastSyncedMessageID == "session-b:assistant:42")
+        #expect(updated.lastSyncedTimestamp == cursorTime)
+        #expect(updated.lastImportedRuntimeSessionID == "session-b")
+        #expect(try registry.loadMainBrain()?.lastSyncedMessageID == "session-b:assistant:42")
+    }
+
+    @Test("legacy chat records decode with empty sync cursor")
+    func legacyChatRecordsDecodeWithEmptySyncCursor() throws {
+        let json = """
+        {
+          "stableID" : "cider.main",
+          "title" : "Main Brain",
+          "kind" : "main-brain",
+          "conversationID" : "11111111-1111-1111-1111-111111111111",
+          "runtimeID" : "hermes",
+          "activeRuntimeSessionID" : "session-a",
+          "runtimeSessionLineage" : [
+            "session-a"
+          ],
+          "createdAt" : "2026-05-02T09:00:00Z",
+          "updatedAt" : "2026-05-02T09:01:00Z",
+          "defaultInCider" : true
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let record = try decoder.decode(CiderAgentChatRecord.self, from: Data(json.utf8))
+
+        #expect(record.lastSyncedMessageID == nil)
+        #expect(record.lastSyncedTimestamp == nil)
+        #expect(record.lastImportedRuntimeSessionID == nil)
     }
 
     @Test("named Hermes chat starts as stable local record without Hermes session")

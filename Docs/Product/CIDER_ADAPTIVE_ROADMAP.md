@@ -87,6 +87,10 @@ This is not a rigid release contract. It is a living queue.
 
 **Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`.
 
+**Known bridge gaps:**
+
+- Telegram voice-mode turns do not currently sync into Cider's mirrored chat transcript. Treat this as a transcript import coverage gap, not a named-chat blocker.
+
 **Supporting docs:**
 
 - `Docs/superpowers/plans/2026-05-02-cider-hermes-bridge-hardening.md`

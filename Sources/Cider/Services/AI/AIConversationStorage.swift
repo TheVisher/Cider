@@ -15,6 +15,9 @@ struct AIConversationMeta: Codable {
     var runtimeSessionLineage: [String]?
     var runtimeSource: String?
     var runtimeLastSyncedAt: Date?
+    var runtimeLastSyncedMessageID: String?
+    var runtimeLastSyncedTimestamp: Date?
+    var runtimeLastImportedSessionID: String?
 
     init(id: UUID = UUID(), title: String = "New Chat", model: String = "apple-intelligence") {
         self.id = id
@@ -40,6 +43,9 @@ struct AIConversationSummary: Identifiable {
     var runtimeSessionLineage: [String]?
     var runtimeSource: String?
     var runtimeLastSyncedAt: Date?
+    var runtimeLastSyncedMessageID: String?
+    var runtimeLastSyncedTimestamp: Date?
+    var runtimeLastImportedSessionID: String?
 }
 
 /// Persists AI conversations as JSONL files in the vault.
@@ -107,7 +113,10 @@ final class AIConversationStorage: ObservableObject {
                 activeRuntimeSessionID: meta.activeRuntimeSessionID,
                 runtimeSessionLineage: meta.runtimeSessionLineage,
                 runtimeSource: meta.runtimeSource,
-                runtimeLastSyncedAt: meta.runtimeLastSyncedAt
+                runtimeLastSyncedAt: meta.runtimeLastSyncedAt,
+                runtimeLastSyncedMessageID: meta.runtimeLastSyncedMessageID,
+                runtimeLastSyncedTimestamp: meta.runtimeLastSyncedTimestamp,
+                runtimeLastImportedSessionID: meta.runtimeLastImportedSessionID
             ))
         }
 
@@ -170,6 +179,9 @@ final class AIConversationStorage: ObservableObject {
         updatedMeta.runtimeSessionLineage = hermesState?.runtimeSessionLineage
         updatedMeta.runtimeSource = hermesState?.source
         updatedMeta.runtimeLastSyncedAt = hermesState?.lastSyncedAt
+        updatedMeta.runtimeLastSyncedMessageID = hermesState?.lastSyncedMessageID
+        updatedMeta.runtimeLastSyncedTimestamp = hermesState?.lastSyncedTimestamp
+        updatedMeta.runtimeLastImportedSessionID = hermesState?.lastImportedRuntimeSessionID
 
         var lines: [String] = []
 

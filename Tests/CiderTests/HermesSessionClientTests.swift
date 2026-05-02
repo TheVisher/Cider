@@ -357,6 +357,9 @@ struct HermesSessionClientTests {
             "telegram-parent",
             "telegram-parent"
         ])
+        #expect(result.state.lastSyncedMessageID == "hermes:telegram-parent:3")
+        #expect(result.state.lastSyncedTimestamp == Date(timeIntervalSince1970: 1_777_662_206.25))
+        #expect(result.state.lastImportedRuntimeSessionID == "telegram-parent")
     }
 
     @Test("transcript parser imports chat messages and skips tool rows")

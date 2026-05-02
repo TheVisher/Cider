@@ -104,6 +104,9 @@ struct HermesRunTransport: HermesBridgeTransport {
                 }
             }
             nextState.lastSyncedAt = now
+            nextState.lastSyncedMessageID = assistantMessage.sourceID
+            nextState.lastSyncedTimestamp = assistantMessage.timestamp
+            nextState.lastImportedRuntimeSessionID = assistantMessage.sourceSessionID
 
             return HermesBridgeSendResult(
                 state: nextState,
