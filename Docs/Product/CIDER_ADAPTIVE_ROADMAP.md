@@ -74,7 +74,18 @@ This is not a rigid release contract. It is a living queue.
 - streaming response path and native approval/confirmation prompt design
 - keep the direct Hermes assumptions isolated in `HermesSessionClient.swift`
 
-**Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven.
+**Current implementation order:**
+
+1. Remove seeded/local-only Hermes session assumptions.
+2. Add explicit attach/relink/repair flow.
+3. Probe Hermes API server capabilities.
+4. Prefer API Runs/SSE for send, stream, status, and stop when available.
+5. Keep CLI/export/session-file polling as fallback.
+6. Add named Hermes side chats that write friendly titles into Hermes for Telegram `/resume <title>`.
+7. Add durable per-chat sync cursors and continuation recovery.
+8. Add native approval UI when Hermes exposes an app-client approval event and response path.
+
+**Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`.
 
 **Supporting docs:**
 
@@ -126,7 +137,7 @@ This is not a rigid release contract. It is a living queue.
 - safe message serialization so multiple clients do not race
 - clear UI when a session was resumed, compacted, or started fresh
 
-**Current note:** The stable `cider.main` registry, Hermes session lineage, transcript sync, and main-window/floating AI surface are implemented. Remaining work is hardening/productization: attach/relink UI, dedupe, send coordination, and source-of-truth docs.
+**Current note:** The stable `cider.main` registry, Hermes session lineage, transcript sync, main-window/floating AI surface, explicit attach/relink UI, send coordination, dedupe, source-of-truth docs, and named Hermes side chats are implemented. Remaining work is product hardening around durable sync cursors, richer stale-session recovery, API availability field testing, native approvals, and a cleaner Telegram resume-list experience if that belongs in Hermes/gateway.
 
 **Why before bigger AI features:** If session continuity is shaky, doc audits, reminders, project agents, and life-assistant workflows will feel fragmented.
 

@@ -27,6 +27,8 @@
 
 The current implementation is a strong v0 of **Cider as a Hermes session client**, not a true shared multi-client room yet.
 
+**Hardening follow-up:** The seeded local Hermes lineage from this plan has been replaced by the explicit attach/create/repair flow in `Docs/superpowers/plans/2026-05-02-cider-hermes-bridge-hardening.md`. Treat the seed IDs here as historical implementation context only.
+
 Cider can:
 
 - attach to the stable Main Brain mapping
