@@ -13,6 +13,7 @@ struct CiderFloatingItemView: View {
     @ObservedObject private var dateCards = DateCardStorage.shared
     @ObservedObject private var contacts = ContactStorage.shared
     @ObservedObject private var todos = TodoCardStorage.shared
+    @ObservedObject private var vaultFiles = VaultFileService.shared
 
     var body: some View {
         Group {
@@ -46,6 +47,12 @@ struct CiderFloatingItemView: View {
                     FloatingTodoDetail(todo: todo, surface: surface)
                 } else {
                     FloatingMissingItemView(title: "Todo not found", surface: surface)
+                }
+            case .vaultFile(let id):
+                if let file = vaultFiles.file(for: id) {
+                    FloatingVaultFileDetail(file: file, surface: surface)
+                } else {
+                    FloatingMissingItemView(title: "File not found", surface: surface)
                 }
             case .clipboard:
                 FloatingMissingItemView(title: "Clipboard opens in its dedicated panel", surface: surface)
@@ -90,7 +97,11 @@ private struct FloatingNoteDetail: View {
             }
         ) {
             if presentation.usesInlineEditor {
-                InlineNoteEditorView(viewModel: viewModel)
+                InlineNoteEditorView(
+                    viewModel: viewModel,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef
+                )
             }
         }
         .onAppear { syncSelectedNote() }
@@ -119,6 +130,19 @@ private struct FloatingNoteDetail: View {
     private func renameNote(_ newTitle: String) {
         guard let selected = viewModel.selectedNote ?? NotesStorage.shared.notes.first(where: { $0.id == note.id }) else { return }
         NotesStorage.shared.rename(note: selected, to: newTitle)
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
     }
 }
 
@@ -321,7 +345,8 @@ private struct FloatingBookmarkDetailContent: View {
             onCopyURL: copyURL,
             onSave: saveDraft,
             onCancel: {},
-            onOpenLinkedRef: floatLinkedRef
+            onOpenLinkedRef: floatLinkedRef,
+            canOpenLinkedRef: canFloatLinkedRef
         )
     }
 
@@ -367,6 +392,10 @@ private struct FloatingBookmarkDetailContent: View {
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
     }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
 }
 
 struct FloatingBookmarkDetailLayout {
@@ -388,54 +417,37 @@ private struct FloatingContactDetail: View {
     let contact: ContactCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
-    @State private var editorContext: ContactEditorContext?
+    @State private var isMetadataVisible = true
 
     var body: some View {
         GenericItemDetailPanel(
             title: contact.displayName,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(contactName: contact.displayName)
+            },
+            metadata: {
+                ContactMetadataInspectorView(
+                    contact: contact,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onSaveContact: { _ in },
+                    onFolderChanged: assignFolder,
+                    onDelete: deleteContact
+                )
             }
         ) {
             ContactDetailView(
                 contact: contact,
                 onEdit: {
-                    editorContext = ContactEditorContext(existingContact: contact)
+                    isMetadataVisible = true
                 },
-                onDismiss: { dock(surface, action: onDock) },
-                onOpenRelated: floatLinkedRef
-            )
-        }
-        .sheet(item: $editorContext) { context in
-            ContactEditorSheet(
-                existingContact: context.existingContact,
-                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
-                    LibraryItemEditor.saveContact(
-                        draftContactID: draftContactID,
-                        existingContact: context.existingContact,
-                        displayName: displayName,
-                        relationshipLabel: relationshipLabel,
-                        birthday: birthday,
-                        notes: notes,
-                        labelIDs: labelIDs,
-                        addBirthdayDateCard: addBirthdayDateCard,
-                        email: email,
-                        phone: phone,
-                        address: address,
-                        hasAvatar: hasAvatar,
-                        customFields: customFields
-                    )
-                },
-                onDelete: { contact in
-                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
-                    }
-                }
+                onDismiss: { dock(surface, action: onDock) }
             )
         }
     }
@@ -448,27 +460,110 @@ private struct FloatingContactDetail: View {
             userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
         )
     }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = contact.folderID
+        guard oldFolderID != folderID else { return }
+        guard ContactStorage.shared.assignContact(contact.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .contact,
+            itemID: contact.id,
+            title: contact.displayName,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func deleteContact() {
+        if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+        }
+        dock(surface, action: onDock)
+    }
 }
 
 private struct FloatingDateCardDetail: View {
     let dateCard: DateCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var isMetadataVisible = true
 
     var body: some View {
         GenericItemDetailPanel(
             title: dateCard.title,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(eventTitle: dateCard.title)
+            },
+            metadata: {
+                BasicItemMetadataInspectorView(
+                    dateCard: dateCard,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onFolderChanged: assignFolder,
+                    onToggleLabel: toggleLabel,
+                    onDelete: deleteDateCard
+                )
             }
         ) {
             DateCardDetailView(dateCard: dateCard, onDismiss: { dock(surface, action: onDock) })
         }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = dateCard.folderID
+        guard oldFolderID != folderID else { return }
+        guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .dateCard,
+            itemID: dateCard.id,
+            title: dateCard.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func toggleLabel(_ labelID: UUID) {
+        var updated = dateCard
+        if updated.labelIDs.contains(labelID) {
+            updated.labelIDs.removeAll { $0 == labelID }
+        } else {
+            updated.labelIDs.append(labelID)
+        }
+        _ = DateCardStorage.shared.updateDateCard(updated)
+    }
+
+    private func deleteDateCard() {
+        if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+        }
+        dock(surface, action: onDock)
     }
 }
 
@@ -476,21 +571,144 @@ private struct FloatingTodoDetail: View {
     let todo: TodoCard
     let surface: CiderFloatableSurface
     @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var isMetadataVisible = true
 
     var body: some View {
         GenericItemDetailPanel(
             title: todo.title,
             detailViewMode: .slideOut,
             showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
             onClose: { dock(surface, action: onDock) },
             onModeChange: { _ in },
             trailingExtra: {
                 FloatingReanchorButton(surface: surface)
                 AIDetailActionsButton(todoTitle: todo.title)
+            },
+            metadata: {
+                BasicItemMetadataInspectorView(
+                    todo: todo,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onFolderChanged: assignFolder,
+                    onToggleLabel: toggleLabel,
+                    onDelete: deleteTodo
+                )
             }
         ) {
             TodoDetailView(todoCard: todo, onDismiss: { dock(surface, action: onDock) })
         }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = todo.folderID
+        guard oldFolderID != folderID else { return }
+        guard TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .todo,
+            itemID: todo.id,
+            title: todo.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func toggleLabel(_ labelID: UUID) {
+        var updated = todo
+        if updated.labelIDs.contains(labelID) {
+            updated.labelIDs.removeAll { $0 == labelID }
+        } else {
+            updated.labelIDs.append(labelID)
+        }
+        _ = TodoCardStorage.shared.updateTodoCard(updated)
+    }
+
+    private func deleteTodo() {
+        if let trashItem = TodoCardStorage.shared.deleteTodoCard(todo.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+        }
+        dock(surface, action: onDock)
+    }
+}
+
+private struct FloatingVaultFileDetail: View {
+    let file: VaultFile
+    let surface: CiderFloatableSurface
+    @Environment(\.floatingCiderDockAction) private var onDock
+    @State private var isMetadataVisible = true
+
+    var body: some View {
+        GenericItemDetailPanel(
+            title: file.filename,
+            detailViewMode: .slideOut,
+            showDragHandle: false,
+            metadataVisible: $isMetadataVisible,
+            onClose: { dock(surface, action: onDock) },
+            onModeChange: { _ in },
+            trailingExtra: {
+                FloatingReanchorButton(surface: surface)
+            },
+            metadata: {
+                VaultFileMetadataInspectorView(
+                    file: file,
+                    onOpenLinkedRef: floatLinkedRef,
+                    canOpenLinkedRef: canFloatLinkedRef,
+                    onFolderChanged: assignFolder,
+                    onDelete: deleteFile
+                )
+            }
+        ) {
+            VaultFileDetailView(file: file, onDismiss: { dock(surface, action: onDock) })
+        }
+    }
+
+    private func floatLinkedRef(_ ref: LibraryEntityRef) {
+        guard let linkedSurface = CiderFloatableSurface(linkedRef: ref) else { return }
+        NotificationCenter.default.post(
+            name: .floatCiderSurface,
+            object: linkedSurface,
+            userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: linkedSurface]
+        )
+    }
+
+    private func canFloatLinkedRef(_ ref: LibraryEntityRef) -> Bool {
+        CiderFloatableSurface(linkedRef: ref) != nil
+    }
+
+    private func assignFolder(_ folderID: UUID?) {
+        let oldFolderID = file.folderID
+        guard oldFolderID != folderID else { return }
+        VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .vaultFile,
+            itemID: file.id,
+            title: file.displayTitle,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+    }
+
+    private func deleteFile() {
+        let trashItem = TrashStorage.shared.trashVaultFile(file)
+        CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+        dock(surface, action: onDock)
     }
 }
 

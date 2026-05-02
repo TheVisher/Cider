@@ -3,7 +3,7 @@ import SwiftUI
 enum CiderReanchorSurfaceResolver {
     static func canOpenInMainWindow(_ surface: CiderFloatableSurface) -> Bool {
         switch surface {
-        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .aiAssistant:
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile, .aiAssistant:
             true
         case .clipboard, .dropZone:
             false
@@ -102,6 +102,11 @@ extension CiderPanelView {
         requestFloat(.todo(todoCard.id))
     }
 
+    func floatVaultFileDetail() {
+        guard let vaultFile = selectedVaultFile else { return }
+        requestFloat(.vaultFile(vaultFile.id))
+    }
+
     func floatNoteDetail() {
         guard let note = notesViewModel.selectedNote ?? selectedNote else { return }
         notesViewModel.flushSave()
@@ -117,6 +122,8 @@ extension CiderPanelView {
             floatContactDetail()
         } else if selectedTodoCard != nil {
             floatTodoDetail()
+        } else if selectedVaultFile != nil {
+            floatVaultFileDetail()
         } else if isNoteDetailPageMode {
             floatNoteDetail()
         }
@@ -147,6 +154,10 @@ extension CiderPanelView {
             if let todoCard = TodoCardStorage.shared.todoCards.first(where: { $0.id == id }) {
                 openTodoDetail(todoCard)
             }
+        case .vaultFile(let id):
+            if let vaultFile = VaultFileService.shared.file(for: id) {
+                openVaultFileDetail(vaultFile)
+            }
         case .aiAssistant:
             openOrSelectAIAssistantTab()
         case .clipboard, .dropZone:
@@ -157,32 +168,49 @@ extension CiderPanelView {
     func openLinkedRef(_ ref: LibraryEntityRef) {
         switch ref.type {
         case .bookmark:
-            if let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == ref.entityID }) {
-                openBookmarkDetails(bookmark)
-            }
+            guard let bookmark = bookmarksViewModel.bookmarks.first(where: { $0.id == ref.entityID }) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openBookmarkDetails(bookmark)
         case .note:
-            if let note = notesViewModel.notes.first(where: { $0.id == ref.entityID }) {
-                openNoteDetail(note)
-            }
+            guard let note = notesViewModel.notes.first(where: { $0.id == ref.entityID }) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openNoteDetail(note)
         case .dateCard:
-            if let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) {
-                openDateCardDetail(dateCard)
-            }
+            guard let dateCard = DateCardStorage.shared.dateCard(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openDateCardDetail(dateCard)
         case .contact:
-            if let contact = ContactStorage.shared.contact(for: ref.entityID) {
-                openContactDetail(contact)
-            }
+            guard let contact = ContactStorage.shared.contact(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openContactDetail(contact)
         case .todo:
-            if let todo = TodoCardStorage.shared.todoCard(for: ref.entityID) {
-                openTodoDetail(todo)
-            }
+            guard let todo = TodoCardStorage.shared.todoCard(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openTodoDetail(todo)
         case .vaultFile:
-            if let file = VaultFileService.shared.file(for: ref.entityID) {
-                openVaultFileDetail(file)
-            }
+            guard let file = VaultFileService.shared.file(for: ref.entityID) else { return }
+            clearDetailStateBeforeOpeningLinkedRef()
+            openVaultFileDetail(file)
         case .externalFile, .session:
             break
         }
+    }
+
+    private func clearDetailStateBeforeOpeningLinkedRef() {
+        if isDetailOpen { saveBookmarkDetails() }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
+
+        detailBookmarkID = nil
+        detailsDraft = nil
+        detailsErrorMessage = nil
+        detailWebViewStore.reset()
+        selectedDateCard = nil
+        selectedContact = nil
+        selectedTodoCard = nil
+        selectedVaultFile = nil
+        selectedNote = nil
+        isEditingNoteTitle = false
+        AIAssistantViewModel.shared.clearContext()
     }
 
     func openBookmarkDetails(_ bookmark: Bookmark) {
@@ -236,7 +264,9 @@ extension CiderPanelView {
         detailsErrorMessage = nil
         detailWebViewStore.reset()
         selectedContact = nil
+        selectedTodoCard = nil
         selectedVaultFile = nil
+        genericMetadataVisible = true
 
         selectedDateCard = dateCard
         if !wasExpanded, detailViewMode == .slideOut {
@@ -267,6 +297,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        genericMetadataVisible = true
 
         selectedContact = contact
         if !wasExpanded, detailViewMode == .slideOut {
@@ -294,6 +325,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedContact = nil
         selectedVaultFile = nil
+        genericMetadataVisible = true
 
         selectedTodoCard = todoCard
         if !wasExpanded {
@@ -322,6 +354,7 @@ extension CiderPanelView {
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
+        genericMetadataVisible = true
 
         selectedVaultFile = file
         if !wasExpanded, detailViewMode == .slideOut {
@@ -400,9 +433,138 @@ extension CiderPanelView {
         bookmarksViewModel.deleteBookmarks([bookmark])
     }
 
+    func deleteDetailVaultFile() {
+        guard let file = selectedVaultFile else { return }
+        closeGenericDetail()
+        let trashItem = TrashStorage.shared.trashVaultFile(file)
+        CiderUndoManager.shared.record(.deletedToTrash(itemType: .vaultFile, trashItem: trashItem))
+    }
+
+    func deleteDetailDateCard() {
+        guard let dateCard = selectedDateCard else { return }
+        closeGenericDetail()
+        if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
+        }
+    }
+
+    func deleteDetailContact() {
+        guard let contact = selectedContact else { return }
+        closeGenericDetail()
+        if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+        }
+    }
+
+    func deleteDetailTodo() {
+        guard let todo = selectedTodoCard else { return }
+        closeGenericDetail()
+        if let trashItem = TodoCardStorage.shared.deleteTodoCard(todo.id) {
+            CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+        }
+    }
+
     func assignDetailBookmarkToFolder(_ folderID: UUID?) {
         guard let bookmark = selectedDetailsBookmark else { return }
         _ = bookmarksViewModel.assign(bookmark, toFolder: folderID)
+    }
+
+    func assignDetailVaultFileToFolder(_ folderID: UUID?) {
+        guard let file = selectedVaultFile else { return }
+        let oldFolderID = file.folderID
+        guard oldFolderID != folderID else { return }
+        VaultFileService.shared.assignFile(file.id, toFolder: folderID)
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .vaultFile,
+            itemID: file.id,
+            title: file.displayTitle,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updatedFile = VaultFileService.shared.file(for: file.id) {
+            selectedVaultFile = updatedFile
+        }
+    }
+
+    func assignDetailDateCardToFolder(_ folderID: UUID?) {
+        guard let dateCard = selectedDateCard else { return }
+        let oldFolderID = dateCard.folderID
+        guard oldFolderID != folderID else { return }
+        guard DateCardStorage.shared.assignDateCard(dateCard.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .dateCard,
+            itemID: dateCard.id,
+            title: dateCard.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updated = DateCardStorage.shared.dateCard(for: dateCard.id) {
+            selectedDateCard = updated
+        }
+    }
+
+    func assignDetailContactToFolder(_ folderID: UUID?) {
+        guard let contact = selectedContact else { return }
+        let oldFolderID = contact.folderID
+        guard oldFolderID != folderID else { return }
+        guard ContactStorage.shared.assignContact(contact.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .contact,
+            itemID: contact.id,
+            title: contact.displayName,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updated = ContactStorage.shared.contact(for: contact.id) {
+            selectedContact = updated
+        }
+    }
+
+    func assignDetailTodoToFolder(_ folderID: UUID?) {
+        guard let todo = selectedTodoCard else { return }
+        let oldFolderID = todo.folderID
+        guard oldFolderID != folderID else { return }
+        guard TodoCardStorage.shared.assignTodoCard(todo.id, toFolder: folderID) else { return }
+        let folderName = VaultFolderService.shared.legacyFolders.first(where: { $0.id == folderID })?.name ?? "Unfiled"
+        CiderUndoManager.shared.record(.movedToFolder(
+            itemType: .todo,
+            itemID: todo.id,
+            title: todo.title,
+            fromFolderID: oldFolderID,
+            toFolderID: folderID,
+            folderName: folderName
+        ))
+        if let updated = TodoCardStorage.shared.todoCard(for: todo.id) {
+            selectedTodoCard = updated
+        }
+    }
+
+    func toggleDetailDateCardLabel(_ labelID: UUID) {
+        guard var dateCard = selectedDateCard else { return }
+        if dateCard.labelIDs.contains(labelID) {
+            dateCard.labelIDs.removeAll { $0 == labelID }
+        } else {
+            dateCard.labelIDs.append(labelID)
+        }
+        guard DateCardStorage.shared.updateDateCard(dateCard) else { return }
+        selectedDateCard = DateCardStorage.shared.dateCard(for: dateCard.id) ?? dateCard
+    }
+
+    func toggleDetailTodoLabel(_ labelID: UUID) {
+        guard var todo = selectedTodoCard else { return }
+        if todo.labelIDs.contains(labelID) {
+            todo.labelIDs.removeAll { $0 == labelID }
+        } else {
+            todo.labelIDs.append(labelID)
+        }
+        guard TodoCardStorage.shared.updateTodoCard(todo) else { return }
+        selectedTodoCard = TodoCardStorage.shared.todoCard(for: todo.id) ?? todo
     }
 
     func copyDetailURL() {

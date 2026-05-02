@@ -11,4 +11,10 @@ struct ItemLinkCLIHelpTextTests {
         #expect(text.contains("cider-cli link backlinks <type> <ref> [--json]"))
         #expect(text.contains("bookmark, note, todo, dateCard, contact, vaultFile"))
     }
+
+    @Test("link help exposes related command for metadata rails")
+    func linkHelpExposesRelatedCommand() {
+        #expect(ItemLinkCLIHelpText.link.contains("link related"))
+        #expect(ItemLinkCLIHelpText.link.contains("link backlinks"))
+    }
 }

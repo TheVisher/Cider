@@ -5,14 +5,10 @@ struct ContactDetailView: View {
     let contact: ContactCard
     var onEdit: (() -> Void)? = nil
     var onDismiss: (() -> Void)? = nil
-    var onOpenRelated: ((LibraryEntityRef) -> Void)? = nil
 
     @State private var selectedTab: ContactProfileTab = .overview
     @State private var isEssentialsExpanded = true
     @State private var avatarImage: NSImage?
-    @State private var draftNotes = ""
-    @State private var hasUnsavedNotes = false
-    @State private var isEditingNotes = false
 
     @ObservedObject private var labelStorage = CardLabelStorage.shared
 
@@ -54,7 +50,6 @@ struct ContactDetailView: View {
 
                 if let onEdit {
                     Button("Edit") {
-                        saveNotesIfNeeded()
                         onEdit()
                     }
                     .buttonStyle(.borderless)
@@ -63,7 +58,6 @@ struct ContactDetailView: View {
 
                 if let onDismiss {
                     Button("Done") {
-                        saveNotesIfNeeded()
                         onDismiss()
                     }
                     .buttonStyle(.borderedProminent)
@@ -72,21 +66,6 @@ struct ContactDetailView: View {
         }
         .task(id: contact.updatedAt) {
             await loadAvatar()
-        }
-        .onAppear {
-            draftNotes = contact.notes
-            hasUnsavedNotes = false
-        }
-        .onChange(of: contact.id) { _, _ in
-            draftNotes = contact.notes
-            hasUnsavedNotes = false
-        }
-        .onChange(of: contact.notes) { _, notes in
-            guard !hasUnsavedNotes else { return }
-            draftNotes = notes
-        }
-        .onDisappear {
-            saveNotesIfNeeded()
         }
     }
 
@@ -154,17 +133,6 @@ struct ContactDetailView: View {
                 ContactProfileBirthdaySection(contact: contact)
             case .favorites:
                 ContactProfileFavoritesSection(contact: contact)
-            case .notes:
-                ContactProfileNotesSection(
-                    contact: contact,
-                    draftNotes: $draftNotes,
-                    hasUnsavedChanges: $hasUnsavedNotes,
-                    isEditing: $isEditingNotes,
-                    onChange: { hasUnsavedNotes = true },
-                    onSave: saveNotesIfNeeded
-                )
-            case .related:
-                ContactProfileRelatedSection(contact: contact, onOpenRelated: onOpenRelated)
             }
         }
         .frame(minWidth: 280, maxWidth: .infinity, alignment: .topLeading)
@@ -199,16 +167,6 @@ struct ContactDetailView: View {
                         .font(CiderFont.bodyMedium)
                         .foregroundColor(CiderColors.secondary)
                 )
-        }
-    }
-
-    private func saveNotesIfNeeded() {
-        guard hasUnsavedNotes else { return }
-        var updated = contact
-        updated.notes = draftNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-        if ContactStorage.shared.updateContact(updated) {
-            hasUnsavedNotes = false
-            isEditingNotes = false
         }
     }
 
@@ -376,147 +334,6 @@ private struct ContactProfileFavoritesSection: View {
 
     private var favoriteLines: [String] {
         ContactProfileFavorites.lines(for: contact)
-    }
-}
-
-private struct ContactProfileNotesSection: View {
-    let contact: ContactCard
-    @Binding var draftNotes: String
-    @Binding var hasUnsavedChanges: Bool
-    @Binding var isEditing: Bool
-    let onChange: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        ContactProfileSection(title: "Notes", symbol: "note.text") {
-            if isEditing {
-                TextEditor(text: $draftNotes)
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.primary)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 180)
-                    .padding(Spacing.xs)
-                    .background(
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(CiderColors.surfaceInput)
-                    )
-                    .onChange(of: draftNotes) { _, _ in onChange() }
-            } else {
-                let lines = ContactProfileNotePreview.lines(
-                    from: draftNotes,
-                    contact: contact,
-                    includeRepresentedFacts: true
-                )
-                if lines.isEmpty {
-                    Text("No notes saved yet.")
-                        .font(CiderFont.body)
-                        .foregroundColor(CiderColors.quaternary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    ContactProfileTextPreview(lines: lines, lineLimit: nil)
-                }
-            }
-
-            HStack(spacing: Spacing.sm) {
-                Text(statusText)
-                    .font(CiderFont.caption)
-                    .foregroundColor(hasUnsavedChanges ? CiderColors.warning : CiderColors.quaternary)
-
-                Spacer(minLength: 0)
-
-                if isEditing {
-                    Button("Cancel") {
-                        draftNotes = contact.notes
-                        hasUnsavedChanges = false
-                        isEditing = false
-                    }
-                    .buttonStyle(.borderless)
-
-                    Button("Save Notes") {
-                        onSave()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!hasUnsavedChanges)
-                } else {
-                    Button("Edit Notes") {
-                        isEditing = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-        }
-    }
-
-    private var statusText: String {
-        if isEditing {
-            return hasUnsavedChanges ? "Unsaved changes" : "Editing Markdown"
-        }
-        return "Rendered preview"
-    }
-}
-
-private struct ContactProfileRelatedSection: View {
-    let contact: ContactCard
-    var onOpenRelated: ((LibraryEntityRef) -> Void)? = nil
-
-    var body: some View {
-        ContactProfileSection(title: "Related", symbol: "link") {
-            if relatedItems.isEmpty {
-                Text("Linked bookmarks, notes, todos, dates, and files will appear here.")
-                    .font(CiderFont.body)
-                    .foregroundColor(CiderColors.quaternary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(relatedItems) { item in
-                        if let onOpenRelated {
-                            Button {
-                                onOpenRelated(item.ref)
-                            } label: {
-                                relatedRow(item)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            relatedRow(item)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var relatedItems: [ContactProfileRelatedItem] {
-        let contactRef = LibraryEntityRef(type: .contact, entityID: contact.id)
-        let refs: [LibraryEntityRef]
-        if let serviceRefs = try? ItemLinkService.shared.relatedRefs(for: contactRef) {
-            refs = serviceRefs
-        } else {
-            refs = ContactProfileRelatedRefs.merged(outgoing: contact.linkedEntities, backlinks: [], excluding: contactRef)
-        }
-        return ItemLinkService.shared.summaries(for: refs).map(ContactProfileRelatedItem.init(summary:))
-    }
-
-    private func relatedRow(_ item: ContactProfileRelatedItem) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            Image(systemName: item.symbol)
-                .font(CiderFont.captionMedium)
-                .foregroundColor(CiderColors.tertiary)
-                .frame(width: 16)
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: Spacing.hairline) {
-                Text(item.title)
-                    .font(CiderFont.bodyMedium)
-                    .foregroundColor(CiderColors.secondary)
-                    .lineLimit(2)
-                Text(item.subtitle)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.quaternary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.vertical, Spacing.xxs)
-        .contentShape(Rectangle())
     }
 }
 

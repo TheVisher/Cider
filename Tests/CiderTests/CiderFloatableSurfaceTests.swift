@@ -8,13 +8,16 @@ struct CiderFloatableSurfaceTests {
         let noteID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let bookmarkID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         let contactID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let fileID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
 
         #expect(CiderFloatableSurface.note(noteID).stableKey == "note:11111111-1111-1111-1111-111111111111")
         #expect(CiderFloatableSurface.bookmark(bookmarkID).stableKey == "bookmark:22222222-2222-2222-2222-222222222222")
         #expect(CiderFloatableSurface.bookmarkMetadata(bookmarkID).defaultTitle == "Bookmark Metadata")
         #expect(CiderFloatableSurface.contact(contactID).defaultTitle == "Contact")
+        #expect(CiderFloatableSurface.vaultFile(fileID).stableKey == "vaultFile:77777777-7777-7777-7777-777777777777")
+        #expect(CiderFloatableSurface.vaultFile(fileID).defaultTitle == "File")
         #expect(CiderFloatableSurface.clipboard.stableKey == "clipboard")
-        #expect(CiderFloatableSurface.aiAssistant.defaultTitle == "AI Assistant")
+        #expect(CiderFloatableSurface.aiAssistant.defaultTitle == "Chat")
         #expect(CiderFloatableSurface.dropZone.defaultTitle == "Drop Zone")
     }
 
@@ -189,6 +192,36 @@ struct CiderFloatableSurfaceTests {
         #expect(size.height >= 560)
     }
 
+    @Test("floating metadata panels default wide enough for side rail")
+    func floatingMetadataPanelDefaultSizeFitsSideRail() {
+        let id = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let surfaces: [CiderFloatableSurface] = [
+            .contact(id),
+            .dateCard(id),
+            .todo(id),
+            .vaultFile(id)
+        ]
+
+        for surface in surfaces {
+            let size = CiderFloatingPanelLayout.defaultContentSize(for: surface)
+
+            #expect(size.width >= FloatingBookmarkDetailLayout.sideRailMinimumWidth)
+            #expect(size.height >= 560)
+        }
+    }
+
+    @Test("restored floating metadata frames expand from old narrow sizes")
+    func restoredFloatingMetadataFrameExpandsOldNarrowSizes() {
+        let id = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let narrowFrame = NSRect(x: 10, y: 20, width: 420, height: 520)
+
+        let restored = CiderFloatingPanelLayout.restoredFrame(narrowFrame, for: .contact(id))
+
+        #expect(restored.origin == narrowFrame.origin)
+        #expect(restored.width >= FloatingBookmarkDetailLayout.sideRailMinimumWidth)
+        #expect(restored.height >= 560)
+    }
+
     @Test("reanchor resolver accepts item and AI surfaces")
     func reanchorResolverAcceptsItemAndAISurfaces() {
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.note(UUID())))
@@ -197,6 +230,7 @@ struct CiderFloatableSurfaceTests {
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.contact(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.dateCard(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.todo(UUID())))
+        #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.vaultFile(UUID())))
         #expect(CiderReanchorSurfaceResolver.canOpenInMainWindow(.aiAssistant))
     }
 
@@ -204,5 +238,36 @@ struct CiderFloatableSurfaceTests {
     func reanchorResolverRejectsUtilitySurfaces() {
         #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.dropZone))
         #expect(!CiderReanchorSurfaceResolver.canOpenInMainWindow(.clipboard))
+    }
+
+    @Test("vault file metadata presentation includes file-specific source and intelligence")
+    func vaultFileMetadataPresentationIncludesFileSpecificDetails() {
+        let file = VaultFile(
+            id: UUID(uuidString: "88888888-8888-8888-8888-888888888888")!,
+            filename: "Modern gradient C logo design.png",
+            relativePath: "Inbox/Images/Modern gradient C logo design.png",
+            fileType: .image,
+            fileSize: 1_572_864,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            modifiedAt: Date(timeIntervalSince1970: 2_000),
+            folderID: nil,
+            title: "Cider Logo",
+            notes: "Useful brand image",
+            tags: ["logo", "cider"],
+            ocrText: "Modern gradient C logo",
+            dominantColors: ["#FFAA00", "#111111", "  "]
+        )
+
+        let presentation = VaultFileMetadataPresentation(file: file)
+
+        #expect(presentation.title == "Cider Logo")
+        #expect(presentation.sourcePath == "Inbox/Images/Modern gradient C logo design.png")
+        #expect(presentation.kind == "Image")
+        #expect(presentation.fileType == "PNG")
+        #expect(presentation.size == ByteCountFormatter.string(fromByteCount: 1_572_864, countStyle: .file))
+        #expect(presentation.colors == ["#FFAA00", "#111111"])
+        #expect(presentation.notes == "Useful brand image")
+        #expect(presentation.ocrText == "Modern gradient C logo")
+        #expect(presentation.keywords == ["logo", "cider"])
     }
 }

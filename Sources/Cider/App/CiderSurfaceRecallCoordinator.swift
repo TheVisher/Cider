@@ -11,7 +11,7 @@ struct CiderSurfaceRecallCoordinator {
 
     static func isRecallable(_ surface: CiderFloatableSurface) -> Bool {
         switch surface {
-        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .aiAssistant:
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile, .aiAssistant:
             true
         case .clipboard, .dropZone:
             false

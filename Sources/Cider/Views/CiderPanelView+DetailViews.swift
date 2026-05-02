@@ -95,6 +95,7 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 width: min(detailSlideOutWidth, maxSlideOutWidth),
                 maxWidth: maxSlideOutWidth,
+                metadataVisible: $genericMetadataVisible,
                 onResize: { newWidth in
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
@@ -102,7 +103,16 @@ extension CiderPanelView {
                 onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
-                trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) }
+                trailingExtra: { AIDetailActionsButton(eventTitle: dateCard.title) },
+                metadata: {
+                    BasicItemMetadataInspectorView(
+                        dateCard: dateCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailDateCardToFolder,
+                        onToggleLabel: toggleDetailDateCardLabel,
+                        onDelete: deleteDetailDateCard
+                    )
+                }
             ) {
                 DateCardDetailView(
                     dateCard: dateCard,
@@ -119,6 +129,7 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 width: min(detailSlideOutWidth, maxSlideOutWidth),
                 maxWidth: maxSlideOutWidth,
+                metadataVisible: $genericMetadataVisible,
                 onResize: { newWidth in
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
@@ -126,16 +137,23 @@ extension CiderPanelView {
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
-                trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) }
+                trailingExtra: { AIDetailActionsButton(contactName: contact.displayName) },
+                metadata: {
+                    ContactMetadataInspectorView(
+                        contact: contact,
+                        onOpenLinkedRef: openLinkedRef,
+                        onSaveContact: { selectedContact = $0 },
+                        onFolderChanged: assignDetailContactToFolder,
+                        onDelete: deleteDetailContact
+                    )
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
                     onEdit: {
-                        closeGenericDetail()
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                        genericMetadataVisible = true
                     },
-                    onDismiss: closeGenericDetail,
-                    onOpenRelated: openLinkedRef
+                    onDismiss: closeGenericDetail
                 )
             }
         } else if let todoCard = selectedTodoCard {
@@ -145,10 +163,20 @@ extension CiderPanelView {
                 detailViewMode: .slideOut,
                 width: BookmarksDesign.detailsSlideOutMinWidth,
                 maxWidth: BookmarksDesign.detailsSlideOutMinWidth,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatTodoDetail,
                 onClose: closeGenericDetail,
                 onModeChange: { _ in },
-                trailingExtra: { AIDetailActionsButton(todoTitle: todoCard.title) }
+                trailingExtra: { AIDetailActionsButton(todoTitle: todoCard.title) },
+                metadata: {
+                    BasicItemMetadataInspectorView(
+                        todo: todoCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailTodoToFolder,
+                        onToggleLabel: toggleDetailTodoLabel,
+                        onDelete: deleteDetailTodo
+                    )
+                }
             ) {
                 TodoDetailView(
                     todoCard: todoCard,
@@ -165,12 +193,23 @@ extension CiderPanelView {
                 detailViewMode: detailViewMode,
                 width: min(detailSlideOutWidth, maxSlideOutWidth),
                 maxWidth: maxSlideOutWidth,
+                metadataVisible: $genericMetadataVisible,
                 onResize: { newWidth in
                     let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
                     detailSlideOutWidth = clamped
                 },
+                onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    VaultFileMetadataInspectorView(
+                        file: vaultFile,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailVaultFileToFolder,
+                        onDelete: deleteDetailVaultFile
+                    )
+                }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
@@ -184,9 +223,20 @@ extension CiderPanelView {
                 title: dateCard.title,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    BasicItemMetadataInspectorView(
+                        dateCard: dateCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailDateCardToFolder,
+                        onToggleLabel: toggleDetailDateCardLabel,
+                        onDelete: deleteDetailDateCard
+                    )
+                }
             ) {
                 DateCardDetailView(
                     dateCard: dateCard,
@@ -206,18 +256,27 @@ extension CiderPanelView {
                 title: contact.displayName,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    ContactMetadataInspectorView(
+                        contact: contact,
+                        onOpenLinkedRef: openLinkedRef,
+                        onSaveContact: { selectedContact = $0 },
+                        onFolderChanged: assignDetailContactToFolder,
+                        onDelete: deleteDetailContact
+                    )
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
                     onEdit: {
-                        closeGenericDetail()
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                        genericMetadataVisible = true
                     },
-                    onDismiss: closeGenericDetail,
-                    onOpenRelated: openLinkedRef
+                    onDismiss: closeGenericDetail
                 )
             }
             .padding(BookmarksDesign.detailsSlideOutFloatInset)
@@ -229,8 +288,19 @@ extension CiderPanelView {
                 title: vaultFile.filename,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
+                onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    VaultFileMetadataInspectorView(
+                        file: vaultFile,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailVaultFileToFolder,
+                        onDelete: deleteDetailVaultFile
+                    )
+                }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
@@ -367,9 +437,20 @@ extension CiderPanelView {
                 title: dateCard.title,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatDateCardDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    BasicItemMetadataInspectorView(
+                        dateCard: dateCard,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailDateCardToFolder,
+                        onToggleLabel: toggleDetailDateCardLabel,
+                        onDelete: deleteDetailDateCard
+                    )
+                }
             ) {
                 DateCardDetailView(
                     dateCard: dateCard,
@@ -387,18 +468,27 @@ extension CiderPanelView {
                 title: contact.displayName,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
                 onFloat: floatContactDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    ContactMetadataInspectorView(
+                        contact: contact,
+                        onOpenLinkedRef: openLinkedRef,
+                        onSaveContact: { selectedContact = $0 },
+                        onFolderChanged: assignDetailContactToFolder,
+                        onDelete: deleteDetailContact
+                    )
+                }
             ) {
                 ContactDetailView(
                     contact: contact,
                     onEdit: {
-                        closeGenericDetail()
-                        newContactEditorContext = ContactEditorContext(existingContact: contact)
+                        genericMetadataVisible = true
                     },
-                    onDismiss: closeGenericDetail,
-                    onOpenRelated: openLinkedRef
+                    onDismiss: closeGenericDetail
                 )
             }
             .padding(.horizontal, Spacing.md)
@@ -408,8 +498,19 @@ extension CiderPanelView {
                 title: vaultFile.filename,
                 detailViewMode: detailViewMode,
                 showDragHandle: false,
+                metadataVisible: $genericMetadataVisible,
+                onFloat: floatVaultFileDetail,
                 onClose: closeGenericDetail,
-                onModeChange: changeDetailViewMode
+                onModeChange: changeDetailViewMode,
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    VaultFileMetadataInspectorView(
+                        file: vaultFile,
+                        onOpenLinkedRef: openLinkedRef,
+                        onFolderChanged: assignDetailVaultFileToFolder,
+                        onDelete: deleteDetailVaultFile
+                    )
+                }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
@@ -419,7 +520,7 @@ extension CiderPanelView {
     }
 
     var noteDetailPageView: some View {
-        InlineNoteEditorView(viewModel: notesViewModel)
+        InlineNoteEditorView(viewModel: notesViewModel, onOpenLinkedRef: openLinkedRef)
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
     }
@@ -446,7 +547,7 @@ extension CiderPanelView {
             toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
             trailingExtra: { NotesInfoToggleButton(viewModel: notesViewModel) }
         ) {
-            InlineNoteEditorView(viewModel: notesViewModel)
+            InlineNoteEditorView(viewModel: notesViewModel, onOpenLinkedRef: openLinkedRef)
         }
     }
 
@@ -465,7 +566,7 @@ extension CiderPanelView {
             toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
             trailingExtra: { NotesInfoToggleButton(viewModel: notesViewModel) }
         ) {
-            InlineNoteEditorView(viewModel: notesViewModel)
+            InlineNoteEditorView(viewModel: notesViewModel, onOpenLinkedRef: openLinkedRef)
         }
         .padding(BookmarksDesign.detailsSlideOutFloatInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

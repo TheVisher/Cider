@@ -46,6 +46,7 @@ struct BookmarkMetadataSidebar: View {
     var onSave: () -> Void
     var onCancel: () -> Void
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
+    var canOpenLinkedRef: ((LibraryEntityRef) -> Bool)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.textScale) private var textScale
@@ -112,11 +113,9 @@ struct BookmarkMetadataSidebar: View {
                             .padding(.vertical, Spacing.md)
                     }
 
-                    if !linkedSummaries.isEmpty {
-                        sectionDivider
-                        linkedItemsSection
-                            .padding(.vertical, Spacing.md)
-                    }
+                    sectionDivider
+                    linkedItemsSection
+                        .padding(.vertical, Spacing.md)
 
                     sectionDivider
                     notesSection
@@ -210,37 +209,14 @@ struct BookmarkMetadataSidebar: View {
             sectionHeader("Linked", isExpanded: $isLinkedItemsExpanded)
 
             if isLinkedItemsExpanded {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    ForEach(linkedSummaries) { summary in
-                        Button {
-                            onOpenLinkedRef?(summary.ref)
-                        } label: {
-                            HStack(alignment: .top, spacing: Spacing.xs) {
-                                Image(systemName: summary.symbol)
-                                    .font(CiderFont.caption(scale: textScale))
-                                    .foregroundColor(CiderColors.tertiary)
-                                    .frame(width: Spacing.md, alignment: .center)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(summary.title)
-                                        .font(CiderFont.bodyMedium(scale: textScale))
-                                        .foregroundColor(CiderColors.primary)
-                                        .lineLimit(1)
-
-                                    if !summary.subtitle.isEmpty {
-                                        Text(summary.subtitle)
-                                            .font(CiderFont.caption(scale: textScale))
-                                            .foregroundColor(CiderColors.tertiary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(onOpenLinkedRef == nil)
-                    }
+                if linkedSummaries.isEmpty {
+                    ItemMetadataEmptyText(text: "No linked items.")
+                } else {
+                    ItemMetadataRowsView(
+                        rows: linkedSummaries.map(ItemMetadataRow.related),
+                        onOpenRef: onOpenLinkedRef,
+                        canOpenRef: canOpenLinkedRef
+                    )
                 }
             }
         }
@@ -799,6 +775,8 @@ struct BookmarkMetadataSidebar: View {
             Text(label)
                 .font(CiderFont.caption(scale: textScale))
                 .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .frame(width: BookmarksDesign.propertyLabelWidth, alignment: .leading)
             Text(value)
                 .font(CiderFont.caption(scale: textScale))

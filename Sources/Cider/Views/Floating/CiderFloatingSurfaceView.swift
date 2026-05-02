@@ -80,6 +80,8 @@ struct CiderFloatingSurfaceView: View {
             "calendar"
         case .todo:
             "checklist"
+        case .vaultFile:
+            "doc"
         case .clipboard:
             "clipboard"
         case .aiAssistant:
@@ -106,7 +108,7 @@ struct CiderFloatingSurfaceView: View {
 private extension CiderFloatableSurface {
     var isLibraryItemSurface: Bool {
         switch self {
-        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo:
+        case .note, .bookmark, .bookmarkMetadata, .contact, .dateCard, .todo, .vaultFile:
             true
         case .clipboard, .aiAssistant, .dropZone:
             false
