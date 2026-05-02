@@ -16,7 +16,9 @@ struct CiderFloatingSurfaceView: View {
             AIAssistantPanelView(
                 viewModel: AIAssistantViewModel.shared,
                 onClose: onDock,
-                showsResizeOverlay: false
+                onFloat: { reanchorSurface() },
+                showsResizeOverlay: false,
+                presentationStyle: .floatingSurface
             )
             .frame(minWidth: AIAssistantPanelDesign.minWidth, minHeight: AIAssistantPanelDesign.minHeight)
         } else {
@@ -84,6 +86,19 @@ struct CiderFloatingSurfaceView: View {
             "sparkles"
         case .dropZone:
             "tray.and.arrow.down"
+        }
+    }
+
+    @MainActor
+    private func reanchorSurface() {
+        if let onReanchor {
+            onReanchor(surface)
+        } else {
+            NotificationCenter.default.post(
+                name: .reanchorCiderSurface,
+                object: surface,
+                userInfo: [CiderFloatingPanelManager.surfaceUserInfoKey: surface]
+            )
         }
     }
 }

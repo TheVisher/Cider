@@ -118,9 +118,9 @@ extension CiderPanelView {
                     onClose: { closeTab(.aiAssistant) },
                     onFloat: {
                         requestFloat(.aiAssistant)
-                        closeTab(.aiAssistant)
                     },
-                    showsResizeOverlay: false
+                    showsResizeOverlay: false,
+                    presentationStyle: .embedded
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .savedView(let id, _):

@@ -29,6 +29,8 @@ final class AIAssistantViewModel: ObservableObject {
     @Published var streamingText = ""
     /// Text revealed to the UI via typewriter effect — lags behind `streamingText`.
     @Published var displayedStreamingText = ""
+    @Published private(set) var scrollToBottomSignal = UUID()
+    @Published private(set) var hasLiveHermesResponseForActiveSend = false
 
     /// Current conversation ID (nil = no active conversation yet).
     @Published var currentConversationID: UUID?
@@ -44,6 +46,7 @@ final class AIAssistantViewModel: ObservableObject {
     private let agentChatRegistry: CiderAgentChatRegistry
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
+    private var hermesSyncInFlight = false
 
     /// When true, messages are routed through AgentOrchestrator instead of
     /// the legacy AIAssistantProvider path.
@@ -312,6 +315,7 @@ final class AIAssistantViewModel: ObservableObject {
 
         let userMessage = AIAssistantMessage(role: .user, content: trimmed)
         messages.append(userMessage)
+        requestScrollToBottom()
 
         isStreaming = true
         streamingText = ""
@@ -329,12 +333,19 @@ final class AIAssistantViewModel: ObservableObject {
     func syncHermesConversation() {
         guard runtimeSelection == .hermes,
               !isStreaming,
+              !hermesSyncInFlight,
               hermesSyncStatus != .syncing,
-              hermesSyncStatus != .sending
+              hermesSyncStatus != .sending,
+              shouldStartHermesSync()
         else { return }
         Task {
             await syncHermesConversation(attachIfNeeded: true)
         }
+    }
+
+    private func shouldStartHermesSync() -> Bool {
+        guard let lastSyncedAt = hermesConversationState?.lastSyncedAt else { return true }
+        return Date().timeIntervalSince(lastSyncedAt) > 5
     }
 
     private func activateHermesConversation() async {
@@ -367,9 +378,11 @@ final class AIAssistantViewModel: ObservableObject {
     private func sendViaHermes(_ text: String) {
         streamTask = Task {
             isStreaming = true
-            streamingText = "Waiting for Hermes..."
+            streamingText = ""
             displayedStreamingText = ""
+            hasLiveHermesResponseForActiveSend = false
             hermesSyncStatus = .sending
+            requestScrollToBottom()
             startTypewriterLoop()
 
             do {
@@ -381,16 +394,18 @@ final class AIAssistantViewModel: ObservableObject {
                     sourceName: "Hermes Pending"
                 )
                 messages.append(pendingMessage)
+                requestScrollToBottom()
 
                 let existingMessages = messages.filter { $0.id != pendingMessage.id }
-                let result = try await hermesSessionService.send(
-                    text: text,
-                    state: state,
+                let progressTask = makeHermesSendProgressTask(baseMessages: existingMessages)
+                defer { progressTask.cancel() }
+                let commandState = try await hermesSessionService.runSendCommand(text: text, state: state)
+
+                let result = try await hermesSessionService.sync(
+                    state: commandState,
                     existingMessages: existingMessages
                 )
-                hermesConversationState = result.state
-                persistMainBrainState(result.state)
-                messages = result.messages
+                applyHermesSyncResult(result, forceMessages: true)
                 hermesSyncStatus = .idle
                 saveCurrentConversation()
             } catch is CancellationError {
@@ -405,28 +420,85 @@ final class AIAssistantViewModel: ObservableObject {
                     role: .assistant,
                     content: "Hermes error: \(error.localizedDescription)"
                 ))
+                requestScrollToBottom()
                 saveCurrentConversation()
             }
 
             await finishTypewriter()
             streamingText = ""
             displayedStreamingText = ""
+            hasLiveHermesResponseForActiveSend = false
             isStreaming = false
         }
     }
 
+    private func makeHermesSendProgressTask(baseMessages: [AIAssistantMessage]) -> Task<Void, Never> {
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(650))
+            while !Task.isCancelled {
+                await self?.syncHermesSendProgress(baseMessages: baseMessages)
+                try? await Task.sleep(for: .milliseconds(900))
+            }
+        }
+    }
+
+    private func syncHermesSendProgress(baseMessages: [AIAssistantMessage]) async {
+        guard runtimeSelection == .hermes,
+              let state = hermesConversationState
+        else { return }
+
+        do {
+            let result = try await hermesSessionService.syncFromSessionFile(
+                state: state,
+                existingMessages: baseMessages
+            )
+            let baseSourceIDs = Set(baseMessages.compactMap(\.sourceID))
+            if result.messages.contains(where: { $0.role == .assistant && !baseSourceIDs.contains($0.sourceID ?? "") }) {
+                hasLiveHermesResponseForActiveSend = true
+            }
+            applyHermesSyncResult(result, forceMessages: result.messages.count >= messages.count)
+        } catch {
+            logger.debug("Hermes live send sync skipped: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func applyHermesSyncResult(_ result: HermesSyncResult, forceMessages: Bool) {
+        let messagesChanged = messages != result.messages
+        hermesConversationState = result.state
+        persistMainBrainState(result.state)
+
+        if forceMessages, messagesChanged {
+            messages = result.messages
+            requestScrollToBottom()
+            saveCurrentConversation()
+        }
+    }
+
+    func requestScrollToBottom() {
+        scrollToBottomSignal = UUID()
+    }
+
     private func syncHermesConversation(attachIfNeeded: Bool) async {
         guard runtimeSelection == .hermes else { return }
+        guard !hermesSyncInFlight else { return }
+        hermesSyncInFlight = true
+        defer { hermesSyncInFlight = false }
         hermesSyncStatus = .syncing
 
         do {
             let state = try await ensureHermesConversationState(attachIfNeeded: attachIfNeeded)
             let result = try await hermesSessionService.sync(state: state, existingMessages: messages)
+            let messagesChanged = messages != result.messages
+            let stateChanged = hasDurableHermesStateChange(from: hermesConversationState, to: result.state)
             hermesConversationState = result.state
             persistMainBrainState(result.state)
-            messages = result.messages
+            if messagesChanged {
+                messages = result.messages
+            }
             hermesSyncStatus = .idle
-            saveCurrentConversation()
+            if messagesChanged || stateChanged {
+                saveCurrentConversation()
+            }
         } catch {
             logger.error("Hermes sync error: \(error.localizedDescription, privacy: .public)")
             hermesSyncStatus = .error(error.localizedDescription)
@@ -627,6 +699,19 @@ final class AIAssistantViewModel: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(80))
             }
         }
+    }
+
+    private func hasDurableHermesStateChange(
+        from oldState: HermesConversationState?,
+        to newState: HermesConversationState
+    ) -> Bool {
+        guard let oldState else { return true }
+        return oldState.conversationID != newState.conversationID
+            || oldState.runtimeID != newState.runtimeID
+            || oldState.activeRuntimeSessionID != newState.activeRuntimeSessionID
+            || oldState.runtimeSessionLineage != newState.runtimeSessionLineage
+            || oldState.title != newState.title
+            || oldState.source != newState.source
     }
 
     private func finishTypewriter() async {

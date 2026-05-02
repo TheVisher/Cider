@@ -95,6 +95,81 @@ struct HermesSessionClientTests {
         ])
     }
 
+    @Test("transcript parser imports multimodal message content")
+    func transcriptParserImportsMultimodalMessageContent() throws {
+        let json = """
+        {
+          "id": "20260501_153629_cdd4b7",
+          "source": "telegram",
+          "title": "Cider Vault Agent #5",
+          "messages": [
+            {
+              "id": 1197,
+              "session_id": "20260501_153629_cdd4b7",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Here is the screenshot from Cider."
+                },
+                {
+                  "type": "image_url",
+                  "image_url": {
+                    "url": "data:image/jpeg;base64,aGVsbG8="
+                  }
+                }
+              ],
+              "timestamp": 1777674271.0
+            }
+          ]
+        }
+        """
+
+        let transcript = try HermesTranscriptParser.parse(Data(json.utf8))
+
+        #expect(transcript.messages.count == 1)
+        #expect(transcript.messages[0].content == "Here is the screenshot from Cider.")
+        #expect(transcript.messages[0].attachments.count == 1)
+        #expect(transcript.messages[0].attachments[0].kind == .image)
+        #expect(transcript.messages[0].externalID == "hermes:20260501_153629_cdd4b7:1197")
+    }
+
+    @Test("session file parser imports messages without exported ids")
+    func sessionFileParserImportsMessagesWithoutExportedIDs() throws {
+        let json = """
+        {
+          "session_id": "20260501_212131_069f94",
+          "messages": [
+            {
+              "role": "user",
+              "content": "hello from local file"
+            },
+            {
+              "role": "tool",
+              "content": "internal tool result"
+            },
+            {
+              "role": "assistant",
+              "content": "hello from live Hermes"
+            }
+          ]
+        }
+        """
+
+        let transcript = try HermesTranscriptParser.parseSessionFile(
+            Data(json.utf8),
+            sessionID: "fallback-session"
+        )
+
+        #expect(transcript.sessionID == "20260501_212131_069f94")
+        #expect(transcript.messages.map(\.role) == [.user, .assistant])
+        #expect(transcript.messages.map(\.content) == ["hello from local file", "hello from live Hermes"])
+        #expect(transcript.messages.map(\.externalID) == [
+            "hermes-live:20260501_212131_069f94:line-0",
+            "hermes-live:20260501_212131_069f94:line-2"
+        ])
+    }
+
     @Test("message merge deduplicates by Hermes message id")
     func messageMergeDeduplicatesByHermesMessageID() {
         let existing = [
@@ -112,6 +187,7 @@ struct HermesSessionClientTests {
                 sourceSessionID: "session-a",
                 role: .user,
                 content: "hello hermes",
+                attachments: [],
                 timestamp: Date(timeIntervalSince1970: 1)
             ),
             HermesTranscriptMessage(
@@ -119,6 +195,7 @@ struct HermesSessionClientTests {
                 sourceSessionID: "session-b",
                 role: .assistant,
                 content: "hello from newer session",
+                attachments: [],
                 timestamp: Date(timeIntervalSince1970: 2)
             )
         ]

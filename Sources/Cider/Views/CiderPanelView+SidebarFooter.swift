@@ -250,7 +250,7 @@ extension CiderPanelView {
                 requestFloatingAIAssistant()
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    Image(systemName: "arrow.up.right.square")
+                    Image(systemName: "rectangle.on.rectangle")
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.controlAccent)
                         .frame(width: 14, alignment: .center)
