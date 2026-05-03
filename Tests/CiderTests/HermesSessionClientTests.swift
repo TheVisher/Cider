@@ -182,6 +182,86 @@ struct HermesSessionClientTests {
         try await service.renameSession(sessionID: " session-a ", title: " Cider   Dashboard Worktree ")
     }
 
+    @Test("service repairs stale session by Hermes title")
+    func serviceRepairsStaleSessionByHermesTitle() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "old-unrelated",
+            parent: nil,
+            source: "telegram",
+            title: "Cider Scratchpad",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "recovered-root",
+            parent: nil,
+            source: "cider",
+            title: "Cider Scratchpad",
+            startedAt: 200,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "recovered-child",
+            parent: "recovered-root",
+            source: "cider",
+            title: "Cider Scratchpad",
+            startedAt: 300,
+            dbURL: dbURL
+        )
+
+        let runner = StubHermesRunner(data: Data("""
+        {
+          "id": "recovered-child",
+          "source": "cider",
+          "title": "Cider Scratchpad",
+          "messages": [
+            {
+              "id": 7,
+              "session_id": "recovered-child",
+              "role": "assistant",
+              "content": "recovered",
+              "timestamp": 1777662106.25
+            }
+          ]
+        }
+        """.utf8)) { arguments in
+            #expect(arguments == [
+                "sessions", "export",
+                "--session-id", "recovered-child",
+                "-"
+            ])
+        }
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let conversationID = UUID()
+        let state = HermesConversationState(
+            conversationID: conversationID,
+            activeRuntimeSessionID: "missing-session",
+            runtimeSessionLineage: ["missing-session"],
+            title: " Cider Scratchpad ",
+            source: "cider"
+        )
+
+        let result = try await service.repairConversation(
+            state: state,
+            existingMessages: []
+        )
+
+        #expect(result.state.conversationID == conversationID)
+        #expect(result.state.activeRuntimeSessionID == "recovered-child")
+        #expect(result.state.runtimeSessionLineage == ["recovered-root", "recovered-child"])
+        #expect(result.state.title == "Cider Scratchpad")
+        #expect(result.state.source == "cider")
+        #expect(result.state.lastSyncedMessageID == "hermes:recovered-child:7")
+        #expect(result.state.lastImportedRuntimeSessionID == "recovered-child")
+        #expect(result.messages.map(\.content) == ["recovered"])
+    }
+
     @Test("main brain sync follows newer Telegram branch")
     func mainBrainSyncFollowsNewerTelegramBranch() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

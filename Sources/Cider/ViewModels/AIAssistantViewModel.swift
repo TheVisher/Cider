@@ -491,8 +491,44 @@ final class AIAssistantViewModel: ObservableObject {
             attachLatestHermesTelegramSession()
         } else {
             Task {
-                await syncHermesConversation(attachIfNeeded: false)
+                await repairHermesConversation()
             }
+        }
+    }
+
+    private func repairHermesConversation() async {
+        guard runtimeSelection == .hermes else { return }
+        guard !hermesSyncInFlight else { return }
+        hermesSyncInFlight = true
+        defer { hermesSyncInFlight = false }
+        hermesSyncStatus = .syncing
+
+        do {
+            let state = try await ensureHermesConversationState(attachIfNeeded: false)
+            guard !state.activeRuntimeSessionID.isEmpty else {
+                hermesSyncStatus = .notAttached
+                return
+            }
+
+            let result = try await hermesSessionService.repairConversation(
+                state: state,
+                existingMessages: messages
+            )
+            let messagesChanged = messages != result.messages
+            let stateChanged = hasDurableHermesStateChange(from: hermesConversationState, to: result.state)
+            hermesConversationState = result.state
+            persistHermesStateForCurrentChat(result.state)
+            if messagesChanged {
+                messages = result.messages
+                requestScrollToBottom()
+            }
+            hermesSyncStatus = .idle
+            if messagesChanged || stateChanged {
+                saveCurrentConversation()
+            }
+        } catch {
+            logger.error("Hermes repair error: \(error.localizedDescription, privacy: .public)")
+            setHermesSyncStatus(for: error)
         }
     }
 
@@ -771,18 +807,22 @@ final class AIAssistantViewModel: ObservableObject {
             }
         } catch {
             logger.error("Hermes sync error: \(error.localizedDescription, privacy: .public)")
-            if let hermesError = error as? HermesSessionClientError {
-                switch hermesError {
-                case .sessionNotFound:
-                    hermesSyncStatus = .staleSession(error.localizedDescription)
-                case .stateDatabaseUnavailable:
-                    hermesSyncStatus = .disconnected(error.localizedDescription)
-                default:
-                    hermesSyncStatus = .error(error.localizedDescription)
-                }
-            } else {
+            setHermesSyncStatus(for: error)
+        }
+    }
+
+    private func setHermesSyncStatus(for error: Error) {
+        if let hermesError = error as? HermesSessionClientError {
+            switch hermesError {
+            case .sessionNotFound:
+                hermesSyncStatus = .staleSession(error.localizedDescription)
+            case .stateDatabaseUnavailable:
+                hermesSyncStatus = .disconnected(error.localizedDescription)
+            default:
                 hermesSyncStatus = .error(error.localizedDescription)
             }
+        } else {
+            hermesSyncStatus = .error(error.localizedDescription)
         }
     }
 

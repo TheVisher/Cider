@@ -160,6 +160,30 @@ struct HermesSessionContinuationResolver {
         return try resolveContinuation(from: any.id)
     }
 
+    func latestSession(title: String) throws -> HermesSessionContinuation? {
+        let trimmedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
+        guard !trimmedTitle.isEmpty else { return nil }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        }
+        defer { sqlite3_close(db) }
+
+        guard let latest = try latestSessionRecord(title: trimmedTitle, db: db) else {
+            return nil
+        }
+
+        let lineage = try lineageEnding(at: latest.id, db: db)
+        return HermesSessionContinuation(
+            activeSessionID: latest.id,
+            lineage: lineage.isEmpty ? [latest.id] : lineage,
+            title: latest.title,
+            source: latest.source,
+            startedAt: latest.startedAt
+        )
+    }
+
     func sessionIDs(source preferredSource: String, in sessionIDs: [String]) throws -> [String] {
         guard !sessionIDs.isEmpty else { return [] }
 
@@ -196,6 +220,41 @@ struct HermesSessionContinuationResolver {
         }
         if result == SQLITE_DONE { return nil }
         throw HermesSessionClientError.sqliteStep(errorMessage(db))
+    }
+
+    private func parentSessionID(of sessionID: String, db: OpaquePointer?) throws -> String? {
+        var stmt: OpaquePointer?
+        let sql = "SELECT parent_session_id FROM sessions WHERE id = ? LIMIT 1;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.sqlitePrepare(errorMessage(db))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, sessionID, -1, SQLITE_TRANSIENT)
+
+        let result = sqlite3_step(stmt)
+        if result == SQLITE_ROW {
+            guard sqlite3_column_type(stmt, 0) != SQLITE_NULL,
+                  let rawParent = sqlite3_column_text(stmt, 0)
+            else { return nil }
+            return String(cString: rawParent)
+        }
+        if result == SQLITE_DONE { return nil }
+        throw HermesSessionClientError.sqliteStep(errorMessage(db))
+    }
+
+    private func lineageEnding(at sessionID: String, db: OpaquePointer?) throws -> [String] {
+        var lineage = [sessionID]
+        var seen = Set(lineage)
+        var current = sessionID
+
+        while let parent = try parentSessionID(of: current, db: db), !seen.contains(parent) {
+            lineage.insert(parent, at: 0)
+            seen.insert(parent)
+            current = parent
+        }
+
+        return lineage
     }
 
     private func newestChild(of sessionID: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
@@ -250,6 +309,31 @@ struct HermesSessionContinuationResolver {
         if let source {
             sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
         }
+
+        let result = sqlite3_step(stmt)
+        if result == SQLITE_ROW {
+            return HermesSessionRecord(stmt: stmt)
+        }
+        if result == SQLITE_DONE { return nil }
+        throw HermesSessionClientError.sqliteStep(errorMessage(db))
+    }
+
+    private func latestSessionRecord(title: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT id, source, title, started_at
+        FROM sessions
+        WHERE title = ?
+        ORDER BY started_at DESC
+        LIMIT 1;
+        """
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.sqlitePrepare(errorMessage(db))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, title, -1, SQLITE_TRANSIENT)
 
         let result = sqlite3_step(stmt)
         if result == SQLITE_ROW {
@@ -571,6 +655,26 @@ final class HermesSessionService: @unchecked Sendable {
         nextState.updateSyncCursor(from: transcript.messages, importedSessionID: continuation.activeSessionID)
 
         return HermesSyncResult(state: nextState, messages: merged)
+    }
+
+    func repairConversation(
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage]
+    ) async throws -> HermesSyncResult {
+        let title = CiderAgentChatRegistry.sanitizedHermesTitle(state.title ?? "")
+        guard !title.isEmpty else {
+            throw HermesSessionClientError.sessionNotFound("Hermes session title for repair")
+        }
+        guard let continuation = try resolver.latestSession(title: title) else {
+            throw HermesSessionClientError.sessionNotFound(title)
+        }
+
+        var repairedState = state
+        repairedState.activeRuntimeSessionID = continuation.activeSessionID
+        repairedState.runtimeSessionLineage = continuation.lineage
+        repairedState.title = continuation.title ?? title
+        repairedState.source = continuation.source ?? state.source
+        return try await sync(state: repairedState, existingMessages: existingMessages)
     }
 
     func syncMainBrain(

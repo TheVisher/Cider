@@ -85,7 +85,7 @@ This is not a rigid release contract. It is a living queue.
 7. Add durable per-chat sync cursors and continuation recovery.
 8. Add native approval UI when Hermes exposes an app-client approval event and response path.
 
-**Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`.
+**Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`. The Relink path can now repair stale raw session pointers by resolving the newest Hermes session with the chat's stored title and preserving the recovered lineage.
 
 **Known bridge gaps:**
 
@@ -141,7 +141,7 @@ This is not a rigid release contract. It is a living queue.
 - safe message serialization so multiple clients do not race
 - clear UI when a session was resumed, compacted, or started fresh
 
-**Current note:** The stable `cider.main` registry, Hermes session lineage, transcript sync, main-window/floating AI surface, explicit attach/relink UI, send coordination, dedupe, source-of-truth docs, and named Hermes side chats are implemented. Remaining work is product hardening around durable sync cursors, richer stale-session recovery, API availability field testing, native approvals, and a cleaner Telegram resume-list experience if that belongs in Hermes/gateway.
+**Current note:** The stable `cider.main` registry, Hermes session lineage, transcript sync, main-window/floating AI surface, explicit attach/relink UI, send coordination, dedupe, source-of-truth docs, durable sync cursors, title-based stale-session repair, and named Hermes side chats are implemented. Remaining work is product hardening around API availability field testing, native approvals, and a cleaner Telegram resume-list experience if that belongs in Hermes/gateway.
 
 **Why before bigger AI features:** If session continuity is shaky, doc audits, reminders, project agents, and life-assistant workflows will feel fragmented.
 
