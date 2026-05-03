@@ -29,6 +29,10 @@ struct NotesExternalChangeState: Equatable {
     let modifiedAt: Date
 }
 
+enum NotesEditorRenderRefreshPlan {
+    static let delays: [TimeInterval] = [0, 0.15, 0.35]
+}
+
 struct NotesRecoverySnapshotChoice: Identifiable, Hashable {
     let id: String
     let title: String
@@ -394,6 +398,27 @@ final class NotesViewModel: ObservableObject {
         isLoadingNote = true
 
         pushContentToEditor(loaded.content)
+        scheduleEditorRenderRefresh(for: loaded.id)
+    }
+
+    private func scheduleEditorRenderRefresh(for noteID: UUID) {
+        for delay in NotesEditorRenderRefreshPlan.delays {
+            Task { @MainActor [weak self] in
+                if delay > 0 {
+                    try? await Task.sleep(for: .seconds(delay))
+                }
+                guard let self, self.selectedNote?.id == noteID else { return }
+                self.pushCurrentContentToEditorIfReady()
+                self.forceEditorDisplayRefresh()
+            }
+        }
+    }
+
+    private func forceEditorDisplayRefresh() {
+        guard let webView = editorWebView else { return }
+        webView.needsLayout = true
+        webView.layoutSubtreeIfNeeded()
+        webView.setNeedsDisplay(webView.bounds)
     }
 
     // MARK: - CRUD

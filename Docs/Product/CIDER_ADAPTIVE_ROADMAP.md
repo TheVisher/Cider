@@ -69,6 +69,7 @@ This is not a rigid release contract. It is a living queue.
 - good handling of compaction/new-session weirdness
 - approvals/status/tool progress presented in a way normal users understand
 - eventual `Cider Main Brain` chat as the default life/vault assistant thread
+- phone-first voice loop where Cider iOS records clips, the Mac host transcribes/runs Hermes/mutates Cider, and the iOS app receives text plus spoken replies
 
 **Supporting docs:**
 
@@ -121,13 +122,15 @@ This is not a rigid release contract. It is a living queue.
 
 ---
 
-### 4. Dashboard command center v1
+### 4. Dashboard command center / second-brain feed v1
 
 **Status:** `Next`
 
-**Goal:** Turn Home/Dashboard into a high-signal command center instead of only a mixed-content feed.
+**Goal:** Turn Home/Dashboard into a high-signal second-brain command center, not a generic news feed.
 
-**Panels/signals to include over time:**
+**Product direction:** The dashboard should curate the vault, remind Erik of things, expand on topics he likes, find similar things based on Cider/vault/media/chat signals, and route useful cards into actions. It should answer: “why does this matter to me?”
+
+**Core lanes/signals:**
 
 - Vault Pulse
 - Overview
@@ -139,18 +142,27 @@ This is not a rigid release contract. It is a living queue.
 - Docs Health
 - Inbox/Triage health
 - Agent job summaries
+- personalized sports/news updates, e.g. Seahawks and Mariners
+- media/game update cards, e.g. sequels, adaptations, Steam/playtest/game updates for known interests
+- similar-item discovery from vault items, bookmarks, notes, media libraries, and feedback
 
-**Near-term rule:** Start with a polished curated dashboard before building full customization.
+**Data-layer direction:** Keep the current local-first `DashboardSnapshot -> topics/cards/runs` shape. Evolve cards toward explicit actions, freshness/expiration fields, machine-readable matched signals, and feedback learning. Preserve `whyItMatters` as a required-quality concept so cards do not become generic headlines.
 
-**Supporting doc:** `Docs/superpowers/specs/2026-04-19-dashboard-design.md`
+**Near-term rule:** Start with a polished curated dashboard before building full customization. Build a few high-signal collectors/resurfacers first instead of a generic RSS reader.
+
+**Supporting docs:**
+
+- `Docs/Product/CIDER_DASHBOARD_SECOND_BRAIN_FEED.md`
+- `Docs/superpowers/specs/2026-04-19-dashboard-design.md`
+- `Docs/superpowers/plans/2026-05-02-cider-dashboard-shared-desktop-web-plan.md`
 
 ---
 
-### 5. Report-only maintenance agents
+### 5. Report-only maintenance agents / Doc Control Agent
 
 **Status:** `Next`
 
-**Goal:** Let Hermes/Cider periodically inspect things Erik forgets to maintain, without silently changing data.
+**Goal:** Let Hermes/Cider periodically inspect things Erik forgets to maintain, without silently changing data. The first serious target is a dedicated Doc Control Agent for Cider itself.
 
 **Streams:**
 
@@ -160,6 +172,18 @@ This is not a rigid release contract. It is a living queue.
 - stale bugs / stale tasks
 - project command center summaries
 - weekly vault digest
+
+**Doc Control Agent shape:**
+
+- persistent/recurring agent, not just an ad hoc subagent
+- report-only by default
+- compares `Docs/` structure against `Sources/` and `Tests/` structure
+- identifies feature code with missing docs, stale docs referencing moved code, duplicate/contradictory docs, and roadmap/doc drift
+- proposes moves/merges/archives/patches with path-level evidence
+- emits dashboard cards for high-priority docs-health issues
+- asks Erik before bulk moving, rewriting, deleting, or archiving docs
+
+**Docs organization direction:** Use `Docs/README.md` as a routing guide/table of contents. Over time, group durable feature docs under `Docs/Features/<Feature>/` folders such as Dashboard, MainBrain, AgentHost, Bookmarks, Notes, TodosReminders, and CLI.
 
 **Current scheduled examples:**
 
@@ -322,6 +346,8 @@ Use this section to capture major reorder decisions.
 | Date | Change | Reason |
 |---|---|---|
 | 2026-05-01 | Created adaptive roadmap with chat UI, roadmap steering, Main Brain, dashboard, maintenance agents, capture rails, reminders/resurfacing, and project command centers as the first major streams. | Erik asked for a constantly adjustable roadmap for the features discussed with Hermes. |
+| 2026-05-02 | Expanded dashboard stream into a second-brain feed direction and created `Docs/Product/CIDER_DASHBOARD_SECOND_BRAIN_FEED.md`. | Erik clarified the dashboard should curate the vault, remind, expand interests, find similar items, and track personalized updates rather than become a generic news feed. |
+| 2026-05-02 | Captured phone-first Cider iOS voice loop and Doc Control Agent direction; created `Docs/README.md` and `Docs/Product/CIDER_DOC_CONTROL_AGENT.md`. | Erik wants Cider/Hermes running on the Mac as the second-brain source of truth, with phone voice capture/playback and a persistent report-only agent to keep docs aligned with code. |
 
 ---
 

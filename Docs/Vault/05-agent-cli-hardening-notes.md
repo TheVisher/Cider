@@ -485,3 +485,45 @@ Expected behavior:
 ### Regression Scenario To Add
 
 - A bookmark in `Food/Restaurants/Edmonds/Tiktok.Com.webloc` updated to title `Kazoku sushi restaurant in Edmonds — Seattle Food Diva` should be renameable in-place to `Food/Restaurants/Edmonds/Kazoku sushi restaurant in Edmonds — Seattle Food Diva.webloc` through the CLI, without moving through a temporary folder or editing the filesystem directly.
+
+## Observed Edge Case 10: Folder Names With Ampersands Fail In CLI Lookup/Move
+
+### Session
+
+During Inbox triage, the agent tried to route NASA's `Your Name in Landsat` bookmark to the existing root folder:
+
+```text
+Fun & Social
+```
+
+`folder list --json` showed the folder exists:
+
+```text
+id: 3E5F6882-B29D-4E46-B1E5-4AAAD2F0FC6D
+relativePath: Fun & Social
+```
+
+But these commands failed or returned no structured error:
+
+```bash
+cider-cli folder get "Fun & Social" --json
+cider-cli bookmark move 2714C3C7 --folder "Fun & Social"
+cider-cli bookmark move 2714C3C7 --path "Fun & Social"
+```
+
+Using the folder ID with `bookmark move --folder <id>` also did not work; it reported no folder found for the ID. The safe fallback was to choose another acceptable folder rather than editing files directly.
+
+### Expected Behavior
+
+Folder lookup and item move should support special characters in folder names, including `&`, identically across `folder get`, `bookmark move --folder`, and `bookmark move --path`.
+
+CLI hardening ideas:
+
+- Add regression tests for folders named `Fun & Social`, `R&D`, and similar shell-sensitive names.
+- Make `bookmark move --folder <folder-id>` accept folder IDs, not only names/paths, or add an explicit `--folder-id` argument.
+- Return JSON errors with `--json` instead of silent `exit -1` / empty output.
+- Prefer exact path resolution before leaf-name matching when the argument contains spaces or special characters.
+
+### Regression Scenario To Add
+
+- Given an existing folder `Fun & Social`, `cider-cli bookmark move <id> --folder "Fun & Social" --json` should move the bookmark and return verified `relativePath: "Fun & Social/<title>.webloc"`.

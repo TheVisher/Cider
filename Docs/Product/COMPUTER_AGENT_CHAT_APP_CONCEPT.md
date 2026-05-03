@@ -123,6 +123,20 @@ Examples:
 
 ## Product Shape
 
+### Phone-first Voice Loop
+
+The product should support a practical, not necessarily perfect, phone-first voice loop:
+
+- user speaks ideas, todos, events, bookmarks, reminders, and vault questions into the phone
+- the Mac host / Hermes agent transcribes and processes the request
+- Cider/Hermes stores durable objects locally on the Mac where appropriate
+- the assistant replies with spoken audio plus an optional transcript
+- latency can be a few seconds; the requirement is reliable, pleasant, and low-friction, not ChatGPT-level realtime voice
+- replies should sound good enough to use while walking, driving, or away from the desk
+- the same Main Brain session should remain attached to Cider, Hermes, and the mobile client
+
+This is not merely a desktop Cider voice feature. The desktop app may host/manage the runtime, but the primary voice UX is mobile because the user wants to talk to their Mac-based second brain while away.
+
 ### Thin Mobile Client
 
 The mobile app does not need to run models or store everything locally.

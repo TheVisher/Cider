@@ -494,6 +494,7 @@ final class AIAssistantViewModel: ObservableObject {
             persistMainBrainState(result.state)
             if messagesChanged {
                 messages = result.messages
+                requestScrollToBottom()
             }
             hermesSyncStatus = .idle
             if messagesChanged || stateChanged {

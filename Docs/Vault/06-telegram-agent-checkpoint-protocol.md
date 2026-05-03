@@ -8,7 +8,9 @@ The goal is continuous improvement: every awkward real-world Cider/Hermes workfl
 
 ## Current Operating Model
 
-Use the Telegram Cider chat as the main **Cider Vault Agent** thread for:
+Cider's primary product target is a native **Cider Main Brain** chat inside the app, powered by Hermes and backed by the Cider Vault. Telegram/Discord are remote access surfaces, not the product source of truth and not required to visually mirror Cider's full transcript.
+
+Use the active Cider/Hermes chat surface for:
 
 - saving links, files, screenshots, GIFs, and notes into the vault
 - triaging Inbox and generic bookmarks
@@ -16,8 +18,9 @@ Use the Telegram Cider chat as the main **Cider Vault Agent** thread for:
 - recording observed workflow failures and friction
 - producing Codex-ready implementation prompts/plans
 - verifying Cider CLI/app changes against real workflows
+- resuming the stable named brain from anywhere, usually `/resume Cider`
 
-The chat is not the only source of truth. Durable behavior must be reflected in:
+The chat transcript is not the only source of truth. Durable behavior must be reflected in:
 
 - `Docs/Vault/01-folder-domains-v1.md`
 - `Docs/Vault/02-routing-rules-v1.md`
@@ -122,12 +125,12 @@ Useful user commands/prompts:
 
 ## Fresh Sessions vs Resume
 
-A long-running Cider Vault Agent session is useful, but important knowledge should not live only in chat context. Use fresh sessions for large focused work, then bring durable outcomes back into docs/memory.
+A long-running Cider Main Brain session is useful, but important knowledge should not live only in chat context. Use fresh sessions for large focused work, then bring durable outcomes back into docs/memory/vault objects.
 
-Recommended named contexts:
+Current recommended context model:
 
-- `Cider Vault Agent` — ongoing vault operations, field notes, routing decisions
-- `Cider Codebase` — code inspection, implementation plans, diff review, tests
-- `Mac System Agent` — non-Cider system-wide tasks
+- `Cider` / `cider.main` — the core second-brain/vault/life-assistant chat. This is the priority.
+- `Cody` — optional later coding/project helper if it proves useful; not required before Cider chat parity.
+- `Mac` — optional later system-task helper; not required before Cider chat parity.
 
-When resuming a Cider session, the agent should reload relevant Cider docs/skills and trust repository/vault state over memory.
+When resuming a Cider session, the agent should resolve the latest backing Hermes thread/compaction by the stable `Cider` title/lineage, reload relevant Cider docs/skills, and trust repository/vault state over memory.
