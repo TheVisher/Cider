@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Cider a reliable first-class Hermes chat client by removing wrong-session bootstrapping risk, supporting named Hermes side chats, proving the supported Hermes API/Runs contract, and replacing the fragile send/progress path with explicit attach, run, stream, stop, and repair states.
+**Goal:** Make Cider's Main Brain chat feel like Hermes inside Cider: stable named brain, native command surface, clear run state, streaming when available, and repairable Hermes continuity.
 
-**Architecture:** Hermes remains the runtime and source of truth for agent execution, session continuity, tools, memory, compaction, approvals, and run state. Cider owns stable chat identity, native UI, local mirrored display history, search/offline affordances, attach/relink/repair controls, and vault actions. Keep all direct Hermes details behind small client types in `Sources/Cider/Services/Agent/`; the existing CLI/export/session-file bridge remains a fallback while the preferred transport becomes Hermes API server Runs/SSE when capabilities prove available.
+**Architecture:** Hermes remains the runtime and source of truth for agent execution, session continuity, tools, memory, compaction, approvals, slash-command behavior, and run state. Cider owns stable chat identity, native UI, local mirrored display history, search/offline affordances, attach/relink/repair controls, slash-command routing, and vault actions. Keep all direct Hermes details behind small client types in `Sources/Cider/Services/Agent/`; the existing CLI/export/session-file bridge remains a fallback while the preferred transport becomes Hermes API server Runs/SSE when capabilities prove available.
 
 **Tech Stack:** Swift, SwiftUI, AppKit, Swift Testing, URLSession, local JSON/JSONL storage, Hermes CLI, Hermes API server on `127.0.0.1:8642`, Server-Sent Events, Hermes `state.db`, Hermes `sessions export`.
 
@@ -22,8 +22,23 @@ Cider already has a usable Main Brain v0:
 - Telegram-origin Hermes messages appear in Cider after sync.
 - The live/export dedupe fix is already implemented in `HermesTranscriptMerger` and covered by `HermesSessionClientTests`.
 - Hermes session titles are global enough for cross-client recall: Cider-created sessions can be resumed from Telegram by explicit `/resume <Hermes session title>` if Cider writes the friendly name into Hermes as the actual session title.
+- Cider-created named chats work from Telegram by explicit `/resume <title>`, which is enough for remote access for now.
+- Durable sync cursors and title-based stale-session repair are implemented.
 
-The remaining risk is product trust, not feature count. The first hardening pass must prevent Cider from silently attaching `cider.main` to the wrong Hermes session.
+## Direction Pivot, 2026-05-02
+
+The current product target is **Cider Main Brain Chat parity with Hermes**, not perfect Cider to Telegram transcript sync.
+
+The primary Cider chat is:
+
+- logical chat ID: `cider.main`
+- display name: `Cider`
+- Hermes visible title: `Cider`
+- human aliases: Cider, Main Brain, Vault, Brain
+
+Telegram or Discord should be treated as remote access surfaces that can resume the named Cider brain with `/resume Cider`. They do not need to visually mirror Cider's full transcript, and Cider does not need to import every external message perfectly before the native Cider chat can improve.
+
+The next implementation slice is the **Cider-native slash command router**. This gives Cider an immediate Hermes-like command surface without waiting for the Hermes API server to be reachable.
 
 ## Product Bar
 
@@ -40,6 +55,7 @@ Cider chat should eventually feel like a real Hermes client, not a nicer file wa
 - native approval UI when Hermes exposes a supported approval event/response path,
 - named side chats so scoped work can avoid flooding Main Brain while still being resumable from Telegram,
 - local mirrored transcript for UI/search/offline use without competing with Hermes runtime history.
+- native slash commands such as `/help`, `/status`, `/resume`, `/last`, `/summary`, `/checkpoint`, `/new`, and `/title`.
 
 ## Discovered Hermes Contract
 
@@ -55,6 +71,8 @@ Local Hermes `v0.12.0 (2026.4.30)` documents a supported API server behind the g
 
 The installed gateway is running, but the API server was not reachable at `127.0.0.1:8642` during discovery. The plan must therefore first add a capability probe and document the exact local enablement path, then wire API Runs behind a transport seam with CLI/export fallback.
 
+This API work remains valuable, but the reason has changed. The Runs/SSE path is for making Cider chat stream and control Hermes natively, not for perfect Cider/Telegram synchronization.
+
 ## Non-Goals
 
 - Do not replace Hermes with a Cider-owned agent runtime.
@@ -62,6 +80,9 @@ The installed gateway is running, but the API server was not reachable at `127.0
 - Do not expose raw Hermes internals broadly through SwiftUI.
 - Do not make file polling more central than it already is.
 - Do not build a standalone multi-client room host in this phase.
+- Do not optimize for perfect Telegram/Cider transcript mirroring.
+- Do not build Cody, Mac, Nexus, Discord-first routing, or a multi-agent roster before the Cider second-brain chat feels excellent.
+- Do not create new architecture docs for speculative agent ideas; update this plan and the adaptive roadmap unless Erik asks for a new doc.
 
 ---
 
@@ -77,8 +98,10 @@ The installed gateway is running, but the API server was not reachable at `127.0
   New transport protocol plus result/event types shared by CLI fallback and API Runs transport.
 - `Sources/Cider/Services/Agent/HermesRunTransport.swift`
   New preferred transport using Hermes API Runs/SSE.
+- `Sources/Cider/Services/Agent/CiderChatCommandRouter.swift`
+  New lightweight command router for Cider-native slash commands. Handles local commands first and returns structured actions for commands that should resume, rename, summarize, checkpoint, or forward to Hermes.
 - `Sources/Cider/ViewModels/AIAssistantViewModel.swift`
-  Owns Main Brain UI state, explicit attach/relink/start-fresh commands, send coordination, and transport selection.
+  Owns Main Brain UI state, explicit attach/relink/start-fresh commands, send coordination, slash command execution, and transport selection.
 - `Sources/Cider/Views/AIAssistant/AIAssistantPanelView.swift`
   Adds compact attach/relink/repair controls and status rendering.
 - `Sources/Cider/Views/AIAssistant/AIAssistantInputView.swift`
@@ -1706,7 +1729,113 @@ git commit -m "feat: add named Hermes chats"
 
 ---
 
-## Task 11: Verification
+## Task 11: Add Cider-Native Slash Command Router
+
+**Purpose:** Make Cider chat feel more like Hermes inside Cider before Runs/SSE and native approvals are fully available.
+
+**Files:**
+- Create: `Sources/Cider/Services/Agent/CiderChatCommandRouter.swift`
+- Modify: `Sources/Cider/ViewModels/AIAssistantViewModel.swift`
+- Modify/Add: `Tests/CiderTests/CiderChatCommandRouterTests.swift`
+
+**Product rule:** Slash commands are a native command surface for the primary Cider brain. They should not become a large architecture project, and they should not depend on perfect Telegram/Cider transcript sync.
+
+**V1 commands:**
+
+```text
+/help
+/status
+/resume [title]
+/last
+/summary
+/checkpoint
+/new
+/title <title>
+```
+
+**Command behavior:**
+
+- `/help` returns a short local assistant message listing supported commands.
+- `/status` returns a local assistant message with active chat name, Hermes title, session ID short form, sync state, and transport availability if known.
+- `/resume` with no title resumes `Cider`; `/resume <title>` resolves or repairs by Hermes title using the existing registry/service path.
+- `/last` returns the last cached assistant response in the current Cider chat.
+- `/summary` sends a normal Hermes request asking for a concise summary of the current chat unless a cached summary exists later.
+- `/checkpoint` sends a normal Hermes request asking it to save durable decisions/context. Do not create a new checkpoint doc automatically in Cider for v1.
+- `/new` starts a fresh local Hermes chat using the existing `startFreshHermesSession()` behavior.
+- `/title <title>` renames the current Cider/Hermes chat locally and renames the backing Hermes session when one exists.
+
+**Router shape:**
+
+```swift
+struct CiderChatCommand: Equatable, Sendable {
+    enum Action: Equatable, Sendable {
+        case localMessage(String)
+        case resume(title: String)
+        case sendToHermes(String)
+        case startFreshChat
+        case renameCurrentChat(String)
+    }
+
+    let name: String
+    let argument: String?
+    let action: Action
+}
+```
+
+`CiderChatCommandRouter.parse(_:)` should return `nil` for normal messages and throw a clear parse error for unsupported slash commands.
+
+- [ ] **Step 1: Write command parser tests**
+
+Cover:
+
+1. Normal messages are not commands.
+2. `/help` returns `.localMessage`.
+3. `/resume` defaults to `Cider`.
+4. `/resume Scratchpad` preserves the title argument.
+5. `/summary` becomes a Hermes prompt.
+6. `/checkpoint` becomes a Hermes prompt.
+7. `/new` returns `.startFreshChat`.
+8. `/title Cider Scratchpad` returns `.renameCurrentChat("Cider Scratchpad")`.
+9. Unknown slash commands throw an unsupported-command error.
+
+- [ ] **Step 2: Implement `CiderChatCommandRouter`**
+
+Keep the parser pure and independent from SwiftUI so it is easy to test.
+
+- [ ] **Step 3: Wire the view model**
+
+In `AIAssistantViewModel.send(_:)`, before normal Hermes send:
+
+1. Ask the router whether the trimmed message is a command.
+2. Execute local command actions without sending to Hermes.
+3. Convert `.sendToHermes` actions into normal Hermes sends.
+4. Reuse existing attach/relink/start-fresh/rename methods where possible.
+5. Append local command output as assistant messages with `sourceName: "Cider"`.
+
+- [ ] **Step 4: Run focused tests**
+
+Run:
+
+```bash
+swift test --filter CiderChatCommandRouterTests
+swift test --filter CiderAgentChatRegistryTests
+swift test --filter HermesSessionClientTests
+```
+
+Expected: all focused tests pass.
+
+- [ ] **Step 5: Commit**
+
+Run:
+
+```bash
+git add Sources/Cider/Services/Agent/CiderChatCommandRouter.swift Sources/Cider/ViewModels/AIAssistantViewModel.swift Tests/CiderTests/CiderChatCommandRouterTests.swift
+git commit -m "feat: add Cider chat slash commands"
+```
+
+---
+
+## Task 12: Verification
 
 **Purpose:** Prove the hardened bridge did not break existing AI, Hermes parsing, or floating surface behavior.
 
