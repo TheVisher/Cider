@@ -25,11 +25,6 @@ struct AIAssistantInputView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
-            if !commandSuggestions.isEmpty {
-                commandSuggestionPopup
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-
             ZStack(alignment: .topLeading) {
                 AIAssistantPromptEditor(
                     text: $inputText,
@@ -144,6 +139,15 @@ struct AIAssistantInputView: View {
             RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(CiderColors.borderDefault, lineWidth: CiderBorder.hairlineStrokeWidth)
         )
+        .overlay(alignment: .topLeading) {
+            if !commandSuggestions.isEmpty {
+                commandSuggestionPopup
+                    .frame(height: commandSuggestionPopupHeight)
+                    .offset(x: Spacing.md, y: -commandSuggestionPopupHeight - Spacing.xs)
+                    .zIndex(10)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
         .shadow(color: .black.opacity(0.16), radius: 14, x: 0, y: 8)
         .onChange(of: inputText) { _, newValue in
             if newValue != suppressedCommandSuggestionText {
@@ -155,6 +159,10 @@ struct AIAssistantInputView: View {
     private var commandSuggestions: [CiderChatCommandRouter.Suggestion] {
         guard inputText != suppressedCommandSuggestionText else { return [] }
         return CiderChatCommandRouter.suggestions(forDraft: inputText)
+    }
+
+    private var commandSuggestionPopupHeight: CGFloat {
+        min(CGFloat(commandSuggestions.count) * 27 + 8, 240)
     }
 
     private var commandSuggestionPopup: some View {
