@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cider Dashboard Feature Map</title>
+<style>
+  body { margin:0; background:#020617; color:#e2e8f0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .wrap { max-width: 1220px; margin:0 auto; padding:28px; }
+  h1 { margin:0 0 4px; font-size:28px; }
+  .sub { color:#94a3b8; margin-bottom:20px; line-height:1.5; }
+  .card { border:1px solid #1e293b; border-radius:16px; background:rgba(15,23,42,.84); padding:18px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+  svg { width:100%; height:auto; display:block; background:#020617; border-radius:12px; }
+  .legend { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-top:16px; }
+  .legend div { border:1px solid #1e293b; border-radius:12px; padding:12px; background:#0f172a; }
+  .muted { color:#94a3b8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cider Dashboard Feature Map</h1>
+  <div class="sub">The dashboard is personal context resurfacing + curated discovery + action routing. Desktop/vault is source of truth first; Web/mobile come after schema gates.</div>
+  <div class="card">
+<svg viewBox="0 0 1180 760" role="img" aria-label="Cider Dashboard architecture and product flow map">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#38bdf8"/></marker>
+    <style>
+      .bg{fill:url(#grid)} .box{rx:12;stroke-width:2}.txt{fill:#e2e8f0;font-size:15px;font-weight:700}.small{fill:#cbd5e1;font-size:11px}.tiny{fill:#94a3b8;font-size:9px}.arrow{stroke:#38bdf8;stroke-width:2.4;fill:none;marker-end:url(#arrow)}.dash{stroke-dasharray:7 5}
+      .input{fill:rgba(8,51,68,.55);stroke:#22d3ee}.filter{fill:rgba(120,53,15,.38);stroke:#fbbf24}.data{fill:rgba(76,29,149,.45);stroke:#a78bfa}.ui{fill:rgba(6,78,59,.45);stroke:#34d399}.action{fill:rgba(251,146,60,.25);stroke:#fb923c}.future{fill:rgba(30,41,59,.65);stroke:#94a3b8}.guard{fill:rgba(136,19,55,.42);stroke:#fb7185}
+    </style>
+  </defs>
+  <rect class="bg" width="1180" height="760"/>
+
+  <path class="arrow" d="M 195 130 C 245 130, 260 130, 310 130"/>
+  <path class="arrow" d="M 480 130 C 530 130, 550 130, 600 130"/>
+  <path class="arrow" d="M 760 130 C 805 130, 825 130, 870 130"/>
+  <path class="arrow" d="M 960 190 C 960 245, 960 255, 960 305"/>
+  <path class="arrow" d="M 880 370 C 780 430, 700 430, 610 485"/>
+  <path class="arrow" d="M 1035 370 C 1075 430, 1075 455, 1075 520"/>
+  <path class="arrow" d="M 450 545 C 450 605, 520 620, 620 620"/>
+  <path class="arrow dash" d="M 835 620 C 900 620, 925 620, 980 620"/>
+
+  <rect x="35" y="55" width="160" height="150" class="box input"/><text x="115" y="86" text-anchor="middle" class="txt">Signals</text><text x="115" y="116" text-anchor="middle" class="small">vault captures</text><text x="115" y="138" text-anchor="middle" class="small">interests/tastes</text><text x="115" y="160" text-anchor="middle" class="small">projects/docs</text><text x="115" y="182" text-anchor="middle" class="small">external sources</text>
+
+  <rect x="310" y="55" width="170" height="150" class="box filter"/><text x="395" y="86" text-anchor="middle" class="txt">Relevance Gate</text><text x="395" y="116" text-anchor="middle" class="small">timely?</text><text x="395" y="138" text-anchor="middle" class="small">personal?</text><text x="395" y="160" text-anchor="middle" class="small">actionable?</text><text x="395" y="182" text-anchor="middle" class="tiny">generic cards stop here</text>
+
+  <rect x="600" y="55" width="160" height="150" class="box data"/><text x="680" y="86" text-anchor="middle" class="txt">Dashboard</text><text x="680" y="108" text-anchor="middle" class="txt">Snapshot</text><text x="680" y="138" text-anchor="middle" class="small">topics</text><text x="680" y="160" text-anchor="middle" class="small">cards</text><text x="680" y="182" text-anchor="middle" class="small">runs</text>
+
+  <rect x="870" y="55" width="180" height="150" class="box data"/><text x="960" y="86" text-anchor="middle" class="txt">Vault Storage</text><text x="960" y="118" text-anchor="middle" class="small">.cider/dashboard/</text><text x="960" y="140" text-anchor="middle" class="small">_cider_dashboard.json</text><text x="960" y="170" text-anchor="middle" class="tiny">Desktop source of truth</text>
+
+  <rect x="800" y="305" width="320" height="70" class="box ui"/><text x="960" y="336" text-anchor="middle" class="txt">DashboardHubView</text><text x="960" y="360" text-anchor="middle" class="small">shell: Main + topic tabs</text>
+
+  <rect x="335" y="485" width="230" height="120" class="box ui"/><text x="450" y="520" text-anchor="middle" class="txt">Main</text><text x="450" y="550" text-anchor="middle" class="small">HomeOverviewDashboardView</text><text x="450" y="575" text-anchor="middle" class="tiny">orientation / vault overview</text>
+
+  <rect x="625" y="485" width="250" height="120" class="box ui"/><text x="750" y="520" text-anchor="middle" class="txt">Topic Boards</text><text x="750" y="550" text-anchor="middle" class="small">DashboardBoardView</text><text x="750" y="574" text-anchor="middle" class="small">DashboardCardView</text><text x="750" y="594" text-anchor="middle" class="tiny">filtered by topicSyncIds</text>
+
+  <rect x="980" y="520" width="160" height="120" class="box action"/><text x="1060" y="552" text-anchor="middle" class="txt">Actions</text><text x="1060" y="580" text-anchor="middle" class="small">seen/dismiss</text><text x="1060" y="602" text-anchor="middle" class="small">rate/feedback</text><text x="1060" y="624" text-anchor="middle" class="small">open source</text>
+
+  <rect x="620" y="620" width="220" height="95" class="box action"/><text x="730" y="652" text-anchor="middle" class="txt">Future Cider Actions</text><text x="730" y="680" text-anchor="middle" class="small">bookmark / note / todo</text><text x="730" y="702" text-anchor="middle" class="small">event / reminder / memory</text>
+
+  <rect x="980" y="620" width="160" height="95" class="box future"/><text x="1060" y="652" text-anchor="middle" class="txt">Web/Mobile</text><text x="1060" y="680" text-anchor="middle" class="small">after schema gate</text><text x="1060" y="702" text-anchor="middle" class="tiny">no separate model</text>
+
+  <rect x="35" y="515" width="240" height="150" class="box guard"/><text x="155" y="548" text-anchor="middle" class="txt">Guardrails</text><text x="155" y="578" text-anchor="middle" class="small">not generic news</text><text x="155" y="600" text-anchor="middle" class="small">explain why it matters</text><text x="155" y="622" text-anchor="middle" class="small">no AI panel coupling</text><text x="155" y="644" text-anchor="middle" class="small">no Web fork</text>
+
+  <text x="60" y="275" class="txt">Card quality test</text>
+  <rect x="60" y="295" width="420" height="130" class="box filter"/>
+  <text x="90" y="330" class="small">Show only if: timely, personal, actionable,</text>
+  <text x="90" y="356" class="small">resurfacing, discovery, or maintenance.</text>
+  <text x="90" y="392" class="small">Every card should answer: “Why this for Erik?”</text>
+</svg>
+  </div>
+  <div class="legend">
+    <div><strong>Signals</strong><br><span class="muted">Vault, tastes, projects, schedules, external selected sources.</span></div>
+    <div><strong>Gate</strong><br><span class="muted">Generic/no-reason cards should stop before storage.</span></div>
+    <div><strong>Storage</strong><br><span class="muted">Desktop/vault snapshot is the MVP source of truth.</span></div>
+    <div><strong>Actions</strong><br><span class="muted">Start with seen/dismiss/rate/open; grow into Cider object creation.</span></div>
+  </div>
+</div>
+</body>
+</html>

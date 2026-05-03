@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cider Docs Map</title>
+<style>
+  body { margin:0; background:#020617; color:#e2e8f0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  .sub { color:#94a3b8; margin-bottom: 20px; }
+  .card { border:1px solid #1e293b; border-radius:16px; background:rgba(15,23,42,.82); padding:18px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+  svg { width:100%; height:auto; display:block; background:#020617; border-radius:12px; }
+  .legend { display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-top:16px; }
+  .legend div { border:1px solid #1e293b; border-radius:12px; padding:12px; background:#0f172a; }
+  .muted { color:#94a3b8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cider Docs Map</h1>
+  <div class="sub">A visual shelf system: capture ideas, promote durable knowledge, keep feature docs traceable to code/tests.</div>
+  <div class="card">
+<svg viewBox="0 0 1120 720" role="img" aria-label="Cider docs information architecture map">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#38bdf8"/></marker>
+    <style>
+      .bg{fill:url(#grid)} .box{rx:12;stroke-width:2} .txt{fill:#e2e8f0;font-size:16px;font-weight:700} .small{fill:#cbd5e1;font-size:12px} .tiny{fill:#94a3b8;font-size:10px}.arrow{stroke:#38bdf8;stroke-width:2.5;fill:none;marker-end:url(#arrow)}
+      .capture{fill:rgba(8,51,68,.55);stroke:#22d3ee}.triage{fill:rgba(120,53,15,.38);stroke:#fbbf24}.feature{fill:rgba(6,78,59,.45);stroke:#34d399}.product{fill:rgba(76,29,149,.45);stroke:#a78bfa}.archive{fill:rgba(30,41,59,.65);stroke:#94a3b8}.qa{fill:rgba(136,19,55,.42);stroke:#fb7185}.conv{fill:rgba(251,146,60,.25);stroke:#fb923c}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="720"/>
+
+  <path class="arrow" d="M 165 125 C 245 125, 245 125, 315 125"/>
+  <path class="arrow" d="M 485 125 C 550 125, 550 80, 620 80"/>
+  <path class="arrow" d="M 485 125 C 550 125, 550 160, 620 160"/>
+  <path class="arrow" d="M 485 125 C 550 125, 550 250, 620 250"/>
+  <path class="arrow" d="M 780 250 C 840 250, 840 250, 900 250"/>
+  <path class="arrow" d="M 780 80 C 835 80, 850 125, 900 160"/>
+  <path class="arrow" d="M 780 160 C 835 160, 850 160, 900 160"/>
+  <path class="arrow" d="M 700 330 C 700 390, 520 390, 520 445"/>
+  <path class="arrow" d="M 520 525 C 520 580, 700 580, 700 630"/>
+
+  <rect x="30" y="65" width="150" height="120" class="box capture"/><text x="105" y="100" text-anchor="middle" class="txt">CAPTURE</text><text x="105" y="126" text-anchor="middle" class="small">ideas / chats</text><text x="105" y="146" text-anchor="middle" class="small">plans / notes</text><text x="105" y="166" text-anchor="middle" class="tiny">messy is okay here</text>
+  <rect x="315" y="65" width="170" height="120" class="box triage"/><text x="400" y="100" text-anchor="middle" class="txt">TRIAGE</text><text x="400" y="126" text-anchor="middle" class="small">temporary?</text><text x="400" y="146" text-anchor="middle" class="small">durable?</text><text x="400" y="166" text-anchor="middle" class="tiny">pick the shelf</text>
+
+  <rect x="620" y="35" width="160" height="90" class="box product"/><text x="700" y="70" text-anchor="middle" class="txt">Product</text><text x="700" y="96" text-anchor="middle" class="small">why / priorities</text>
+  <rect x="620" y="125" width="160" height="90" class="box product"/><text x="700" y="160" text-anchor="middle" class="txt">Architecture</text><text x="700" y="186" text-anchor="middle" class="small">system shape</text>
+  <rect x="620" y="215" width="160" height="110" class="box feature"/><text x="700" y="250" text-anchor="middle" class="txt">Features</text><text x="700" y="276" text-anchor="middle" class="small">Dashboard</text><text x="700" y="296" text-anchor="middle" class="small">MainBrain, etc.</text>
+
+  <rect x="900" y="125" width="185" height="90" class="box conv"/><text x="992" y="160" text-anchor="middle" class="txt">Conventions</text><text x="992" y="186" text-anchor="middle" class="small">rules for all apps</text>
+  <rect x="900" y="215" width="185" height="100" class="box qa"/><text x="992" y="250" text-anchor="middle" class="txt">QA / Testing</text><text x="992" y="276" text-anchor="middle" class="small">confidence + regressions</text><text x="992" y="296" text-anchor="middle" class="tiny">linked to feature docs</text>
+
+  <rect x="360" y="445" width="320" height="80" class="box feature"/><text x="520" y="478" text-anchor="middle" class="txt">Doc Control Agent</text><text x="520" y="504" text-anchor="middle" class="small">weekly report-only drift check</text>
+  <rect x="540" y="630" width="320" height="60" class="box archive"/><text x="700" y="666" text-anchor="middle" class="txt">Proposed Moves / Archives</text><text x="700" y="686" text-anchor="middle" class="tiny">requires Erik approval</text>
+
+  <text x="35" y="380" class="txt">Feature Folder Contract</text>
+  <rect x="35" y="400" width="255" height="250" class="box feature"/>
+  <text x="58" y="435" class="small">Docs/Features/&lt;Feature&gt;/</text>
+  <text x="58" y="465" class="small">├── README.md</text>
+  <text x="58" y="490" class="small">├── PRODUCT.md</text>
+  <text x="58" y="515" class="small">├── ARCHITECTURE.md</text>
+  <text x="58" y="540" class="small">├── DATA_MODEL.md</text>
+  <text x="58" y="565" class="small">├── CLI.md</text>
+  <text x="58" y="590" class="small">├── TESTING.md</text>
+  <text x="58" y="615" class="small">└── DECISIONS.md</text>
+
+  <text x="790" y="380" class="txt">Rule of Thumb</text>
+  <rect x="790" y="400" width="295" height="145" class="box triage"/>
+  <text x="815" y="435" class="small">1. Search before creating.</text>
+  <text x="815" y="462" class="small">2. Update source of truth first.</text>
+  <text x="815" y="489" class="small">3. Promote durable ideas.</text>
+  <text x="815" y="516" class="small">4. Ask before bulk moves.</text>
+</svg>
+  </div>
+  <div class="legend">
+    <div><strong>Capture</strong><br><span class="muted">Messy ideas, checkpoints, chats, plans.</span></div>
+    <div><strong>Promote</strong><br><span class="muted">Durable ideas move into source-of-truth docs.</span></div>
+    <div><strong>Maintain</strong><br><span class="muted">Doc Control Agent checks drift weekly.</span></div>
+    <div><strong>Approve</strong><br><span class="muted">Bulk moves/archives require Erik sign-off.</span></div>
+  </div>
+</div>
+</body>
+</html>
