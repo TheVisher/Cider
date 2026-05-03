@@ -1765,6 +1765,7 @@ Automatically extract structured recipe data from saved content — TikTok links
 
 ## KANBAN Vision
 
+> Status: historical product/roadmap context. The current Kanban source of truth lives in `Docs/Features/Kanban/` and the active board YAML files under `/Users/minivish/CiderVault/.cider/boards/`.
 
 ### Concept
 

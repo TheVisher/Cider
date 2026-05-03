@@ -1,5 +1,7 @@
 # Cider Main Brain AI Surface Implementation Plan
 
+> Status: historical handoff/checkpoint. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`.
+
 > **For agentic workers:** This plan is now mostly implemented. Use it as historical implementation context, not as the next work queue. The follow-up hardening plan is `Docs/superpowers/plans/2026-05-02-cider-hermes-bridge-hardening.md`.
 
 **Goal:** Make Cider open one stable Hermes-backed Main Brain chat by default, and make the AI chat a normal Cider surface that can live in the main window or float like other surfaces.

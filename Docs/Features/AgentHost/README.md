@@ -1,10 +1,12 @@
 # Agent Host Feature
 
-**Status:** Feature folder seed.
+**Status:** Future boundary / feature folder seed. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`.
 
 ## Purpose
 
 Agent Host is the neutral backend layer that coordinates Cider, Hermes, mobile clients, Telegram, and future clients. It should own multi-client chat coordination while Hermes owns agent session internals.
+
+Current direction: Cider should first be a strong local-first client and context surface for Hermes/Codex-style agents, not a replacement runtime for every agent. Agent Host is the future coordinator for true multi-client rooms, event fanout, send ordering, approvals, and runtime adapters.
 
 ## Responsibilities
 

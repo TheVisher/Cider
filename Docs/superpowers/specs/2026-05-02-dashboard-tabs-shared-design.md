@@ -1,5 +1,7 @@
 # Dashboard Tabs Shared Design
 
+> Status: historical implemented design context. The current Dashboard source of truth lives in `Docs/Features/Dashboard/`.
+
 ## Intent
 
 Keep the current Cider Desktop Dashboard and extend it into a dashboard shell with multiple internal views. The current overview/daily brief becomes the `Main` view. New personal-dashboard topics such as tech news, sports, entertainment, and Cider projects become peer views inside the same Dashboard saved-view tab.

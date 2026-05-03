@@ -1,5 +1,7 @@
 # Codex Handoff: Telegram-First Remote Agent
 
+> Status: historical handoff/checkpoint. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`.
+
 ## Current Branch
 
 - repository: `/Users/minivish/Cider`

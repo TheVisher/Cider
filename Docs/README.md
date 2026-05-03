@@ -15,12 +15,15 @@ If you feel lost, use these in order:
 5. Overall product vision: `Docs/Product/PRODUCT_VISION.md`
 6. Cider life-assistant vision: `Docs/Product/CIDER_LIFE_ASSISTANT_VISION.md`
 7. Dashboard second-brain feed: `Docs/Product/CIDER_DASHBOARD_SECOND_BRAIN_FEED.md`
-8. Doc control agent concept: `Docs/Product/CIDER_DOC_CONTROL_AGENT.md`
-9. Storage architecture: `Docs/Architecture/STORAGE.md`
-10. Vault agent behavior: `Docs/Architecture/VAULT_AGENT_VISION.md`
-11. Agent service / Hermes integration: `Docs/Architecture/AGENT_SERVICE.md`
-12. Vault routing rules: `Docs/Vault/02-routing-rules-v1.md`
-13. Agent CLI hardening notes: `Docs/Vault/05-agent-cli-hardening-notes.md`
+8. Kanban boards and development workflow: `Docs/Features/Kanban/README.md`
+9. Todos, reminders, and resurfacing: `Docs/Features/TodosReminders/README.md`
+10. Doc control agent concept: `Docs/Product/CIDER_DOC_CONTROL_AGENT.md`
+11. Storage doctrine: `Docs/Architecture/STORAGE_DOCTRINE.md`
+12. Transitional storage details: `Docs/Architecture/STORAGE.md`
+13. Vault agent behavior: `Docs/Architecture/VAULT_AGENT_VISION.md`
+14. Agent service / Hermes integration: `Docs/Architecture/AGENT_SERVICE.md`
+15. Vault routing rules: `Docs/Vault/02-routing-rules-v1.md`
+16. Agent CLI hardening notes: `Docs/Vault/05-agent-cli-hardening-notes.md`
 
 ---
 
@@ -30,11 +33,15 @@ When creating or updating docs, prefer updating an existing source-of-truth doc 
 
 ### Docs vs. Kanban
 
-Docs are Cider's durable foundation. Use docs for product vision, architecture, data models, UX principles, agent operating rules, routing doctrine, and big feature designs that should remain true after implementation work is complete.
+Docs are Cider's durable foundation. Use docs for product vision, architecture, data models, UX principles, agent operating rules, routing doctrine, QA procedures, and big feature designs that should remain true after implementation work is complete.
 
 Kanban is Cider's active work surface. Use Kanban cards for smaller tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, and handoff context for Hermes, Codex, Claude, or another agent.
 
 If a Kanban card produces a lasting product, architecture, UX, data-model, routing, or agent-behavior decision, promote the durable outcome into the relevant doc. Do not create a new Markdown doc for every card; create full docs only when the work needs a durable standalone foundation record or large spec.
+
+Large implementation plans/specs may live under `Docs/superpowers/`, but active tracking should still live on a Kanban card. Link the card to the plan/spec, and promote only durable outcomes into Product, Architecture, Feature, Vault, QA, or Conventions docs.
+
+Use Kanban cards for task-local test evidence and handoff notes. Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done.
 
 ### Product docs
 
@@ -86,10 +93,11 @@ If a plan/spec contains durable product or architecture knowledge, summarize or 
 
 Use `Docs/QA/` for:
 
-- audit reports
-- regression plans
+- reusable audit procedures
+- release/regression plans
+- historical audit reports
 - release checklists
-- bug verification notes
+- bug verification notes that should remain useful after the card is done
 
 ### Conventions docs
 
@@ -113,6 +121,7 @@ Initial feature/component folders to create over time:
 - `Docs/Features/Dashboard/`
 - `Docs/Features/MainBrain/`
 - `Docs/Features/AgentHost/`
+- `Docs/Features/Kanban/`
 - `Docs/Features/Bookmarks/`
 - `Docs/Features/Notes/`
 - `Docs/Features/TodosReminders/`
@@ -139,6 +148,21 @@ Tests/CiderTests/Dashboard*           -> Docs/Features/Dashboard/TESTING.md
 Sources/Cider/Services/Agent/         -> Docs/Features/MainBrain/ARCHITECTURE.md
 Sources/Cider/Views/*AI*              -> Docs/Features/MainBrain/README.md
 Docs/Architecture/AGENT_SERVICE.md    -> Docs/Features/AgentHost/README.md or Architecture source
+
+Sources/Cider/Models/KanbanBoard.swift          -> Docs/Features/Kanban/DATA_MODEL.md
+Sources/Cider/Services/KanbanStorage.swift      -> Docs/Features/Kanban/ARCHITECTURE.md
+Sources/Cider/Views/Kanban/                     -> Docs/Features/Kanban/README.md
+Sources/CiderCLI/CiderCLI.swift board commands  -> Docs/Features/Kanban/ARCHITECTURE.md
+Tests/CiderTests/Kanban*                        -> Docs/Features/Kanban/TESTING.md
+
+Sources/Cider/Models/TodoCard.swift                    -> Docs/Features/TodosReminders/DATA_MODEL.md
+Sources/Cider/Models/DateCard.swift                    -> Docs/Features/TodosReminders/DATA_MODEL.md
+Sources/Cider/Models/SurfacingRule.swift               -> Docs/Features/TodosReminders/DATA_MODEL.md
+Sources/Cider/Services/ReminderReconciler.swift        -> Docs/Features/TodosReminders/ARCHITECTURE.md
+Sources/Cider/Services/DateCardNotificationService.swift -> Docs/Features/TodosReminders/ARCHITECTURE.md
+Sources/Cider/Services/ReminderOutbox.swift            -> Docs/Features/TodosReminders/ARCHITECTURE.md
+Sources/Cider/Services/DailyVaultReminderService.swift -> Docs/Features/TodosReminders/ARCHITECTURE.md
+Tests/CiderTests/*Todo* Tests/CiderTests/*Reminder* Tests/CiderTests/*Event* -> Docs/Features/TodosReminders/TESTING.md
 
 Sources/CiderCLI/                     -> Docs/Features/CLI/README.md
 Docs/Vault/*                          -> Docs/Features/Vault/README.md or vault-specific docs

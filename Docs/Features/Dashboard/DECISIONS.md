@@ -51,3 +51,13 @@ Durable decision log for Dashboard.
 **Why:** It matches existing Cider JSON conventions, is easy for agents to reason about, and can migrate later if volume requires.
 
 **Source:** `Shared/DASHBOARD.md`
+
+---
+
+## 2026-05-02 — Dashboard Is Not the AI Panel
+
+**Decision:** Dashboard is a Cider product/data surface, not the AI assistant panel or AI chat UI.
+
+**Why:** Dashboard cards, topics, feedback, and source routing should evolve independently from assistant transport, chat state, and panel behavior.
+
+**Source:** `Docs/superpowers/plans/2026-05-02-cider-dashboard-shared-desktop-web-plan.md`

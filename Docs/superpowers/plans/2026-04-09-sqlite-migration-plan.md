@@ -1,5 +1,7 @@
 # SQLite Migration Implementation Plan
 
+> Status: historical completed implementation plan. Board `p1l2m3`, card `plan002`, records this work as completed on `2026-04-11`. For current storage architecture, use `Docs/Architecture/STORAGE_DOCTRINE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace Cider's JSON-based metadata persistence with a unified SQLite database, enabling relational queries, atomic writes, and concurrent access while keeping files as the source of truth.

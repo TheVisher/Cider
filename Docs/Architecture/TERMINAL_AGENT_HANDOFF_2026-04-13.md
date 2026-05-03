@@ -1,5 +1,7 @@
 # Terminal Handoff: Managed Agent + iMessage Direction
 
+> Status: historical handoff/checkpoint. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`.
+
 ## Purpose
 
 This document is a handoff for continuing agent-runtime and messaging work from a terminal session without losing the reasoning that led here.

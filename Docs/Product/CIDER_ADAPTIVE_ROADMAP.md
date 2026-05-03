@@ -266,9 +266,10 @@ This is not a rigid release contract. It is a living queue.
 
 **Supporting docs:**
 
+- `Docs/Features/TodosReminders/README.md`
 - `Docs/superpowers/plans/2026-04-12-reminder-engine.md`
-- `Docs/superpowers/plans/2026-04-26-update-reminder-plan.md`
-- `Docs/superpowers/specs/2026-04-26-update-reminder-design.md`
+
+Note: `Docs/superpowers/plans/2026-04-26-update-reminder-plan.md` and `Docs/superpowers/specs/2026-04-26-update-reminder-design.md` are Sparkle app-update reminder docs, not life-assistant reminder docs.
 
 ---
 

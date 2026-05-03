@@ -1,5 +1,7 @@
 # Codex Telegram Handoff: Persistent Runtime + Vault Count Routing
 
+> Status: historical handoff/checkpoint. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`.
+
 ## Purpose
 
 This handoff captures the current state of the Telegram-backed Codex runtime in Cider, what has already been fixed, what is still not wired, and the recommended next step.
@@ -248,4 +250,3 @@ There are linker warnings from `libconvexmobile.a` being built for newer macOS p
 Use this prompt in the next thread:
 
 > Read `/Users/minivish/Cider/Docs/Architecture/CODEX_TELEGRAM_HANDOFF_2026-04-14.md`, `/Users/minivish/Cider/Docs/Architecture/CODEX_HANDOFF_2026-04-14.md`, and `/Users/minivish/Cider/Docs/Architecture/AGENT_SERVICE.md`. Inspect the current `CodexProcessRuntime`, `AgentOrchestrator`, and Telegram bridge. Continue improving the Telegram-backed Codex runtime, keeping `cider-cli` as the short-term canonical tool bridge for vault facts and counts. Do not replace it with raw filesystem counting. If you implement native app-tool wiring, bridge it into `AgentToolRegistry` cleanly instead of adding a second ad hoc path.
-

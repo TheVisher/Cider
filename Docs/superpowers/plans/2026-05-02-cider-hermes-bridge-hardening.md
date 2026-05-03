@@ -1,5 +1,7 @@
 # Cider Hermes Bridge Hardening Implementation Plan
 
+> Status: historical implementation plan and hardening context. Durable Main Brain guidance has been promoted into `Docs/Features/MainBrain/`; reactivate any remaining unchecked work through Kanban before using this as an active queue.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Cider's Main Brain chat feel like Hermes inside Cider: stable named brain, native command surface, clear run state, streaming when available, and repairable Hermes continuity.

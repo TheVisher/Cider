@@ -2,7 +2,7 @@
 
 > Status note: this document describes the legacy and transitional file/index model that Cider has used during the per-file and SQLite migration work. For the active target architecture, see [STORAGE_DOCTRINE.md](./STORAGE_DOCTRINE.md). Where this document conflicts with the doctrine, the doctrine wins.
 
-> This is the definitive reference for how Cider stores ALL data on disk — user content (standard files) and internal app data (hidden `.cider/` directory). **Every card type** must follow the per-file pattern. No exceptions.
+> Historical/transitional note: this document is no longer the definitive global storage reference. It remains useful for file layout history, standard artifact formats, and bookmark migration/runtime details. New storage decisions should start from `STORAGE_DOCTRINE.md`.
 >
 > *Consolidates the former PER_FILE_STORAGE.md and VAULT_STORAGE.md.*
 

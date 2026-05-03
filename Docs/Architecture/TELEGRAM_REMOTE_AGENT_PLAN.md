@@ -1,5 +1,7 @@
 # Telegram-First Remote Agent Plan
 
+> Status: historical/deferred remote-agent architecture context. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`; future multi-client coordination belongs in `Docs/Features/AgentHost/README.md`.
+
 ## Decision
 
 The remote agent v1 should use Telegram as the first bidirectional channel.

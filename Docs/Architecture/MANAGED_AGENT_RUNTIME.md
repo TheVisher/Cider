@@ -1,5 +1,7 @@
 # Managed Agent Runtime
 
+> Status: historical/alternate architecture context. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`. Agent Host future-boundary guidance lives in `Docs/Features/AgentHost/README.md`.
+
 ## Status
 
 Draft architecture for the next phase after `AgentOrchestrator` / unified tool registration.

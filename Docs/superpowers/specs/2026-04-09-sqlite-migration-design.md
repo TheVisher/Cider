@@ -1,7 +1,9 @@
 # Cider SQLite Migration Design
 
 **Date:** 2026-04-09
-**Status:** Approved design, pending implementation plan
+**Status:** Historical migration design. The SQLite migration was completed; for current storage doctrine, see `Docs/Architecture/STORAGE_DOCTRINE.md`.
+
+> Historical note: this spec records the original migration design and may contain sidecar/rebuild assumptions that were later superseded. Current doctrine: SQLite is canonical for app metadata, files are user-owned artifacts, sidecars are migration artifacts only.
 
 ## Summary
 

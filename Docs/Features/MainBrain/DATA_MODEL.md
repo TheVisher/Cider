@@ -19,6 +19,8 @@ CiderAgentChatRecord
 ├─ runtimeID: hermes
 ├─ activeRuntimeSessionID: latest backing Hermes session pointer
 ├─ runtimeSessionLineage: previous/current Hermes session IDs
+├─ lastSyncedCursor: latest imported Hermes message/session cursor
+├─ checkpoints: durable summary/checkpoint references
 ├─ conversationUUID: stable Cider-side conversation identity
 ├─ defaultInCider: true
 ├─ createdAt

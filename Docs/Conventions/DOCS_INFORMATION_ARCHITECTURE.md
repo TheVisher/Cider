@@ -57,6 +57,10 @@ Kanban is the workbench: active smaller tweaks, bugs, follow-up ideas, implement
 
 Promotion rule: when a Kanban item changes Cider's lasting behavior or principles, move the durable summary into the appropriate Product, Architecture, Feature, Vault, QA, or Conventions doc before treating the work as fully settled.
 
+Large implementation plans/specs may live under `Docs/superpowers/`, but active tracking should still live on a Kanban card. Link the card to the plan/spec, and promote only durable outcomes into Product, Architecture, Feature, Vault, QA, or Conventions docs.
+
+Use Kanban cards for task-local test evidence and handoff notes. Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done.
+
 ### 1. Product shelf: `Docs/Product/`
 
 Use for *why* and *what matters*.
@@ -120,7 +124,7 @@ Examples:
 - audit loops
 - release checklist
 - regression reports
-- bug-specific QA notes
+- reusable bug verification notes
 
 ### 6. Conventions shelf: `Docs/Conventions/`
 

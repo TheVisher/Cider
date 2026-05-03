@@ -1,7 +1,9 @@
 # Sidecar Retirement Plan
 
-**Status:** Working plan  
+**Status:** Active transitional cleanup plan
 **Date:** 2026-04-15
+
+> Source-of-truth note: this plan tracks sidecar cleanup work. It is not the canonical storage architecture. When this plan and `STORAGE_DOCTRINE.md` disagree, `STORAGE_DOCTRINE.md` wins.
 
 ## Goal
 

@@ -1,5 +1,7 @@
 # Cider / Hermes Session Lineage Sync Note
 
+> Status: historical handoff/checkpoint. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`.
+
 Date: 2026-05-02
 
 Purpose: preserve the design decision for how Cider should keep a stable Main Brain chat even when Hermes compacts and creates continuation sessions. This is written as a handoff note for ChatGPT / future agents.

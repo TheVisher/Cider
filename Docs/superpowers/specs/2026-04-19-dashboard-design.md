@@ -1,7 +1,9 @@
 # Cider Dashboard Design
 
+> Status: historical design context. The current Dashboard source of truth lives in `Docs/Features/Dashboard/`.
+
 **Date:** 2026-04-19
-**Status:** Approved design, pending implementation plan
+**Status:** Historical approved design
 
 ## Summary
 

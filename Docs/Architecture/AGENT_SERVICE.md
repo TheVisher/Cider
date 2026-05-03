@@ -1,5 +1,7 @@
 # Agent Service Architecture
 
+> Status: architecture background. Current durable Main Brain and Hermes integration guidance lives in `Docs/Features/MainBrain/`; future neutral Agent Host boundaries live in `Docs/Features/AgentHost/README.md`.
+
 ## Table of Contents
 
 1. [Overview](#overview) — Line 12

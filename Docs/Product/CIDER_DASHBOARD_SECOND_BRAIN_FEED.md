@@ -1,8 +1,10 @@
 # Cider Dashboard: Personalized Second-Brain Feed
 
+> Status: historical product/data-model context. The current Dashboard source of truth lives in `Docs/Features/Dashboard/`.
+
 **Created:** 2026-05-02  
 **Owner:** Erik + Hermes  
-**Status:** Product direction / data-model guidance
+**Status:** Historical product direction / data-model guidance
 
 ---
 

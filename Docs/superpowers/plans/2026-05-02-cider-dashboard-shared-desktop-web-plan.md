@@ -1,5 +1,7 @@
 # Cider Shared Dashboard Implementation Plan
 
+> Status: historical implementation context. The current Dashboard source of truth lives in `Docs/Features/Dashboard/`; active follow-up work should live in Kanban and durable outcomes should be promoted back into the Dashboard feature docs.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 >
 > **Hard constraint from Erik:** Do **not** touch the Cider AI panels or AI chat work while implementing this plan. Avoid `Sources/Cider/Views/AIAssistant/**`, `Sources/Cider/ViewModels/AIAssistantViewModel.swift`, `Sources/Cider/Services/AI/**`, `Sources/Cider/App/AppDelegate+AIAssistantPanel.swift`, and any UI wiring whose only purpose is the current AI panel.
