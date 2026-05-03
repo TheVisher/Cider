@@ -36,7 +36,7 @@ Long term, the app should support:
 - direct or private network connectivity where possible
 - Tailscale/WireGuard/manual host address support for early remote use
 - app-level encryption after the basic connection loop works
-- voice capture and spoken replies after text sessions work
+- mobile-first voice capture and spoken replies after text sessions work
 - approval cards and action logs after core chat is reliable
 - multiple Mac/host support later
 
@@ -121,7 +121,7 @@ The first milestone should prove organized multi-chat text sessions from a phone
 
 - polished native iPhone app
 - polished native Mac app
-- voice input/output
+- live/mobile voice loop: voice capture, transcription, spoken replies, auto-play, and reasonable-latency turn-taking
 - app-level end-to-end encryption
 - APNs/push notifications
 - CloudKit

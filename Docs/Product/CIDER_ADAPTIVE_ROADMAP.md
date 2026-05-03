@@ -81,6 +81,13 @@ This is not a rigid release contract. It is a living queue.
 - named Hermes side chats for scoped work, while avoiding a large multi-agent/chat roster until the primary Cider brain feels excellent
 - durable per-chat sync cursors such as last synced Hermes message/session markers, so lineage imports stay reliable as histories grow
 - documented source-of-truth policy between Hermes runtime history and Cider's mirrored UI history
+- clean user-facing chat output with minimal internal tool chatter
+- stable session identity and resume behavior
+- clear distinction between visible Cider chat and underlying Hermes session lineage
+- good handling of compaction/new-session weirdness
+- approvals/status/tool progress presented in a way normal users understand
+- eventual `Cider Main Brain` chat as the default life/vault assistant thread
+- phone-first voice loop where Cider iOS records clips, the Mac host transcribes/runs Hermes/mutates Cider, and the iOS app receives text plus spoken replies
 - Cider-native slash command router for core commands like `/help`, `/status`, `/resume`, `/last`, `/summary`, `/checkpoint`, `/new`, and `/title`
 - slash-command discovery UI in the composer so typing `/` shows available commands and filters as Erik types
 - Hermes Runs/SSE API usage for native Cider send, stream, run state, and stop when available
@@ -108,6 +115,8 @@ This is not a rigid release contract. It is a living queue.
 - Hermes cron automation/job results currently come through Telegram but do not route into the Cider AI chat. Treat this as a remote-surface delivery gap for later Agent Host or transcript import work.
 - Hermes Runs/SSE API is still unavailable locally on `127.0.0.1:8642`; keep the fallback path while using the API seam for future native streaming.
 - Native approval UI is intentionally deferred until Hermes exposes an app-client approval event and response path.
+
+**Merged roadmap note:** This item now absorbs the older "Agent session continuity / Main Brain foundation" stream. Stable logical chat identity, current Hermes session pointer, lineage tracking, sync cursors, and compaction/continuation repair are part of Cider Main Brain Chat parity rather than a separate roadmap item.
 
 **Supporting docs:**
 
@@ -145,33 +154,15 @@ This is not a rigid release contract. It is a living queue.
 
 ## Next candidates
 
-### 3. Agent session continuity / Main Brain foundation
-
-**Status:** `Shipped / Needs Sign-off`
-
-**Goal:** Make Cider's AI experience feel like one durable personal brain, even when Hermes sessions compact, fork, resume, or move across Telegram/CLI/Cider.
-
-**Feature shape:**
-
-- stable logical chat ID such as `cider.main`
-- mapping from Cider chat to current Hermes session ID, continuation lineage, and eventually a durable sync cursor
-- read-only awareness of Hermes session history/lineage
-- safe message serialization so multiple clients do not race
-- clear UI when a session was resumed, compacted, or started fresh
-
-**Current note:** The stable `cider.main` registry, Hermes session lineage, transcript sync, main-window/floating AI surface, explicit attach/relink UI, send coordination, dedupe, source-of-truth docs, durable sync cursors, title-based stale-session repair, and named Hermes side chats are implemented. The target has pivoted from perfect Cider/Telegram sync to Cider Main Brain Chat parity with Hermes. Remaining work is product hardening around slash commands, API availability field testing, streaming/run state, native approvals, and a cleaner Telegram resume-list experience if that belongs in Hermes/gateway.
-
-**Why before bigger AI features:** If session continuity is shaky, doc audits, reminders, project agents, and life-assistant workflows will feel fragmented.
-
----
-
-### 4. Dashboard command center v1
+### 3. Dashboard command center / second-brain feed v1
 
 **Status:** `Next`
 
-**Goal:** Turn Home/Dashboard into a high-signal command center instead of only a mixed-content feed.
+**Goal:** Turn Home/Dashboard into a high-signal second-brain command center, not a generic news feed.
 
-**Panels/signals to include over time:**
+**Product direction:** The dashboard should curate the vault, remind Erik of things, expand on topics he likes, find similar things based on Cider/vault/media/chat signals, and route useful cards into actions. It should answer: “why does this matter to me?”
+
+**Core lanes/signals:**
 
 - Vault Pulse
 - Overview
@@ -183,18 +174,27 @@ This is not a rigid release contract. It is a living queue.
 - Docs Health
 - Inbox/Triage health
 - Agent job summaries
+- personalized sports/news updates, e.g. Seahawks and Mariners
+- media/game update cards, e.g. sequels, adaptations, Steam/playtest/game updates for known interests
+- similar-item discovery from vault items, bookmarks, notes, media libraries, and feedback
 
-**Near-term rule:** Start with a polished curated dashboard before building full customization.
+**Data-layer direction:** Keep the current local-first `DashboardSnapshot -> topics/cards/runs` shape. Evolve cards toward explicit actions, freshness/expiration fields, machine-readable matched signals, and feedback learning. Preserve `whyItMatters` as a required-quality concept so cards do not become generic headlines.
 
-**Supporting doc:** `Docs/superpowers/specs/2026-04-19-dashboard-design.md`
+**Near-term rule:** Start with a polished curated dashboard before building full customization. Build a few high-signal collectors/resurfacers first instead of a generic RSS reader.
+
+**Supporting docs:**
+
+- `Docs/Product/CIDER_DASHBOARD_SECOND_BRAIN_FEED.md`
+- `Docs/superpowers/specs/2026-04-19-dashboard-design.md`
+- `Docs/superpowers/plans/2026-05-02-cider-dashboard-shared-desktop-web-plan.md`
 
 ---
 
-### 5. Report-only maintenance agents
+### 4. Report-only maintenance agents / Doc Control Agent
 
 **Status:** `Next`
 
-**Goal:** Let Hermes/Cider periodically inspect things Erik forgets to maintain, without silently changing data.
+**Goal:** Let Hermes/Cider periodically inspect things Erik forgets to maintain, without silently changing data. The first serious target is a dedicated Doc Control Agent for Cider itself.
 
 **Streams:**
 
@@ -204,6 +204,18 @@ This is not a rigid release contract. It is a living queue.
 - stale bugs / stale tasks
 - project command center summaries
 - weekly vault digest
+
+**Doc Control Agent shape:**
+
+- persistent/recurring agent, not just an ad hoc subagent
+- report-only by default
+- compares `Docs/` structure against `Sources/` and `Tests/` structure
+- identifies feature code with missing docs, stale docs referencing moved code, duplicate/contradictory docs, and roadmap/doc drift
+- proposes moves/merges/archives/patches with path-level evidence
+- emits dashboard cards for high-priority docs-health issues
+- asks Erik before bulk moving, rewriting, deleting, or archiving docs
+
+**Docs organization direction:** Use `Docs/README.md` as a routing guide/table of contents. Over time, group durable feature docs under `Docs/Features/<Feature>/` folders such as Dashboard, MainBrain, AgentHost, Bookmarks, Notes, TodosReminders, and CLI.
 
 **Current scheduled examples:**
 
@@ -218,7 +230,7 @@ This is not a rigid release contract. It is a living queue.
 
 ## Soon
 
-### 6. Capture and import rails
+### 5. Capture and import rails
 
 **Status:** `Soon`
 
@@ -237,7 +249,7 @@ This is not a rigid release contract. It is a living queue.
 
 ---
 
-### 7. Cider-owned reminders, todos, and resurfacing
+### 6. Cider-owned reminders, todos, and resurfacing
 
 **Status:** `Soon`
 
@@ -260,7 +272,7 @@ This is not a rigid release contract. It is a living queue.
 
 ---
 
-### 8. Project command centers
+### 7. Project command centers
 
 **Status:** `Soon`
 
@@ -284,7 +296,7 @@ This is not a rigid release contract. It is a living queue.
 
 ## Later
 
-### 9. Media memory and taste library
+### 8. Media memory and taste library
 
 **Status:** `Later`
 
@@ -307,7 +319,7 @@ This is not a rigid release contract. It is a living queue.
 
 ---
 
-### 10. Knowledge graph / related items
+### 9. Knowledge graph / related items
 
 **Status:** `Later`
 
@@ -320,7 +332,7 @@ This is not a rigid release contract. It is a living queue.
 
 ---
 
-### 11. Universal metadata inspector
+### 10. Universal metadata inspector
 
 **Status:** `Later`
 
@@ -333,7 +345,7 @@ This is not a rigid release contract. It is a living queue.
 
 ---
 
-### 12. Contact profile surface
+### 11. Contact profile surface
 
 **Status:** `Later`
 
@@ -365,7 +377,10 @@ Use this section to capture major reorder decisions.
 
 | Date | Change | Reason |
 |---|---|---|
+| 2026-05-03 | Merged the older Main Brain foundation roadmap item into Cider Main Brain Chat parity with Hermes. | The session-continuity work is now part of the core Cider chat parity stream, not a separate competing roadmap. |
 | 2026-05-02 | Promoted Cider/Hermes bridge hardening and Hermes field testing as the current focus; marked Main Brain foundation as shipped/needs sign-off. | The Main Brain v0 is implemented and working in Cider/Telegram, but needs reliability hardening before larger agent features. |
+| 2026-05-02 | Expanded dashboard stream into a second-brain feed direction and created `Docs/Product/CIDER_DASHBOARD_SECOND_BRAIN_FEED.md`. | Erik clarified the dashboard should curate the vault, remind, expand interests, find similar items, and track personalized updates rather than become a generic news feed. |
+| 2026-05-02 | Captured phone-first Cider iOS voice loop and Doc Control Agent direction; created `Docs/README.md` and `Docs/Product/CIDER_DOC_CONTROL_AGENT.md`. | Erik wants Cider/Hermes running on the Mac as the second-brain source of truth, with phone voice capture/playback and a persistent report-only agent to keep docs aligned with code. |
 | 2026-05-01 | Created adaptive roadmap with chat UI, roadmap steering, Main Brain, dashboard, maintenance agents, capture rails, reminders/resurfacing, and project command centers as the first major streams. | Erik asked for a constantly adjustable roadmap for the features discussed with Hermes. |
 
 ---

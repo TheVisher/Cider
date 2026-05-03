@@ -724,7 +724,7 @@ struct AIAssistantPanelView: View {
                                 .frame(height: composerHeight + Spacing.xl)
                                 .id("bottom")
                         }
-                        .id(layoutBucket(for: width))
+                        .id(renderInvalidationKey(for: width))
                         .frame(width: columnWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, Spacing.lg)
@@ -811,8 +811,13 @@ struct AIAssistantPanelView: View {
         return min(contentWidth * ratio, message.role == .user ? 560 : 680)
     }
 
-    private func layoutBucket(for width: CGFloat) -> Int {
-        Int(width / 80)
+    private func renderInvalidationKey(for width: CGFloat) -> String {
+        AIAssistantRenderInvalidation.key(
+            messages: visibleMessages,
+            width: width,
+            composerHeight: composerHeight,
+            streamingToken: viewModel.isStreaming ? viewModel.displayedStreamingText : nil
+        )
     }
 
     private var visibleMessages: [AIAssistantMessage] {
@@ -888,7 +893,7 @@ struct AIAssistantPanelView: View {
         animated: Bool = true,
         delay: TimeInterval = 0
     ) {
-        let action = {
+        let action: @MainActor () -> Void = {
             if reduceMotion || !animated || viewModel.messages.count > visibleMessageLimit {
                 proxy.scrollTo("bottom", anchor: .bottom)
             } else {
@@ -897,11 +902,20 @@ struct AIAssistantPanelView: View {
                 }
             }
         }
+        let actionBox = MainActorActionBox(action)
 
         if delay > 0 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                MainActor.assumeIsolated {
+                    actionBox.perform()
+                }
+            }
         } else {
-            DispatchQueue.main.async(execute: action)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    actionBox.perform()
+                }
+            }
         }
     }
 
@@ -1381,11 +1395,56 @@ struct AIAssistantPanelView: View {
     }
 }
 
+enum AIAssistantRenderInvalidation {
+    static func key(
+        messages: [AIAssistantMessage],
+        width: CGFloat,
+        composerHeight: CGFloat,
+        streamingToken: String?
+    ) -> String {
+        let widthBucket = Int(width / 80)
+        let composerBucket = Int(composerHeight / 8)
+        let messageSignature = messages.map(messageSignature).joined(separator: "|")
+        let streamingSignature = streamingToken.map { String(stableDigest($0)) } ?? "idle"
+        return "\(widthBucket):\(composerBucket):\(messageSignature):\(streamingSignature)"
+    }
+
+    private static func messageSignature(_ message: AIAssistantMessage) -> String {
+        [
+            message.id.uuidString,
+            message.role.rawValue,
+            String(stableDigest(message.content)),
+            message.sourceID ?? "",
+            message.sourceSessionID ?? "",
+            String(message.attachments.count)
+        ].joined(separator: ":")
+    }
+
+    private static func stableDigest(_ value: String) -> UInt64 {
+        value.utf8.reduce(14_695_981_039_346_656_037) { partial, byte in
+            (partial ^ UInt64(byte)) &* 1_099_511_628_211
+        }
+    }
+}
+
 private struct HeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private final class MainActorActionBox: @unchecked Sendable {
+    private let action: @MainActor () -> Void
+
+    init(_ action: @escaping @MainActor () -> Void) {
+        self.action = action
+    }
+
+    @MainActor
+    func perform() {
+        action()
     }
 }
 

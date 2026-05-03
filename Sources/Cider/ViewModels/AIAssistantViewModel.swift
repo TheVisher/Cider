@@ -990,6 +990,7 @@ final class AIAssistantViewModel: ObservableObject {
             persistHermesStateForCurrentChat(result.state)
             if messagesChanged {
                 messages = result.messages
+                requestScrollToBottom()
             }
             hermesSyncStatus = .idle
             if messagesChanged || stateChanged {
