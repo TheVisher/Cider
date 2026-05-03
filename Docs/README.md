@@ -28,6 +28,14 @@ If you feel lost, use these in order:
 
 When creating or updating docs, prefer updating an existing source-of-truth doc before adding another standalone file.
 
+### Docs vs. Kanban
+
+Docs are Cider's durable foundation. Use docs for product vision, architecture, data models, UX principles, agent operating rules, routing doctrine, and big feature designs that should remain true after implementation work is complete.
+
+Kanban is Cider's active work surface. Use Kanban cards for smaller tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, and handoff context for Hermes, Codex, Claude, or another agent.
+
+If a Kanban card produces a lasting product, architecture, UX, data-model, routing, or agent-behavior decision, promote the durable outcome into the relevant doc. Do not create a new Markdown doc for every card; create full docs only when the work needs a durable standalone foundation record or large spec.
+
 ### Product docs
 
 Use `Docs/Product/` for:

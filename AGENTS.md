@@ -1,5 +1,42 @@
 # Cider Agent Notes
 
+## Cider Development Kanban
+
+Kanban is a first-class development workflow for Cider, not just an app feature.
+
+Docs and Kanban have different jobs:
+
+- Docs are Cider's durable foundation: product vision, architecture, data model, UX principles, agent operating rules, routing doctrine, and big feature designs that should remain true after an implementation card is done.
+- Kanban is Cider's active work surface: small tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, and short handoff records.
+- Promote important Kanban outcomes into docs when they become lasting product, architecture, UX, data-model, or agent-behavior decisions.
+- Do not create stray Markdown docs for every task. Use a full doc only when the work needs a durable standalone foundation record or large spec.
+
+For Cider development work, agents should use the boards in `~/CiderVault/.cider/boards/` as the shared source of truth:
+
+- Check the relevant board before starting substantial work.
+- If the work already has a card, move it to the active work column before implementing.
+- If the work does not have a card, add one with a concise title, useful notes/spec context, and `created: 'YYYY-MM-DD'`.
+- Move work through the board as reality changes: backlog/planned -> in_progress -> testing/ready to test -> done.
+- For bugs, use the bugs board and move fixed items to `fixed`.
+- Put implementation notes, test evidence, blockers, and follow-up context on the card instead of scattering one-off Markdown files unless a full spec/doc is genuinely needed.
+- Keep card text useful for future handoff to Hermes, Codex, or another agent.
+
+Active board files:
+
+- `~/CiderVault/.cider/boards/a1b2c3.yaml` — Cider Roadmap
+- `~/CiderVault/.cider/boards/d4e5f6.yaml` — Cider Bugs
+- `~/CiderVault/.cider/boards/p1l2m3.yaml` — Implementation Plans
+- `~/CiderVault/.cider/boards/e7f8a9.yaml` — Kanban Implementation
+- `~/CiderVault/.cider/boards/f0d730.yaml` — Vault Agent Work
+
+YAML rules:
+
+- Preserve board YAML structure and indentation.
+- Every card must have a `created` field.
+- Quote dates with single quotes, for example `created: '2026-05-03'`.
+- Do not duplicate keys on a card.
+- Prefer structured parsing or a whole-file rewrite over small indentation-sensitive YAML edits.
+
 ## Social Voice
 
 For Cider social posts, write like a useful product made by a real person.

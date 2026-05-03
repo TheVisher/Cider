@@ -20,6 +20,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var priority: KanbanPriority?
     var agent: String?
     var tags: [String]
+    var linkedEntities: [LibraryEntityRef]
     var created: Date
     var completed: Date?
 
@@ -31,6 +32,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         priority: KanbanPriority? = nil,
         agent: String? = nil,
         tags: [String] = [],
+        linkedEntities: [LibraryEntityRef] = [],
         created: Date = Date(),
         completed: Date? = nil
     ) {
@@ -41,13 +43,14 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.priority = priority
         self.agent = agent
         self.tags = tags
+        self.linkedEntities = linkedEntities
         self.created = created
         self.completed = completed
     }
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, color, priority, agent, tags, created, completed
+        case id, title, notes, color, priority, agent, tags, linkedEntities, created, completed
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +62,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         priority = try c.decodeIfPresent(KanbanPriority.self, forKey: .priority)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         tags = (try c.decodeIfPresent([String].self, forKey: .tags)) ?? []
+        linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
         created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
     }
@@ -72,6 +76,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         try c.encodeIfPresent(priority, forKey: .priority)
         try c.encodeIfPresent(agent, forKey: .agent)
         if !tags.isEmpty { try c.encode(tags, forKey: .tags) }
+        if !linkedEntities.isEmpty { try c.encode(linkedEntities, forKey: .linkedEntities) }
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
     }

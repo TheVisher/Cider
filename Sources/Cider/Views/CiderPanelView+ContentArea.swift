@@ -126,7 +126,7 @@ extension CiderPanelView {
             case .savedView(let id, _):
                 if let savedView = savedViewStorage.savedView(for: id) {
                     if case .kanban(let boardID) = savedView.kind {
-                        KanbanBoardView(boardID: boardID)
+                        KanbanBoardView(boardID: boardID, onOpenCard: openKanbanCardDetail)
                     } else if case .dashboard = savedView.kind {
                         DashboardHubView(onOpenSourceURL: { url in
                             openURLSafely(url)

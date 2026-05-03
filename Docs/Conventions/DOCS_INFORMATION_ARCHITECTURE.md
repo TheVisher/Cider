@@ -20,7 +20,13 @@ New idea / code change / bug / agent output
         ▼
 Is it durable guidance or just work-in-progress?
         │
-        ├─ Work-in-progress implementation artifact
+        ├─ Small/active work item
+        │      ▼
+        │   Cider Kanban card
+        │      │
+        │      └─ If it becomes durable, promote summary into Product / Architecture / Feature docs
+        │
+        ├─ Large work-in-progress implementation artifact
         │      ▼
         │   Docs/superpowers/plans/ or Docs/superpowers/specs/
         │      │
@@ -42,6 +48,14 @@ Is it durable guidance or just work-in-progress?
 ---
 
 ## The Shelf System
+
+### Docs vs. Kanban
+
+Docs are the bookshelf: durable foundation records for product vision, architecture, data models, UX principles, agent operating rules, routing doctrine, and big feature designs.
+
+Kanban is the workbench: active smaller tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, and handoff notes. A card can carry enough context for another agent to continue, but it is not the long-term source of truth for durable doctrine.
+
+Promotion rule: when a Kanban item changes Cider's lasting behavior or principles, move the durable summary into the appropriate Product, Architecture, Feature, Vault, QA, or Conventions doc before treating the work as fully settled.
 
 ### 1. Product shelf: `Docs/Product/`
 

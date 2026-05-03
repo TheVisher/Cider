@@ -1,6 +1,6 @@
 import Foundation
 
-enum LibraryEntityType: String, Codable, CaseIterable, Hashable {
+enum LibraryEntityType: String, Codable, CaseIterable, Hashable, Sendable {
     case bookmark
     case note
     case dateCard
@@ -15,7 +15,7 @@ enum LibraryEntityType: String, Codable, CaseIterable, Hashable {
     static let activeCases: Set<LibraryEntityType> = [.bookmark, .note, .dateCard, .contact, .todo, .vaultFile]
 }
 
-struct LibraryEntityRef: Identifiable, Codable, Hashable {
+struct LibraryEntityRef: Identifiable, Codable, Hashable, Sendable {
     let type: LibraryEntityType
     let entityID: UUID
 

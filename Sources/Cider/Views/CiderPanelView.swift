@@ -47,6 +47,10 @@ struct CiderPanelView: View {
     @State var selectedContact: ContactCard?
     @State var selectedTodoCard: TodoCard?
     @State var selectedVaultFile: VaultFile?
+    @State var selectedKanbanBoardID: String?
+    @State var selectedKanbanCardID: String?
+    @State var kanbanCardDraft: KanbanCardDraft?
+    @State var kanbanMetadataVisible: Bool = true
     @State var cardScaleSaveTask: Task<Void, Never>?
     @State var sidebarSearchText: String = ""
     @State var debouncedSearchText: String = ""
@@ -82,10 +86,24 @@ struct CiderPanelView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
+        panelBase
+            .sheet(item: $newEventEditorContext) { context in
+                eventEditorSheet(context: context)
+            }
+            .sheet(item: $newContactEditorContext) { context in
+                contactEditorSheet(context: context)
+            }
+            .sheet(item: $newTodoEditorContext) { context in
+                todoEditorSheet(context: context)
+            }
+            .background(keyboardShortcutBackground)
+    }
+
+    private var panelBase: some View {
         CiderPanelShell(
             isCollapsed: isCollapsed,
             suppressSidebarAutoExpand: isAnyDetailOpen,
-            blurRightColumn: isDetailSlideOut || isGenericDetailSlideOut || isNoteDetailSlideOut,
+            blurRightColumn: isDetailSlideOut || isGenericDetailSlideOut || isNoteDetailSlideOut || isKanbanDetailSlideOut,
             showsPanelControls: true,
             onClose: { closeSurface() },
             onCollapse: { minimizeSurface() },
@@ -99,87 +117,7 @@ struct CiderPanelView: View {
         } content: {
             contentArea
         } overlay: {
-            if isSearchPaletteVisible {
-                SearchPaletteView(
-                    bookmarks: bookmarksViewModel.bookmarks,
-                    notes: notesViewModel.notes,
-                    onOpenBookmark: { bookmark in
-                        if NSEvent.modifierFlags.contains(.command) {
-                            bookmarksViewModel.open(bookmark)
-                        } else {
-                            openBookmarkDetails(bookmark)
-                        }
-                    },
-                    onOpenNote: { note in
-                        openNoteDetail(note)
-                    },
-                    onOpenDateCard: { openDateCardDetail($0) },
-                    onOpenContact: { openContactDetail($0) },
-                    onOpenTodo: { openTodoDetail($0) },
-                    onSpawnSearchTab: spawnSearchTab,
-                    onDismiss: { isSearchPaletteVisible = false },
-                    onAction: { action in
-                        handleQuickAction(action)
-                    },
-                    onSelectTag: { tag in
-                        let filter = SavedViewFilterSpec(labelIDs: [tag.id])
-                        let savedView = savedViewStorage.createSavedView(name: tag.name, filterSpec: filter)
-                        savedViewStorage.addToTabOrder(savedView.id)
-                        selectedFolderID = nil
-                        selectedTab = .savedView(id: savedView.id, name: savedView.name)
-                    }
-                )
-            }
-            if isDetailFullPanel {
-                detailFullPanelOverlay
-            }
-            if isDetailSlideOut, let _ = detailsDraft {
-                // Transparent dismiss area — covers the blurred content to the left
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { closeBookmarkDetails() }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                detailSlideOutContainer
-                    .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                    .padding(BookmarksDesign.detailsSlideOutFloatInset)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-            if isGenericDetailFullPanel {
-                genericDetailFullPanelOverlay
-            }
-            if isGenericDetailSlideOut {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { closeGenericDetail() }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                genericDetailSlideOutContainer
-                    .frame(width: isTodoDetailOpen ? BookmarksDesign.detailsSlideOutMinWidth : min(detailSlideOutWidth, maxSlideOutWidth))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                    .padding(BookmarksDesign.detailsSlideOutFloatInset)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-            if isNoteDetailFullPanel {
-                noteDetailFullPanelOverlay
-            }
-            if isNoteDetailSlideOut {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { closeNoteDetail() }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                noteDetailSlideOutContainer
-                    .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                    .padding(BookmarksDesign.detailsSlideOutFloatInset)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-            if isURLDropTargeted {
-                urlDropOverlay
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            }
+            panelOverlay
         }
         .onDrop(
             of: Self.urlDropTypeIdentifiers,
@@ -196,6 +134,7 @@ struct CiderPanelView: View {
         .animation(reduceMotion ? .none : .snappy, value: isGenericDetailSlideOut)
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailFullPanel)
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailSlideOut)
+        .animation(reduceMotion ? .none : .snappy, value: isKanbanDetailSlideOut)
         .ciderCardEnvironment(textScale: textScale, hideFooters: hideCardFooters, detailsOnHover: showCardDetailsOnHover)
         .task { ensureDefaultTabs() }
         .onAppear { installKeyboardMonitor() }
@@ -351,126 +290,236 @@ struct CiderPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showOnboarding)) { _ in
             openOrCreateOnboardingTab()
         }
-        .sheet(item: $newEventEditorContext) { context in
-            DateCardEditorSheet(
-                existingCard: context.existingCard,
-                defaultDate: context.defaultDate,
-                onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule, rules in
-                    LibraryItemEditor.saveDateCard(
-                        existingCard: context.existingCard,
-                        title: title,
-                        details: details,
-                        startAt: startAt,
-                        endAt: endAt,
-                        allDay: allDay,
-                        location: location,
-                        amount: amount,
-                        labelIDs: labelIDs,
-                        recurrenceRule: recurrenceRule,
-                        rules: rules
-                    )
-                },
-                onDelete: { dateCard in
-                    if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
-                    }
-                }
-            )
-        }
-        .sheet(item: $newContactEditorContext) { context in
-            ContactEditorSheet(
-                existingContact: context.existingContact,
-                onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
-                    LibraryItemEditor.saveContact(
-                        draftContactID: draftContactID,
-                        existingContact: context.existingContact,
-                        displayName: displayName,
-                        relationshipLabel: relationshipLabel,
-                        birthday: birthday,
-                        notes: notes,
-                        labelIDs: labelIDs,
-                        addBirthdayDateCard: addBirthdayDateCard,
-                        email: email,
-                        phone: phone,
-                        address: address,
-                        hasAvatar: hasAvatar,
-                        customFields: customFields
-                    )
-                },
-                onDelete: { contact in
-                    if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
-                    }
-                }
-            )
-        }
-        .sheet(item: $newTodoEditorContext) { context in
-            TodoEditorSheet(
-                existingCard: context.existingCard,
-                onSave: { card in
-                    if context.existingCard != nil {
-                        _ = TodoCardStorage.shared.updateTodoCard(card)
-                    } else {
-                        // New card — create via storage so it gets a fresh ID and timestamps
-                        var created = TodoCardStorage.shared.createTodoCard(
-                            title: card.title,
-                            dueDate: card.dueDate,
-                            priority: card.priority
-                        )
-                        created.details = card.details
-                        created.checklist = card.checklist
-                        created.labelIDs = card.labelIDs
-                        created.rules = card.rules
-                        _ = TodoCardStorage.shared.updateTodoCard(created)
-                    }
-                },
-                onDelete: { todoCard in
-                    if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
-                        CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
-                    }
-                }
-            )
-        }
-        .background {
-            Button("") { isSearchPaletteVisible = true }
-                .keyboardShortcut("k", modifiers: .command)
-                .hidden()
+    }
 
-            Button("") { selectAllVisibleItems() }
-                .keyboardShortcut("a", modifiers: .command)
-                .hidden()
-
-            Button("") {
-                // If a sheet (e.g. Kanban card edit) is presented, let it handle Escape.
-                if let keyWindow = NSApp.keyWindow, keyWindow.isSheet {
-                    keyWindow.close()
-                    return
-                }
-                if isEditingNoteTitle {
-                    isEditingNoteTitle = false
-                } else if isSearchPaletteVisible {
-                    isSearchPaletteVisible = false
-                } else if !sidebarSearchText.isEmpty {
-                    searchDebounceTask?.cancel()
-                    sidebarSearchText = ""
-                    debouncedSearchText = ""
-                } else if isDetailOpen {
-                    closeBookmarkDetails()
-                } else if isGenericDetailOpen {
-                    closeGenericDetail()
-                } else if isNoteDetailOpen {
-                    closeNoteDetail()
-                } else if !selectedItemIDs.isEmpty || focusedItemID != nil {
-                    withAnimation(reduceMotion ? .none : .snappy) {
-                        selectedItemIDs.removeAll()
-                    }
-                    focusedItemID = nil
-                    selectionAnchorID = nil
+    private func eventEditorSheet(context: DateCardEditorContext) -> AnyView {
+        AnyView(DateCardEditorSheet(
+            existingCard: context.existingCard,
+            defaultDate: context.defaultDate,
+            onSave: { title, details, startAt, endAt, allDay, location, amount, labelIDs, recurrenceRule, rules in
+                LibraryItemEditor.saveDateCard(
+                    existingCard: context.existingCard,
+                    title: title,
+                    details: details,
+                    startAt: startAt,
+                    endAt: endAt,
+                    allDay: allDay,
+                    location: location,
+                    amount: amount,
+                    labelIDs: labelIDs,
+                    recurrenceRule: recurrenceRule,
+                    rules: rules
+                )
+            },
+            onDelete: { dateCard in
+                if let trashItem = DateCardStorage.shared.deleteDateCard(dateCard.id) {
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .dateCard, trashItem: trashItem))
                 }
             }
-            .keyboardShortcut(.escape, modifiers: [])
-            .hidden()
+        ))
+    }
+
+    private func contactEditorSheet(context: ContactEditorContext) -> AnyView {
+        AnyView(ContactEditorSheet(
+            existingContact: context.existingContact,
+            onSave: { draftContactID, displayName, relationshipLabel, birthday, notes, labelIDs, addBirthdayDateCard, email, phone, address, hasAvatar, customFields in
+                LibraryItemEditor.saveContact(
+                    draftContactID: draftContactID,
+                    existingContact: context.existingContact,
+                    displayName: displayName,
+                    relationshipLabel: relationshipLabel,
+                    birthday: birthday,
+                    notes: notes,
+                    labelIDs: labelIDs,
+                    addBirthdayDateCard: addBirthdayDateCard,
+                    email: email,
+                    phone: phone,
+                    address: address,
+                    hasAvatar: hasAvatar,
+                    customFields: customFields
+                )
+            },
+            onDelete: { contact in
+                if let trashItem = ContactStorage.shared.deleteContact(contact.id) {
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .contact, trashItem: trashItem))
+                }
+            }
+        ))
+    }
+
+    private func todoEditorSheet(context: TodoEditorContext) -> AnyView {
+        AnyView(TodoEditorSheet(
+            existingCard: context.existingCard,
+            onSave: { card in
+                if context.existingCard != nil {
+                    _ = TodoCardStorage.shared.updateTodoCard(card)
+                } else {
+                    var created = TodoCardStorage.shared.createTodoCard(
+                        title: card.title,
+                        dueDate: card.dueDate,
+                        priority: card.priority
+                    )
+                    created.details = card.details
+                    created.checklist = card.checklist
+                    created.labelIDs = card.labelIDs
+                    created.rules = card.rules
+                    _ = TodoCardStorage.shared.updateTodoCard(created)
+                }
+            },
+            onDelete: { todoCard in
+                if let trashItem = TodoCardStorage.shared.deleteTodoCard(todoCard.id) {
+                    CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+                }
+            }
+        ))
+    }
+
+    @ViewBuilder
+    private var panelOverlay: some View {
+        if isSearchPaletteVisible {
+            SearchPaletteView(
+                bookmarks: bookmarksViewModel.bookmarks,
+                notes: notesViewModel.notes,
+                onOpenBookmark: { bookmark in
+                    if NSEvent.modifierFlags.contains(.command) {
+                        bookmarksViewModel.open(bookmark)
+                    } else {
+                        openBookmarkDetails(bookmark)
+                    }
+                },
+                onOpenNote: { note in
+                    openNoteDetail(note)
+                },
+                onOpenDateCard: { openDateCardDetail($0) },
+                onOpenContact: { openContactDetail($0) },
+                onOpenTodo: { openTodoDetail($0) },
+                onSpawnSearchTab: spawnSearchTab,
+                onDismiss: { isSearchPaletteVisible = false },
+                onAction: { action in
+                    handleQuickAction(action)
+                },
+                onSelectTag: { tag in
+                    let filter = SavedViewFilterSpec(labelIDs: [tag.id])
+                    let savedView = savedViewStorage.createSavedView(name: tag.name, filterSpec: filter)
+                    savedViewStorage.addToTabOrder(savedView.id)
+                    selectedFolderID = nil
+                    selectedTab = .savedView(id: savedView.id, name: savedView.name)
+                }
+            )
         }
+
+        if isDetailFullPanel {
+            detailFullPanelOverlay
+        }
+
+        if isDetailSlideOut, detailsDraft != nil {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { closeBookmarkDetails() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            detailSlideOutContainer
+                .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+
+        if isGenericDetailFullPanel {
+            genericDetailFullPanelOverlay
+        }
+
+        if isGenericDetailSlideOut {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { closeGenericDetail() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            genericDetailSlideOutContainer
+                .frame(width: isTodoDetailOpen ? BookmarksDesign.detailsSlideOutMinWidth : min(detailSlideOutWidth, maxSlideOutWidth))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+
+        if isNoteDetailFullPanel {
+            noteDetailFullPanelOverlay
+        }
+
+        if isNoteDetailSlideOut {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { closeNoteDetail() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            noteDetailSlideOutContainer
+                .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+
+        if isKanbanDetailSlideOut {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { closeKanbanDetail() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            kanbanDetailSlideOutContainer
+                .frame(width: min(detailSlideOutWidth, maxSlideOutWidth))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(BookmarksDesign.detailsSlideOutFloatInset)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+
+        if isURLDropTargeted {
+            urlDropOverlay
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+        }
+    }
+
+    @ViewBuilder
+    private var keyboardShortcutBackground: some View {
+        Button("") { isSearchPaletteVisible = true }
+            .keyboardShortcut("k", modifiers: .command)
+            .hidden()
+
+        Button("") { selectAllVisibleItems() }
+            .keyboardShortcut("a", modifiers: .command)
+            .hidden()
+
+        Button("") {
+            // If a sheet is presented, let it handle Escape.
+            if let keyWindow = NSApp.keyWindow, keyWindow.isSheet {
+                keyWindow.close()
+                return
+            }
+            if isEditingNoteTitle {
+                isEditingNoteTitle = false
+            } else if isSearchPaletteVisible {
+                isSearchPaletteVisible = false
+            } else if !sidebarSearchText.isEmpty {
+                searchDebounceTask?.cancel()
+                sidebarSearchText = ""
+                debouncedSearchText = ""
+            } else if isDetailOpen {
+                closeBookmarkDetails()
+            } else if isGenericDetailOpen {
+                closeGenericDetail()
+            } else if isNoteDetailOpen {
+                closeNoteDetail()
+            } else if isKanbanDetailOpen {
+                closeKanbanDetail()
+            } else if !selectedItemIDs.isEmpty || focusedItemID != nil {
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    selectedItemIDs.removeAll()
+                }
+                focusedItemID = nil
+                selectionAnchorID = nil
+            }
+        }
+        .keyboardShortcut(.escape, modifiers: [])
+        .hidden()
     }
 
     private func aiFolderContext(for folderID: UUID?) -> (name: String, directItemCount: Int, childFolderCount: Int)? {

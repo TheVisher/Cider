@@ -3,6 +3,7 @@ import SwiftUI
 /// Renders a Kanban board as horizontal scrolling columns with draggable cards.
 struct KanbanBoardView: View {
     let boardID: String
+    var onOpenCard: (String, String) -> Void = { _, _ in }
 
     @ObservedObject private var storage = KanbanStorage.shared
     @State private var editingBoardName = false
@@ -11,7 +12,6 @@ struct KanbanBoardView: View {
     @State private var newCardTitle = ""
     @State private var renamingColumnID: String?
     @State private var columnNameDraft = ""
-    @State private var editingCard: KanbanCard?
     @State private var showDeleteConfirmation = false
     @State private var searchText = ""
     @State private var compactCards = false
@@ -35,33 +35,11 @@ struct KanbanBoardView: View {
 
     var body: some View {
         if let board {
-            ZStack {
-                VStack(spacing: 0) {
-                    boardHeader(board)
-                    Divider().background(CiderColors.separator)
-                    columnsArea(board)
-                }
-
-                if let editingCard {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            self.editingCard = nil
-                        }
-
-                    KanbanCardDetailView(
-                        card: editingCard,
-                        boardID: boardID,
-                        storage: storage,
-                        onClose: { self.editingCard = nil }
-                    )
-                    .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                    .zIndex(1)
-                }
+            VStack(spacing: 0) {
+                boardHeader(board)
+                Divider().background(CiderColors.separator)
+                columnsArea(board)
             }
-            .animation(reduceMotion ? .none : .spring(response: 0.22, dampingFraction: 0.92), value: editingCard != nil)
         } else {
             emptyState
         }
@@ -208,7 +186,7 @@ struct KanbanBoardView: View {
                     ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
                         cardView(card, compact: compactCards)
                             .onTapGesture {
-                                editingCard = card
+                                onOpenCard(boardID, card.id)
                             }
                             .draggable(card.id) {
                                 cardDragPreview(card)

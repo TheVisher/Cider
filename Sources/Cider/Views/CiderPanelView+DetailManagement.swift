@@ -7,6 +7,7 @@ enum CiderDetailSurfaceKind: CaseIterable, Hashable {
     case contact
     case todo
     case vaultFile
+    case kanban
 }
 
 enum CiderDetailNavigationPolicy {
@@ -63,7 +64,7 @@ extension CiderPanelView {
     }
 
     var isAnyDetailOpen: Bool {
-        isDetailOpen || isGenericDetailOpen || isNoteDetailOpen
+        isDetailOpen || isGenericDetailOpen || isNoteDetailOpen || isKanbanDetailOpen
     }
 
     var isGenericDetailSlideOut: Bool {
@@ -86,6 +87,21 @@ extension CiderPanelView {
     var selectedDetailsBookmark: Bookmark? {
         guard let detailBookmarkID else { return nil }
         return bookmarksViewModel.bookmarks.first(where: { $0.id == detailBookmarkID })
+    }
+
+    var selectedKanbanDetail: (board: KanbanBoard, column: KanbanColumn, card: KanbanCard)? {
+        guard let selectedKanbanBoardID, let selectedKanbanCardID else { return nil }
+        guard let found = KanbanStorage.shared.findCard(id: selectedKanbanCardID) else { return nil }
+        guard found.board.id == selectedKanbanBoardID else { return nil }
+        return found
+    }
+
+    var isKanbanDetailOpen: Bool {
+        selectedKanbanDetail != nil
+    }
+
+    var isKanbanDetailSlideOut: Bool {
+        isKanbanDetailOpen
     }
 
     func requestFloat(_ surface: CiderFloatableSurface) {
@@ -223,6 +239,8 @@ extension CiderPanelView {
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        selectedKanbanBoardID = nil
+        selectedKanbanCardID = nil
         selectedNote = nil
         isEditingNoteTitle = false
         AIAssistantViewModel.shared.clearContext()
@@ -359,6 +377,35 @@ extension CiderPanelView {
         }
     }
 
+    func openKanbanCardDetail(boardID: String, cardID: String) {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
+        if isDetailOpen { saveBookmarkDetails() }
+
+        guard let found = KanbanStorage.shared.findCard(id: cardID), found.board.id == boardID else { return }
+
+        if isKanbanDetailOpen { saveKanbanCardDraft() }
+
+        let wasExpanded = isAnyDetailOpen
+        clearDetailSelectionState(except: .kanban)
+        kanbanMetadataVisible = true
+        selectedKanbanBoardID = boardID
+        selectedKanbanCardID = cardID
+        kanbanCardDraft = KanbanCardDraft(card: found.card)
+
+        if !wasExpanded {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
+
+        AIAssistantViewModel.shared.updateContext(
+            todo: (title: found.card.title, status: found.column.name)
+        )
+    }
+
     func clearDetailSelectionState(except target: CiderDetailSurfaceKind) {
         let surfacesToClear = CiderDetailNavigationPolicy.surfacesToClear(whenOpening: target)
 
@@ -389,6 +436,13 @@ extension CiderPanelView {
         if surfacesToClear.contains(.vaultFile) {
             selectedVaultFile = nil
         }
+
+        if surfacesToClear.contains(.kanban) {
+            saveKanbanCardDraft()
+            selectedKanbanBoardID = nil
+            selectedKanbanCardID = nil
+            kanbanCardDraft = nil
+        }
     }
 
     func closeGenericDetail() {
@@ -397,7 +451,19 @@ extension CiderPanelView {
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        selectedKanbanBoardID = nil
+        selectedKanbanCardID = nil
+        kanbanCardDraft = nil
 
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
+    }
+
+    func closeKanbanDetail() {
+        saveKanbanCardDraft()
+        selectedKanbanBoardID = nil
+        selectedKanbanCardID = nil
+        kanbanCardDraft = nil
+        AIAssistantViewModel.shared.clearContext()
         NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
     }
 
@@ -405,6 +471,7 @@ extension CiderPanelView {
         let anyOpen = isAnyDetailOpen
         if isDetailOpen { saveBookmarkDetails() }
         if isNoteDetailOpen { notesViewModel.flushSave() }
+        if isKanbanDetailOpen { saveKanbanCardDraft() }
         detailBookmarkID = nil
         detailsDraft = nil
         detailsErrorMessage = nil
@@ -413,6 +480,9 @@ extension CiderPanelView {
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        selectedKanbanBoardID = nil
+        selectedKanbanCardID = nil
+        kanbanCardDraft = nil
 
         selectedNote = nil
         isEditingNoteTitle = false
@@ -486,6 +556,77 @@ extension CiderPanelView {
         closeGenericDetail()
         if let trashItem = TodoCardStorage.shared.deleteTodoCard(todo.id) {
             CiderUndoManager.shared.record(.deletedToTrash(itemType: .todo, trashItem: trashItem))
+        }
+    }
+
+    func currentKanbanDraftCard(from detail: (board: KanbanBoard, column: KanbanColumn, card: KanbanCard)) -> KanbanCard {
+        let draft = kanbanCardDraft ?? KanbanCardDraft(card: detail.card)
+        return draft.updatedCard(from: detail.card)
+    }
+
+    func saveKanbanCardDraft() {
+        guard let detail = selectedKanbanDetail else { return }
+        let updated = currentKanbanDraftCard(from: detail)
+        KanbanStorage.shared.updateCard(boardID: detail.board.id, card: updated)
+        selectedKanbanCardID = updated.id
+    }
+
+    func moveSelectedKanbanCard(to columnID: String) {
+        guard let detail = selectedKanbanDetail else { return }
+        saveKanbanCardDraft()
+
+        guard let refreshed = KanbanStorage.shared.findCard(id: detail.card.id), refreshed.board.id == detail.board.id else {
+            return
+        }
+
+        let targetCount = refreshed.board.columns.first(where: { $0.id == columnID })?.cards.count ?? 0
+        KanbanStorage.shared.moveCard(
+            boardID: refreshed.board.id,
+            cardID: refreshed.card.id,
+            toColumnID: columnID,
+            toIndex: targetCount
+        )
+
+        let statusName = refreshed.board.columns.first(where: { $0.id == columnID })?.name ?? refreshed.column.name
+        AIAssistantViewModel.shared.updateContext(
+            todo: (title: currentKanbanDraftCard(from: refreshed).title, status: statusName)
+        )
+    }
+
+    func deleteSelectedKanbanCard() {
+        guard let boardID = selectedKanbanBoardID, let cardID = selectedKanbanCardID else {
+            closeKanbanDetail()
+            return
+        }
+
+        KanbanStorage.shared.deleteCard(boardID: boardID, cardID: cardID)
+        selectedKanbanBoardID = nil
+        selectedKanbanCardID = nil
+        kanbanCardDraft = nil
+        AIAssistantViewModel.shared.clearContext()
+        NotificationCenter.default.post(name: .restoreCiderPanelAfterSlideOut, object: nil)
+    }
+
+    func exportKanbanCardMarkdown(board: KanbanBoard, column: KanbanColumn, card: KanbanCard) {
+        let card = kanbanCardDraft?.updatedCard(from: card) ?? card
+        let markdown = KanbanCardMarkdownExporter.markdown(
+            for: card,
+            boardName: board.name,
+            columnName: column.name
+        )
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+
+        do {
+            try markdown.write(to: tempURL, atomically: true, encoding: .utf8)
+            CiderFileExporter.exportFile(
+                sourceURL: tempURL,
+                suggestedFileName: KanbanCardMarkdownExporter.suggestedFileName(for: card),
+                helpText: "Export this Kanban card as a Markdown file."
+            )
+        } catch {
+            print("Kanban Markdown export failed: \(error.localizedDescription)")
         }
     }
 

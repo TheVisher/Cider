@@ -16,4 +16,14 @@ struct CiderDetailNavigationPolicyTests {
             #expect(cleared.count == CiderDetailSurfaceKind.allCases.count - 1)
         }
     }
+
+    @Test("opening kanban clears other detail surfaces")
+    func openingKanbanClearsOtherDetailSurfaces() {
+        let cleared = CiderDetailNavigationPolicy.surfacesToClear(whenOpening: .kanban)
+
+        #expect(cleared.contains(.bookmark))
+        #expect(cleared.contains(.note))
+        #expect(cleared.contains(.todo))
+        #expect(!cleared.contains(.kanban))
+    }
 }

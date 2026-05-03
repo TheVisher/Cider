@@ -13,16 +13,28 @@ Native macOS floating panel app for bookmarks, notes, and projects. Double-tap O
 - **Acrylic style** — `NSVisualEffectView` with `.underWindowBackground`, NOT `.glassEffect()`
 - **Use `os.Logger`** — not `print()` (invisible from Dock launch)
 - **Delete via TrashStorage** — never direct file deletion, always TrashStorage + CiderUndoManager
-- **Update Kanban boards** — when starting, completing, or adding work, update the YAML boards in `~/CiderVault/.cider/boards/`. Move cards between columns (backlog → in_progress → testing → done). The app watches these files and updates live.
+- **Update Kanban boards** — Kanban is first-class for Cider development. When starting, completing, or adding work, update the YAML boards in `~/CiderVault/.cider/boards/`. Move cards between columns (backlog/planned → in_progress → testing/ready to test → done). The app watches these files and updates live.
 - **YAML board rules** — every card MUST have a `created` field (e.g. `created: '2026-03-29'`). Always quote dates with single quotes. Never duplicate keys on the same card. Always use the Write tool to rewrite the entire file (Edit tool corrupts YAML indentation).
 
 ## Kanban Boards
 
-YAML files in `~/CiderVault/.cider/boards/`. Two active boards:
+YAML files in `~/CiderVault/.cider/boards/`. Active boards include:
 - `a1b2c3.yaml` — **Cider Roadmap** (features, backlog, in progress, done)
 - `d4e5f6.yaml` — **Cider Bugs** (high/medium/low priority, fixed)
+- `p1l2m3.yaml` — **Implementation Plans** (implementation handoff/tracking)
+- `e7f8a9.yaml` — **Kanban Implementation** (board mechanics)
+- `f0d730.yaml` — **Vault Agent Work** (vault/agent workflow)
+
+Docs and Kanban have different jobs:
+
+- **Docs are the durable foundation** — product vision, architecture, data model, UX principles, agent operating rules, routing doctrine, and big feature designs that should remain true after individual tasks are done.
+- **Kanban is the active work surface** — small tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, and short handoff records.
+- If a Kanban item produces a lasting product/architecture/UX/data-model/agent-behavior decision, promote that outcome into the relevant docs before or when the card moves to done.
+- Do not create one-off Markdown docs for every task. Create a full Markdown spec/doc only when the work genuinely needs a durable standalone foundation record or large design.
 
 When you start work on a feature, move its card to `in_progress`. When done, move to `done` (or `testing` if it needs manual testing). When fixing a bug, move it to `fixed`. If you build something new that isn't on the board, add a card.
+
+Use cards as working handoff records. Add implementation notes, test evidence, blockers, and follow-up context to the card so Hermes, Codex, Claude, or another agent can pick up the thread without creating stray Markdown files for every task. Create a full Markdown spec only when the work genuinely needs a durable standalone document.
 
 ## Build
 

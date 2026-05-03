@@ -217,6 +217,56 @@ extension CiderPanelView {
     }
 
     @ViewBuilder
+    var kanbanDetailSlideOutContainer: some View {
+        if let detail = selectedKanbanDetail {
+            let draftBinding = Binding<KanbanCardDraft>(
+                get: { kanbanCardDraft ?? KanbanCardDraft(card: detail.card) },
+                set: { kanbanCardDraft = $0 }
+            )
+            let draftCard = currentKanbanDraftCard(from: detail)
+
+            GenericItemDetailPanel(
+                title: draftCard.title,
+                detailViewMode: .slideOut,
+                width: min(detailSlideOutWidth, maxSlideOutWidth),
+                maxWidth: maxSlideOutWidth,
+                showTitle: false,
+                scrollsContent: false,
+                metadataVisible: $kanbanMetadataVisible,
+                onResize: { newWidth in
+                    let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                    detailSlideOutWidth = clamped
+                },
+                onClose: closeKanbanDetail,
+                onModeChange: { _ in },
+                trailingExtra: { EmptyView() },
+                metadata: {
+                    KanbanCardMetadataInspectorView(
+                        board: detail.board,
+                        column: detail.column,
+                        card: detail.card,
+                        draft: draftBinding,
+                        onSave: saveKanbanCardDraft,
+                        onMove: { columnID in
+                            moveSelectedKanbanCard(to: columnID)
+                        },
+                        onDelete: deleteSelectedKanbanCard,
+                        onExportMarkdown: {
+                            exportKanbanCardMarkdown(board: detail.board, column: detail.column, card: detail.card)
+                        },
+                        onOpenLinkedRef: openLinkedRef
+                    )
+                }
+            ) {
+                KanbanCardDetailView(
+                    draft: draftBinding,
+                    onSave: saveKanbanCardDraft
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
     var genericDetailFullPanelOverlay: some View {
         if let dateCard = selectedDateCard {
             GenericItemDetailPanel(
