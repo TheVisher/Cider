@@ -58,6 +58,7 @@ Cider chat should eventually feel like a real Hermes client, not a nicer file wa
 - named side chats so scoped work can avoid flooding Main Brain while still being resumable from Telegram,
 - local mirrored transcript for UI/search/offline use without competing with Hermes runtime history.
 - native slash commands such as `/help`, `/status`, `/resume`, `/last`, `/summary`, `/checkpoint`, `/new`, and `/title`.
+- composer command discovery so typing `/` reveals available Cider commands and filters them as the draft changes.
 
 ## Discovered Hermes Contract
 
@@ -107,7 +108,7 @@ This API work remains valuable, but the reason has changed. The Runs/SSE path is
 - `Sources/Cider/Views/AIAssistant/AIAssistantPanelView.swift`
   Adds compact attach/relink/repair controls and status rendering.
 - `Sources/Cider/Views/AIAssistant/AIAssistantInputView.swift`
-  Disables send/stops correctly based on Hermes run state if the existing `isStreaming` boolean is not expressive enough.
+  Disables send/stops correctly based on Hermes run state if the existing `isStreaming` boolean is not expressive enough. Also owns composer-level slash command discovery UI.
 - `Tests/CiderTests/CiderAgentChatRegistryTests.swift`
   Covers no seeded session creation and create/update behavior.
 - `Tests/CiderTests/HermesSessionClientTests.swift`
@@ -1838,6 +1839,73 @@ Run:
 git add Sources/Cider/Services/Agent/CiderChatCommandRouter.swift Sources/Cider/ViewModels/AIAssistantViewModel.swift Tests/CiderTests/CiderChatCommandRouterTests.swift
 git commit -m "feat: add Cider chat slash commands"
 ```
+
+---
+
+## Task 11.5: Add Slash Command Discovery Popup
+
+**Purpose:** Make the native command surface discoverable without requiring Erik to memorize every slash command.
+
+**Files:**
+- Modify: `Sources/Cider/Services/Agent/CiderChatCommandRouter.swift`
+- Modify: `Sources/Cider/Views/AIAssistant/AIAssistantInputView.swift`
+- Modify/Add: `Tests/CiderTests/CiderChatCommandRouterTests.swift`
+
+**Product rule:** This is command discovery/autocomplete only. It should reuse the existing command router metadata and should not create a second command execution path.
+
+**Behavior:**
+
+- When the composer draft starts with `/`, show a compact popup above the input.
+- Filter commands as the user types, so `/s` shows `/status` and `/summary`.
+- Each row should show the command name and a short human-readable description.
+- Clicking a command fills the composer with that command.
+- Commands that expect an argument, such as `/resume` and `/title`, should insert a trailing space.
+- Commands that are complete by themselves, such as `/help`, `/status`, `/last`, `/summary`, `/checkpoint`, and `/new`, should not auto-send.
+- Hide the popup when the draft no longer starts with `/`, after a command is selected, or after sending.
+- Keep keyboard navigation as optional polish after the click-selection version works.
+
+- [ ] **Step 1: Add command metadata tests**
+
+Extend `CiderChatCommandRouterTests` to cover:
+
+1. The router exposes metadata for every v1 command.
+2. Filtering with an empty `/` query returns the v1 command list.
+3. Filtering with `s` returns `/status` and `/summary`.
+4. Commands that require arguments are marked so the UI can insert a trailing space.
+
+- [ ] **Step 2: Add pure command metadata/filtering API**
+
+Add a small metadata type to `CiderChatCommandRouter`, for example:
+
+```swift
+struct Suggestion: Equatable, Sendable {
+    let name: String
+    let usage: String
+    let description: String
+    let insertsTrailingSpace: Bool
+}
+```
+
+Expose a pure filtering helper such as `suggestions(matching:)`.
+
+- [ ] **Step 3: Render the popup in `AIAssistantInputView`**
+
+Use the input text binding to derive the current slash query. Render the popup above the input bar with existing Cider colors, tight spacing, and stable dimensions.
+
+- [ ] **Step 4: Wire row selection**
+
+On row click, replace the draft with the selected command insertion string and refocus the composer. Do not send automatically.
+
+- [ ] **Step 5: Run focused tests and build**
+
+Run:
+
+```bash
+swift test --filter CiderChatCommandRouterTests
+xcodebuild -scheme CiderApp -project Cider.xcodeproj -configuration Debug -derivedDataPath .deriveddata build
+```
+
+Expected: tests and build pass.
 
 ---
 

@@ -82,6 +82,7 @@ This is not a rigid release contract. It is a living queue.
 - durable per-chat sync cursors such as last synced Hermes message/session markers, so lineage imports stay reliable as histories grow
 - documented source-of-truth policy between Hermes runtime history and Cider's mirrored UI history
 - Cider-native slash command router for core commands like `/help`, `/status`, `/resume`, `/last`, `/summary`, `/checkpoint`, `/new`, and `/title`
+- slash-command discovery UI in the composer so typing `/` shows available commands and filters as Erik types
 - Hermes Runs/SSE API usage for native Cider send, stream, run state, and stop when available
 - streaming response path and native approval/confirmation prompt design
 - keep the direct Hermes assumptions isolated in `HermesSessionClient.swift`
@@ -94,11 +95,12 @@ This is not a rigid release contract. It is a living queue.
 4. Add durable per-chat sync cursors and continuation recovery.
 5. Pivot the product target from perfect external-client sync to Cider Main Brain Chat parity with Hermes.
 6. Build the Cider-native slash command router.
-7. Prefer API Runs/SSE for Cider-native send, stream, status, and stop when available.
-8. Keep CLI/export/session-file polling as fallback.
-9. Add native approval UI when Hermes exposes an app-client approval event and response path.
+7. Add slash-command discovery/autocomplete in the Cider composer as a polish follow-up.
+8. Prefer API Runs/SSE for Cider-native send, stream, status, and stop when available.
+9. Keep CLI/export/session-file polling as fallback.
+10. Add native approval UI when Hermes exposes an app-client approval event and response path.
 
-**Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`. The Relink path can now repair stale raw session pointers by resolving the newest Hermes session with the chat's stored title and preserving the recovered lineage. The next implementation slice is the Cider-native slash command router, not more Telegram/Cider sync.
+**Implementation checkpoint, 2026-05-02:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`. The Relink path can now repair stale raw session pointers by resolving the newest Hermes session with the chat's stored title and preserving the recovered lineage. The Cider-native slash command router is implemented; the next command-surface polish is a composer popup for `/` command discovery, while the next deeper parity work remains Runs/SSE, busy/stop, and approvals.
 
 **Known bridge gaps:**
 
