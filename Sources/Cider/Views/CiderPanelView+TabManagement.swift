@@ -27,11 +27,13 @@ extension CiderPanelView {
 
     func openOrSelectAIAssistantTab() {
         if let existing = allTabs.first(where: { $0 == .aiAssistant }) {
+            CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
             selectedFolderID = nil
             selectedTagIDs.removeAll()
             selectedTab = existing
         } else {
             dynamicTabs.append(.aiAssistant)
+            CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(true)
             selectedFolderID = nil
             selectedTagIDs.removeAll()
             selectedTab = .aiAssistant
@@ -45,6 +47,9 @@ extension CiderPanelView {
             savedViewStorage.removeFromTabOrder(id)
         } else {
             dynamicTabs.removeAll { $0 == tab }
+            if tab == .aiAssistant {
+                CiderWorkspaceTabStateStore.shared.setAIAssistantTabOpen(false)
+            }
         }
 
         if wasSelected {
@@ -129,6 +134,8 @@ extension CiderPanelView {
     }
 
     func ensureDefaultTabs() {
+        restorePersistentDynamicTabsIfNeeded()
+
         if savedViewStorage.savedViews.contains(where: { $0.kind == .dashboard }) == false {
             let dashboard = savedViewStorage.createDashboardView()
             savedViewStorage.removeFromTabOrder(dashboard.id)
@@ -172,6 +179,12 @@ extension CiderPanelView {
             selectedTab = .savedView(id: welcome.id, name: welcome.name)
         } else {
             selectedTab = .savedView(id: inbox.id, name: inbox.name)
+        }
+    }
+
+    private func restorePersistentDynamicTabsIfNeeded() {
+        for tab in CiderWorkspaceTabStateStore.shared.restoredDynamicTabs() where !dynamicTabs.contains(tab) {
+            dynamicTabs.append(tab)
         }
     }
 

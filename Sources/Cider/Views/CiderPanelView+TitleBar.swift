@@ -32,7 +32,8 @@ extension CiderPanelView {
                 savedViewStorage.addToTabOrder(savedView.id)
                 selectedFolderID = nil
                 selectedTab = .savedView(id: savedView.id, name: savedView.name)
-            }
+            },
+            onOpenAIAssistantTab: openOrSelectAIAssistantTab
         )
         .frame(maxWidth: .infinity)
 

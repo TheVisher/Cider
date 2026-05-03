@@ -15,6 +15,9 @@ struct AIConversationMeta: Codable {
     var runtimeSessionLineage: [String]?
     var runtimeSource: String?
     var runtimeLastSyncedAt: Date?
+    var runtimeLastSyncedMessageID: String?
+    var runtimeLastSyncedTimestamp: Date?
+    var runtimeLastImportedSessionID: String?
 
     init(id: UUID = UUID(), title: String = "New Chat", model: String = "apple-intelligence") {
         self.id = id
@@ -40,6 +43,9 @@ struct AIConversationSummary: Identifiable {
     var runtimeSessionLineage: [String]?
     var runtimeSource: String?
     var runtimeLastSyncedAt: Date?
+    var runtimeLastSyncedMessageID: String?
+    var runtimeLastSyncedTimestamp: Date?
+    var runtimeLastImportedSessionID: String?
 }
 
 /// Persists AI conversations as JSONL files in the vault.
@@ -107,11 +113,43 @@ final class AIConversationStorage: ObservableObject {
                 activeRuntimeSessionID: meta.activeRuntimeSessionID,
                 runtimeSessionLineage: meta.runtimeSessionLineage,
                 runtimeSource: meta.runtimeSource,
-                runtimeLastSyncedAt: meta.runtimeLastSyncedAt
+                runtimeLastSyncedAt: meta.runtimeLastSyncedAt,
+                runtimeLastSyncedMessageID: meta.runtimeLastSyncedMessageID,
+                runtimeLastSyncedTimestamp: meta.runtimeLastSyncedTimestamp,
+                runtimeLastImportedSessionID: meta.runtimeLastImportedSessionID
             ))
         }
 
-        conversations = summaries.sorted { $0.updated > $1.updated }
+        conversations = Self.collapsingDuplicateHermesRuntimeSummaries(summaries)
+            .sorted { $0.updated > $1.updated }
+    }
+
+    static func collapsingDuplicateHermesRuntimeSummaries(
+        _ summaries: [AIConversationSummary]
+    ) -> [AIConversationSummary] {
+        var unkeyed: [AIConversationSummary] = []
+        var keyed: [String: AIConversationSummary] = [:]
+
+        for summary in summaries {
+            guard summary.runtimeID == CiderAgentChatRegistry.hermesRuntimeID,
+                  let activeRuntimeSessionID = summary.activeRuntimeSessionID,
+                  !activeRuntimeSessionID.isEmpty
+            else {
+                unkeyed.append(summary)
+                continue
+            }
+
+            let key = "hermes:\(activeRuntimeSessionID)"
+            if let existing = keyed[key] {
+                if summary.updated > existing.updated {
+                    keyed[key] = summary
+                }
+            } else {
+                keyed[key] = summary
+            }
+        }
+
+        return unkeyed + keyed.values
     }
 
     // MARK: - Save Conversation
@@ -141,6 +179,9 @@ final class AIConversationStorage: ObservableObject {
         updatedMeta.runtimeSessionLineage = hermesState?.runtimeSessionLineage
         updatedMeta.runtimeSource = hermesState?.source
         updatedMeta.runtimeLastSyncedAt = hermesState?.lastSyncedAt
+        updatedMeta.runtimeLastSyncedMessageID = hermesState?.lastSyncedMessageID
+        updatedMeta.runtimeLastSyncedTimestamp = hermesState?.lastSyncedTimestamp
+        updatedMeta.runtimeLastImportedSessionID = hermesState?.lastImportedRuntimeSessionID
 
         var lines: [String] = []
 

@@ -51,6 +51,397 @@ struct HermesSessionClientTests {
         #expect(continuation.source == "telegram")
     }
 
+    @Test("service attaches explicitly chosen session")
+    func serviceAttachesExplicitlyChosenSession() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "session-a",
+            parent: nil,
+            source: "telegram",
+            title: "Chosen Session",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "session-b",
+            parent: "session-a",
+            source: "telegram",
+            title: "Chosen Session Continued",
+            startedAt: 200,
+            dbURL: dbURL
+        )
+
+        let runner = StubHermesRunner(data: Data("""
+        {
+          "id": "session-b",
+          "source": "telegram",
+          "title": "Chosen Session Continued",
+          "messages": [
+            {
+              "id": 1,
+              "session_id": "session-b",
+              "role": "assistant",
+              "content": "attached",
+              "timestamp": 1777662106.25
+            }
+          ]
+        }
+        """.utf8))
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let conversationID = UUID()
+
+        let result = try await service.attachConversation(sessionID: "session-a", conversationID: conversationID)
+
+        #expect(result.state.conversationID == conversationID)
+        #expect(result.state.activeRuntimeSessionID == "session-b")
+        #expect(result.state.runtimeSessionLineage == ["session-a", "session-b"])
+        #expect(result.messages.map(\.content) == ["attached"])
+    }
+
+    @Test("fresh Cider session starts a new Hermes CLI session")
+    func freshCiderSessionStartsNewHermesCLISession() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+
+        let runner = StubHermesRunner(data: Data("""
+        {
+          "id": "fresh-cider-session",
+          "source": "cider",
+          "title": "Fresh Cider",
+          "messages": [
+            {
+              "id": 1,
+              "session_id": "fresh-cider-session",
+              "role": "user",
+              "content": "hello",
+              "timestamp": 1777662105.25
+            },
+            {
+              "id": 2,
+              "session_id": "fresh-cider-session",
+              "role": "assistant",
+              "content": "fresh response",
+              "timestamp": 1777662106.25
+            }
+          ]
+        }
+        """.utf8)) { arguments in
+            if arguments.first == "chat" {
+                #expect(arguments == [
+                    "chat",
+                    "--query", "hello",
+                    "--quiet",
+                    "--source", "cider"
+                ])
+                try insertSession(
+                    id: "fresh-cider-session",
+                    parent: nil,
+                    source: "cider",
+                    title: "Fresh Cider",
+                    startedAt: 400,
+                    dbURL: dbURL
+                )
+            }
+        }
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let state = HermesConversationState(
+            activeRuntimeSessionID: "",
+            runtimeSessionLineage: [],
+            title: "Main Brain",
+            source: "cider"
+        )
+
+        let result = try await service.send(text: "hello", state: state, existingMessages: [])
+
+        #expect(result.state.activeRuntimeSessionID == "fresh-cider-session")
+        #expect(result.state.runtimeSessionLineage == ["fresh-cider-session"])
+        #expect(result.messages.map(\.content) == ["hello", "fresh response"])
+    }
+
+    @Test("service renames Hermes session with sanitized title")
+    func serviceRenamesHermesSessionWithSanitizedTitle() async throws {
+        let runner = StubHermesRunner(data: Data()) { arguments in
+            #expect(arguments == [
+                "sessions",
+                "rename",
+                "session-a",
+                "Cider Dashboard Worktree"
+            ])
+        }
+        let service = HermesSessionService(runner: runner)
+
+        try await service.renameSession(sessionID: " session-a ", title: " Cider   Dashboard Worktree ")
+    }
+
+    @Test("service repairs stale session by Hermes title")
+    func serviceRepairsStaleSessionByHermesTitle() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "old-unrelated",
+            parent: nil,
+            source: "telegram",
+            title: "Cider Scratchpad",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "recovered-root",
+            parent: nil,
+            source: "cider",
+            title: "Cider Scratchpad",
+            startedAt: 200,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "recovered-child",
+            parent: "recovered-root",
+            source: "cider",
+            title: "Cider Scratchpad",
+            startedAt: 300,
+            dbURL: dbURL
+        )
+
+        let runner = StubHermesRunner(data: Data("""
+        {
+          "id": "recovered-child",
+          "source": "cider",
+          "title": "Cider Scratchpad",
+          "messages": [
+            {
+              "id": 7,
+              "session_id": "recovered-child",
+              "role": "assistant",
+              "content": "recovered",
+              "timestamp": 1777662106.25
+            }
+          ]
+        }
+        """.utf8)) { arguments in
+            #expect(arguments == [
+                "sessions", "export",
+                "--session-id", "recovered-child",
+                "-"
+            ])
+        }
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let conversationID = UUID()
+        let state = HermesConversationState(
+            conversationID: conversationID,
+            activeRuntimeSessionID: "missing-session",
+            runtimeSessionLineage: ["missing-session"],
+            title: " Cider Scratchpad ",
+            source: "cider"
+        )
+
+        let result = try await service.repairConversation(
+            state: state,
+            existingMessages: []
+        )
+
+        #expect(result.state.conversationID == conversationID)
+        #expect(result.state.activeRuntimeSessionID == "recovered-child")
+        #expect(result.state.runtimeSessionLineage == ["recovered-root", "recovered-child"])
+        #expect(result.state.title == "Cider Scratchpad")
+        #expect(result.state.source == "cider")
+        #expect(result.state.lastSyncedMessageID == "hermes:recovered-child:7")
+        #expect(result.state.lastImportedRuntimeSessionID == "recovered-child")
+        #expect(result.messages.map(\.content) == ["recovered"])
+    }
+
+    @Test("main brain sync follows newer Telegram branch")
+    func mainBrainSyncFollowsNewerTelegramBranch() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "telegram-root",
+            parent: nil,
+            source: "telegram",
+            title: "Main Brain",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "cli-current",
+            parent: "telegram-root",
+            source: "cli",
+            title: "Main Brain CLI",
+            startedAt: 200,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "telegram-new",
+            parent: "telegram-root",
+            source: "telegram",
+            title: "Main Brain Telegram",
+            startedAt: 300,
+            dbURL: dbURL
+        )
+
+        let runner = StubHermesRunner(data: Data("""
+        {
+          "id": "telegram-new",
+          "source": "telegram",
+          "title": "Main Brain Telegram",
+          "messages": [
+            {
+              "id": 1,
+              "session_id": "telegram-new",
+              "role": "user",
+              "content": "sent from telegram",
+              "timestamp": 1777662105.25
+            }
+          ]
+        }
+        """.utf8)) { arguments in
+            #expect(arguments == [
+                "sessions", "export",
+                "--session-id", "telegram-new",
+                "-"
+            ])
+        }
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let state = HermesConversationState(
+            activeRuntimeSessionID: "cli-current",
+            runtimeSessionLineage: ["telegram-root", "cli-current"],
+            title: "Main Brain",
+            source: "cli"
+        )
+
+        let result = try await service.syncMainBrain(state: state, existingMessages: [])
+
+        #expect(result.state.activeRuntimeSessionID == "telegram-new")
+        #expect(result.state.runtimeSessionLineage == ["telegram-new"])
+        #expect(result.state.source == "telegram")
+        #expect(result.messages.map(\.content) == ["sent from telegram"])
+    }
+
+    @Test("main brain sync imports updated Telegram lineage without leaving active Cider child")
+    func mainBrainSyncImportsUpdatedTelegramLineageWithoutLeavingActiveCiderChild() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbURL = tempDir.appendingPathComponent("state.db")
+        try makeHermesStateDB(at: dbURL)
+        try insertSession(
+            id: "telegram-parent",
+            parent: nil,
+            source: "telegram",
+            title: "Main Brain Telegram",
+            startedAt: 100,
+            dbURL: dbURL
+        )
+        try insertSession(
+            id: "cider-child",
+            parent: "telegram-parent",
+            source: "cli",
+            title: "Main Brain Cider",
+            startedAt: 200,
+            dbURL: dbURL
+        )
+
+        let runner = MappingHermesRunner(exports: [
+            "cider-child": Data("""
+            {
+              "id": "cider-child",
+              "source": "cli",
+              "title": "Main Brain Cider",
+              "messages": [
+                {
+                  "id": 1,
+                  "session_id": "cider-child",
+                  "role": "assistant",
+                  "content": "copied parent answer",
+                  "timestamp": 1777662105.25
+                }
+              ]
+            }
+            """.utf8),
+            "telegram-parent": Data("""
+            {
+              "id": "telegram-parent",
+              "source": "telegram",
+              "title": "Main Brain Telegram",
+              "messages": [
+                {
+                  "id": 1,
+                  "session_id": "telegram-parent",
+                  "role": "assistant",
+                  "content": "copied parent answer",
+                  "timestamp": 1777662105.25
+                },
+                {
+                  "id": 2,
+                  "session_id": "telegram-parent",
+                  "role": "user",
+                  "content": "new telegram question",
+                  "timestamp": 1777662205.25
+                },
+                {
+                  "id": 3,
+                  "session_id": "telegram-parent",
+                  "role": "assistant",
+                  "content": "new telegram answer",
+                  "timestamp": 1777662206.25
+                }
+              ]
+            }
+            """.utf8)
+        ])
+        let service = HermesSessionService(stateDatabaseURL: dbURL, runner: runner)
+        let state = HermesConversationState(
+            activeRuntimeSessionID: "cider-child",
+            runtimeSessionLineage: ["telegram-parent", "cider-child"],
+            title: "Main Brain",
+            source: "cli"
+        )
+        let existing = [
+            AIAssistantMessage(
+                role: .assistant,
+                content: "copied parent answer",
+                sourceID: "hermes:cider-child:1",
+                sourceSessionID: "cider-child",
+                sourceName: "Hermes"
+            )
+        ]
+
+        let result = try await service.syncMainBrain(state: state, existingMessages: existing)
+
+        #expect(result.state.activeRuntimeSessionID == "cider-child")
+        #expect(result.state.runtimeSessionLineage == ["telegram-parent", "cider-child"])
+        #expect(result.messages.map(\.content) == [
+            "copied parent answer",
+            "new telegram question",
+            "new telegram answer"
+        ])
+        #expect(result.messages.map(\.sourceSessionID) == [
+            "cider-child",
+            "telegram-parent",
+            "telegram-parent"
+        ])
+        #expect(result.state.lastSyncedMessageID == "hermes:telegram-parent:3")
+        #expect(result.state.lastSyncedTimestamp == Date(timeIntervalSince1970: 1_777_662_206.25))
+        #expect(result.state.lastImportedRuntimeSessionID == "telegram-parent")
+    }
+
     @Test("transcript parser imports chat messages and skips tool rows")
     func transcriptParserImportsChatMessagesAndSkipsToolRows() throws {
         let json = """
@@ -207,6 +598,102 @@ struct HermesSessionClientTests {
         #expect(merged[1].sourceID == "hermes:session-b:2")
     }
 
+    @Test("message merge deduplicates live session rows already imported from export")
+    func messageMergeDeduplicatesLiveRowsAlreadyImportedFromExport() {
+        let existing = [
+            AIAssistantMessage(
+                role: .assistant,
+                content: "Hermes is already here",
+                timestamp: Date(timeIntervalSince1970: 10),
+                sourceID: "hermes:session-a:42",
+                sourceSessionID: "session-a",
+                sourceName: "Hermes"
+            )
+        ]
+        let incoming = [
+            HermesTranscriptMessage(
+                externalID: "hermes-live:session-a:line-2",
+                sourceSessionID: "session-a",
+                role: .assistant,
+                content: "  Hermes   is already here  ",
+                attachments: [],
+                timestamp: Date(timeIntervalSince1970: 99)
+            )
+        ]
+
+        let merged = HermesTranscriptMerger.merge(existing: existing, incoming: incoming)
+
+        #expect(merged.count == 1)
+        #expect(merged[0].sourceID == "hermes:session-a:42")
+    }
+
+    @Test("message merge preserves repeated exported Hermes messages")
+    func messageMergePreservesRepeatedExportedHermesMessages() {
+        let existing = [
+            AIAssistantMessage(
+                role: .assistant,
+                content: "Saved.",
+                sourceID: "hermes:session-a:41",
+                sourceSessionID: "session-a",
+                sourceName: "Hermes"
+            )
+        ]
+        let incoming = [
+            HermesTranscriptMessage(
+                externalID: "hermes:session-a:42",
+                sourceSessionID: "session-a",
+                role: .assistant,
+                content: "Saved.",
+                attachments: [],
+                timestamp: Date(timeIntervalSince1970: 11)
+            )
+        ]
+
+        let merged = HermesTranscriptMerger.merge(existing: existing, incoming: incoming)
+
+        #expect(merged.count == 2)
+        #expect(merged.map(\.sourceID) == ["hermes:session-a:41", "hermes:session-a:42"])
+    }
+
+    @Test("message merge deduplicates copied Hermes rows across lineage sessions")
+    func messageMergeDeduplicatesCopiedHermesRowsAcrossLineageSessions() {
+        let existing = [
+            AIAssistantMessage(
+                role: .assistant,
+                content: "same copied answer",
+                sourceID: "hermes:cider-child:42",
+                sourceSessionID: "cider-child",
+                sourceName: "Hermes"
+            )
+        ]
+        let incoming = [
+            HermesTranscriptMessage(
+                externalID: "hermes:telegram-parent:42",
+                sourceSessionID: "telegram-parent",
+                role: .assistant,
+                content: "same copied answer",
+                attachments: [],
+                timestamp: Date(timeIntervalSince1970: 11)
+            ),
+            HermesTranscriptMessage(
+                externalID: "hermes:telegram-parent:43",
+                sourceSessionID: "telegram-parent",
+                role: .assistant,
+                content: "same copied answer",
+                attachments: [],
+                timestamp: Date(timeIntervalSince1970: 12)
+            )
+        ]
+
+        let merged = HermesTranscriptMerger.merge(existing: existing, incoming: incoming)
+
+        #expect(merged.count == 2)
+        #expect(merged.map(\.sourceID) == [
+            "hermes:cider-child:42",
+            "hermes:telegram-parent:43"
+        ])
+    }
+
     private func makeHermesStateDB(at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -277,4 +764,39 @@ private enum TestSQLiteError: Error {
     case exec
     case prepare
     case step
+}
+
+private struct StubHermesRunner: HermesCommandRunning {
+    let data: Data
+    var onRun: (@Sendable ([String]) async throws -> Void)?
+
+    init(
+        data: Data,
+        onRun: (@Sendable ([String]) async throws -> Void)? = nil
+    ) {
+        self.data = data
+        self.onRun = onRun
+    }
+
+    func runHermes(arguments: [String], timeout: TimeInterval) async throws -> Data {
+        try await onRun?(arguments)
+        return data
+    }
+}
+
+private struct MappingHermesRunner: HermesCommandRunning {
+    let exports: [String: Data]
+
+    func runHermes(arguments: [String], timeout: TimeInterval) async throws -> Data {
+        #expect(arguments.count == 5)
+        #expect(arguments[0] == "sessions")
+        #expect(arguments[1] == "export")
+        #expect(arguments[2] == "--session-id")
+        #expect(arguments[4] == "-")
+
+        guard let data = exports[arguments[3]] else {
+            throw HermesSessionClientError.sessionNotFound(arguments[3])
+        }
+        return data
+    }
 }

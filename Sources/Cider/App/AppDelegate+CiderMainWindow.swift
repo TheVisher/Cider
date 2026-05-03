@@ -91,10 +91,12 @@ extension AppDelegate {
     }
 
     func hideCiderMainWindow() {
+        ciderMainWindow?.persistCurrentFrame()
         ciderMainWindow?.orderOut(nil)
     }
 
     func minimizeCiderMainWindow() {
+        ciderMainWindow?.persistCurrentFrame()
         ciderMainWindow?.miniaturize(nil)
     }
 

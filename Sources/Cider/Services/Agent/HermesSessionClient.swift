@@ -10,6 +10,9 @@ struct HermesConversationState: Codable, Equatable, Sendable {
     var title: String?
     var source: String?
     var lastSyncedAt: Date?
+    var lastSyncedMessageID: String?
+    var lastSyncedTimestamp: Date?
+    var lastImportedRuntimeSessionID: String?
 
     init(
         conversationID: UUID = UUID(),
@@ -18,7 +21,10 @@ struct HermesConversationState: Codable, Equatable, Sendable {
         runtimeSessionLineage: [String]? = nil,
         title: String? = nil,
         source: String? = nil,
-        lastSyncedAt: Date? = nil
+        lastSyncedAt: Date? = nil,
+        lastSyncedMessageID: String? = nil,
+        lastSyncedTimestamp: Date? = nil,
+        lastImportedRuntimeSessionID: String? = nil
     ) {
         self.conversationID = conversationID
         self.runtimeID = runtimeID
@@ -27,6 +33,9 @@ struct HermesConversationState: Codable, Equatable, Sendable {
         self.title = title
         self.source = source
         self.lastSyncedAt = lastSyncedAt
+        self.lastSyncedMessageID = lastSyncedMessageID
+        self.lastSyncedTimestamp = lastSyncedTimestamp
+        self.lastImportedRuntimeSessionID = lastImportedRuntimeSessionID
     }
 }
 
@@ -35,6 +44,7 @@ struct HermesSessionContinuation: Equatable, Sendable {
     let lineage: [String]
     let title: String?
     let source: String?
+    let startedAt: Double
 }
 
 struct HermesTranscript: Equatable, Sendable {
@@ -114,8 +124,24 @@ struct HermesSessionContinuationResolver {
             activeSessionID: active.id,
             lineage: lineage,
             title: active.title,
-            source: active.source
+            source: active.source,
+            startedAt: active.startedAt
         )
+    }
+
+    func latestSession(source preferredSource: String, newerThan sessionID: String) throws -> HermesSessionContinuation? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        }
+        defer { sqlite3_close(db) }
+
+        guard let current = try sessionRecord(id: sessionID, db: db),
+              let latest = try latestSessionRecord(source: preferredSource, db: db),
+              latest.startedAt > current.startedAt
+        else { return nil }
+
+        return try resolveContinuation(from: latest.id)
     }
 
     func latestSession(source preferredSource: String? = "telegram") throws -> HermesSessionContinuation? {
@@ -134,9 +160,53 @@ struct HermesSessionContinuationResolver {
         return try resolveContinuation(from: any.id)
     }
 
+    func latestSession(title: String) throws -> HermesSessionContinuation? {
+        let trimmedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
+        guard !trimmedTitle.isEmpty else { return nil }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        }
+        defer { sqlite3_close(db) }
+
+        guard let latest = try latestSessionRecord(title: trimmedTitle, db: db) else {
+            return nil
+        }
+
+        let lineage = try lineageEnding(at: latest.id, db: db)
+        return HermesSessionContinuation(
+            activeSessionID: latest.id,
+            lineage: lineage.isEmpty ? [latest.id] : lineage,
+            title: latest.title,
+            source: latest.source,
+            startedAt: latest.startedAt
+        )
+    }
+
+    func sessionIDs(source preferredSource: String, in sessionIDs: [String]) throws -> [String] {
+        guard !sessionIDs.isEmpty else { return [] }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(stateDatabaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.stateDatabaseUnavailable(stateDatabaseURL.path)
+        }
+        defer { sqlite3_close(db) }
+
+        var matching = Set<String>()
+        for sessionID in sessionIDs {
+            guard let record = try sessionRecord(id: sessionID, db: db),
+                  record.source == preferredSource
+            else { continue }
+            matching.insert(record.id)
+        }
+
+        return sessionIDs.filter { matching.contains($0) }
+    }
+
     private func sessionRecord(id: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
         var stmt: OpaquePointer?
-        let sql = "SELECT id, source, title FROM sessions WHERE id = ? LIMIT 1;"
+        let sql = "SELECT id, source, title, started_at FROM sessions WHERE id = ? LIMIT 1;"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw HermesSessionClientError.sqlitePrepare(errorMessage(db))
         }
@@ -152,10 +222,45 @@ struct HermesSessionContinuationResolver {
         throw HermesSessionClientError.sqliteStep(errorMessage(db))
     }
 
+    private func parentSessionID(of sessionID: String, db: OpaquePointer?) throws -> String? {
+        var stmt: OpaquePointer?
+        let sql = "SELECT parent_session_id FROM sessions WHERE id = ? LIMIT 1;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.sqlitePrepare(errorMessage(db))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, sessionID, -1, SQLITE_TRANSIENT)
+
+        let result = sqlite3_step(stmt)
+        if result == SQLITE_ROW {
+            guard sqlite3_column_type(stmt, 0) != SQLITE_NULL,
+                  let rawParent = sqlite3_column_text(stmt, 0)
+            else { return nil }
+            return String(cString: rawParent)
+        }
+        if result == SQLITE_DONE { return nil }
+        throw HermesSessionClientError.sqliteStep(errorMessage(db))
+    }
+
+    private func lineageEnding(at sessionID: String, db: OpaquePointer?) throws -> [String] {
+        var lineage = [sessionID]
+        var seen = Set(lineage)
+        var current = sessionID
+
+        while let parent = try parentSessionID(of: current, db: db), !seen.contains(parent) {
+            lineage.insert(parent, at: 0)
+            seen.insert(parent)
+            current = parent
+        }
+
+        return lineage
+    }
+
     private func newestChild(of sessionID: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
         var stmt: OpaquePointer?
         let sql = """
-        SELECT id, source, title
+        SELECT id, source, title, started_at
         FROM sessions
         WHERE parent_session_id = ?
         ORDER BY started_at DESC
@@ -181,14 +286,14 @@ struct HermesSessionContinuationResolver {
         let sql: String
         if source == nil {
             sql = """
-            SELECT id, source, title
+            SELECT id, source, title, started_at
             FROM sessions
             ORDER BY started_at DESC
             LIMIT 1;
             """
         } else {
             sql = """
-            SELECT id, source, title
+            SELECT id, source, title, started_at
             FROM sessions
             WHERE source = ?
             ORDER BY started_at DESC
@@ -204,6 +309,31 @@ struct HermesSessionContinuationResolver {
         if let source {
             sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
         }
+
+        let result = sqlite3_step(stmt)
+        if result == SQLITE_ROW {
+            return HermesSessionRecord(stmt: stmt)
+        }
+        if result == SQLITE_DONE { return nil }
+        throw HermesSessionClientError.sqliteStep(errorMessage(db))
+    }
+
+    private func latestSessionRecord(title: String, db: OpaquePointer?) throws -> HermesSessionRecord? {
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT id, source, title, started_at
+        FROM sessions
+        WHERE title = ?
+        ORDER BY started_at DESC
+        LIMIT 1;
+        """
+
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw HermesSessionClientError.sqlitePrepare(errorMessage(db))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, title, -1, SQLITE_TRANSIENT)
 
         let result = sqlite3_step(stmt)
         if result == SQLITE_ROW {
@@ -292,10 +422,39 @@ enum HermesTranscriptMerger {
         incoming: [HermesTranscriptMessage]
     ) -> [AIAssistantMessage] {
         var seen = Set(existing.compactMap(\.sourceID))
+        var seenLiveExportFingerprints: [String: Set<HermesMessageSourceStyle>] = [:]
+        var seenLineageCopyFingerprints = Set<String>()
+        for message in existing {
+            guard let fingerprint = liveExportFingerprint(for: message),
+                  let style = HermesMessageSourceStyle(sourceID: message.sourceID)
+            else {
+                if let fingerprint = lineageCopyFingerprint(for: message) {
+                    seenLineageCopyFingerprints.insert(fingerprint)
+                }
+                continue
+            }
+            seenLiveExportFingerprints[fingerprint, default: []].insert(style)
+            if let fingerprint = lineageCopyFingerprint(for: message) {
+                seenLineageCopyFingerprints.insert(fingerprint)
+            }
+        }
         var merged = existing
 
         for message in incoming.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard !seen.contains(message.externalID) else { continue }
+            let style = HermesMessageSourceStyle(sourceID: message.externalID)
+            let fingerprint = liveExportFingerprint(for: message)
+            if let style,
+               let fingerprint,
+               seenLiveExportFingerprints[fingerprint]?.contains(style.counterpart) == true {
+                continue
+            }
+            let lineageCopyFingerprint = lineageCopyFingerprint(for: message)
+            if let lineageCopyFingerprint,
+               seenLineageCopyFingerprints.contains(lineageCopyFingerprint) {
+                continue
+            }
+
             merged.append(AIAssistantMessage(
                 role: message.role,
                 content: message.content,
@@ -306,9 +465,127 @@ enum HermesTranscriptMerger {
                 attachments: message.attachments
             ))
             seen.insert(message.externalID)
+            if let style, let fingerprint {
+                seenLiveExportFingerprints[fingerprint, default: []].insert(style)
+            }
+            if let lineageCopyFingerprint {
+                seenLineageCopyFingerprints.insert(lineageCopyFingerprint)
+            }
         }
 
         return merged
+    }
+
+    private static func lineageCopyFingerprint(for message: AIAssistantMessage) -> String? {
+        lineageCopyFingerprint(
+            sourceID: message.sourceID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func lineageCopyFingerprint(for message: HermesTranscriptMessage) -> String? {
+        lineageCopyFingerprint(
+            sourceID: message.externalID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func lineageCopyFingerprint(
+        sourceID: String?,
+        role: AIAssistantMessage.Role,
+        content: String,
+        attachmentCount: Int
+    ) -> String? {
+        guard HermesMessageSourceStyle(sourceID: sourceID) == .export,
+              let messageID = hermesMessageID(sourceID: sourceID),
+              !messageID.hasPrefix("line-")
+        else { return nil }
+
+        let normalizedContent = content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return [
+            messageID,
+            role.rawValue,
+            normalizedContent,
+            String(attachmentCount)
+        ].joined(separator: "|")
+    }
+
+    private static func hermesMessageID(sourceID: String?) -> String? {
+        guard let sourceID,
+              sourceID.hasPrefix("hermes:"),
+              let separatorIndex = sourceID.lastIndex(of: ":")
+        else { return nil }
+        return String(sourceID[sourceID.index(after: separatorIndex)...])
+    }
+
+    private static func liveExportFingerprint(for message: AIAssistantMessage) -> String? {
+        guard let sourceSessionID = message.sourceSessionID,
+              HermesMessageSourceStyle(sourceID: message.sourceID) != nil
+        else { return nil }
+        return liveExportFingerprint(
+            sourceSessionID: sourceSessionID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func liveExportFingerprint(for message: HermesTranscriptMessage) -> String? {
+        guard HermesMessageSourceStyle(sourceID: message.externalID) != nil else { return nil }
+        return liveExportFingerprint(
+            sourceSessionID: message.sourceSessionID,
+            role: message.role,
+            content: message.content,
+            attachmentCount: message.attachments.count
+        )
+    }
+
+    private static func liveExportFingerprint(
+        sourceSessionID: String,
+        role: AIAssistantMessage.Role,
+        content: String,
+        attachmentCount: Int
+    ) -> String {
+        let normalizedContent = content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return [
+            sourceSessionID,
+            role.rawValue,
+            normalizedContent,
+            String(attachmentCount)
+        ].joined(separator: "|")
+    }
+}
+
+private enum HermesMessageSourceStyle: Hashable {
+    case export
+    case live
+
+    init?(sourceID: String?) {
+        guard let sourceID else { return nil }
+        if sourceID.hasPrefix("hermes-live:") {
+            self = .live
+        } else if sourceID.hasPrefix("hermes:") {
+            self = .export
+        } else {
+            return nil
+        }
+    }
+
+    var counterpart: HermesMessageSourceStyle {
+        switch self {
+        case .export:
+            return .live
+        case .live:
+            return .export
+        }
     }
 }
 
@@ -339,25 +616,100 @@ final class HermesSessionService: @unchecked Sendable {
         return try await sync(state: state, existingMessages: [])
     }
 
+    func attachConversation(
+        sessionID: String,
+        conversationID: UUID = UUID()
+    ) async throws -> HermesSyncResult {
+        let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSessionID.isEmpty else {
+            throw HermesSessionClientError.sessionNotFound("empty session id")
+        }
+        let continuation = try resolver.resolveContinuation(from: trimmedSessionID)
+        let state = HermesConversationState(
+            conversationID: conversationID,
+            activeRuntimeSessionID: continuation.activeSessionID,
+            runtimeSessionLineage: continuation.lineage,
+            title: continuation.title,
+            source: continuation.source
+        )
+        return try await sync(state: state, existingMessages: [])
+    }
+
     func sync(
         state: HermesConversationState,
         existingMessages: [AIAssistantMessage]
     ) async throws -> HermesSyncResult {
         let continuation = try resolver.resolveContinuation(from: state.activeRuntimeSessionID)
-        let transcriptData = try await runner.runHermes(arguments: [
-            "sessions", "export",
-            "--session-id", continuation.activeSessionID,
-            "-"
-        ])
-        let transcript = try HermesTranscriptParser.parse(transcriptData)
+        let transcript = try await transcript(for: continuation)
         let merged = HermesTranscriptMerger.merge(existing: existingMessages, incoming: transcript.messages)
 
         var nextState = state
         nextState.activeRuntimeSessionID = continuation.activeSessionID
-        nextState.runtimeSessionLineage = mergedLineage(state.runtimeSessionLineage, continuation.lineage)
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
         nextState.title = transcript.title ?? continuation.title ?? state.title
         nextState.source = transcript.source ?? continuation.source ?? state.source
         nextState.lastSyncedAt = Date()
+        nextState.updateSyncCursor(from: transcript.messages, importedSessionID: continuation.activeSessionID)
+
+        return HermesSyncResult(state: nextState, messages: merged)
+    }
+
+    func repairConversation(
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage]
+    ) async throws -> HermesSyncResult {
+        let title = CiderAgentChatRegistry.sanitizedHermesTitle(state.title ?? "")
+        guard !title.isEmpty else {
+            throw HermesSessionClientError.sessionNotFound("Hermes session title for repair")
+        }
+        guard let continuation = try resolver.latestSession(title: title) else {
+            throw HermesSessionClientError.sessionNotFound(title)
+        }
+
+        var repairedState = state
+        repairedState.activeRuntimeSessionID = continuation.activeSessionID
+        repairedState.runtimeSessionLineage = continuation.lineage
+        repairedState.title = continuation.title ?? title
+        repairedState.source = continuation.source ?? state.source
+        return try await sync(state: repairedState, existingMessages: existingMessages)
+    }
+
+    func syncMainBrain(
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage]
+    ) async throws -> HermesSyncResult {
+        var stateToSync = state
+        if let latestTelegram = try resolver.latestSession(
+            source: "telegram",
+            newerThan: state.activeRuntimeSessionID
+        ) {
+            stateToSync.activeRuntimeSessionID = latestTelegram.activeSessionID
+            stateToSync.runtimeSessionLineage = reconciledLineage(
+                existing: state.runtimeSessionLineage,
+                continuation: latestTelegram.lineage
+            )
+            stateToSync.title = latestTelegram.title ?? state.title
+            stateToSync.source = latestTelegram.source ?? state.source
+        }
+
+        let synced = try await sync(state: stateToSync, existingMessages: existingMessages)
+        let supplementalSessionIDs = try resolver.sessionIDs(
+            source: "telegram",
+            in: synced.state.runtimeSessionLineage
+        ).filter { $0 != synced.state.activeRuntimeSessionID }
+
+        guard !supplementalSessionIDs.isEmpty else { return synced }
+
+        var nextState = synced.state
+        var merged = synced.messages
+        for sessionID in supplementalSessionIDs {
+            let transcript = try await transcript(sessionID: sessionID)
+            merged = HermesTranscriptMerger.merge(existing: merged, incoming: transcript.messages)
+            nextState.updateSyncCursor(from: transcript.messages, importedSessionID: sessionID)
+        }
 
         return HermesSyncResult(state: nextState, messages: merged)
     }
@@ -372,6 +724,10 @@ final class HermesSessionService: @unchecked Sendable {
     }
 
     func runSendCommand(text: String, state: HermesConversationState) async throws -> HermesConversationState {
+        if state.activeRuntimeSessionID.isEmpty {
+            return try await runNewSessionCommand(text: text, state: state)
+        }
+
         let continuation = try resolver.resolveContinuation(from: state.activeRuntimeSessionID)
         _ = try await runner.runHermes(arguments: [
             "chat",
@@ -382,7 +738,52 @@ final class HermesSessionService: @unchecked Sendable {
 
         var nextState = state
         nextState.activeRuntimeSessionID = continuation.activeSessionID
-        nextState.runtimeSessionLineage = mergedLineage(state.runtimeSessionLineage, continuation.lineage)
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
+        return nextState
+    }
+
+    func renameSession(sessionID: String, title: String) async throws {
+        let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
+        guard !trimmedSessionID.isEmpty else {
+            throw HermesSessionClientError.sessionNotFound("empty session id")
+        }
+        guard !trimmedTitle.isEmpty else {
+            throw HermesSessionClientError.hermesCommandFailed("Hermes session title is empty")
+        }
+
+        _ = try await runner.runHermes(arguments: [
+            "sessions",
+            "rename",
+            trimmedSessionID,
+            trimmedTitle
+        ])
+    }
+
+    private func runNewSessionCommand(text: String, state: HermesConversationState) async throws -> HermesConversationState {
+        let source = state.source?.isEmpty == false ? state.source! : "cider"
+        _ = try await runner.runHermes(arguments: [
+            "chat",
+            "--query", text,
+            "--quiet",
+            "--source", source
+        ], timeout: 180)
+
+        guard let continuation = try resolver.latestSession(source: source) else {
+            throw HermesSessionClientError.sessionNotFound("new \(source) session")
+        }
+
+        var nextState = state
+        nextState.activeRuntimeSessionID = continuation.activeSessionID
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
+        nextState.title = continuation.title ?? state.title
+        nextState.source = continuation.source ?? state.source
         return nextState
     }
 
@@ -401,28 +802,73 @@ final class HermesSessionService: @unchecked Sendable {
 
         var nextState = state
         nextState.activeRuntimeSessionID = continuation.activeSessionID
-        nextState.runtimeSessionLineage = mergedLineage(state.runtimeSessionLineage, continuation.lineage)
+        nextState.runtimeSessionLineage = reconciledLineage(
+            existing: state.runtimeSessionLineage,
+            continuation: continuation.lineage
+        )
         nextState.title = transcript.title ?? continuation.title ?? state.title
         nextState.source = transcript.source ?? continuation.source ?? state.source
         nextState.lastSyncedAt = Date()
+        nextState.updateSyncCursor(from: transcript.messages, importedSessionID: continuation.activeSessionID)
 
         return HermesSyncResult(state: nextState, messages: merged)
     }
 
-    private func mergedLineage(_ existing: [String], _ incoming: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for id in existing + incoming where !seen.contains(id) {
-            result.append(id)
-            seen.insert(id)
+    private func reconciledLineage(existing: [String], continuation: [String]) -> [String] {
+        guard let continuationHead = continuation.first else { return [] }
+        guard let overlap = existing.firstIndex(of: continuationHead) else {
+            return continuation
         }
-        return result
+        return Array(existing.prefix(through: overlap)) + continuation.dropFirst()
+    }
+
+    private func transcript(for continuation: HermesSessionContinuation) async throws -> HermesTranscript {
+        try await transcript(sessionID: continuation.activeSessionID)
+    }
+
+    private func transcript(sessionID: String) async throws -> HermesTranscript {
+        let transcriptData = try await runner.runHermes(arguments: [
+            "sessions", "export",
+            "--session-id", sessionID,
+            "-"
+        ])
+        let exported = try HermesTranscriptParser.parse(transcriptData)
+        if !exported.messages.isEmpty {
+            return exported
+        }
+
+        let sessionFileURL = HermesPaths.sessionFileURL(sessionID: sessionID)
+        guard let sessionFileData = try? Data(contentsOf: sessionFileURL),
+              let liveTranscript = try? HermesTranscriptParser.parseSessionFile(
+                sessionFileData,
+                sessionID: sessionID
+              ),
+              !liveTranscript.messages.isEmpty
+        else {
+            return exported
+        }
+
+        return liveTranscript
     }
 }
 
 struct HermesSyncResult: Sendable {
     let state: HermesConversationState
     let messages: [AIAssistantMessage]
+}
+
+private extension HermesConversationState {
+    mutating func updateSyncCursor(
+        from messages: [HermesTranscriptMessage],
+        importedSessionID: String
+    ) {
+        lastImportedRuntimeSessionID = importedSessionID
+        guard let newestHermesMessage = messages.max(by: { $0.timestamp < $1.timestamp })
+        else { return }
+
+        lastSyncedMessageID = newestHermesMessage.externalID
+        lastSyncedTimestamp = newestHermesMessage.timestamp
+    }
 }
 
 protocol HermesCommandRunning: Sendable {
@@ -573,11 +1019,13 @@ private struct HermesSessionRecord {
     let id: String
     let source: String?
     let title: String?
+    let startedAt: Double
 
     init(stmt: OpaquePointer?) {
         id = String(cString: sqlite3_column_text(stmt, 0))
         source = Self.optionalString(stmt, 1)
         title = Self.optionalString(stmt, 2)
+        startedAt = sqlite3_column_double(stmt, 3)
     }
 
     private static func optionalString(_ stmt: OpaquePointer?, _ index: Int32) -> String? {

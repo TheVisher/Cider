@@ -53,51 +53,93 @@ This is not a rigid release contract. It is a living queue.
 
 ## Current focus
 
-### 1. Perfect the Cider / Hermes chat UI
+### 1. Cider Main Brain Chat parity with Hermes
 
 **Status:** `Now`
 
-**Why it matters:** This is the surface Erik is using right now to talk to Hermes. If this feels confusing, leaky, unreliable, or hard to resume, every other agent-powered feature feels worse.
+**Why it matters:** The core product is not a multi-agent roster, perfect Telegram/Cider sync, or a pile of future architecture. The core product is a native second brain inside Cider: open the app, talk to Cider, and have Hermes save, recall, organize, and act on the Cider Vault with the same confidence Erik already gets from remote Hermes chat.
 
-**Direction:** Cider should become a clean vault-aware client over Hermes/agent sessions, not just a raw transcript viewer.
+**Decision:** Do not optimize for perfect Cider to Telegram transcript mirroring right now. Telegram or Discord can remain remote access surfaces that resume the named Cider brain when Erik is away. The benchmark is now: can Erik use Cider chat instead of Telegram when he is at the Mac?
+
+**Direction:** Keep Hermes as the agent runtime and Cider as the local-first vault client. Cider owns the stable logical chat identity, native UI, vault actions, mirrored display history, native confirmation/approval UI, and slash-command parsing/routing/presentation. Hermes owns runtime session continuity, tools, memory, compaction, approvals, execution semantics for forwarded commands, and run state. Cider chat should feel like Hermes inside Cider: slash commands, streaming or near-live responses, clear busy/awaiting-approval states, repair/relink controls, clean event handling, and no reliance on janky Markdown/JSON file watching as the final architecture.
+
+**Primary chat:** `cider.main` is the canonical Cider brain.
+
+- Display name: `Cider`
+- Hermes visible title: `Cider`
+- Human aliases: Cider, Main Brain, Vault, Brain
+- Remote access: Telegram/Discord can explicitly resume it with `/resume Cider`
+- Safety rule: v1 `/title` must not casually rename `cider.main` away from the canonical Hermes title `Cider`.
+- Safety rule: v1 `/new` must not silently strand the canonical brain; it should require confirmation or create a clearly separate fresh chat while preserving the existing record/lineage.
 
 **Key outcomes:**
 
-- clean user-facing chat output with minimal internal tool chatter
-- stable session identity and resume behavior
-- clear distinction between visible Cider chat and underlying Hermes session lineage
-- good handling of compaction/new-session weirdness
-- approvals/status/tool progress presented in a way normal users understand
-- eventual `Cider Main Brain` chat as the default life/vault assistant thread
+- fresh-user attach/create flow instead of developer-specific seed session IDs
+- stronger dedupe between live Hermes session-file rows and final export rows
+- clear busy/send state so Cider does not blindly send into an active Hermes run
+- visible attach/relink/repair controls for stale or forked sessions
+- named Hermes side chats for scoped work, while avoiding a large multi-agent/chat roster until the primary Cider brain feels excellent
+- durable per-chat sync cursors such as last synced Hermes message/session markers, so lineage imports stay reliable as histories grow
+- documented source-of-truth policy between Hermes runtime history and Cider's mirrored UI history
+- Cider-native slash command router for core commands like `/help`, `/status`, `/resume`, `/last`, `/summary`, `/checkpoint`, `/new`, and `/title`
+- slash-command discovery UI in the composer so typing `/` shows available commands and filters as Erik types
+- Hermes Runs/SSE API usage for native Cider send, stream, run state, and stop when available
+- streaming response path and native approval/confirmation prompt design
+- keep the direct Hermes assumptions isolated in `HermesSessionClient.swift`
+
+**Current implementation order:**
+
+1. Remove seeded/local-only Hermes session assumptions.
+2. Add explicit attach/relink/repair flow.
+3. Add named Hermes side chats that write friendly titles into Hermes for Telegram `/resume <title>`.
+4. Add durable per-chat sync cursors and continuation recovery.
+5. Pivot the product target from perfect external-client sync to Cider Main Brain Chat parity with Hermes.
+6. Build the Cider-native slash command router.
+7. Add slash-command discovery/autocomplete in the Cider composer as a polish follow-up.
+8. Prefer API Runs/SSE for Cider-native send, stream, status, and stop when available.
+9. Keep CLI/export/session-file polling as fallback.
+10. Add native approval UI when Hermes exposes an app-client approval event and response path.
+
+**Implementation checkpoint, 2026-05-03:** The seeded Main Brain mapping has been removed. Hermes mode now starts unattached on fresh installs and exposes explicit controls for Attach Latest Telegram, Choose Existing Session, Start Fresh Hermes Session, Relink, Sync, and Clear Error. Cider now has an isolated bridge transport seam with a Hermes Runs/SSE API path and CLI/export fallback while the supported Hermes communication layer is still being proven. Named Hermes side chats are registry-backed, create their Hermes session on first send, rename the backing Hermes session to the friendly title, and can be resumed from Telegram by explicit `/resume <title>`. The Relink path can now repair stale raw session pointers by resolving the newest Hermes session with the chat's stored title and preserving the recovered lineage. The Cider-native slash command router is implemented, and the composer now has `/` command discovery/autocomplete. Cider can parse Hermes approval request events into the waiting-for-approval state; native approve/deny buttons remain deferred until Hermes exposes an app-client approval response endpoint.
+
+**Known bridge gaps:**
+
+- Telegram voice-mode turns do not currently sync into Cider's mirrored chat transcript. Treat this as a transcript import coverage gap, not a named-chat blocker.
+- Hermes cron automation/job results currently come through Telegram but do not route into the Cider AI chat. Treat this as a remote-surface delivery gap for later Agent Host or transcript import work.
+- Hermes Runs/SSE API is still unavailable locally on `127.0.0.1:8642`; keep the fallback path while using the API seam for future native streaming.
+- Native approval UI is intentionally deferred until Hermes exposes an app-client approval event and response path.
 
 **Supporting docs:**
 
+- `Docs/superpowers/plans/2026-05-02-cider-hermes-bridge-hardening.md`
+- `Docs/superpowers/plans/2026-05-01-cider-main-brain-ai-surface.md`
 - `Docs/superpowers/plans/2026-04-29-main-panel-deprecation-smart-recall.md`
-- `Docs/Architecture/TELEGRAM_REMOTE_AGENT_PLAN.md`
 - `Docs/Architecture/AGENT_SERVICE.md`
-- Cider-vault-agent skill references: `cider-main-brain-chat.md`, `telegram-checkpoint-protocol.md`
+- `Docs/Vault/05-agent-cli-hardening-notes.md`
+- `Docs/Vault/06-telegram-agent-checkpoint-protocol.md`
 
 ---
 
-### 2. Establish this adaptive roadmap as the steering layer
+### 2. Field-test Hermes and feed CLI hardening
 
 **Status:** `Now`
 
-**Why it matters:** Cider has many good ideas spread across docs, memories, kanban cards, and chat sessions. We need one adjustable map so the next feature choice is not lost in scattered notes.
+**Why it matters:** Hermes is now useful enough to expose real workflow cracks: media/GIF imports, `.webloc` naming, capture routing, CLI ergonomics, and vault conventions. Those field notes are better than guessing.
 
 **Key outcomes:**
 
-- one place to add/reorder feature streams
-- lightweight status and priority tracking
-- links to detailed specs/plans instead of duplicating everything
-- periodic review cadence: ask “what should move up/down?”
-- future dashboard card that can show roadmap/project direction inside Cider
+- keep using Hermes through Telegram and Cider for real capture/recall work
+- record every awkward vault operation in `Docs/Vault/05-agent-cli-hardening-notes.md`
+- promote repeated issues into focused CLI/API implementation plans
+- prefer report-only agent behavior until Cider has safer mutation/approval rails
+- avoid building a full shared-room host until daily use proves polling/resume is insufficient
 
 **Supporting docs:**
 
-- `Docs/Product/PRODUCT_VISION.md`
-- `Docs/superpowers/specs/2026-04-19-dashboard-design.md`
-- `Docs/QA/AUDIT_LOOPS.md`
+- `Docs/Vault/05-agent-cli-hardening-notes.md`
+- `Docs/Vault/06-telegram-agent-checkpoint-protocol.md`
+- `Docs/Vault/Checkpoints/2026-04-30-telegram-cider-agent-checkpoint.md`
+- `Docs/Product/COMPUTER_AGENT_CHAT_APP_CONCEPT.md`
 
 ---
 
@@ -105,17 +147,19 @@ This is not a rigid release contract. It is a living queue.
 
 ### 3. Agent session continuity / Main Brain foundation
 
-**Status:** `Next`
+**Status:** `Shipped / Needs Sign-off`
 
 **Goal:** Make Cider's AI experience feel like one durable personal brain, even when Hermes sessions compact, fork, resume, or move across Telegram/CLI/Cider.
 
 **Feature shape:**
 
 - stable logical chat ID such as `cider.main`
-- mapping from Cider chat to current Hermes session ID and continuation lineage
+- mapping from Cider chat to current Hermes session ID, continuation lineage, and eventually a durable sync cursor
 - read-only awareness of Hermes session history/lineage
 - safe message serialization so multiple clients do not race
 - clear UI when a session was resumed, compacted, or started fresh
+
+**Current note:** The stable `cider.main` registry, Hermes session lineage, transcript sync, main-window/floating AI surface, explicit attach/relink UI, send coordination, dedupe, source-of-truth docs, durable sync cursors, title-based stale-session repair, and named Hermes side chats are implemented. The target has pivoted from perfect Cider/Telegram sync to Cider Main Brain Chat parity with Hermes. Remaining work is product hardening around slash commands, API availability field testing, streaming/run state, native approvals, and a cleaner Telegram resume-list experience if that belongs in Hermes/gateway.
 
 **Why before bigger AI features:** If session continuity is shaky, doc audits, reminders, project agents, and life-assistant workflows will feel fragmented.
 
@@ -321,6 +365,7 @@ Use this section to capture major reorder decisions.
 
 | Date | Change | Reason |
 |---|---|---|
+| 2026-05-02 | Promoted Cider/Hermes bridge hardening and Hermes field testing as the current focus; marked Main Brain foundation as shipped/needs sign-off. | The Main Brain v0 is implemented and working in Cider/Telegram, but needs reliability hardening before larger agent features. |
 | 2026-05-01 | Created adaptive roadmap with chat UI, roadmap steering, Main Brain, dashboard, maintenance agents, capture rails, reminders/resurfacing, and project command centers as the first major streams. | Erik asked for a constantly adjustable roadmap for the features discussed with Hermes. |
 
 ---
@@ -329,7 +374,7 @@ Use this section to capture major reorder decisions.
 
 When revisiting this roadmap, ask:
 
-1. Is the Cider/Hermes chat UI good enough to stop being the primary focus?
+1. Is the Cider/Hermes bridge reliable enough to stop being the primary focus?
 2. What is the single next feature stream that would make Cider feel more useful this week?
 3. Are any scheduled agent reports noisy, missing, or ready to become dashboard cards?
 4. Which docs are stale enough that they should be merged, archived, or rewritten?

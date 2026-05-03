@@ -31,6 +31,20 @@ Cider's AI assistant currently lives inside the UI chat panel. It responds when 
 
 For the intended product behavior of the vault-native assistant, also read [VAULT_AGENT_VISION.md](/Users/minivish/Cider/Docs/Architecture/VAULT_AGENT_VISION.md).
 
+Current Hermes bridge note: the Main Brain work is presently a Cider client over Hermes, not a replacement Cider-owned runtime. Hermes owns runtime session continuity, tools, memory, compaction, and raw agent execution history. Cider owns stable chat identity, vault UI/actions, mirrored display/search history, and repair/attach UX. The product target is first-class Hermes communication inside Cider, comparable to Telegram but native: streaming responses, approval/confirmation boxes, clear busy/run state, and clean event handling through a supported Hermes API/protocol/agent communication layer when available. Direct polling of Hermes SQLite/session JSON/export files is a bridge, not the preferred final contract.
+
+### Cider/Hermes Source Of Truth
+
+Hermes owns runtime session continuity, tool context, memory, compaction, approvals and permission prompts, streaming/run state, and raw agent execution history. Cider owns the user-facing vault UI, stable chat identity, mirrored display history, search/index affordances, native confirmation boxes, and vault actions.
+
+Cider may mirror Hermes messages for display, search, and offline continuity, but the mirror is not the authoritative runtime transcript. When Hermes API Runs/SSE are available, Cider should prefer that supported event contract over reading Hermes session files directly. When the API server is unavailable, Cider may use CLI/export/session-file polling as a bridge with clear fallback status.
+
+Cider chat records must treat raw Hermes session IDs as pointers, not identities. The durable user-facing identity is the Cider logical chat ID, such as `cider.main` or `cider.scratchpad`, backed by the current Hermes session ID, Hermes session lineage, and eventually durable sync cursors. This lets Cider follow Hermes continuation sessions without turning compaction into a new visible chat.
+
+Current hardening checkpoint: Cider no longer seeds `cider.main` from local developer Hermes session IDs. Fresh installs must explicitly attach latest Telegram, choose an existing Hermes session, or start a fresh Hermes session before Main Brain is considered linked. `HermesBridgeTransport` isolates the current transport choice so Cider can prefer Hermes Runs/SSE when available and fall back through the existing CLI/export bridge during the transition.
+
+The longer-term native Agent Service below may still matter, but it should not accidentally create a second competing runtime while the active product path is Hermes-backed Main Brain chat.
+
 The agent is not a separate process. It is a Swift service inside Cider's process, same as `VaultBookmarkService` or `DateCardStorage`. Cider owns its lifecycle.
 
 ---
