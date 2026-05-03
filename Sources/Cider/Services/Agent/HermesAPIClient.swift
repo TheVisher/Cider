@@ -92,6 +92,8 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
             return .toolCompleted(name: tool, isError: status == "error")
         case "reasoning.available":
             return .reasoningAvailable(preview ?? "")
+        case "approval.requested":
+            return .approvalRequested(preview)
         case "run.completed":
             return .completed(output: output ?? "")
         case "run.failed":

@@ -60,4 +60,19 @@ struct HermesAPIClientTests {
             .completed(output: "Hello")
         ])
     }
+
+    @Test("SSE parser extracts approval request events")
+    func sseParserExtractsApprovalRequestEvents() throws {
+        let sse = """
+        data: {"event":"approval.requested","run_id":"run_1","preview":"Allow Hermes to edit this file?"}
+
+        """
+
+        let events = try HermesSSEParser.events(from: Data(sse.utf8))
+        let bridgeEvents = events.compactMap(\.bridgeEvent)
+
+        #expect(bridgeEvents == [
+            .approvalRequested("Allow Hermes to edit this file?")
+        ])
+    }
 }

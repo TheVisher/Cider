@@ -21,6 +21,7 @@ enum HermesRunEvent: Equatable, Sendable {
     case toolStarted(name: String?, preview: String?)
     case toolCompleted(name: String?, isError: Bool)
     case reasoningAvailable(String)
+    case approvalRequested(String?)
     case completed(output: String)
     case failed(String)
     case cancelled
@@ -48,6 +49,9 @@ struct HermesRunSnapshot: Equatable, Sendable {
             }
         case .reasoningAvailable:
             break
+        case .approvalRequested(let detail):
+            next.status = .waitingForApproval(detail)
+            next.toolSummary = detail ?? "Waiting for approval"
         case .completed(let output):
             next.status = .completed(output)
             if next.visibleText.isEmpty {

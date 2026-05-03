@@ -116,4 +116,40 @@ struct CiderChatCommandRouterTests {
             try CiderChatCommandRouter.parse("/wat")
         }
     }
+
+    @Test("router exposes metadata for every v1 command")
+    func routerExposesMetadataForEveryV1Command() {
+        let names = CiderChatCommandRouter.suggestions(matching: "").map(\.name)
+
+        #expect(names == ["help", "status", "resume", "last", "summary", "checkpoint", "new", "title"])
+    }
+
+    @Test("slash query returns all command suggestions")
+    func slashQueryReturnsAllCommandSuggestions() {
+        let suggestions = CiderChatCommandRouter.suggestions(forDraft: "/")
+
+        #expect(suggestions.map(\.usage).contains("/help"))
+        #expect(suggestions.map(\.usage).contains("/title <title>"))
+    }
+
+    @Test("command suggestions filter by typed query")
+    func commandSuggestionsFilterByTypedQuery() {
+        let suggestions = CiderChatCommandRouter.suggestions(forDraft: "/s")
+
+        #expect(suggestions.map(\.name) == ["status", "summary"])
+    }
+
+    @Test("argument commands insert trailing space")
+    func argumentCommandsInsertTrailingSpace() throws {
+        let resume = try #require(CiderChatCommandRouter.suggestions(matching: "resume").first)
+        let title = try #require(CiderChatCommandRouter.suggestions(matching: "title").first)
+        let help = try #require(CiderChatCommandRouter.suggestions(matching: "help").first)
+
+        #expect(resume.insertsTrailingSpace)
+        #expect(title.insertsTrailingSpace)
+        #expect(!help.insertsTrailingSpace)
+        #expect(resume.insertionText == "/resume ")
+        #expect(title.insertionText == "/title ")
+        #expect(help.insertionText == "/help")
+    }
 }

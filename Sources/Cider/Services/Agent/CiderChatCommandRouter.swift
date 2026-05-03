@@ -17,6 +17,19 @@ struct CiderChatCommand: Equatable, Sendable {
 }
 
 enum CiderChatCommandRouter {
+    struct Suggestion: Equatable, Sendable, Identifiable {
+        let name: String
+        let usage: String
+        let description: String
+        let insertsTrailingSpace: Bool
+
+        var id: String { name }
+
+        var insertionText: String {
+            insertsTrailingSpace ? "/\(name) " : "/\(name)"
+        }
+    }
+
     enum Error: Swift.Error, Equatable, LocalizedError {
         case unsupportedCommand(String)
         case missingArgument(String)
@@ -32,6 +45,71 @@ enum CiderChatCommandRouter {
     }
 
     static let canonicalCiderTitle = "Cider"
+
+    static let allSuggestions: [Suggestion] = [
+        Suggestion(
+            name: "help",
+            usage: "/help",
+            description: "Show available Cider commands",
+            insertsTrailingSpace: false
+        ),
+        Suggestion(
+            name: "status",
+            usage: "/status",
+            description: "Show Hermes connection and transport state",
+            insertsTrailingSpace: false
+        ),
+        Suggestion(
+            name: "resume",
+            usage: "/resume [title]",
+            description: "Resume Cider or another named Hermes chat",
+            insertsTrailingSpace: true
+        ),
+        Suggestion(
+            name: "last",
+            usage: "/last",
+            description: "Show the last cached assistant response",
+            insertsTrailingSpace: false
+        ),
+        Suggestion(
+            name: "summary",
+            usage: "/summary",
+            description: "Ask Hermes for a concise chat summary",
+            insertsTrailingSpace: false
+        ),
+        Suggestion(
+            name: "checkpoint",
+            usage: "/checkpoint",
+            description: "Ask Hermes to save durable context",
+            insertsTrailingSpace: false
+        ),
+        Suggestion(
+            name: "new",
+            usage: "/new",
+            description: "Start a separate fresh chat after confirmation",
+            insertsTrailingSpace: false
+        ),
+        Suggestion(
+            name: "title",
+            usage: "/title <title>",
+            description: "Rename a side chat",
+            insertsTrailingSpace: true
+        )
+    ]
+
+    static func suggestions(forDraft draft: String) -> [Suggestion] {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return [] }
+        let query = String(trimmed.dropFirst())
+        guard !query.contains(where: \.isWhitespace) else { return [] }
+        return suggestions(matching: query)
+    }
+
+    static func suggestions(matching query: String) -> [Suggestion] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return allSuggestions }
+        return allSuggestions.filter { $0.name.hasPrefix(normalized) }
+    }
 
     static func parse(_ text: String) throws -> CiderChatCommand? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -101,16 +179,12 @@ enum CiderChatCommandRouter {
         }
     }
 
-    private static let helpMessage = """
-    Cider commands:
-    /status - show the current Hermes connection
-    /resume [title] - resume Cider or another named Hermes chat
-    /last - show the last cached assistant response
-    /summary - ask Hermes for a concise chat summary
-    /checkpoint - ask Hermes to save durable context
-    /new - start a fresh chat after confirmation
-    /title <title> - rename a side chat
-    """
+    private static var helpMessage: String {
+        let commandLines = allSuggestions
+            .map { "\($0.usage) - \($0.description)" }
+            .joined(separator: "\n")
+        return "Cider commands:\n\(commandLines)"
+    }
 
     private static let summaryPrompt = """
     Please summarize the current Cider chat in a concise, useful way. Focus on decisions, open loops, and next actions.

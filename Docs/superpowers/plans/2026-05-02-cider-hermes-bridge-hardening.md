@@ -1864,7 +1864,7 @@ git commit -m "feat: add Cider chat slash commands"
 - Hide the popup when the draft no longer starts with `/`, after a command is selected, or after sending.
 - Keep keyboard navigation as optional polish after the click-selection version works.
 
-- [ ] **Step 1: Add command metadata tests**
+- [x] **Step 1: Add command metadata tests**
 
 Extend `CiderChatCommandRouterTests` to cover:
 
@@ -1873,7 +1873,7 @@ Extend `CiderChatCommandRouterTests` to cover:
 3. Filtering with `s` returns `/status` and `/summary`.
 4. Commands that require arguments are marked so the UI can insert a trailing space.
 
-- [ ] **Step 2: Add pure command metadata/filtering API**
+- [x] **Step 2: Add pure command metadata/filtering API**
 
 Add a small metadata type to `CiderChatCommandRouter`, for example:
 
@@ -1888,15 +1888,15 @@ struct Suggestion: Equatable, Sendable {
 
 Expose a pure filtering helper such as `suggestions(matching:)`.
 
-- [ ] **Step 3: Render the popup in `AIAssistantInputView`**
+- [x] **Step 3: Render the popup in `AIAssistantInputView`**
 
 Use the input text binding to derive the current slash query. Render the popup above the input bar with existing Cider colors, tight spacing, and stable dimensions.
 
-- [ ] **Step 4: Wire row selection**
+- [x] **Step 4: Wire row selection**
 
 On row click, replace the draft with the selected command insertion string and refocus the composer. Do not send automatically.
 
-- [ ] **Step 5: Run focused tests and build**
+- [x] **Step 5: Run focused tests and build**
 
 Run:
 
@@ -1907,6 +1907,8 @@ xcodebuild -scheme CiderApp -project Cider.xcodeproj -configuration Debug -deriv
 
 Expected: tests and build pass.
 
+**Implementation note, 2026-05-03:** Command metadata/filtering, click-to-insert popup UI, and approval-request event parsing are implemented. Cider can show a waiting-for-approval state from Runs/SSE events, but native approve/deny remains intentionally deferred until Hermes exposes a supported approval response endpoint.
+
 ---
 
 ## Task 12: Verification
@@ -1916,7 +1918,7 @@ Expected: tests and build pass.
 **Files:**
 - Test-only.
 
-- [ ] **Step 1: Run focused Hermes tests**
+- [x] **Step 1: Run focused Hermes tests**
 
 Run:
 
@@ -1929,7 +1931,7 @@ swift test --filter HermesBridgeTransportTests
 
 Expected: every focused filter passes.
 
-- [ ] **Step 2: Run surface recall tests**
+- [x] **Step 2: Run surface recall tests**
 
 Run:
 
@@ -1939,7 +1941,7 @@ swift test --filter CiderSurfaceRecallCoordinatorTests
 
 Expected: surface recall tests pass.
 
-- [ ] **Step 3: Run full Swift test suite**
+- [x] **Step 3: Run full Swift test suite**
 
 Run:
 
@@ -1949,7 +1951,7 @@ swift test
 
 Expected: full package tests pass.
 
-- [ ] **Step 4: Build app**
+- [x] **Step 4: Build app**
 
 Run:
 
@@ -1968,6 +1970,8 @@ curl -H 'Authorization: Bearer change-me-local-dev' http://127.0.0.1:8642/v1/cap
 ```
 
 Expected: JSON includes `"run_submission": true`, `"run_status": true`, and `"run_events_sse": true`.
+
+**Current result, 2026-05-03:** `127.0.0.1:8642` is not reachable on this machine, so Cider remains on the CLI/export fallback path until Hermes exposes or enables the API server locally.
 
 - [ ] **Step 6: Manual Cider QA**
 

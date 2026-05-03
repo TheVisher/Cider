@@ -32,4 +32,14 @@ struct HermesBridgeTransportTests {
         #expect(snapshot.visibleText == "Tests passed")
         #expect(snapshot.toolSummary == "swift test")
     }
+
+    @Test("run snapshot tracks approval requests")
+    func runSnapshotTracksApprovalRequests() {
+        let snapshot = HermesRunSnapshot.empty
+            .reducing(.runStarted("run_1"))
+            .reducing(.approvalRequested("Allow file edit?"))
+
+        #expect(snapshot.status == .waitingForApproval("Allow file edit?"))
+        #expect(snapshot.toolSummary == "Allow file edit?")
+    }
 }

@@ -897,6 +897,8 @@ final class AIAssistantViewModel: ObservableObject {
             if !preview.isEmpty {
                 hermesSyncStatus = .running(runID: activeHermesRunID, detail: preview)
             }
+        case .approvalRequested(let detail):
+            hermesSyncStatus = .waitingForApproval(detail)
         case .completed(let output):
             if !output.isEmpty, streamingText.isEmpty {
                 streamingText = output
