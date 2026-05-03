@@ -61,7 +61,7 @@ This is not a rigid release contract. It is a living queue.
 
 **Decision:** Do not optimize for perfect Cider to Telegram transcript mirroring right now. Telegram or Discord can remain remote access surfaces that resume the named Cider brain when Erik is away. The benchmark is now: can Erik use Cider chat instead of Telegram when he is at the Mac?
 
-**Direction:** Keep Hermes as the agent runtime and Cider as the local-first vault client. Cider owns the stable logical chat identity, native UI, vault actions, mirrored display history, and native confirmation/approval UI. Hermes owns runtime session continuity, tools, memory, compaction, approvals, slash-command semantics, and run state. Cider chat should feel like Hermes inside Cider: slash commands, streaming or near-live responses, clear busy/awaiting-approval states, repair/relink controls, clean event handling, and no reliance on janky Markdown/JSON file watching as the final architecture.
+**Direction:** Keep Hermes as the agent runtime and Cider as the local-first vault client. Cider owns the stable logical chat identity, native UI, vault actions, mirrored display history, native confirmation/approval UI, and slash-command parsing/routing/presentation. Hermes owns runtime session continuity, tools, memory, compaction, approvals, execution semantics for forwarded commands, and run state. Cider chat should feel like Hermes inside Cider: slash commands, streaming or near-live responses, clear busy/awaiting-approval states, repair/relink controls, clean event handling, and no reliance on janky Markdown/JSON file watching as the final architecture.
 
 **Primary chat:** `cider.main` is the canonical Cider brain.
 
@@ -69,6 +69,8 @@ This is not a rigid release contract. It is a living queue.
 - Hermes visible title: `Cider`
 - Human aliases: Cider, Main Brain, Vault, Brain
 - Remote access: Telegram/Discord can explicitly resume it with `/resume Cider`
+- Safety rule: v1 `/title` must not casually rename `cider.main` away from the canonical Hermes title `Cider`.
+- Safety rule: v1 `/new` must not silently strand the canonical brain; it should require confirmation or create a clearly separate fresh chat while preserving the existing record/lineage.
 
 **Key outcomes:**
 

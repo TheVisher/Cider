@@ -102,7 +102,7 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
     static let shared = CiderAgentChatRegistry()
 
     static let mainBrainStableID = "cider.main"
-    static let mainBrainTitle = "Main Brain"
+    static let mainBrainTitle = "Cider"
     static let mainBrainKind = "main-brain"
     static let hermesChatKind = "hermes-chat"
     static let hermesRuntimeID = "hermes"
@@ -177,7 +177,7 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         let record = CiderAgentChatRecord(
             stableID: Self.mainBrainStableID,
             title: Self.mainBrainTitle,
-            hermesTitle: "Cider Main Brain",
+            hermesTitle: Self.mainBrainTitle,
             kind: Self.mainBrainKind,
             conversationID: state.conversationID,
             runtimeID: state.runtimeID,
@@ -219,7 +219,7 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         record.lastSyncedTimestamp = state.lastSyncedTimestamp
         record.lastImportedRuntimeSessionID = state.lastImportedRuntimeSessionID
         record.title = Self.mainBrainTitle
-        record.hermesTitle = record.hermesTitle ?? "Cider Main Brain"
+        record.hermesTitle = Self.mainBrainTitle
         record.kind = Self.mainBrainKind
         record.scope = record.scope ?? "main"
         record.archived = false

@@ -4,7 +4,7 @@
 
 **Goal:** Make Cider's Main Brain chat feel like Hermes inside Cider: stable named brain, native command surface, clear run state, streaming when available, and repairable Hermes continuity.
 
-**Architecture:** Hermes remains the runtime and source of truth for agent execution, session continuity, tools, memory, compaction, approvals, slash-command behavior, and run state. Cider owns stable chat identity, native UI, local mirrored display history, search/offline affordances, attach/relink/repair controls, slash-command routing, and vault actions. Keep all direct Hermes details behind small client types in `Sources/Cider/Services/Agent/`; the existing CLI/export/session-file bridge remains a fallback while the preferred transport becomes Hermes API server Runs/SSE when capabilities prove available.
+**Architecture:** Hermes remains the runtime and source of truth for agent execution, session continuity, tools, memory, compaction, approvals, execution semantics for forwarded slash commands, and run state. Cider owns stable chat identity, native UI, local mirrored display history, search/offline affordances, attach/relink/repair controls, slash-command parsing/routing/presentation, and vault actions. Keep all direct Hermes details behind small client types in `Sources/Cider/Services/Agent/`; the existing CLI/export/session-file bridge remains a fallback while the preferred transport becomes Hermes API server Runs/SSE when capabilities prove available.
 
 **Tech Stack:** Swift, SwiftUI, AppKit, Swift Testing, URLSession, local JSON/JSONL storage, Hermes CLI, Hermes API server on `127.0.0.1:8642`, Server-Sent Events, Hermes `state.db`, Hermes `sessions export`.
 
@@ -35,6 +35,8 @@ The primary Cider chat is:
 - display name: `Cider`
 - Hermes visible title: `Cider`
 - human aliases: Cider, Main Brain, Vault, Brain
+- safety rule: v1 `/title` must not casually rename `cider.main` away from the canonical Hermes title `Cider`
+- safety rule: v1 `/new` must not silently strand the canonical brain; require confirmation or create a clearly separate fresh chat while preserving the existing record/lineage
 
 Telegram or Discord should be treated as remote access surfaces that can resume the named Cider brain with `/resume Cider`. They do not need to visually mirror Cider's full transcript, and Cider does not need to import every external message perfectly before the native Cider chat can improve.
 
@@ -1761,8 +1763,9 @@ git commit -m "feat: add named Hermes chats"
 - `/last` returns the last cached assistant response in the current Cider chat.
 - `/summary` sends a normal Hermes request asking for a concise summary of the current chat unless a cached summary exists later.
 - `/checkpoint` sends a normal Hermes request asking it to save durable decisions/context. Do not create a new checkpoint doc automatically in Cider for v1.
-- `/new` starts a fresh local Hermes chat using the existing `startFreshHermesSession()` behavior.
-- `/title <title>` renames the current Cider/Hermes chat locally and renames the backing Hermes session when one exists.
+- `/new` explains that starting fresh will leave the current brain intact and requires `/new confirm` before starting a separate fresh local Hermes chat.
+- `/new confirm` starts a fresh local Hermes chat using the existing `startFreshHermesSession()` behavior.
+- `/title <title>` renames side chats locally and renames the backing Hermes session when one exists. On `cider.main`, v1 must preserve the canonical Hermes title `Cider` and return a local safety message instead of renaming.
 
 **Router shape:**
 
@@ -1772,6 +1775,8 @@ struct CiderChatCommand: Equatable, Sendable {
         case localMessage(String)
         case resume(title: String)
         case sendToHermes(String)
+        case showStatus
+        case showLastResponse
         case startFreshChat
         case renameCurrentChat(String)
     }
@@ -1794,9 +1799,10 @@ Cover:
 4. `/resume Scratchpad` preserves the title argument.
 5. `/summary` becomes a Hermes prompt.
 6. `/checkpoint` becomes a Hermes prompt.
-7. `/new` returns `.startFreshChat`.
-8. `/title Cider Scratchpad` returns `.renameCurrentChat("Cider Scratchpad")`.
-9. Unknown slash commands throw an unsupported-command error.
+7. `/new` returns a local confirmation message.
+8. `/new confirm` returns `.startFreshChat`.
+9. `/title Cider Scratchpad` returns `.renameCurrentChat("Cider Scratchpad")`.
+10. Unknown slash commands throw an unsupported-command error.
 
 - [ ] **Step 2: Implement `CiderChatCommandRouter`**
 

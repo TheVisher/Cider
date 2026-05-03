@@ -343,6 +343,9 @@ final class AIAssistantViewModel: ObservableObject {
         guard !trimmed.isEmpty, !isStreaming else { return }
 
         if runtimeSelection == .hermes {
+            if handleCiderChatCommandIfNeeded(trimmed) {
+                return
+            }
             sendViaHermes(trimmed)
             return
         }
@@ -388,6 +391,101 @@ final class AIAssistantViewModel: ObservableObject {
         return Date().timeIntervalSince(lastSyncedAt) > 5
     }
 
+    private func handleCiderChatCommandIfNeeded(_ text: String) -> Bool {
+        let command: CiderChatCommand?
+        do {
+            command = try CiderChatCommandRouter.parse(text)
+        } catch {
+            appendCiderCommandMessage(error.localizedDescription)
+            return true
+        }
+
+        guard let command else { return false }
+
+        switch command.action {
+        case .localMessage(let message):
+            appendCiderCommandMessage(message)
+        case .showStatus:
+            Task {
+                let availability = await hermesBridgeTransport.availability()
+                appendCiderCommandMessage(hermesCommandStatusMessage(availability: availability))
+            }
+        case .showLastResponse:
+            appendCiderCommandMessage(lastHermesAssistantResponseMessage())
+        case .resume(let title):
+            Task {
+                await resumeHermesChat(title: title)
+            }
+        case .sendToHermes(let prompt):
+            sendViaHermes(prompt)
+        case .startFreshChat:
+            startFreshHermesSession()
+            appendCiderCommandMessage("Started a fresh Hermes chat. Your canonical Cider brain is still resumable with /resume Cider.")
+        case .renameCurrentChat(let title):
+            Task {
+                await renameCurrentHermesChat(to: title)
+            }
+        }
+
+        return true
+    }
+
+    private func appendCiderCommandMessage(_ content: String) {
+        if currentConversationID == nil {
+            currentConversationID = UUID()
+        }
+        messages.append(AIAssistantMessage(
+            role: .assistant,
+            content: content,
+            sourceID: "cider-command:\(UUID().uuidString)",
+            sourceName: "Cider"
+        ))
+        requestScrollToBottom()
+        saveCurrentConversation()
+    }
+
+    private func hermesCommandStatusMessage(availability: HermesBridgeAvailability) -> String {
+        let transport: String
+        switch availability {
+        case .apiRuns:
+            transport = "Hermes Runs/SSE API"
+        case .cliFallback:
+            transport = "CLI/export fallback"
+        case .unavailable(let message):
+            transport = "Unavailable: \(message)"
+        }
+
+        let activeSessionID = hermesConversationState?.activeRuntimeSessionID ?? ""
+        let session = activeSessionID.isEmpty ? "not attached" : activeSessionID
+        let title = hermesConversationState?.title
+            ?? currentHermesChatRecord()?.hermesTitle
+            ?? currentChatTitle
+        let lineageCount = hermesConversationState?.runtimeSessionLineage
+            .filter { !$0.isEmpty }
+            .count ?? 0
+
+        return """
+        Cider Hermes status:
+        Chat: \(currentChatTitle)
+        Hermes title: \(title)
+        Session: \(session)
+        Lineage sessions: \(lineageCount)
+        State: \(hermesStatusTitle)
+        Transport: \(transport)
+        """
+    }
+
+    private func lastHermesAssistantResponseMessage() -> String {
+        guard let message = messages.reversed().first(where: {
+            $0.role == .assistant
+                && $0.sourceName != "Cider"
+                && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            return "No cached Hermes assistant response yet."
+        }
+        return message.content
+    }
+
     private func activateHermesConversation() async {
         do {
             guard let mainBrain = try agentChatRegistry.loadMainBrain() else {
@@ -413,7 +511,7 @@ final class AIAssistantViewModel: ObservableObject {
                 runtimeID: mainBrain.runtimeID,
                 activeRuntimeSessionID: mainBrain.activeRuntimeSessionID,
                 runtimeSessionLineage: mainBrain.runtimeSessionLineage,
-                title: mainBrain.title,
+                title: mainBrain.hermesTitle ?? mainBrain.title,
                 source: nil,
                 lastSyncedAt: nil,
                 lastSyncedMessageID: mainBrain.lastSyncedMessageID,
@@ -505,11 +603,6 @@ final class AIAssistantViewModel: ObservableObject {
 
         do {
             let state = try await ensureHermesConversationState(attachIfNeeded: false)
-            guard !state.activeRuntimeSessionID.isEmpty else {
-                hermesSyncStatus = .notAttached
-                return
-            }
-
             let result = try await hermesSessionService.repairConversation(
                 state: state,
                 existingMessages: messages
@@ -592,6 +685,101 @@ final class AIAssistantViewModel: ObservableObject {
         } else if case .disconnected = hermesSyncStatus {
             hermesSyncStatus = hermesConversationState == nil ? .notAttached : .idle
         }
+    }
+
+    private func resumeHermesChat(title: String) async {
+        guard runtimeSelection == .hermes, !hermesSyncInFlight, !isStreaming else { return }
+        let sanitizedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
+        guard !sanitizedTitle.isEmpty else {
+            appendCiderCommandMessage("Missing session title. Try /resume Cider.")
+            return
+        }
+
+        do {
+            saveCurrentConversation()
+            let record: CiderAgentChatRecord
+            if isCanonicalCiderTitle(sanitizedTitle) {
+                if let existing = try agentChatRegistry.loadMainBrain() {
+                    record = existing
+                } else {
+                    let state = HermesConversationState(
+                        conversationID: UUID(),
+                        activeRuntimeSessionID: "",
+                        runtimeSessionLineage: [],
+                        title: CiderAgentChatRegistry.mainBrainTitle,
+                        source: nil
+                    )
+                    record = try agentChatRegistry.createMainBrain(from: state)
+                }
+            } else if let existing = try agentChatRegistry
+                .listChats(includeArchived: true)
+                .first(where: { record in
+                    CiderAgentChatRegistry.sanitizedHermesTitle(record.hermesTitle ?? record.title)
+                        .caseInsensitiveCompare(sanitizedTitle) == .orderedSame
+                }) {
+                record = existing
+            } else {
+                record = try agentChatRegistry.createHermesChat(title: sanitizedTitle)
+            }
+
+            openHermesChat(record, syncIfAttached: false)
+            await repairHermesConversation()
+            if case .idle = hermesSyncStatus {
+                appendCiderCommandMessage("Resumed \(record.hermesTitle ?? record.title).")
+            } else {
+                appendCiderCommandMessage("Could not fully resume \(record.hermesTitle ?? record.title): \(hermesStatusTitle)")
+            }
+        } catch {
+            logger.error("Hermes resume command error: \(error.localizedDescription, privacy: .public)")
+            setHermesSyncStatus(for: error)
+            appendCiderCommandMessage("Hermes resume error: \(error.localizedDescription)")
+        }
+    }
+
+    private func renameCurrentHermesChat(to title: String) async {
+        guard runtimeSelection == .hermes, !hermesSyncInFlight, !isStreaming else { return }
+        let sanitizedTitle = CiderAgentChatRegistry.sanitizedHermesTitle(title)
+        guard !sanitizedTitle.isEmpty else {
+            appendCiderCommandMessage("Missing title. Try /title Cider Scratchpad.")
+            return
+        }
+
+        guard let record = currentHermesChatRecord() else {
+            appendCiderCommandMessage("This chat is not in the Cider Hermes registry yet. Create or load a named Hermes chat before renaming it.")
+            return
+        }
+
+        guard record.stableID != CiderAgentChatRegistry.mainBrainStableID else {
+            appendCiderCommandMessage("Cider is the canonical Main Brain name. I won't rename its Hermes title away from /resume Cider in v1.")
+            return
+        }
+
+        do {
+            let renamed = try agentChatRegistry.renameChat(stableID: record.stableID, title: sanitizedTitle)
+            if !record.activeRuntimeSessionID.isEmpty {
+                try await hermesSessionService.renameSession(
+                    sessionID: record.activeRuntimeSessionID,
+                    title: sanitizedTitle
+                )
+            }
+            activeHermesChatStableID = renamed.stableID
+            if var state = hermesConversationState {
+                state.title = sanitizedTitle
+                hermesConversationState = state
+            }
+            refreshHermesChats()
+            saveCurrentConversation()
+            appendCiderCommandMessage("Renamed this Hermes chat to \(sanitizedTitle). Telegram can resume it with /resume \(sanitizedTitle).")
+        } catch {
+            logger.error("Hermes title command error: \(error.localizedDescription, privacy: .public)")
+            setHermesSyncStatus(for: error)
+            appendCiderCommandMessage("Hermes title error: \(error.localizedDescription)")
+        }
+    }
+
+    private func isCanonicalCiderTitle(_ title: String) -> Bool {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["cider", "main brain", "vault", "brain"].contains(normalized)
     }
 
     private func sendViaHermes(_ text: String) {
@@ -871,7 +1059,7 @@ final class AIAssistantViewModel: ObservableObject {
                 runtimeID: mainBrain.runtimeID,
                 activeRuntimeSessionID: mainBrain.activeRuntimeSessionID,
                 runtimeSessionLineage: mainBrain.runtimeSessionLineage,
-                title: mainBrain.title,
+                title: mainBrain.hermesTitle ?? mainBrain.title,
                 source: nil,
                 lastSyncedAt: nil,
                 lastSyncedMessageID: mainBrain.lastSyncedMessageID,
@@ -1210,7 +1398,7 @@ final class AIAssistantViewModel: ObservableObject {
         return try? agentChatRegistry.chat(forConversationID: currentConversationID)
     }
 
-    private func openHermesChat(_ record: CiderAgentChatRecord) {
+    private func openHermesChat(_ record: CiderAgentChatRecord, syncIfAttached: Bool = true) {
         stopStreaming()
         activeHermesChatStableID = record.stableID
         currentConversationID = record.conversationID
@@ -1230,7 +1418,7 @@ final class AIAssistantViewModel: ObservableObject {
         hermesSyncStatus = record.activeRuntimeSessionID.isEmpty ? .idle : .syncing
         provider.resetSession()
         requestScrollToBottom()
-        if !record.activeRuntimeSessionID.isEmpty {
+        if syncIfAttached, !record.activeRuntimeSessionID.isEmpty {
             Task {
                 await syncHermesConversation(attachIfNeeded: false)
             }

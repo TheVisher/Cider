@@ -38,7 +38,8 @@ struct CiderAgentChatRegistryTests {
         let loaded = try registry.loadMainBrain()
 
         #expect(created.stableID == CiderAgentChatRegistry.mainBrainStableID)
-        #expect(created.title == CiderAgentChatRegistry.mainBrainTitle)
+        #expect(created.title == "Cider")
+        #expect(created.hermesTitle == "Cider")
         #expect(created.kind == CiderAgentChatRegistry.mainBrainKind)
         #expect(created.conversationID == conversationID)
         #expect(created.runtimeID == "hermes")
@@ -99,7 +100,8 @@ struct CiderAgentChatRegistryTests {
 
         #expect(updated.stableID == CiderAgentChatRegistry.mainBrainStableID)
         #expect(updated.conversationID == first.conversationID)
-        #expect(updated.title == CiderAgentChatRegistry.mainBrainTitle)
+        #expect(updated.title == "Cider")
+        #expect(updated.hermesTitle == "Cider")
         #expect(updated.activeRuntimeSessionID == "20260501_130000_next")
         #expect(updated.runtimeSessionLineage == [
             "20260501_120144_e3d994",
