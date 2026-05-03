@@ -105,6 +105,7 @@ This is not a rigid release contract. It is a living queue.
 **Known bridge gaps:**
 
 - Telegram voice-mode turns do not currently sync into Cider's mirrored chat transcript. Treat this as a transcript import coverage gap, not a named-chat blocker.
+- Hermes cron automation/job results currently come through Telegram but do not route into the Cider AI chat. Treat this as a remote-surface delivery gap for later Agent Host or transcript import work.
 - Hermes Runs/SSE API is still unavailable locally on `127.0.0.1:8642`; keep the fallback path while using the API seam for future native streaming.
 - Native approval UI is intentionally deferred until Hermes exposes an app-client approval event and response path.
 

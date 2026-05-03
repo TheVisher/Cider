@@ -1973,6 +1973,8 @@ Expected: JSON includes `"run_submission": true`, `"run_status": true`, and `"ru
 
 **Current result, 2026-05-03:** `127.0.0.1:8642` is not reachable on this machine, so Cider remains on the CLI/export fallback path until Hermes exposes or enables the API server locally.
 
+**Known delivery gap, 2026-05-03:** Hermes cron automation/job results currently appear in Telegram but do not route into the Cider AI chat. Keep this as a later remote-surface delivery/import issue, not a blocker for merging the current Cider chat hardening work.
+
 - [ ] **Step 6: Manual Cider QA**
 
 Verify:
