@@ -72,6 +72,21 @@ struct KanbanBoardView: View {
                 .font(CiderFont.caption)
                 .foregroundColor(CiderColors.tertiary)
 
+            if KanbanBoardLayout.usesProjectLayout(for: board) {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "rectangle.split.3x1")
+                    Text("Project board")
+                }
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.controlAccent)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(CiderColors.controlAccent.opacity(0.12))
+                )
+            }
+
             Spacer()
 
             // Search field
@@ -164,11 +179,20 @@ struct KanbanBoardView: View {
 
     // MARK: - Columns
 
+    @ViewBuilder
     private func columnsArea(_ board: KanbanBoard) -> some View {
+        if KanbanBoardLayout.usesProjectLayout(for: board) {
+            projectRowsArea(board)
+        } else {
+            standardColumnsArea(board)
+        }
+    }
+
+    private func standardColumnsArea(_ board: KanbanBoard) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: Spacing.md) {
                 ForEach(board.columns) { column in
-                    columnView(column, board: board)
+                    columnView(column, board: board, width: KanbanDesign.columnWidth)
                 }
             }
             .padding(Spacing.lg)
@@ -176,7 +200,68 @@ struct KanbanBoardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func columnView(_ column: KanbanColumn, board: KanbanBoard) -> some View {
+    private func projectRowsArea(_ board: KanbanBoard) -> some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                ForEach(KanbanBoardLayout.lanes(for: board)) { lane in
+                    projectLaneView(lane, board: board)
+                }
+            }
+            .padding(Spacing.lg)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func projectLaneView(_ lane: KanbanBoardLane, board: KanbanBoard) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                Text(lane.title)
+                    .font(CiderFont.labelSemibold)
+                    .foregroundColor(CiderColors.primary)
+
+                Text("\(lane.columns.count) columns")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text("\(lane.cardCount) cards")
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.xs)
+
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    ForEach(lane.columns) { column in
+                        columnView(
+                            column,
+                            board: board,
+                            width: KanbanDesign.projectColumnWidth,
+                            height: KanbanDesign.projectColumnHeight
+                        )
+                    }
+                }
+                .padding(.bottom, Spacing.xs)
+            }
+        }
+        .padding(Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(CiderColors.surfaceSubtle.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+    }
+
+    private func columnView(
+        _ column: KanbanColumn,
+        board: KanbanBoard,
+        width: CGFloat,
+        height: CGFloat? = nil
+    ) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             columnHeader(column)
 
@@ -227,7 +312,8 @@ struct KanbanBoardView: View {
             }
         }
         .padding(Spacing.sm)
-        .frame(width: 260)
+        .frame(width: width)
+        .frame(height: height)
         .background(
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .fill(CiderColors.surfaceSubtle)

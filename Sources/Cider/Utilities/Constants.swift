@@ -165,6 +165,12 @@ enum KanbanDesign {
     static let accentBarRadius: CGFloat = 2
     /// Height of the color accent bar on cards
     static let accentBarHeight: CGFloat = 3
+    /// Width for standalone Kanban columns.
+    static let columnWidth: CGFloat = 260
+    /// Width for project-board columns, which need a little more scan room.
+    static let projectColumnWidth: CGFloat = 280
+    /// Capped height for columns inside project-board swimlanes.
+    static let projectColumnHeight: CGFloat = 320
 }
 
 // MARK: - Animation Presets
