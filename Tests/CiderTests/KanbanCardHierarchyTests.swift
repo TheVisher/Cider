@@ -96,6 +96,7 @@ struct KanbanCardHierarchyTests {
         #expect(nodes.map(\.card.id) == ["standalone", "parent", "child-a", "child-b"])
         #expect(nodes.map(\.depth) == [0, 0, 1, 1])
         #expect(nodes.map(\.sameColumnParentID) == [nil, nil, "parent", "parent"])
+        #expect(nodes.map(\.visualIndex) == [0, 1, 2, 3])
     }
 
     @Test("cross-column children stay top-level in their own column")
@@ -121,5 +122,27 @@ struct KanbanCardHierarchyTests {
         #expect(nodes.map(\.card.id) == ["child"])
         #expect(nodes.map(\.depth) == [0])
         #expect(nodes.map(\.sameColumnParentID) == [nil])
+    }
+
+    @Test("same-column children are available as a parent group")
+    func sameColumnChildrenAreAvailableAsParentGroup() {
+        let column = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent"),
+                KanbanCard(id: "child-a", title: "Child A", parentCardID: "parent"),
+                KanbanCard(id: "child-b", title: "Child B", parentCardID: "parent"),
+                KanbanCard(id: "standalone", title: "Standalone"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [column])
+
+        let groups = KanbanBoardLayout.cardGroups(for: column, in: board)
+
+        #expect(groups.map(\.parent.card.id) == ["parent", "standalone"])
+        #expect(groups.first?.children.map(\.card.id) == ["child-a", "child-b"])
+        #expect(groups.first?.children.map(\.visualIndex) == [1, 2])
+        #expect(groups.last?.children.isEmpty == true)
     }
 }

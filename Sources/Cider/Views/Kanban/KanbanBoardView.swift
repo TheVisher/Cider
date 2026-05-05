@@ -379,9 +379,9 @@ struct KanbanBoardView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
                     let cards = filteredCards(column.cards)
-                    let nodes = KanbanBoardLayout.cardNodes(for: column, in: board, visibleCards: cards)
-                    ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
-                        cardNodeView(node, column: column, toIndex: index)
+                    let groups = KanbanBoardLayout.cardGroups(for: column, in: board, visibleCards: cards)
+                    ForEach(groups) { group in
+                        cardGroupView(group, column: column)
                     }
 
                     // Add card button or inline field — also a drop target for appending
@@ -496,49 +496,79 @@ struct KanbanBoardView: View {
 
     // MARK: - Cards
 
-    private func cardNodeView(_ node: KanbanColumnCardNode, column: KanbanColumn, toIndex: Int) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            if node.depth > 0 {
-                hierarchyConnector
-            }
+    private func cardGroupView(_ group: KanbanColumnCardGroup, column: KanbanColumn) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            interactiveCard(group.parent.card, column: column, toIndex: group.parent.visualIndex)
 
-            cardView(node.card, compact: compactCards)
-                .onTapGesture {
-                    onOpenCard(boardID, node.card.id)
-                }
-                .draggable(node.card.id) {
-                    cardDragPreview(node.card)
-                }
-                .dropDestination(for: String.self) { cardIDs, _ in
-                    guard let cardID = cardIDs.first, cardID != node.card.id else { return false }
-                    withAnimation(reduceMotion ? .none : .spring) {
-                        storage.moveCard(
-                            boardID: boardID,
-                            cardID: cardID,
-                            toColumnID: column.id,
-                            toIndex: toIndex
-                        )
-                    }
-                    return true
-                }
+            if !group.children.isEmpty {
+                childRailView(group: group, column: column)
+            }
         }
-        .padding(.leading, CGFloat(node.depth) * KanbanDesign.childIndent)
     }
 
-    private var hierarchyConnector: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Rectangle()
-                .fill(CiderColors.borderSubtle)
-                .frame(width: CiderBorder.hairlineStrokeWidth, height: Spacing.md)
+    private func childRailView(group: KanbanColumnCardGroup, column: KanbanColumn) -> some View {
+        let lineColor = hierarchyLineColor(for: group.parent.card)
 
-            Rectangle()
-                .fill(CiderColors.borderSubtle)
-                .frame(width: KanbanDesign.childConnectorWidth, height: CiderBorder.hairlineStrokeWidth)
-
-            Spacer(minLength: 0)
+        return VStack(spacing: Spacing.sm) {
+            ForEach(group.children) { child in
+                childBranchRow(child, column: column, lineColor: lineColor)
+            }
         }
-        .frame(width: KanbanDesign.childConnectorWidth, height: 34, alignment: .topLeading)
-        .padding(.top, Spacing.sm)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(lineColor)
+                .frame(width: CiderBorder.hairlineStrokeWidth)
+                .padding(.top, -Spacing.xs)
+                .padding(.bottom, Spacing.xxs)
+                .offset(x: KanbanDesign.childIndent)
+        }
+    }
+
+    private func childBranchRow(
+        _ node: KanbanColumnCardNode,
+        column: KanbanColumn,
+        lineColor: Color
+    ) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            Rectangle()
+                .fill(lineColor)
+                .frame(width: KanbanDesign.childConnectorWidth, height: CiderBorder.hairlineStrokeWidth)
+                .padding(.top, KanbanDesign.childConnectorTopInset)
+
+            interactiveCard(node.card, column: column, toIndex: node.visualIndex)
+        }
+        .padding(.leading, KanbanDesign.childIndent)
+    }
+
+    private func interactiveCard(_ card: KanbanCard, column: KanbanColumn, toIndex: Int) -> some View {
+        cardView(card, compact: compactCards)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onTapGesture {
+                onOpenCard(boardID, card.id)
+            }
+            .draggable(card.id) {
+                cardDragPreview(card)
+            }
+            .dropDestination(for: String.self) { cardIDs, _ in
+                guard let cardID = cardIDs.first, cardID != card.id else { return false }
+                withAnimation(reduceMotion ? .none : .spring) {
+                    storage.moveCard(
+                        boardID: boardID,
+                        cardID: cardID,
+                        toColumnID: column.id,
+                        toIndex: toIndex
+                    )
+                }
+                return true
+            }
+    }
+
+    private func hierarchyLineColor(for parent: KanbanCard) -> Color {
+        if let color = parent.color {
+            return kanbanColor(color).opacity(0.82)
+        }
+
+        return CiderColors.borderSubtle.opacity(0.95)
     }
 
     private func cardView(_ card: KanbanCard, compact: Bool = false) -> some View {

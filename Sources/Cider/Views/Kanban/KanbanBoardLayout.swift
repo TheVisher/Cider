@@ -28,8 +28,16 @@ struct KanbanColumnCardNode: Identifiable, Equatable {
     let card: KanbanCard
     let depth: Int
     let sameColumnParentID: String?
+    let visualIndex: Int
 
     var id: String { card.id }
+}
+
+struct KanbanColumnCardGroup: Identifiable, Equatable {
+    let parent: KanbanColumnCardNode
+    let children: [KanbanColumnCardNode]
+
+    var id: String { parent.id }
 }
 
 enum KanbanBoardLayout {
@@ -98,16 +106,53 @@ enum KanbanBoardLayout {
                 continue
             }
 
-            nodes.append(KanbanColumnCardNode(card: card, depth: 0, sameColumnParentID: nil))
+            nodes.append(KanbanColumnCardNode(
+                card: card,
+                depth: 0,
+                sameColumnParentID: nil,
+                visualIndex: nodes.count
+            ))
             renderedIDs.insert(card.id)
 
             for child in sameColumnChildren[card.id] ?? [] where !renderedIDs.contains(child.id) {
-                nodes.append(KanbanColumnCardNode(card: child, depth: 1, sameColumnParentID: card.id))
+                nodes.append(KanbanColumnCardNode(
+                    card: child,
+                    depth: 1,
+                    sameColumnParentID: card.id,
+                    visualIndex: nodes.count
+                ))
                 renderedIDs.insert(child.id)
             }
         }
 
         return nodes
+    }
+
+    static func cardGroups(
+        for column: KanbanColumn,
+        in board: KanbanBoard,
+        visibleCards: [KanbanCard]? = nil
+    ) -> [KanbanColumnCardGroup] {
+        let nodes = cardNodes(for: column, in: board, visibleCards: visibleCards)
+        var groups: [KanbanColumnCardGroup] = []
+        var index = 0
+
+        while index < nodes.count {
+            let parent = nodes[index]
+            var children: [KanbanColumnCardNode] = []
+            var nextIndex = index + 1
+
+            while nextIndex < nodes.count,
+                  nodes[nextIndex].sameColumnParentID == parent.card.id {
+                children.append(nodes[nextIndex])
+                nextIndex += 1
+            }
+
+            groups.append(KanbanColumnCardGroup(parent: parent, children: children))
+            index = nextIndex
+        }
+
+        return groups
     }
 
     static func shouldPushArchive(

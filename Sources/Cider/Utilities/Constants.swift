@@ -174,7 +174,9 @@ enum KanbanDesign {
     /// Indent applied to same-column child cards in hierarchy groups.
     static let childIndent: CGFloat = 18
     /// Width reserved for the child-card hierarchy connector.
-    static let childConnectorWidth: CGFloat = 10
+    static let childConnectorWidth: CGFloat = 14
+    /// Vertical offset that aims the child connector into the upper body of a card.
+    static let childConnectorTopInset: CGFloat = 20
 }
 
 // MARK: - Animation Presets
