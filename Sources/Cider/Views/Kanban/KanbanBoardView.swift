@@ -16,7 +16,6 @@ struct KanbanBoardView: View {
     @State private var searchText = ""
     @State private var compactCards = false
     @State private var archiveExpanded = false
-    @State private var laneScrollTargets: [KanbanLaneRole: String] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -260,23 +259,30 @@ struct KanbanBoardView: View {
             .padding(.horizontal, Spacing.xs)
 
             HStack(alignment: .top, spacing: Spacing.md) {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(alignment: .top, spacing: Spacing.md) {
-                        ForEach(lane.columns) { column in
-                            columnView(
-                                column,
-                                board: board,
-                                width: KanbanDesign.projectColumnWidth,
-                                height: KanbanDesign.projectColumnHeight
-                            )
-                            .id(column.id)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            ForEach(lane.columns) { column in
+                                columnView(
+                                    column,
+                                    board: board,
+                                    width: KanbanDesign.projectColumnWidth,
+                                    height: KanbanDesign.projectColumnHeight
+                                )
+                                .id(column.id)
+                            }
                         }
+                        .padding(.bottom, Spacing.xs)
                     }
-                    .padding(.bottom, Spacing.xs)
-                    .scrollTargetLayout()
+                    .frame(maxWidth: .infinity)
+                    .onChange(of: archiveExpanded) { _, expanded in
+                        scrollLaneToCompletionIfNeeded(lane, proxy: proxy, expanded: expanded)
+                    }
+                    .onAppear {
+                        scrollLaneToCompletionIfNeeded(lane, proxy: proxy, expanded: archiveExpanded)
+                    }
                 }
                 .frame(maxWidth: .infinity)
-                .scrollPosition(id: laneScrollTargetBinding(for: lane.role), anchor: .trailing)
 
                 if !archiveColumns.isEmpty {
                     projectArchiveReveal(columns: archiveColumns, board: board)
@@ -284,20 +290,6 @@ struct KanbanBoardView: View {
                 }
             }
             .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
-            .onChange(of: archiveExpanded) { _, expanded in
-                withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
-                    if expanded, let completionColumnID = lane.columns.last?.id {
-                        laneScrollTargets[lane.role] = completionColumnID
-                    } else {
-                        laneScrollTargets.removeValue(forKey: lane.role)
-                    }
-                }
-            }
-            .onAppear {
-                if archiveExpanded, let completionColumnID = lane.columns.last?.id {
-                    laneScrollTargets[lane.role] = completionColumnID
-                }
-            }
         }
         .padding(Spacing.sm)
         .background(
@@ -310,19 +302,19 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func laneScrollTargetBinding(for role: KanbanLaneRole) -> Binding<String?> {
-        Binding(
-            get: {
-                laneScrollTargets[role]
-            },
-            set: { newValue in
-                if let newValue {
-                    laneScrollTargets[role] = newValue
-                } else {
-                    laneScrollTargets.removeValue(forKey: role)
-                }
+    private func scrollLaneToCompletionIfNeeded(
+        _ lane: KanbanBoardLane,
+        proxy: ScrollViewProxy,
+        expanded: Bool
+    ) {
+        guard expanded, let completionColumnID = lane.columns.last?.id else { return }
+
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
+                proxy.scrollTo(completionColumnID, anchor: .trailing)
             }
-        )
+        }
     }
 
     private func projectArchiveReveal(columns archiveColumns: [KanbanColumn], board: KanbanBoard) -> some View {
