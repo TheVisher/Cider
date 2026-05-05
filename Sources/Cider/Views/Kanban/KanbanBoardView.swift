@@ -16,6 +16,7 @@ struct KanbanBoardView: View {
     @State private var searchText = ""
     @State private var compactCards = false
     @State private var archiveExpanded = false
+    @State private var archiveOpenGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -134,6 +135,9 @@ struct KanbanBoardView: View {
                KanbanBoardLayout.hasArchiveColumns(in: board) {
                 Button {
                     withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
+                        if !archiveExpanded {
+                            archiveOpenGeneration += 1
+                        }
                         archiveExpanded.toggle()
                     }
                 } label: {
@@ -259,30 +263,22 @@ struct KanbanBoardView: View {
             .padding(.horizontal, Spacing.xs)
 
             HStack(alignment: .top, spacing: Spacing.md) {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        HStack(alignment: .top, spacing: Spacing.md) {
-                            ForEach(lane.columns) { column in
-                                columnView(
-                                    column,
-                                    board: board,
-                                    width: KanbanDesign.projectColumnWidth,
-                                    height: KanbanDesign.projectColumnHeight
-                                )
-                                .id(column.id)
-                            }
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: Spacing.md) {
+                        ForEach(lane.columns) { column in
+                            columnView(
+                                column,
+                                board: board,
+                                width: KanbanDesign.projectColumnWidth,
+                                height: KanbanDesign.projectColumnHeight
+                            )
                         }
-                        .padding(.bottom, Spacing.xs)
                     }
-                    .frame(maxWidth: .infinity)
-                    .onChange(of: archiveExpanded) { _, expanded in
-                        scrollLaneToCompletionIfNeeded(lane, proxy: proxy, expanded: expanded)
-                    }
-                    .onAppear {
-                        scrollLaneToCompletionIfNeeded(lane, proxy: proxy, expanded: archiveExpanded)
-                    }
+                    .padding(.bottom, Spacing.xs)
                 }
                 .frame(maxWidth: .infinity)
+                .defaultScrollAnchor(archiveExpanded ? .trailing : .leading)
+                .id(projectLaneScrollIdentity(for: lane))
 
                 if !archiveColumns.isEmpty {
                     projectArchiveReveal(columns: archiveColumns, board: board)
@@ -302,19 +298,12 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func scrollLaneToCompletionIfNeeded(
-        _ lane: KanbanBoardLane,
-        proxy: ScrollViewProxy,
-        expanded: Bool
-    ) {
-        guard expanded, let completionColumnID = lane.columns.last?.id else { return }
-
-        Task { @MainActor in
-            await Task.yield()
-            withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
-                proxy.scrollTo(completionColumnID, anchor: .trailing)
-            }
+    private func projectLaneScrollIdentity(for lane: KanbanBoardLane) -> String {
+        if archiveExpanded {
+            return "\(lane.id)-archive-\(archiveOpenGeneration)"
         }
+
+        return "\(lane.id)-active"
     }
 
     private func projectArchiveReveal(columns archiveColumns: [KanbanColumn], board: KanbanBoard) -> some View {
