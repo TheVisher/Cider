@@ -519,6 +519,7 @@ struct KanbanBoardView: View {
             interactiveCard(
                 group.parent.card,
                 column: column,
+                board: board,
                 toIndex: group.parent.visualIndex,
                 childSummary: summary,
                 canCollapse: canCollapse,
@@ -526,12 +527,16 @@ struct KanbanBoardView: View {
             )
 
             if !group.children.isEmpty {
-                childRailView(group: group, column: column)
+                childRailView(group: group, column: column, board: board)
             }
         }
     }
 
-    private func childRailView(group: KanbanColumnCardGroup, column: KanbanColumn) -> some View {
+    private func childRailView(
+        group: KanbanColumnCardGroup,
+        column: KanbanColumn,
+        board: KanbanBoard
+    ) -> some View {
         let lineColor = hierarchyLineColor(for: group.parent.card)
         let children = group.children
 
@@ -540,6 +545,7 @@ struct KanbanBoardView: View {
                 childBranchRow(
                     child,
                     column: column,
+                    board: board,
                     lineColor: lineColor,
                     isFirst: index == 0,
                     isLast: index == children.count - 1
@@ -551,6 +557,7 @@ struct KanbanBoardView: View {
     private func childBranchRow(
         _ node: KanbanColumnCardNode,
         column: KanbanColumn,
+        board: KanbanBoard,
         lineColor: Color,
         isFirst: Bool,
         isLast: Bool
@@ -562,7 +569,7 @@ struct KanbanBoardView: View {
                 isLast: isLast
             )
 
-            interactiveCard(node.card, column: column, toIndex: node.visualIndex)
+            interactiveCard(node.card, column: column, board: board, toIndex: node.visualIndex)
         }
         .padding(.leading, KanbanDesign.childIndent)
     }
@@ -570,6 +577,7 @@ struct KanbanBoardView: View {
     private func interactiveCard(
         _ card: KanbanCard,
         column: KanbanColumn,
+        board: KanbanBoard,
         toIndex: Int,
         childSummary: KanbanParentChildSummary? = nil,
         canCollapse: Bool = false,
@@ -579,6 +587,8 @@ struct KanbanBoardView: View {
             card,
             compact: compactCards,
             childSummary: childSummary,
+            parentBadge: KanbanBoardLayout.parentBadge(for: card, in: column, board: board),
+            inheritedAccentColor: KanbanBoardLayout.inheritedParentAccentColor(for: card, in: board),
             canCollapse: canCollapse,
             isCollapsed: isCollapsed
         )
@@ -625,12 +635,14 @@ struct KanbanBoardView: View {
         _ card: KanbanCard,
         compact: Bool = false,
         childSummary: KanbanParentChildSummary? = nil,
+        parentBadge: KanbanParentBadge? = nil,
+        inheritedAccentColor: KanbanCardColor? = nil,
         canCollapse: Bool = false,
         isCollapsed: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
             // Color accent bar
-            if let color = card.color {
+            if let color = card.color ?? inheritedAccentColor {
                 RoundedRectangle(cornerRadius: KanbanDesign.accentBarRadius, style: .continuous)
                     .fill(kanbanColor(color))
                     .frame(height: KanbanDesign.accentBarHeight)
@@ -670,6 +682,10 @@ struct KanbanBoardView: View {
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .lineLimit(1)
+            }
+
+            if let parentBadge {
+                parentBadgeView(parentBadge)
             }
 
             if !compact {
@@ -724,6 +740,36 @@ struct KanbanBoardView: View {
                 }
             }
         }
+    }
+
+    private func parentBadgeView(_ badge: KanbanParentBadge) -> some View {
+        Button {
+            onOpenCard(boardID, badge.parentID)
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                if let accentColor = badge.accentColor {
+                    Circle()
+                        .fill(kanbanColor(accentColor))
+                        .frame(width: 5, height: 5)
+                }
+
+                Text("Parent")
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text(badge.title)
+                    .foregroundColor(CiderColors.secondary)
+                    .lineLimit(1)
+            }
+            .font(CiderFont.micro)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput.opacity(0.85))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open parent card \(badge.title)")
     }
 
     private func cardDragPreview(_ card: KanbanCard) -> some View {

@@ -240,4 +240,82 @@ struct KanbanCardHierarchyTests {
         #expect(summary?.columnCounts.map(\.count) == [1, 1, 1])
         #expect(summary?.compactText == "3 children · 1 Backlog · 1 Testing · 1 Done · 1/3 done")
     }
+
+    @Test("cross-column child exposes parent badge and inherited accent")
+    func crossColumnChildExposesParentBadgeAndInheritedAccent() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent Plan", color: .purple),
+            ]
+        )
+        let testing = KanbanColumn(
+            id: "testing",
+            name: "Testing",
+            cards: [
+                KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog, testing])
+
+        let badge = KanbanBoardLayout.parentBadge(
+            for: testing.cards[0],
+            in: testing,
+            board: board
+        )
+
+        #expect(badge?.parentID == "parent")
+        #expect(badge?.title == "Parent Plan")
+        #expect(badge?.accentColor == .purple)
+        #expect(KanbanBoardLayout.inheritedParentAccentColor(for: testing.cards[0], in: board) == .purple)
+    }
+
+    @Test("same-column child inherits parent accent without parent badge")
+    func sameColumnChildInheritsParentAccentWithoutParentBadge() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent Plan", color: .green),
+                KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog])
+
+        let badge = KanbanBoardLayout.parentBadge(
+            for: backlog.cards[1],
+            in: backlog,
+            board: board
+        )
+
+        #expect(badge == nil)
+        #expect(KanbanBoardLayout.inheritedParentAccentColor(for: backlog.cards[1], in: board) == .green)
+    }
+
+    @Test("parent accent falls back to stable color when parent has no explicit color")
+    func parentAccentFallsBackToStableColor() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent Plan"),
+            ]
+        )
+        let testing = KanbanColumn(
+            id: "testing",
+            name: "Testing",
+            cards: [
+                KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog, testing])
+
+        let first = KanbanBoardLayout.inheritedParentAccentColor(for: testing.cards[0], in: board)
+        let second = KanbanBoardLayout.inheritedParentAccentColor(for: testing.cards[0], in: board)
+
+        #expect(first != nil)
+        #expect(first == second)
+        #expect(KanbanBoardLayout.parentBadge(for: testing.cards[0], in: testing, board: board)?.accentColor == first)
+    }
 }

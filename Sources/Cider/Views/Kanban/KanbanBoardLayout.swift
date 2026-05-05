@@ -67,6 +67,12 @@ struct KanbanParentChildSummary: Equatable {
     }
 }
 
+struct KanbanParentBadge: Equatable {
+    let parentID: String
+    let title: String
+    let accentColor: KanbanCardColor?
+}
+
 enum KanbanBoardLayout {
     static let archiveDividerWidth: CGFloat = 28
 
@@ -215,6 +221,39 @@ enum KanbanBoardLayout {
             doneCount: doneCount,
             columnCounts: columnCounts
         )
+    }
+
+    static func inheritedParentAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor? {
+        guard let parent = board.parentCard(for: card.id) else { return nil }
+        return parentAccentColor(for: parent)
+    }
+
+    static func parentBadge(
+        for card: KanbanCard,
+        in column: KanbanColumn,
+        board: KanbanBoard
+    ) -> KanbanParentBadge? {
+        guard let parent = board.parentCard(for: card.id) else { return nil }
+        let parentIsInSameColumn = column.cards.contains { $0.id == parent.id }
+        guard !parentIsInSameColumn else { return nil }
+
+        return KanbanParentBadge(
+            parentID: parent.id,
+            title: parent.title,
+            accentColor: parentAccentColor(for: parent)
+        )
+    }
+
+    private static func parentAccentColor(for parent: KanbanCard) -> KanbanCardColor {
+        if let color = parent.color {
+            return color
+        }
+
+        let colors = KanbanCardColor.allCases
+        let stableIndex = parent.id.utf8.reduce(0) { partial, byte in
+            (partial + Int(byte)) % colors.count
+        }
+        return colors[stableIndex]
     }
 
     static func shouldPushArchive(
