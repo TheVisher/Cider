@@ -258,7 +258,7 @@ struct KanbanBoardView: View {
             }
             .padding(.horizontal, Spacing.xs)
 
-            ScrollViewReader { proxy in
+            HStack(alignment: .top, spacing: Spacing.md) {
                 ScrollView(.horizontal, showsIndicators: true) {
                     HStack(alignment: .top, spacing: Spacing.md) {
                         ForEach(lane.columns) { column in
@@ -268,41 +268,18 @@ struct KanbanBoardView: View {
                                 width: KanbanDesign.projectColumnWidth,
                                 height: KanbanDesign.projectColumnHeight
                             )
-                            .id(projectColumnScrollID(lane: lane, column: column))
-                        }
-
-                        if !archiveColumns.isEmpty {
-                            archiveRevealDivider
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-
-                            ForEach(archiveColumns) { column in
-                                columnView(
-                                    column,
-                                    board: board,
-                                    width: KanbanDesign.projectColumnWidth,
-                                    height: KanbanDesign.projectColumnHeight
-                                )
-                                .id(projectColumnScrollID(lane: lane, column: column))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                                        .strokeBorder(CiderColors.controlAccent.opacity(0.35), lineWidth: CiderBorder.hairlineStrokeWidth)
-                                )
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
                         }
                     }
                     .padding(.bottom, Spacing.xs)
-                    .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
                 }
-                .onChange(of: archiveExpanded) { _, expanded in
-                    scrollProjectLane(
-                        lane,
-                        archiveColumns: archiveColumns,
-                        proxy: proxy,
-                        archiveExpanded: expanded
-                    )
+                .frame(maxWidth: .infinity)
+
+                if !archiveColumns.isEmpty {
+                    projectArchiveReveal(columns: archiveColumns, board: board)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
         }
         .padding(Spacing.sm)
         .background(
@@ -315,24 +292,23 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func scrollProjectLane(
-        _ lane: KanbanBoardLane,
-        archiveColumns: [KanbanColumn],
-        proxy: ScrollViewProxy,
-        archiveExpanded: Bool
-    ) {
-        let targetColumn = archiveExpanded ? archiveColumns.last : lane.columns.last
-        guard let targetColumn else { return }
+    private func projectArchiveReveal(columns: [KanbanColumn], board: KanbanBoard) -> some View {
+        HStack(alignment: .top, spacing: Spacing.md) {
+            archiveRevealDivider
 
-        DispatchQueue.main.async {
-            withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
-                proxy.scrollTo(projectColumnScrollID(lane: lane, column: targetColumn), anchor: .trailing)
+            ForEach(columns) { column in
+                columnView(
+                    column,
+                    board: board,
+                    width: KanbanDesign.projectColumnWidth,
+                    height: KanbanDesign.projectColumnHeight
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                        .strokeBorder(CiderColors.controlAccent.opacity(0.35), lineWidth: CiderBorder.hairlineStrokeWidth)
+                )
             }
         }
-    }
-
-    private func projectColumnScrollID(lane: KanbanBoardLane, column: KanbanColumn) -> String {
-        "\(lane.id)-\(column.id)"
     }
 
     private var archiveRevealDivider: some View {
