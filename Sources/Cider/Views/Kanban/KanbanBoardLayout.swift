@@ -225,16 +225,12 @@ enum KanbanBoardLayout {
 
     static func inheritedParentAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor? {
         guard let parent = board.parentCard(for: card.id) else { return nil }
-        return parentAccentColor(for: parent)
+        return cardAccentColor(for: parent, in: board)
     }
 
     static func cardAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor? {
-        if !board.childCards(of: card.id).isEmpty {
-            return parentAccentColor(for: card)
-        }
-
-        if let parent = board.parentCard(for: card.id) {
-            return parentAccentColor(for: parent)
+        if card.parentCardID != nil || !board.childCards(of: card.id).isEmpty {
+            return familyAccentColor(for: card, in: board)
         }
 
         return card.color
@@ -252,8 +248,27 @@ enum KanbanBoardLayout {
         return KanbanParentBadge(
             parentID: parent.id,
             title: parent.title,
-            accentColor: cardAccentColor(for: parent, in: board) ?? parentAccentColor(for: parent)
+            accentColor: cardAccentColor(for: parent, in: board)
         )
+    }
+
+    private static func familyAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor {
+        parentAccentColor(for: familyRoot(for: card, in: board))
+    }
+
+    private static func familyRoot(for card: KanbanCard, in board: KanbanBoard) -> KanbanCard {
+        var root = card
+        var visited = Set([card.id])
+        var nextParentID = card.parentCardID
+
+        while let parentID = nextParentID,
+              let parent = board.card(id: parentID),
+              visited.insert(parent.id).inserted {
+            root = parent
+            nextParentID = parent.parentCardID
+        }
+
+        return root
     }
 
     private static func parentAccentColor(for parent: KanbanCard) -> KanbanCardColor {

@@ -319,8 +319,8 @@ struct KanbanCardHierarchyTests {
         #expect(KanbanBoardLayout.parentBadge(for: testing.cards[0], in: testing, board: board)?.accentColor == first)
     }
 
-    @Test("nested parent uses its own group accent instead of ancestor accent")
-    func nestedParentUsesOwnGroupAccent() {
+    @Test("nested parent uses family root accent")
+    func nestedParentUsesFamilyRootAccent() {
         let backlog = KanbanColumn(
             id: "backlog",
             name: "Backlog",
@@ -338,6 +338,24 @@ struct KanbanCardHierarchyTests {
 
         #expect(parentAccent != nil)
         #expect(parentAccent == childAccent)
-        #expect(parentAccent != ancestorAccent)
+        #expect(parentAccent == ancestorAccent)
+    }
+
+    @Test("descendant family accent uses explicit root color")
+    func descendantFamilyAccentUsesExplicitRootColor() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "grandparent", title: "Grandparent", color: .orange),
+                KanbanCard(id: "parent", title: "Parent Plan", color: .purple, parentCardID: "grandparent"),
+                KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog])
+
+        #expect(KanbanBoardLayout.cardAccentColor(for: backlog.cards[0], in: board) == .orange)
+        #expect(KanbanBoardLayout.cardAccentColor(for: backlog.cards[1], in: board) == .orange)
+        #expect(KanbanBoardLayout.cardAccentColor(for: backlog.cards[2], in: board) == .orange)
     }
 }
