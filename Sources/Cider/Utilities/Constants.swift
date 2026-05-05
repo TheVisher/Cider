@@ -170,7 +170,7 @@ enum KanbanDesign {
     /// Width for project-board columns, which need a little more scan room.
     static let projectColumnWidth: CGFloat = 280
     /// Capped height for columns inside project-board swimlanes.
-    static let projectColumnHeight: CGFloat = 320
+    static let projectColumnHeight: CGFloat = 560
 }
 
 // MARK: - Animation Presets

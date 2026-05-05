@@ -1,18 +1,14 @@
 import Foundation
 
 enum KanbanLaneRole: String, CaseIterable {
-    case discovery
-    case build
-    case quality
-    case done
+    case workflow
+    case qa
     case other
 
     var title: String {
         switch self {
-        case .discovery: "Discovery"
-        case .build: "Build"
-        case .quality: "Quality"
-        case .done: "Done"
+        case .workflow: "Workflow"
+        case .qa: "QA"
         case .other: "Other"
         }
     }
@@ -38,46 +34,37 @@ enum KanbanBoardLayout {
             return true
         }
 
-        let roles = Set(board.columns.map(role(for:)))
-        return roles.count >= 4
+        return board.columns.contains { isArchiveColumn($0) }
     }
 
     static func lanes(for board: KanbanBoard) -> [KanbanBoardLane] {
-        let grouped = Dictionary(grouping: board.columns, by: role(for:))
-        return KanbanLaneRole.allCases.compactMap { role in
-            guard let columns = grouped[role], !columns.isEmpty else { return nil }
-            return KanbanBoardLane(role: role, columns: columns)
+        let activeColumns = board.columns.filter { !isArchiveColumn($0) }
+        guard !activeColumns.isEmpty else {
+            return []
         }
+
+        return [
+            KanbanBoardLane(role: .workflow, columns: activeColumns)
+        ]
     }
 
     static func role(for column: KanbanColumn) -> KanbanLaneRole {
-        if column.isDoneColumn {
-            return .done
-        }
-
         let normalized = normalize("\(column.id) \(column.name)")
 
-        if containsAny(normalized, ["archive", "archived", "complete", "completed", "done"]) {
-            return .done
+        if containsAny(normalized, ["qa", "quality", "bug", "bugs", "fix", "fixed", "fixes", "investigating", "verified"]) {
+            return .qa
         }
 
-        if containsAny(normalized, ["test", "testing", "qa", "quality", "bug", "bugs", "fix", "fixed", "fixes", "ready_to_test", "investigating", "verified"]) {
-            return .quality
-        }
-
-        if containsAny(normalized, ["progress", "implement", "implementation", "build", "coding", "review", "active"]) {
-            return .build
-        }
-
-        if containsAny(normalized, ["idea", "ideas", "backlog", "discovery", "shaping", "ready", "next", "planned"]) {
-            return .discovery
-        }
-
-        return .other
+        return .workflow
     }
 
     private static func containsAny(_ value: String, _ needles: [String]) -> Bool {
         needles.contains { value.contains($0) }
+    }
+
+    private static func isArchiveColumn(_ column: KanbanColumn) -> Bool {
+        let normalized = normalize("\(column.id) \(column.name)")
+        return containsAny(normalized, ["archive", "archived"])
     }
 
     private static func normalize(_ value: String) -> String {

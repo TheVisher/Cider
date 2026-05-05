@@ -18,8 +18,8 @@ struct KanbanBoardLayoutTests {
         #expect(KanbanBoardLayout.usesProjectLayout(for: board))
     }
 
-    @Test("columns are grouped into stable project swimlanes")
-    func columnsGroupIntoProjectSwimlanes() {
+    @Test("active project columns stay together in one workflow row")
+    func activeColumnsStayTogetherInWorkflowRow() {
         let board = KanbanBoard(
             name: "Cider",
             columns: [
@@ -34,11 +34,8 @@ struct KanbanBoardLayoutTests {
 
         let lanes = KanbanBoardLayout.lanes(for: board)
 
-        #expect(lanes.map(\.role) == [.discovery, .build, .quality, .done])
-        #expect(lanes.first(where: { $0.role == .discovery })?.columns.map(\.id) == ["ideas", "next_up"])
-        #expect(lanes.first(where: { $0.role == .build })?.columns.map(\.id) == ["in_progress"])
-        #expect(lanes.first(where: { $0.role == .quality })?.columns.map(\.id) == ["testing", "bugs"])
-        #expect(lanes.first(where: { $0.role == .done })?.columns.map(\.id) == ["completed"])
+        #expect(lanes.map(\.role) == [.workflow])
+        #expect(lanes.first?.columns.map(\.id) == ["ideas", "next_up", "in_progress", "testing", "bugs", "completed"])
     }
 
     @Test("small generic boards keep the existing flat column layout")
@@ -55,4 +52,3 @@ struct KanbanBoardLayoutTests {
         #expect(!KanbanBoardLayout.usesProjectLayout(for: board))
     }
 }
-
