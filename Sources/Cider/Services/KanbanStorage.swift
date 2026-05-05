@@ -1,5 +1,6 @@
 import Foundation
 import Yams
+import Darwin
 import os.log
 
 /// Manages YAML-backed Kanban boards stored in the vault.
@@ -16,6 +17,14 @@ final class KanbanStorage: ObservableObject {
 
     private var boardsDir: URL {
         StoragePaths.directoryURL(for: .kanbanBoards)
+    }
+
+    private func boardFileURL(for boardID: String) -> URL {
+        boardsDir.appendingPathComponent("\(boardID).yaml")
+    }
+
+    private func boardLockURL(for boardID: String) -> URL {
+        boardsDir.appendingPathComponent("\(boardID).yaml.lock")
     }
 
     init() {
@@ -66,22 +75,69 @@ final class KanbanStorage: ObservableObject {
     // MARK: - Save
 
     private func save(_ board: KanbanBoard) {
+        _ = withExclusiveBoardFileLock(boardID: board.id) {
+            saveUnlocked(board)
+            upsertInMemory(board)
+            return true
+        }
+    }
+
+    private func saveUnlocked(_ board: KanbanBoard) {
         do {
             let encoder = YAMLEncoder()
             let yaml = try encoder.encode(board)
-            let url = boardsDir.appendingPathComponent("\(board.id).yaml")
+            let url = boardFileURL(for: board.id)
             try yaml.write(to: url, atomically: true, encoding: .utf8)
         } catch {
             logger.error("Failed to save board \(board.id): \(error.localizedDescription, privacy: .public)")
         }
     }
 
+    private func withExclusiveBoardFileLock<T>(boardID: String, _ body: () -> T) -> T? {
+        ensureDirectory()
+        let lockURL = boardLockURL(for: boardID)
+        let fd = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard fd != -1 else {
+            logger.error("Failed to open Kanban lock \(lockURL.lastPathComponent, privacy: .public)")
+            return nil
+        }
+
+        defer { close(fd) }
+
+        guard flock(fd, LOCK_EX) == 0 else {
+            logger.error("Failed to acquire Kanban lock \(lockURL.lastPathComponent, privacy: .public)")
+            return nil
+        }
+
+        defer { flock(fd, LOCK_UN) }
+        return body()
+    }
+
+    private func upsertInMemory(_ board: KanbanBoard) {
+        if let index = boards.firstIndex(where: { $0.id == board.id }) {
+            boards[index] = board
+        } else {
+            boards.append(board)
+        }
+        boards.sort { $0.created > $1.created }
+    }
+
     private func mutate(boardID: String, _ body: (inout KanbanBoard) -> Void) {
-        guard let index = boards.firstIndex(where: { $0.id == boardID }) else { return }
         isMutating = true
         defer { isMutating = false }
-        body(&boards[index])
-        save(boards[index])
+
+        var didMutate = false
+        _ = withExclusiveBoardFileLock(boardID: boardID) {
+            guard var board = load(from: boardFileURL(for: boardID)) ?? boards.first(where: { $0.id == boardID }) else {
+                return
+            }
+            body(&board)
+            saveUnlocked(board)
+            upsertInMemory(board)
+            didMutate = true
+        }
+
+        guard didMutate else { return }
         NotificationCenter.default.post(name: .kanbanBoardsChanged, object: nil)
     }
 
@@ -101,21 +157,27 @@ final class KanbanStorage: ObservableObject {
 
     @discardableResult
     func deleteBoard(id: String) -> TrashItem? {
-        guard let board = boards.first(where: { $0.id == id }) else { return nil }
-        let url = boardsDir.appendingPathComponent("\(id).yaml")
-        let yamlContent = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-
-        let trashItem = TrashStorage.shared.trashKanbanBoard(
-            boardID: id,
-            name: board.name,
-            yamlContent: yamlContent
-        )
-
         isMutating = true
         defer { isMutating = false }
-        boards.removeAll { $0.id == id }
-        try? FileManager.default.removeItem(at: url)
-        logger.info("Trashed board: \(id, privacy: .public)")
+
+        var trashItem: TrashItem?
+        _ = withExclusiveBoardFileLock(boardID: id) {
+            guard let board = load(from: boardFileURL(for: id)) ?? boards.first(where: { $0.id == id }) else { return }
+            let url = boardFileURL(for: id)
+            let yamlContent = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+
+            trashItem = TrashStorage.shared.trashKanbanBoard(
+                boardID: id,
+                name: board.name,
+                yamlContent: yamlContent
+            )
+
+            boards.removeAll { $0.id == id }
+            try? FileManager.default.removeItem(at: url)
+            logger.info("Trashed board: \(id, privacy: .public)")
+        }
+
+        guard let trashItem else { return nil }
         NotificationCenter.default.post(name: .kanbanBoardsChanged, object: nil)
         return trashItem
     }
@@ -128,22 +190,24 @@ final class KanbanStorage: ObservableObject {
 
     @discardableResult
     func addColumn(boardID: String, name: String, isDoneColumn: Bool = false) -> KanbanColumn? {
-        guard let board = boards.first(where: { $0.id == boardID }) else { return nil }
-        var columnID = KanbanID.slug(from: name)
-        // Ensure unique column ID within this board
-        let existingIDs = Set(board.columns.map(\.id))
-        if existingIDs.contains(columnID) {
-            var counter = 2
-            while existingIDs.contains("\(columnID)_\(counter)") { counter += 1 }
-            columnID = "\(columnID)_\(counter)"
+        var createdColumn: KanbanColumn?
+        mutate(boardID: boardID) { board in
+            var columnID = KanbanID.slug(from: name)
+            let existingIDs = Set(board.columns.map(\.id))
+            if existingIDs.contains(columnID) {
+                var counter = 2
+                while existingIDs.contains("\(columnID)_\(counter)") { counter += 1 }
+                columnID = "\(columnID)_\(counter)"
+            }
+            let column = KanbanColumn(
+                id: columnID,
+                name: name,
+                isDoneColumn: isDoneColumn
+            )
+            board.columns.append(column)
+            createdColumn = column
         }
-        let column = KanbanColumn(
-            id: columnID,
-            name: name,
-            isDoneColumn: isDoneColumn
-        )
-        mutate(boardID: boardID) { $0.columns.append(column) }
-        return column
+        return createdColumn
     }
 
     func deleteColumn(boardID: String, columnID: String) {
@@ -176,26 +240,46 @@ final class KanbanStorage: ObservableObject {
 
     @discardableResult
     func addCard(boardID: String, columnID: String, title: String, parentCardID: String? = nil) -> KanbanCard? {
-        guard let board = boards.first(where: { $0.id == boardID }) else { return nil }
-        guard parentCardID == nil || board.card(id: parentCardID ?? "") != nil else { return nil }
         let card = KanbanCard(title: title, parentCardID: parentCardID)
+        var didAdd = false
         mutate(boardID: boardID) { board in
+            guard parentCardID == nil || board.card(id: parentCardID ?? "") != nil else { return }
             guard let colIdx = board.columns.firstIndex(where: { $0.id == columnID }) else { return }
             board.columns[colIdx].cards.append(card)
+            didAdd = true
         }
-        return card
+        return didAdd ? card : nil
     }
 
     func updateCard(boardID: String, card: KanbanCard) {
+        let baseline = boards.flatMap(\.allCards).first { $0.id == card.id }
         mutate(boardID: boardID) { board in
-            guard board.canAssignParent(cardID: card.id, parentCardID: card.parentCardID) else { return }
             for colIdx in board.columns.indices {
                 if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == card.id }) {
-                    board.columns[colIdx].cards[cardIdx] = card
+                    let current = board.columns[colIdx].cards[cardIdx]
+                    let merged = mergeCardUpdate(card, baseline: baseline, into: current)
+                    guard board.canAssignParent(cardID: merged.id, parentCardID: merged.parentCardID) else { return }
+                    board.columns[colIdx].cards[cardIdx] = merged
                     return
                 }
             }
         }
+    }
+
+    private func mergeCardUpdate(_ incoming: KanbanCard, baseline: KanbanCard?, into current: KanbanCard) -> KanbanCard {
+        guard let baseline else { return incoming }
+
+        var merged = current
+        if incoming.title != baseline.title { merged.title = incoming.title }
+        if incoming.notes != baseline.notes { merged.notes = incoming.notes }
+        if incoming.color != baseline.color { merged.color = incoming.color }
+        if incoming.priority != baseline.priority { merged.priority = incoming.priority }
+        if incoming.agent != baseline.agent { merged.agent = incoming.agent }
+        if incoming.tags != baseline.tags { merged.tags = incoming.tags }
+        if incoming.linkedEntities != baseline.linkedEntities { merged.linkedEntities = incoming.linkedEntities }
+        if incoming.parentCardID != baseline.parentCardID { merged.parentCardID = incoming.parentCardID }
+        if incoming.completed != baseline.completed { merged.completed = incoming.completed }
+        return merged
     }
 
     func deleteCard(boardID: String, cardID: String) {
