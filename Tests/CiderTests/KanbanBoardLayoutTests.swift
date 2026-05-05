@@ -59,6 +59,29 @@ struct KanbanBoardLayoutTests {
         #expect(lanes.first(where: { $0.role == .qa })?.columns.map(\.id) == ["investigating", "qa", "ready_to_test", "verified"])
     }
 
+    @Test("archive columns are kept out of active lanes and aligned to source lanes")
+    func archiveColumnsAlignToSourceLanes() {
+        let board = KanbanBoard(
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog"),
+                KanbanColumn(id: "testing", name: "Testing"),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true),
+                KanbanColumn(id: "workflow_archive", name: "Workflow Archive", isDoneColumn: true),
+                KanbanColumn(id: "needs_fix", name: "Needs Fix"),
+                KanbanColumn(id: "verified", name: "Verified"),
+                KanbanColumn(id: "qa_archive", name: "QA Archive", isDoneColumn: true),
+            ]
+        )
+
+        let lanes = KanbanBoardLayout.lanes(for: board)
+
+        #expect(lanes.first(where: { $0.role == .workflow })?.columns.map(\.id) == ["backlog", "testing", "done"])
+        #expect(lanes.first(where: { $0.role == .qa })?.columns.map(\.id) == ["needs_fix", "verified"])
+        #expect(KanbanBoardLayout.archiveColumns(for: .workflow, in: board).map(\.id) == ["workflow_archive"])
+        #expect(KanbanBoardLayout.archiveColumns(for: .qa, in: board).map(\.id) == ["qa_archive"])
+    }
+
     @Test("small generic boards keep the existing flat column layout")
     func smallGenericBoardsUseFlatLayout() {
         let board = KanbanBoard(

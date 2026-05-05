@@ -52,6 +52,16 @@ enum KanbanBoardLayout {
         ].filter { !$0.columns.isEmpty }
     }
 
+    static func hasArchiveColumns(in board: KanbanBoard) -> Bool {
+        board.columns.contains { isArchiveColumn($0) }
+    }
+
+    static func archiveColumns(for laneRole: KanbanLaneRole, in board: KanbanBoard) -> [KanbanColumn] {
+        board.columns.filter { column in
+            isArchiveColumn(column) && role(for: column) == laneRole
+        }
+    }
+
     static func role(for column: KanbanColumn) -> KanbanLaneRole {
         let normalized = normalize("\(column.id) \(column.name)")
 

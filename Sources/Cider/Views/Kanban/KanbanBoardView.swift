@@ -15,6 +15,7 @@ struct KanbanBoardView: View {
     @State private var showDeleteConfirmation = false
     @State private var searchText = ""
     @State private var compactCards = false
+    @State private var archiveExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -129,6 +130,30 @@ struct KanbanBoardView: View {
             .buttonStyle(.plain)
             .help(compactCards ? "Expanded view" : "Compact view")
 
+            if KanbanBoardLayout.usesProjectLayout(for: board),
+               KanbanBoardLayout.hasArchiveColumns(in: board) {
+                Button {
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
+                        archiveExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: Spacing.xxs) {
+                        Image(systemName: archiveExpanded ? "archivebox.fill" : "archivebox")
+                        Text("Archive")
+                    }
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(archiveExpanded ? CiderColors.controlAccent : CiderColors.tertiary)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(archiveExpanded ? CiderColors.controlAccent.opacity(0.12) : CiderColors.surfaceInput)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(archiveExpanded ? "Hide archive columns" : "Reveal archive columns")
+            }
+
             Button {
                 withAnimation(reduceMotion ? .none : .spring) {
                     let name = "New Column"
@@ -213,7 +238,9 @@ struct KanbanBoardView: View {
     }
 
     private func projectLaneView(_ lane: KanbanBoardLane, board: KanbanBoard) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        let archiveColumns = archiveExpanded ? KanbanBoardLayout.archiveColumns(for: lane.role, in: board) : []
+
+        return VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Text(lane.title)
                     .font(CiderFont.labelSemibold)
@@ -241,8 +268,28 @@ struct KanbanBoardView: View {
                             height: KanbanDesign.projectColumnHeight
                         )
                     }
+
+                    if !archiveColumns.isEmpty {
+                        archiveRevealDivider
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+
+                        ForEach(archiveColumns) { column in
+                            columnView(
+                                column,
+                                board: board,
+                                width: KanbanDesign.projectColumnWidth,
+                                height: KanbanDesign.projectColumnHeight
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                    .strokeBorder(CiderColors.controlAccent.opacity(0.35), lineWidth: CiderBorder.hairlineStrokeWidth)
+                            )
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
                 }
                 .padding(.bottom, Spacing.xs)
+                .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
             }
         }
         .padding(Spacing.sm)
@@ -254,6 +301,24 @@ struct KanbanBoardView: View {
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
         )
+    }
+
+    private var archiveRevealDivider: some View {
+        VStack(spacing: Spacing.xs) {
+            Image(systemName: "chevron.right")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.controlAccent)
+
+            Text("Archive")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.tertiary)
+                .rotationEffect(.degrees(-90))
+                .fixedSize()
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: 28, height: KanbanDesign.projectColumnHeight)
+        .padding(.top, Spacing.lg)
     }
 
     private func columnView(
