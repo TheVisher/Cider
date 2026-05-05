@@ -76,4 +76,50 @@ struct KanbanCardHierarchyTests {
         #expect(board.card(id: "child-a")?.parentCardID == nil)
         #expect(board.card(id: "child-b")?.parentCardID == "other-parent")
     }
+
+    @Test("same-column children render directly under their parent")
+    func sameColumnChildrenRenderUnderParent() {
+        let column = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "standalone", title: "Standalone"),
+                KanbanCard(id: "child-a", title: "Child A", parentCardID: "parent"),
+                KanbanCard(id: "parent", title: "Parent"),
+                KanbanCard(id: "child-b", title: "Child B", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [column])
+
+        let nodes = KanbanBoardLayout.cardNodes(for: column, in: board)
+
+        #expect(nodes.map(\.card.id) == ["standalone", "parent", "child-a", "child-b"])
+        #expect(nodes.map(\.depth) == [0, 0, 1, 1])
+        #expect(nodes.map(\.sameColumnParentID) == [nil, nil, "parent", "parent"])
+    }
+
+    @Test("cross-column children stay top-level in their own column")
+    func crossColumnChildrenStayTopLevel() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent"),
+            ]
+        )
+        let testing = KanbanColumn(
+            id: "testing",
+            name: "Testing",
+            cards: [
+                KanbanCard(id: "child", title: "Child", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog, testing])
+
+        let nodes = KanbanBoardLayout.cardNodes(for: testing, in: board)
+
+        #expect(nodes.map(\.card.id) == ["child"])
+        #expect(nodes.map(\.depth) == [0])
+        #expect(nodes.map(\.sameColumnParentID) == [nil])
+    }
 }

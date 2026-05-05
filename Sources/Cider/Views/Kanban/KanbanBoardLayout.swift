@@ -24,6 +24,14 @@ struct KanbanBoardLane: Identifiable, Equatable {
     var cardCount: Int { columns.reduce(0) { $0 + $1.cards.count } }
 }
 
+struct KanbanColumnCardNode: Identifiable, Equatable {
+    let card: KanbanCard
+    let depth: Int
+    let sameColumnParentID: String?
+
+    var id: String { card.id }
+}
+
 enum KanbanBoardLayout {
     static let archiveDividerWidth: CGFloat = 28
 
@@ -63,6 +71,43 @@ enum KanbanBoardLayout {
         board.columns.filter { column in
             isArchiveColumn(column) && role(for: column) == laneRole
         }
+    }
+
+    static func cardNodes(
+        for column: KanbanColumn,
+        in board: KanbanBoard,
+        visibleCards: [KanbanCard]? = nil
+    ) -> [KanbanColumnCardNode] {
+        let cards = visibleCards ?? column.cards
+        let visibleIDs = Set(cards.map(\.id))
+        let sameColumnIDs = Set(column.cards.map(\.id))
+        let sameColumnChildren = Dictionary(grouping: cards.filter { card in
+            guard let parentID = card.parentCardID else { return false }
+            return visibleIDs.contains(parentID) && sameColumnIDs.contains(parentID)
+        }, by: { $0.parentCardID ?? "" })
+
+        var renderedIDs = Set<String>()
+        var nodes: [KanbanColumnCardNode] = []
+
+        for card in cards {
+            guard !renderedIDs.contains(card.id) else { continue }
+
+            if let parentID = card.parentCardID,
+               visibleIDs.contains(parentID),
+               sameColumnIDs.contains(parentID) {
+                continue
+            }
+
+            nodes.append(KanbanColumnCardNode(card: card, depth: 0, sameColumnParentID: nil))
+            renderedIDs.insert(card.id)
+
+            for child in sameColumnChildren[card.id] ?? [] where !renderedIDs.contains(child.id) {
+                nodes.append(KanbanColumnCardNode(card: child, depth: 1, sameColumnParentID: card.id))
+                renderedIDs.insert(child.id)
+            }
+        }
+
+        return nodes
     }
 
     static func shouldPushArchive(

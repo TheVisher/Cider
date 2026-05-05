@@ -379,26 +379,9 @@ struct KanbanBoardView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
                     let cards = filteredCards(column.cards)
-                    ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                        cardView(card, compact: compactCards)
-                            .onTapGesture {
-                                onOpenCard(boardID, card.id)
-                            }
-                            .draggable(card.id) {
-                                cardDragPreview(card)
-                            }
-                            .dropDestination(for: String.self) { cardIDs, _ in
-                                guard let cardID = cardIDs.first, cardID != card.id else { return false }
-                                withAnimation(reduceMotion ? .none : .spring) {
-                                    storage.moveCard(
-                                        boardID: boardID,
-                                        cardID: cardID,
-                                        toColumnID: column.id,
-                                        toIndex: index
-                                    )
-                                }
-                                return true
-                            }
+                    let nodes = KanbanBoardLayout.cardNodes(for: column, in: board, visibleCards: cards)
+                    ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
+                        cardNodeView(node, column: column, toIndex: index)
                     }
 
                     // Add card button or inline field — also a drop target for appending
@@ -512,6 +495,51 @@ struct KanbanBoardView: View {
     }
 
     // MARK: - Cards
+
+    private func cardNodeView(_ node: KanbanColumnCardNode, column: KanbanColumn, toIndex: Int) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            if node.depth > 0 {
+                hierarchyConnector
+            }
+
+            cardView(node.card, compact: compactCards)
+                .onTapGesture {
+                    onOpenCard(boardID, node.card.id)
+                }
+                .draggable(node.card.id) {
+                    cardDragPreview(node.card)
+                }
+                .dropDestination(for: String.self) { cardIDs, _ in
+                    guard let cardID = cardIDs.first, cardID != node.card.id else { return false }
+                    withAnimation(reduceMotion ? .none : .spring) {
+                        storage.moveCard(
+                            boardID: boardID,
+                            cardID: cardID,
+                            toColumnID: column.id,
+                            toIndex: toIndex
+                        )
+                    }
+                    return true
+                }
+        }
+        .padding(.leading, CGFloat(node.depth) * KanbanDesign.childIndent)
+    }
+
+    private var hierarchyConnector: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle()
+                .fill(CiderColors.borderSubtle)
+                .frame(width: CiderBorder.hairlineStrokeWidth, height: Spacing.md)
+
+            Rectangle()
+                .fill(CiderColors.borderSubtle)
+                .frame(width: KanbanDesign.childConnectorWidth, height: CiderBorder.hairlineStrokeWidth)
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: KanbanDesign.childConnectorWidth, height: 34, alignment: .topLeading)
+        .padding(.top, Spacing.sm)
+    }
 
     private func cardView(_ card: KanbanCard, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {

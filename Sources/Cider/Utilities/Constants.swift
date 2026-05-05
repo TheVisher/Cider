@@ -171,6 +171,10 @@ enum KanbanDesign {
     static let projectColumnWidth: CGFloat = 280
     /// Capped height for columns inside project-board swimlanes.
     static let projectColumnHeight: CGFloat = 560
+    /// Indent applied to same-column child cards in hierarchy groups.
+    static let childIndent: CGFloat = 18
+    /// Width reserved for the child-card hierarchy connector.
+    static let childConnectorWidth: CGFloat = 10
 }
 
 // MARK: - Animation Presets
