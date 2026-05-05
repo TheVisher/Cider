@@ -175,4 +175,69 @@ struct KanbanCardHierarchyTests {
         #expect(groupedRenderID == "parent|child")
         #expect(parentOnlyRenderID != groupedRenderID)
     }
+
+    @Test("collapsed parent groups hide same-column children without changing order")
+    func collapsedParentGroupsHideSameColumnChildren() {
+        let column = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent"),
+                KanbanCard(id: "child-a", title: "Child A", parentCardID: "parent"),
+                KanbanCard(id: "child-b", title: "Child B", parentCardID: "parent"),
+                KanbanCard(id: "standalone", title: "Standalone"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [column])
+
+        let groups = KanbanBoardLayout.cardGroups(
+            for: column,
+            in: board,
+            collapsedParentIDs: ["parent"]
+        )
+
+        #expect(groups.map(\.parent.card.id) == ["parent", "standalone"])
+        #expect(groups.first?.children.isEmpty == true)
+        #expect(groups.last?.parent.card.id == "standalone")
+    }
+
+    @Test("parent child summary counts children across columns")
+    func parentChildSummaryCountsChildrenAcrossColumns() {
+        let board = KanbanBoard(
+            name: "Hierarchy",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "parent", title: "Parent"),
+                        KanbanCard(id: "child-a", title: "Child A", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(id: "child-b", title: "Child B", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(id: "child-c", title: "Child C", parentCardID: "parent"),
+                    ]
+                ),
+            ]
+        )
+
+        let summary = KanbanBoardLayout.childSummary(for: "parent", in: board)
+
+        #expect(summary?.totalCount == 3)
+        #expect(summary?.doneCount == 1)
+        #expect(summary?.columnCounts.map(\.columnName) == ["Backlog", "Testing", "Done"])
+        #expect(summary?.columnCounts.map(\.count) == [1, 1, 1])
+        #expect(summary?.compactText == "3 children · 1 Backlog · 1 Testing · 1 Done · 1/3 done")
+    }
 }

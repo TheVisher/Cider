@@ -17,6 +17,7 @@ struct KanbanBoardView: View {
     @State private var compactCards = false
     @State private var archiveExpanded = false
     @State private var archiveOpenGeneration = 0
+    @State private var collapsedParentCardIDs: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -41,6 +42,9 @@ struct KanbanBoardView: View {
                 boardHeader(board)
                 Divider().background(CiderColors.separator)
                 columnsArea(board)
+            }
+            .onChange(of: boardID) { _, _ in
+                collapsedParentCardIDs.removeAll()
             }
         } else {
             emptyState
@@ -379,9 +383,14 @@ struct KanbanBoardView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
                     let cards = filteredCards(column.cards)
-                    let groups = KanbanBoardLayout.cardGroups(for: column, in: board, visibleCards: cards)
+                    let groups = KanbanBoardLayout.cardGroups(
+                        for: column,
+                        in: board,
+                        visibleCards: cards,
+                        collapsedParentIDs: collapsedParentCardIDs
+                    )
                     ForEach(groups) { group in
-                        cardGroupView(group, column: column)
+                        cardGroupView(group, column: column, board: board)
                             .id(group.renderID)
                     }
 
@@ -497,9 +506,24 @@ struct KanbanBoardView: View {
 
     // MARK: - Cards
 
-    private func cardGroupView(_ group: KanbanColumnCardGroup, column: KanbanColumn) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            interactiveCard(group.parent.card, column: column, toIndex: group.parent.visualIndex)
+    private func cardGroupView(
+        _ group: KanbanColumnCardGroup,
+        column: KanbanColumn,
+        board: KanbanBoard
+    ) -> some View {
+        let summary = KanbanBoardLayout.childSummary(for: group.parent.card.id, in: board)
+        let isCollapsed = collapsedParentCardIDs.contains(group.parent.card.id)
+        let canCollapse = group.sameColumnChildCount > 0
+
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            interactiveCard(
+                group.parent.card,
+                column: column,
+                toIndex: group.parent.visualIndex,
+                childSummary: summary,
+                canCollapse: canCollapse,
+                isCollapsed: isCollapsed
+            )
 
             if !group.children.isEmpty {
                 childRailView(group: group, column: column)
@@ -543,8 +567,21 @@ struct KanbanBoardView: View {
         .padding(.leading, KanbanDesign.childIndent)
     }
 
-    private func interactiveCard(_ card: KanbanCard, column: KanbanColumn, toIndex: Int) -> some View {
-        cardView(card, compact: compactCards)
+    private func interactiveCard(
+        _ card: KanbanCard,
+        column: KanbanColumn,
+        toIndex: Int,
+        childSummary: KanbanParentChildSummary? = nil,
+        canCollapse: Bool = false,
+        isCollapsed: Bool = false
+    ) -> some View {
+        cardView(
+            card,
+            compact: compactCards,
+            childSummary: childSummary,
+            canCollapse: canCollapse,
+            isCollapsed: isCollapsed
+        )
             .frame(maxWidth: .infinity, alignment: .leading)
             .onTapGesture {
                 onOpenCard(boardID, card.id)
@@ -566,6 +603,16 @@ struct KanbanBoardView: View {
             }
     }
 
+    private func toggleCollapse(cardID: String) {
+        withAnimation(reduceMotion ? .none : .spring(response: 0.24, dampingFraction: 0.86)) {
+            if collapsedParentCardIDs.contains(cardID) {
+                collapsedParentCardIDs.remove(cardID)
+            } else {
+                collapsedParentCardIDs.insert(cardID)
+            }
+        }
+    }
+
     private func hierarchyLineColor(for parent: KanbanCard) -> Color {
         if let color = parent.color {
             return kanbanColor(color).opacity(0.82)
@@ -574,7 +621,13 @@ struct KanbanBoardView: View {
         return CiderColors.borderSubtle.opacity(0.95)
     }
 
-    private func cardView(_ card: KanbanCard, compact: Bool = false) -> some View {
+    private func cardView(
+        _ card: KanbanCard,
+        compact: Bool = false,
+        childSummary: KanbanParentChildSummary? = nil,
+        canCollapse: Bool = false,
+        isCollapsed: Bool = false
+    ) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
             // Color accent bar
             if let color = card.color {
@@ -584,6 +637,21 @@ struct KanbanBoardView: View {
             }
 
             HStack(spacing: Spacing.xs) {
+                if canCollapse {
+                    Button {
+                        toggleCollapse(cardID: card.id)
+                    } label: {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(CiderFont.micro)
+                            .foregroundColor(CiderColors.tertiary)
+                            .frame(width: 12, height: 12)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isCollapsed ? "Expand child cards" : "Collapse child cards")
+                    .accessibilityHint("Toggles visible child cards in this column.")
+                }
+
                 Text(card.title)
                     .font(compact ? CiderFont.caption : CiderFont.label)
                     .foregroundColor(CiderColors.primary)
@@ -595,6 +663,13 @@ struct KanbanBoardView: View {
                         priorityBadge(priority)
                     }
                 }
+            }
+
+            if let childSummary {
+                Text(childSummary.compactText)
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
             }
 
             if !compact {

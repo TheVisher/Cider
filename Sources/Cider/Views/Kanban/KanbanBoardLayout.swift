@@ -36,10 +36,34 @@ struct KanbanColumnCardNode: Identifiable, Equatable {
 struct KanbanColumnCardGroup: Identifiable, Equatable {
     let parent: KanbanColumnCardNode
     let children: [KanbanColumnCardNode]
+    let sameColumnChildCount: Int
 
     var id: String { parent.id }
     var renderID: String {
         ([parent.card.id] + children.map(\.card.id)).joined(separator: "|")
+    }
+}
+
+struct KanbanColumnChildCount: Equatable {
+    let columnID: String
+    let columnName: String
+    let count: Int
+}
+
+struct KanbanParentChildSummary: Equatable {
+    let totalCount: Int
+    let doneCount: Int
+    let columnCounts: [KanbanColumnChildCount]
+
+    var compactText: String {
+        var pieces = [
+            "\(totalCount) \(totalCount == 1 ? "child" : "children")"
+        ]
+        pieces.append(contentsOf: columnCounts.map { "\($0.count) \($0.columnName)" })
+        if doneCount > 0 {
+            pieces.append("\(doneCount)/\(totalCount) done")
+        }
+        return pieces.joined(separator: " · ")
     }
 }
 
@@ -134,7 +158,8 @@ enum KanbanBoardLayout {
     static func cardGroups(
         for column: KanbanColumn,
         in board: KanbanBoard,
-        visibleCards: [KanbanCard]? = nil
+        visibleCards: [KanbanCard]? = nil,
+        collapsedParentIDs: Set<String> = []
     ) -> [KanbanColumnCardGroup] {
         let nodes = cardNodes(for: column, in: board, visibleCards: visibleCards)
         var groups: [KanbanColumnCardGroup] = []
@@ -151,11 +176,45 @@ enum KanbanBoardLayout {
                 nextIndex += 1
             }
 
-            groups.append(KanbanColumnCardGroup(parent: parent, children: children))
+            groups.append(KanbanColumnCardGroup(
+                parent: parent,
+                children: collapsedParentIDs.contains(parent.card.id) ? [] : children,
+                sameColumnChildCount: children.count
+            ))
             index = nextIndex
         }
 
         return groups
+    }
+
+    static func childSummary(for parentID: String, in board: KanbanBoard) -> KanbanParentChildSummary? {
+        var totalCount = 0
+        var doneCount = 0
+        var columnCounts: [KanbanColumnChildCount] = []
+
+        for column in board.columns {
+            let children = column.cards.filter { $0.parentCardID == parentID }
+            guard !children.isEmpty else { continue }
+
+            totalCount += children.count
+            if column.isDoneColumn {
+                doneCount += children.count
+            } else {
+                doneCount += children.filter { $0.completed != nil }.count
+            }
+            columnCounts.append(KanbanColumnChildCount(
+                columnID: column.id,
+                columnName: column.name,
+                count: children.count
+            ))
+        }
+
+        guard totalCount > 0 else { return nil }
+        return KanbanParentChildSummary(
+            totalCount: totalCount,
+            doneCount: doneCount,
+            columnCounts: columnCounts
+        )
     }
 
     static func shouldPushArchive(
