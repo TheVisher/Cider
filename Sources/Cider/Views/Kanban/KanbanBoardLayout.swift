@@ -62,6 +62,13 @@ enum KanbanBoardLayout {
         }
     }
 
+    static func archiveHandoffColumn(for laneRole: KanbanLaneRole, in board: KanbanBoard) -> KanbanColumn? {
+        lanes(for: board)
+            .first { $0.role == laneRole }?
+            .columns
+            .last
+    }
+
     static func role(for column: KanbanColumn) -> KanbanLaneRole {
         let normalized = normalize("\(column.id) \(column.name)")
 

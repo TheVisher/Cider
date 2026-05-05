@@ -239,6 +239,10 @@ struct KanbanBoardView: View {
 
     private func projectLaneView(_ lane: KanbanBoardLane, board: KanbanBoard) -> some View {
         let archiveColumns = archiveExpanded ? KanbanBoardLayout.archiveColumns(for: lane.role, in: board) : []
+        let handoffColumn = archiveColumns.isEmpty ? nil : KanbanBoardLayout.archiveHandoffColumn(for: lane.role, in: board)
+        let scrollingColumns = lane.columns.filter { column in
+            column.id != handoffColumn?.id
+        }
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
@@ -261,7 +265,7 @@ struct KanbanBoardView: View {
             HStack(alignment: .top, spacing: Spacing.md) {
                 ScrollView(.horizontal, showsIndicators: true) {
                     HStack(alignment: .top, spacing: Spacing.md) {
-                        ForEach(lane.columns) { column in
+                        ForEach(scrollingColumns) { column in
                             columnView(
                                 column,
                                 board: board,
@@ -274,8 +278,8 @@ struct KanbanBoardView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                if !archiveColumns.isEmpty {
-                    projectArchiveReveal(columns: archiveColumns, board: board)
+                if let handoffColumn, !archiveColumns.isEmpty {
+                    projectArchiveReveal(handoffColumn: handoffColumn, archiveColumns: archiveColumns, board: board)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -292,11 +296,22 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func projectArchiveReveal(columns: [KanbanColumn], board: KanbanBoard) -> some View {
+    private func projectArchiveReveal(
+        handoffColumn: KanbanColumn,
+        archiveColumns: [KanbanColumn],
+        board: KanbanBoard
+    ) -> some View {
         HStack(alignment: .top, spacing: Spacing.md) {
+            columnView(
+                handoffColumn,
+                board: board,
+                width: KanbanDesign.projectColumnWidth,
+                height: KanbanDesign.projectColumnHeight
+            )
+
             archiveRevealDivider
 
-            ForEach(columns) { column in
+            ForEach(archiveColumns) { column in
                 columnView(
                     column,
                     board: board,

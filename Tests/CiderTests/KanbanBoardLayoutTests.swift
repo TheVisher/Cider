@@ -80,6 +80,8 @@ struct KanbanBoardLayoutTests {
         #expect(lanes.first(where: { $0.role == .qa })?.columns.map(\.id) == ["needs_fix", "verified"])
         #expect(KanbanBoardLayout.archiveColumns(for: .workflow, in: board).map(\.id) == ["workflow_archive"])
         #expect(KanbanBoardLayout.archiveColumns(for: .qa, in: board).map(\.id) == ["qa_archive"])
+        #expect(KanbanBoardLayout.archiveHandoffColumn(for: .workflow, in: board)?.id == "done")
+        #expect(KanbanBoardLayout.archiveHandoffColumn(for: .qa, in: board)?.id == "verified")
     }
 
     @Test("small generic boards keep the existing flat column layout")
