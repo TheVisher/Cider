@@ -39,19 +39,27 @@ enum KanbanBoardLayout {
 
     static func lanes(for board: KanbanBoard) -> [KanbanBoardLane] {
         let activeColumns = board.columns.filter { !isArchiveColumn($0) }
-        guard !activeColumns.isEmpty else {
+        let workflowColumns = activeColumns.filter { role(for: $0) == .workflow }
+        let qaColumns = activeColumns.filter { role(for: $0) == .qa }
+
+        guard !workflowColumns.isEmpty || !qaColumns.isEmpty else {
             return []
         }
 
         return [
-            KanbanBoardLane(role: .workflow, columns: activeColumns)
-        ]
+            KanbanBoardLane(role: .workflow, columns: workflowColumns),
+            KanbanBoardLane(role: .qa, columns: qaColumns)
+        ].filter { !$0.columns.isEmpty }
     }
 
     static func role(for column: KanbanColumn) -> KanbanLaneRole {
         let normalized = normalize("\(column.id) \(column.name)")
 
-        if containsAny(normalized, ["qa", "quality", "bug", "bugs", "fix", "fixed", "fixes", "investigating", "verified"]) {
+        if containsAny(normalized, ["testing"]) {
+            return .workflow
+        }
+
+        if containsAny(normalized, ["qa", "quality", "bug", "bugs", "fix", "fixed", "fixes", "investigating", "ready_to_test", "verified"]) {
             return .qa
         }
 
