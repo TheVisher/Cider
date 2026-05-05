@@ -508,32 +508,34 @@ struct KanbanBoardView: View {
 
     private func childRailView(group: KanbanColumnCardGroup, column: KanbanColumn) -> some View {
         let lineColor = hierarchyLineColor(for: group.parent.card)
+        let children = group.children
 
         return VStack(spacing: Spacing.sm) {
-            ForEach(group.children) { child in
-                childBranchRow(child, column: column, lineColor: lineColor)
+            ForEach(Array(children.enumerated()), id: \.element.id) { index, child in
+                childBranchRow(
+                    child,
+                    column: column,
+                    lineColor: lineColor,
+                    isFirst: index == 0,
+                    isLast: index == children.count - 1
+                )
             }
-        }
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(lineColor)
-                .frame(width: CiderBorder.hairlineStrokeWidth)
-                .padding(.top, -Spacing.xs)
-                .padding(.bottom, Spacing.xxs)
-                .offset(x: KanbanDesign.childIndent)
         }
     }
 
     private func childBranchRow(
         _ node: KanbanColumnCardNode,
         column: KanbanColumn,
-        lineColor: Color
+        lineColor: Color,
+        isFirst: Bool,
+        isLast: Bool
     ) -> some View {
         HStack(alignment: .top, spacing: Spacing.xs) {
-            Rectangle()
-                .fill(lineColor)
-                .frame(width: KanbanDesign.childConnectorWidth, height: CiderBorder.hairlineStrokeWidth)
-                .padding(.top, KanbanDesign.childConnectorTopInset)
+            KanbanChildConnector(
+                lineColor: lineColor,
+                isFirst: isFirst,
+                isLast: isLast
+            )
 
             interactiveCard(node.card, column: column, toIndex: node.visualIndex)
         }
@@ -764,5 +766,32 @@ struct KanbanBoardView: View {
                 .foregroundColor(CiderColors.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct KanbanChildConnector: View {
+    let lineColor: Color
+    let isFirst: Bool
+    let isLast: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                let startY = isFirst ? -Spacing.xs : -Spacing.sm
+                let endY = isLast
+                    ? KanbanDesign.childConnectorTopInset
+                    : proxy.size.height + Spacing.sm
+
+                path.move(to: CGPoint(x: 0, y: startY))
+                path.addLine(to: CGPoint(x: 0, y: endY))
+                path.move(to: CGPoint(x: 0, y: KanbanDesign.childConnectorTopInset))
+                path.addLine(to: CGPoint(
+                    x: KanbanDesign.childConnectorWidth,
+                    y: KanbanDesign.childConnectorTopInset
+                ))
+            }
+            .stroke(lineColor, lineWidth: CiderBorder.hairlineStrokeWidth)
+        }
+        .frame(width: KanbanDesign.childConnectorWidth)
     }
 }
