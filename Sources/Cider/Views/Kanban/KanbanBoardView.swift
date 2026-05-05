@@ -382,6 +382,7 @@ struct KanbanBoardView: View {
                     let groups = KanbanBoardLayout.cardGroups(for: column, in: board, visibleCards: cards)
                     ForEach(groups) { group in
                         cardGroupView(group, column: column)
+                            .id(group.renderID)
                     }
 
                     // Add card button or inline field — also a drop target for appending

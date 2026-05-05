@@ -145,4 +145,34 @@ struct KanbanCardHierarchyTests {
         #expect(groups.first?.children.map(\.visualIndex) == [1, 2])
         #expect(groups.last?.children.isEmpty == true)
     }
+
+    @Test("group render id changes when same-column child membership changes")
+    func groupRenderIDChangesWhenChildMembershipChanges() {
+        let parent = KanbanCard(id: "parent", title: "Parent")
+        let child = KanbanCard(id: "child", title: "Child", parentCardID: "parent")
+
+        let parentOnlyColumn = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [parent]
+        )
+        let groupedColumn = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [parent, child]
+        )
+
+        let parentOnlyRenderID = KanbanBoardLayout
+            .cardGroups(for: parentOnlyColumn, in: KanbanBoard(name: "Hierarchy", columns: [parentOnlyColumn]))
+            .first?
+            .renderID
+        let groupedRenderID = KanbanBoardLayout
+            .cardGroups(for: groupedColumn, in: KanbanBoard(name: "Hierarchy", columns: [groupedColumn]))
+            .first?
+            .renderID
+
+        #expect(parentOnlyRenderID == "parent")
+        #expect(groupedRenderID == "parent|child")
+        #expect(parentOnlyRenderID != groupedRenderID)
+    }
 }

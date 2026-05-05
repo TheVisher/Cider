@@ -38,6 +38,9 @@ struct KanbanColumnCardGroup: Identifiable, Equatable {
     let children: [KanbanColumnCardNode]
 
     var id: String { parent.id }
+    var renderID: String {
+        ([parent.card.id] + children.map(\.card.id)).joined(separator: "|")
+    }
 }
 
 enum KanbanBoardLayout {
