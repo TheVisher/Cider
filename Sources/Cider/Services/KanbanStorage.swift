@@ -319,8 +319,11 @@ final class KanbanStorage: ObservableObject {
             guard board.columns.contains(where: { $0.id == toColumnID }) else { return }
 
             guard let rootCard = board.card(id: cardID) else { return }
+            let sourceColumnID = board.columnID(containing: cardID)
             let cardsToMove = includeDescendants
-                ? [rootCard] + board.descendantCards(of: cardID)
+                ? [rootCard] + board.descendantCards(of: cardID).filter { descendant in
+                    board.columnID(containing: descendant.id) == sourceColumnID
+                }
                 : [rootCard]
             let movingIDs = Set(cardsToMove.map(\.id))
 

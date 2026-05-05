@@ -3,9 +3,9 @@ import Testing
 @testable import Cider
 
 struct KanbanBoardFileLockingTests {
-    @Test("moving parent group to queued moves descendants together")
+    @Test("moving parent group to queued moves source-column descendants only")
     @MainActor
-    func movingParentGroupToQueuedMovesDescendantsTogether() throws {
+    func movingParentGroupToQueuedMovesSourceColumnDescendantsOnly() throws {
         let vault = try Self.makeTemporaryVault()
         defer {
             StoragePaths.vaultOverride = nil
@@ -34,12 +34,12 @@ struct KanbanBoardFileLockingTests {
         let refreshed = try #require(KanbanStorage().boards.first { $0.id == board.id })
         let queuedColumn = try #require(refreshed.columns.first { $0.id == queued.id })
 
-        #expect(queuedColumn.cards.map(\.id) == [parent.id, childA.id, grandchild.id, childB.id])
+        #expect(queuedColumn.cards.map(\.id) == [parent.id, childA.id, grandchild.id])
         #expect(queuedColumn.cards.first { $0.id == childA.id }?.parentCardID == parent.id)
         #expect(queuedColumn.cards.first { $0.id == grandchild.id }?.parentCardID == childA.id)
-        #expect(queuedColumn.cards.first { $0.id == childB.id }?.parentCardID == parent.id)
         #expect(refreshed.columns.first { $0.id == "backlog" }?.cards.isEmpty == true)
-        #expect(refreshed.columns.first { $0.id == "in_progress" }?.cards.isEmpty == true)
+        #expect(refreshed.columns.first { $0.id == "in_progress" }?.cards.map(\.id) == [childB.id])
+        #expect(refreshed.columns.first { $0.id == "in_progress" }?.cards.first?.parentCardID == parent.id)
     }
 
     @Test("moving individual child keeps parent and leaves siblings in place")

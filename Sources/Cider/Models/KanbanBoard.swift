@@ -183,6 +183,12 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
         allCards.first { $0.id == cardID }
     }
 
+    func columnID(containing cardID: String) -> String? {
+        columns.first { column in
+            column.cards.contains { $0.id == cardID }
+        }?.id
+    }
+
     func parentCard(for cardID: String) -> KanbanCard? {
         guard let parentID = card(id: cardID)?.parentCardID else { return nil }
         return card(id: parentID)
