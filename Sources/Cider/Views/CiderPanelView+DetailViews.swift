@@ -254,6 +254,12 @@ extension CiderPanelView {
                         onExportMarkdown: {
                             exportKanbanCardMarkdown(board: detail.board, column: detail.column, card: detail.card)
                         },
+                        onOpenKanbanCard: { cardID in
+                            openKanbanCardDetail(boardID: detail.board.id, cardID: cardID)
+                        },
+                        onAddChildCard: { title in
+                            addChildKanbanCard(title: title)
+                        },
                         onOpenLinkedRef: openLinkedRef
                     )
                 }

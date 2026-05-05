@@ -21,6 +21,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var agent: String?
     var tags: [String]
     var linkedEntities: [LibraryEntityRef]
+    var parentCardID: String?
     var created: Date
     var completed: Date?
 
@@ -33,6 +34,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         agent: String? = nil,
         tags: [String] = [],
         linkedEntities: [LibraryEntityRef] = [],
+        parentCardID: String? = nil,
         created: Date = Date(),
         completed: Date? = nil
     ) {
@@ -44,13 +46,14 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.agent = agent
         self.tags = tags
         self.linkedEntities = linkedEntities
+        self.parentCardID = parentCardID
         self.created = created
         self.completed = completed
     }
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, color, priority, agent, tags, linkedEntities, created, completed
+        case id, title, notes, color, priority, agent, tags, linkedEntities, parentCardID, created, completed
     }
 
     init(from decoder: Decoder) throws {
@@ -63,6 +66,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         tags = (try c.decodeIfPresent([String].self, forKey: .tags)) ?? []
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
+        parentCardID = try c.decodeIfPresent(String.self, forKey: .parentCardID)
         created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
     }
@@ -77,6 +81,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         try c.encodeIfPresent(agent, forKey: .agent)
         if !tags.isEmpty { try c.encode(tags, forKey: .tags) }
         if !linkedEntities.isEmpty { try c.encode(linkedEntities, forKey: .linkedEntities) }
+        try c.encodeIfPresent(parentCardID, forKey: .parentCardID)
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
     }
@@ -168,6 +173,47 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
         try c.encode(name, forKey: .name)
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encode(columns, forKey: .columns)
+    }
+
+    var allCards: [KanbanCard] {
+        columns.flatMap(\.cards)
+    }
+
+    func card(id cardID: String) -> KanbanCard? {
+        allCards.first { $0.id == cardID }
+    }
+
+    func parentCard(for cardID: String) -> KanbanCard? {
+        guard let parentID = card(id: cardID)?.parentCardID else { return nil }
+        return card(id: parentID)
+    }
+
+    func childCards(of parentID: String) -> [KanbanCard] {
+        allCards.filter { $0.parentCardID == parentID }
+    }
+
+    func canAssignParent(cardID: String, parentCardID: String?) -> Bool {
+        guard card(id: cardID) != nil else { return false }
+        guard let parentCardID else { return true }
+        guard cardID != parentCardID, card(id: parentCardID) != nil else { return false }
+
+        var visited = Set<String>()
+        var nextParentID: String? = parentCardID
+        while let current = nextParentID {
+            if current == cardID { return false }
+            if !visited.insert(current).inserted { return false }
+            nextParentID = card(id: current)?.parentCardID
+        }
+        return true
+    }
+
+    mutating func clearParentReferences(to parentID: String) {
+        for columnIndex in columns.indices {
+            for cardIndex in columns[columnIndex].cards.indices
+            where columns[columnIndex].cards[cardIndex].parentCardID == parentID {
+                columns[columnIndex].cards[cardIndex].parentCardID = nil
+            }
+        }
     }
 }
 

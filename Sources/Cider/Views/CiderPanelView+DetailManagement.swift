@@ -571,6 +571,30 @@ extension CiderPanelView {
         selectedKanbanCardID = updated.id
     }
 
+    func addChildKanbanCard(title: String) {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return }
+        guard let boardID = selectedKanbanBoardID, let parentID = selectedKanbanCardID else { return }
+
+        saveKanbanCardDraft()
+
+        guard let parentDetail = KanbanStorage.shared.findCard(id: parentID),
+              parentDetail.board.id == boardID else { return }
+
+        let targetColumnID = parentDetail.board.columns.first(where: {
+            $0.name.localizedCaseInsensitiveCompare("Backlog") == .orderedSame
+        })?.id ?? parentDetail.column.id
+
+        guard let child = KanbanStorage.shared.addCard(
+            boardID: boardID,
+            columnID: targetColumnID,
+            title: trimmedTitle,
+            parentCardID: parentID
+        ) else { return }
+
+        openKanbanCardDetail(boardID: boardID, cardID: child.id)
+    }
+
     func moveSelectedKanbanCard(to columnID: String) {
         guard let detail = selectedKanbanDetail else { return }
         saveKanbanCardDraft()

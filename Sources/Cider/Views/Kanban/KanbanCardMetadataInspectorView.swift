@@ -9,13 +9,18 @@ struct KanbanCardMetadataInspectorView: View {
     var onMove: (String) -> Void
     var onDelete: () -> Void
     var onExportMarkdown: () -> Void
+    var onOpenKanbanCard: (String) -> Void
+    var onAddChildCard: (String) -> Void
     var onOpenLinkedRef: ((LibraryEntityRef) -> Void)?
 
     @State private var isBoardExpanded = true
     @State private var isPlanningExpanded = true
+    @State private var isHierarchyExpanded = true
     @State private var isLinkedExpanded = true
     @State private var isActionsExpanded = true
     @State private var isDatesExpanded = true
+    @State private var isAddingChild = false
+    @State private var childTitle = ""
 
     @ObservedObject private var bookmarks = VaultBookmarkService.shared
     @ObservedObject private var notes = NotesStorage.shared
@@ -33,6 +38,8 @@ struct KanbanCardMetadataInspectorView: View {
         onMove: @escaping (String) -> Void,
         onDelete: @escaping () -> Void,
         onExportMarkdown: @escaping () -> Void,
+        onOpenKanbanCard: @escaping (String) -> Void,
+        onAddChildCard: @escaping (String) -> Void,
         onOpenLinkedRef: ((LibraryEntityRef) -> Void)? = nil
     ) {
         self.board = board
@@ -43,6 +50,8 @@ struct KanbanCardMetadataInspectorView: View {
         self.onMove = onMove
         self.onDelete = onDelete
         self.onExportMarkdown = onExportMarkdown
+        self.onOpenKanbanCard = onOpenKanbanCard
+        self.onAddChildCard = onAddChildCard
         self.onOpenLinkedRef = onOpenLinkedRef
     }
 
@@ -104,6 +113,10 @@ struct KanbanCardMetadataInspectorView: View {
                     }
                 }
             }
+
+            ItemMetadataDivider()
+
+            kanbanHierarchySection
 
             ItemMetadataDivider()
 
@@ -173,6 +186,160 @@ struct KanbanCardMetadataInspectorView: View {
         }
 
         return rows
+    }
+
+    private var kanbanHierarchySection: some View {
+        ItemMetadataSectionView(title: "Hierarchy", isExpanded: $isHierarchyExpanded) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("Parent")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+
+                    if let parentCardID = draft.parentCardID,
+                       let parent = board.card(id: parentCardID) {
+                        hierarchyCardRow(
+                            title: parent.title,
+                            subtitle: "Parent card",
+                            systemImage: "arrow.up.left.square",
+                            action: { onOpenKanbanCard(parent.id) },
+                            trailing: {
+                                Button {
+                                    draft.parentCardID = nil
+                                    onSave()
+                                } label: {
+                                    Image(systemName: "xmark.circle")
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Clear parent")
+                            }
+                        )
+                    } else {
+                        ItemMetadataEmptyText(text: "No parent card.")
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack {
+                        Text("Children")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+
+                        Spacer()
+
+                        Button {
+                            isAddingChild = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(CiderFont.captionSemibold)
+                                .foregroundColor(CiderColors.controlAccent)
+                                .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Add child card")
+                    }
+
+                    if isAddingChild {
+                        addChildCardField
+                    }
+
+                    let children = board.childCards(of: card.id)
+                    if children.isEmpty {
+                        ItemMetadataEmptyText(text: "No child cards yet.")
+                    } else {
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            ForEach(children) { child in
+                                hierarchyCardRow(
+                                    title: child.title,
+                                    subtitle: "Child card",
+                                    systemImage: "arrow.down.right.square",
+                                    action: { onOpenKanbanCard(child.id) },
+                                    trailing: { EmptyView() }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var addChildCardField: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            TextField("Child card title", text: $childTitle)
+                .textFieldStyle(.plain)
+                .font(CiderFont.caption)
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceSubtle)
+                )
+                .onSubmit { submitChildCard() }
+
+            HStack(spacing: Spacing.sm) {
+                Button("Create") {
+                    submitChildCard()
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.controlAccent)
+
+                Button("Cancel") {
+                    childTitle = ""
+                    isAddingChild = false
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+            }
+        }
+    }
+
+    private func hierarchyCardRow<Trailing: View>(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        action: @escaping () -> Void,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            Button(action: action) {
+                HStack(alignment: .top, spacing: Spacing.xs) {
+                    Image(systemName: systemImage)
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: Spacing.md)
+
+                    VStack(alignment: .leading, spacing: Spacing.hairline) {
+                        Text(title)
+                            .font(CiderFont.bodyMedium)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(2)
+
+                        Text(subtitle)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            trailing()
+        }
+    }
+
+    private func submitChildCard() {
+        let trimmed = childTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onAddChildCard(trimmed)
+        childTitle = ""
+        isAddingChild = false
     }
 
     private var kanbanLinkedSection: some View {

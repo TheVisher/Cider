@@ -175,9 +175,10 @@ final class KanbanStorage: ObservableObject {
     // MARK: - Card Operations
 
     @discardableResult
-    func addCard(boardID: String, columnID: String, title: String) -> KanbanCard? {
-        guard boards.contains(where: { $0.id == boardID }) else { return nil }
-        let card = KanbanCard(title: title)
+    func addCard(boardID: String, columnID: String, title: String, parentCardID: String? = nil) -> KanbanCard? {
+        guard let board = boards.first(where: { $0.id == boardID }) else { return nil }
+        guard parentCardID == nil || board.card(id: parentCardID ?? "") != nil else { return nil }
+        let card = KanbanCard(title: title, parentCardID: parentCardID)
         mutate(boardID: boardID) { board in
             guard let colIdx = board.columns.firstIndex(where: { $0.id == columnID }) else { return }
             board.columns[colIdx].cards.append(card)
@@ -187,6 +188,7 @@ final class KanbanStorage: ObservableObject {
 
     func updateCard(boardID: String, card: KanbanCard) {
         mutate(boardID: boardID) { board in
+            guard board.canAssignParent(cardID: card.id, parentCardID: card.parentCardID) else { return }
             for colIdx in board.columns.indices {
                 if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == card.id }) {
                     board.columns[colIdx].cards[cardIdx] = card
@@ -201,7 +203,24 @@ final class KanbanStorage: ObservableObject {
             for colIdx in board.columns.indices {
                 board.columns[colIdx].cards.removeAll { $0.id == cardID }
             }
+            board.clearParentReferences(to: cardID)
         }
+    }
+
+    @discardableResult
+    func setCardParent(boardID: String, cardID: String, parentCardID: String?) -> Bool {
+        var didUpdate = false
+        mutate(boardID: boardID) { board in
+            guard board.canAssignParent(cardID: cardID, parentCardID: parentCardID) else { return }
+            for colIdx in board.columns.indices {
+                if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
+                    board.columns[colIdx].cards[cardIdx].parentCardID = parentCardID
+                    didUpdate = true
+                    return
+                }
+            }
+        }
+        return didUpdate
     }
 
     func moveCard(boardID: String, cardID: String, toColumnID: String, toIndex: Int) {

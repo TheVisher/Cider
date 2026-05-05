@@ -32,4 +32,33 @@ struct KanbanCardCodableTests {
 
         #expect(decoded.linkedEntities.isEmpty)
     }
+
+    @Test("card parent id round trips through codable storage")
+    func parentCardIDRoundTripsThroughCodableStorage() throws {
+        let card = KanbanCard(
+            id: "child-card",
+            title: "Child",
+            parentCardID: "parent-card"
+        )
+
+        let data = try JSONEncoder().encode(card)
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
+
+        #expect(decoded.parentCardID == "parent-card")
+    }
+
+    @Test("legacy cards without parent id decode with nil parent")
+    func legacyCardsWithoutParentIDDecodeWithNilParent() throws {
+        let json = """
+        {
+          "id": "legacy-card",
+          "title": "Legacy Kanban Card",
+          "created": "2026-05-02"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+
+        #expect(decoded.parentCardID == nil)
+    }
 }

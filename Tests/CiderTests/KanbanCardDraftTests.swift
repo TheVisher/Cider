@@ -84,4 +84,21 @@ struct KanbanCardDraftTests {
         #expect(updated.notes == "Keep the implementation notes on the card.")
         #expect(updated.linkedEntities == [existingRef, addedRef])
     }
+
+    @Test("draft preserves parent card relationship")
+    func draftPreservesParentCardRelationship() {
+        let card = KanbanCard(
+            id: "child-card",
+            title: "Child Card",
+            parentCardID: "parent-card"
+        )
+
+        var draft = KanbanCardDraft(card: card)
+        draft.notes = "Edited child notes"
+
+        let updated = draft.updatedCard(from: card)
+
+        #expect(updated.parentCardID == "parent-card")
+        #expect(updated.notes == "Edited child notes")
+    }
 }

@@ -2943,9 +2943,46 @@ struct CiderCLI {
                 print("Error: Board '\(name)' not found")
             }
 
+        case "children":
+            guard let boardRef = args.first,
+                  let cardID = parseFlag("--card", from: args) else {
+                print("Error: Usage: cider-cli board children <board> --card <id>")
+                return
+            }
+            guard let board = findBoard(boardRef, in: storage) else { return }
+            guard let parent = board.card(id: cardID) else {
+                print("Error: Card '\(cardID)' not found in board '\(board.name)'")
+                return
+            }
+            let children = board.childCards(of: parent.id)
+            if jsonOutput {
+                outputJSON([
+                    "board": board.name,
+                    "card": parent.id,
+                    "children": children.map { child in
+                        var dict: [String: Any] = [
+                            "id": child.id,
+                            "title": child.title,
+                            "created": ISO8601DateFormatter().string(from: child.created),
+                            "parentCardID": parent.id,
+                        ]
+                        if let priority = child.priority { dict["priority"] = priority.rawValue }
+                        if let completed = child.completed { dict["completed"] = ISO8601DateFormatter().string(from: completed) }
+                        return dict
+                    },
+                ])
+            } else if children.isEmpty {
+                print("No child cards for: \(parent.title) [\(parent.id)]")
+            } else {
+                print("Child cards for: \(parent.title) [\(parent.id)]")
+                for child in children {
+                    print("  [\(child.id)] \(child.title)")
+                }
+            }
+
         case "add-card":
             guard let boardName = args.first else {
-                print("Error: Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high]")
+                print("Error: Usage: cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>]")
                 return
             }
             guard let colName = parseFlag("--column", from: args),
@@ -2955,7 +2992,12 @@ struct CiderCLI {
             }
             if let board = storage.boards.first(where: { $0.name.localizedCaseInsensitiveCompare(boardName) == .orderedSame || $0.id == boardName }) {
                 if let col = board.columns.first(where: { $0.name.localizedCaseInsensitiveCompare(colName) == .orderedSame || $0.id == colName }) {
-                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title) {
+                    let parentCardID = parseFlag("--parent", from: args)
+                    if let parentCardID, board.card(id: parentCardID) == nil {
+                        print("Error: Parent card '\(parentCardID)' not found in board '\(board.name)'")
+                        return
+                    }
+                    if let card = storage.addCard(boardID: board.id, columnID: col.id, title: title, parentCardID: parentCardID) {
                         // Apply optional notes and priority via updateCard
                         var updated = card
                         if let notes = parseFlag("--notes", from: args) { updated.notes = notes }
@@ -2982,7 +3024,7 @@ struct CiderCLI {
         case "update-card":
             guard let boardRef = args.first,
                   let cardID = parseFlag("--card", from: args) else {
-                print("Error: Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]")
+                print("Error: Usage: cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes] [--priority low|medium|high|none] [--agent <name>] [--clear-agent] [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none] [--parent <card-id>] [--clear-parent]")
                 return
             }
             guard let board = findBoard(boardRef, in: storage) else { return }
@@ -3077,6 +3119,22 @@ struct CiderCLI {
                 }
                 if nextColor != card.color {
                     card.color = nextColor
+                    changed = true
+                }
+            }
+
+            if args.contains("--clear-parent") {
+                if card.parentCardID != nil {
+                    card.parentCardID = nil
+                    changed = true
+                }
+            } else if let parentCardID = parseFlag("--parent", from: args) {
+                guard board.canAssignParent(cardID: card.id, parentCardID: parentCardID) else {
+                    print("Error: Cannot assign parent '\(parentCardID)' to card '\(card.id)'. Parent must exist in the same board and cannot create a cycle.")
+                    return
+                }
+                if card.parentCardID != parentCardID {
+                    card.parentCardID = parentCardID
                     changed = true
                 }
             }
@@ -3187,7 +3245,7 @@ struct CiderCLI {
 
         default:
             print("Unknown board command: \(subcommand ?? "nil")")
-            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, add-column, rename-column, delete-column")
+            print("Commands: list, show, create, rename, delete, add-card, update-card, move-card, delete-card, children, add-column, rename-column, delete-column")
         }
     }
 
@@ -5540,12 +5598,14 @@ struct CiderCLI {
           cider-cli board create <name>
           cider-cli board rename <name|id> --to <new-name>
           cider-cli board delete <name|id>
-          cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high]
+          cider-cli board add-card <board> --column <col> --title <title> [--notes <text>] [--priority low|medium|high] [--parent <card-id>]
           cider-cli board update-card <board> --card <id> [--title <title>] [--notes <text>] [--clear-notes]
                                          [--priority low|medium|high|none] [--agent <name>] [--clear-agent]
                                          [--tags <csv>] [--clear-tags] [--color blue|green|orange|red|purple|none]
+                                         [--parent <card-id>] [--clear-parent]
           cider-cli board move-card <board> --card <id> --to <column>
           cider-cli board delete-card <board> --card <id>
+          cider-cli board children <board> --card <id> [--json]
           cider-cli board add-column <board> --name <col-name> [--done]
           cider-cli board rename-column <board> --column <col> --to <new-name>
           cider-cli board delete-column <board> --column <col>

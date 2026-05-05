@@ -22,6 +22,7 @@ For Cider development work, agents should use the boards in `~/CiderVault/.cider
 - For bugs, use the bugs board and move fixed items to `fixed`.
 - Put implementation notes, test evidence, blockers, and follow-up context on the card instead of scattering one-off Markdown files unless a full spec/doc is genuinely needed.
 - Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done.
+- When a Kanban card grows into multiple deliverables, create child cards linked to the parent instead of expanding one forever-card. Parent cards should summarize direction; child cards should carry scoped implementation notes, test evidence, commits, and status.
 - Keep card text useful for future handoff to Hermes, Codex, or another agent.
 
 Active board files:

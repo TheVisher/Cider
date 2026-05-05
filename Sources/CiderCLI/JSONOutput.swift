@@ -202,6 +202,7 @@ func outputJSON(_ value: Any) {
                     if let priority = card.priority { d["priority"] = priority.rawValue }
                     if let agent = card.agent { d["agent"] = agent }
                     if !card.tags.isEmpty { d["tags"] = card.tags }
+                    if let parentCardID = card.parentCardID { d["parentCardID"] = parentCardID }
                     if let completed = card.completed { d["completed"] = ISO8601DateFormatter().string(from: completed) }
                     return d
                 },
