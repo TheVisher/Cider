@@ -16,6 +16,7 @@ struct KanbanBoardView: View {
     @State private var searchText = ""
     @State private var compactCards = false
     @State private var archiveExpanded = false
+    @State private var laneScrollTargets: [KanbanLaneRole: String] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -239,10 +240,6 @@ struct KanbanBoardView: View {
 
     private func projectLaneView(_ lane: KanbanBoardLane, board: KanbanBoard) -> some View {
         let archiveColumns = archiveExpanded ? KanbanBoardLayout.archiveColumns(for: lane.role, in: board) : []
-        let handoffColumn = archiveColumns.isEmpty ? nil : KanbanBoardLayout.archiveHandoffColumn(for: lane.role, in: board)
-        let scrollingColumns = lane.columns.filter { column in
-            column.id != handoffColumn?.id
-        }
 
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
@@ -265,25 +262,42 @@ struct KanbanBoardView: View {
             HStack(alignment: .top, spacing: Spacing.md) {
                 ScrollView(.horizontal, showsIndicators: true) {
                     HStack(alignment: .top, spacing: Spacing.md) {
-                        ForEach(scrollingColumns) { column in
+                        ForEach(lane.columns) { column in
                             columnView(
                                 column,
                                 board: board,
                                 width: KanbanDesign.projectColumnWidth,
                                 height: KanbanDesign.projectColumnHeight
                             )
+                            .id(column.id)
                         }
                     }
                     .padding(.bottom, Spacing.xs)
+                    .scrollTargetLayout()
                 }
                 .frame(maxWidth: .infinity)
+                .scrollPosition(id: laneScrollTargetBinding(for: lane.role), anchor: .trailing)
 
-                if let handoffColumn, !archiveColumns.isEmpty {
-                    projectArchiveReveal(handoffColumn: handoffColumn, archiveColumns: archiveColumns, board: board)
+                if !archiveColumns.isEmpty {
+                    projectArchiveReveal(columns: archiveColumns, board: board)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
+            .onChange(of: archiveExpanded) { _, expanded in
+                withAnimation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86)) {
+                    if expanded, let completionColumnID = lane.columns.last?.id {
+                        laneScrollTargets[lane.role] = completionColumnID
+                    } else {
+                        laneScrollTargets.removeValue(forKey: lane.role)
+                    }
+                }
+            }
+            .onAppear {
+                if archiveExpanded, let completionColumnID = lane.columns.last?.id {
+                    laneScrollTargets[lane.role] = completionColumnID
+                }
+            }
         }
         .padding(Spacing.sm)
         .background(
@@ -296,19 +310,23 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func projectArchiveReveal(
-        handoffColumn: KanbanColumn,
-        archiveColumns: [KanbanColumn],
-        board: KanbanBoard
-    ) -> some View {
-        HStack(alignment: .top, spacing: Spacing.md) {
-            columnView(
-                handoffColumn,
-                board: board,
-                width: KanbanDesign.projectColumnWidth,
-                height: KanbanDesign.projectColumnHeight
-            )
+    private func laneScrollTargetBinding(for role: KanbanLaneRole) -> Binding<String?> {
+        Binding(
+            get: {
+                laneScrollTargets[role]
+            },
+            set: { newValue in
+                if let newValue {
+                    laneScrollTargets[role] = newValue
+                } else {
+                    laneScrollTargets.removeValue(forKey: role)
+                }
+            }
+        )
+    }
 
+    private func projectArchiveReveal(columns archiveColumns: [KanbanColumn], board: KanbanBoard) -> some View {
+        HStack(alignment: .top, spacing: Spacing.md) {
             archiveRevealDivider
 
             ForEach(archiveColumns) { column in
