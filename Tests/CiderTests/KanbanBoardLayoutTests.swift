@@ -95,4 +95,48 @@ struct KanbanBoardLayoutTests {
 
         #expect(!KanbanBoardLayout.usesProjectLayout(for: board))
     }
+
+    @Test("archive reveal only pushes active columns when the combined lane overflows")
+    func archiveRevealPushesOnlyWhenNeeded() {
+        let columnWidth: CGFloat = 280
+        let spacing: CGFloat = 12
+        let activeWidth = KanbanBoardLayout.columnGroupWidth(
+            columnCount: 4,
+            columnWidth: columnWidth,
+            spacing: spacing
+        )
+        let archiveWidth = KanbanBoardLayout.archiveRevealWidth(
+            columnCount: 1,
+            columnWidth: columnWidth,
+            spacing: spacing
+        )
+        let combinedWidth = activeWidth + spacing + archiveWidth
+
+        #expect(!KanbanBoardLayout.shouldPushArchive(
+            activeColumnCount: 4,
+            archiveColumnCount: 1,
+            availableWidth: combinedWidth + 120,
+            columnWidth: columnWidth,
+            spacing: spacing,
+            archiveExpanded: true
+        ))
+
+        #expect(KanbanBoardLayout.shouldPushArchive(
+            activeColumnCount: 4,
+            archiveColumnCount: 1,
+            availableWidth: combinedWidth - 1,
+            columnWidth: columnWidth,
+            spacing: spacing,
+            archiveExpanded: true
+        ))
+
+        #expect(!KanbanBoardLayout.shouldPushArchive(
+            activeColumnCount: 4,
+            archiveColumnCount: 1,
+            availableWidth: combinedWidth - 1,
+            columnWidth: columnWidth,
+            spacing: spacing,
+            archiveExpanded: false
+        ))
+    }
 }

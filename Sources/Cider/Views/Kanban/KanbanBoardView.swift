@@ -262,29 +262,38 @@ struct KanbanBoardView: View {
             }
             .padding(.horizontal, Spacing.xs)
 
-            HStack(alignment: .top, spacing: Spacing.md) {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(alignment: .top, spacing: Spacing.md) {
-                        ForEach(lane.columns) { column in
-                            columnView(
-                                column,
-                                board: board,
-                                width: KanbanDesign.projectColumnWidth,
-                                height: KanbanDesign.projectColumnHeight
-                            )
-                        }
-                    }
-                    .padding(.bottom, Spacing.xs)
-                }
-                .frame(maxWidth: .infinity)
-                .defaultScrollAnchor(archiveExpanded ? .trailing : .leading)
-                .id(projectLaneScrollIdentity(for: lane))
+            GeometryReader { geometry in
+                let shouldPushArchive = projectLaneNeedsArchivePush(
+                    lane: lane,
+                    archiveColumns: archiveColumns,
+                    availableWidth: geometry.size.width
+                )
 
-                if !archiveColumns.isEmpty {
-                    projectArchiveReveal(columns: archiveColumns, board: board)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            ForEach(lane.columns) { column in
+                                columnView(
+                                    column,
+                                    board: board,
+                                    width: KanbanDesign.projectColumnWidth,
+                                    height: KanbanDesign.projectColumnHeight
+                                )
+                            }
+                        }
+                        .padding(.bottom, Spacing.xs)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .defaultScrollAnchor(shouldPushArchive ? .trailing : .leading)
+                    .id(projectLaneScrollIdentity(for: lane, shouldPushArchive: shouldPushArchive))
+
+                    if !archiveColumns.isEmpty {
+                        projectArchiveReveal(columns: archiveColumns, board: board)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
             }
+            .frame(height: KanbanDesign.projectColumnHeight + Spacing.xs)
             .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
         }
         .padding(Spacing.sm)
@@ -298,9 +307,24 @@ struct KanbanBoardView: View {
         )
     }
 
-    private func projectLaneScrollIdentity(for lane: KanbanBoardLane) -> String {
+    private func projectLaneNeedsArchivePush(
+        lane: KanbanBoardLane,
+        archiveColumns: [KanbanColumn],
+        availableWidth: CGFloat
+    ) -> Bool {
+        KanbanBoardLayout.shouldPushArchive(
+            activeColumnCount: lane.columns.count,
+            archiveColumnCount: archiveColumns.count,
+            availableWidth: availableWidth,
+            columnWidth: KanbanDesign.projectColumnWidth,
+            spacing: Spacing.md,
+            archiveExpanded: archiveExpanded
+        )
+    }
+
+    private func projectLaneScrollIdentity(for lane: KanbanBoardLane, shouldPushArchive: Bool) -> String {
         if archiveExpanded {
-            return "\(lane.id)-archive-\(archiveOpenGeneration)"
+            return "\(lane.id)-archive-\(archiveOpenGeneration)-push-\(shouldPushArchive)"
         }
 
         return "\(lane.id)-active"

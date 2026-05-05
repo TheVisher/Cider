@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum KanbanLaneRole: String, CaseIterable {
@@ -24,6 +25,8 @@ struct KanbanBoardLane: Identifiable, Equatable {
 }
 
 enum KanbanBoardLayout {
+    static let archiveDividerWidth: CGFloat = 28
+
     static func usesProjectLayout(for board: KanbanBoard) -> Bool {
         let normalizedBoardName = normalize(board.name)
         if ["cider", "cider_web", "cider_ios"].contains(normalizedBoardName) {
@@ -60,6 +63,41 @@ enum KanbanBoardLayout {
         board.columns.filter { column in
             isArchiveColumn(column) && role(for: column) == laneRole
         }
+    }
+
+    static func shouldPushArchive(
+        activeColumnCount: Int,
+        archiveColumnCount: Int,
+        availableWidth: CGFloat,
+        columnWidth: CGFloat,
+        spacing: CGFloat,
+        archiveExpanded: Bool
+    ) -> Bool {
+        guard archiveExpanded, archiveColumnCount > 0 else { return false }
+        let activeWidth = columnGroupWidth(
+            columnCount: activeColumnCount,
+            columnWidth: columnWidth,
+            spacing: spacing
+        )
+        let archiveWidth = archiveRevealWidth(
+            columnCount: archiveColumnCount,
+            columnWidth: columnWidth,
+            spacing: spacing
+        )
+        return activeWidth + spacing + archiveWidth > availableWidth
+    }
+
+    static func columnGroupWidth(columnCount: Int, columnWidth: CGFloat, spacing: CGFloat) -> CGFloat {
+        guard columnCount > 0 else { return 0 }
+        return CGFloat(columnCount) * columnWidth
+            + CGFloat(columnCount - 1) * spacing
+    }
+
+    static func archiveRevealWidth(columnCount: Int, columnWidth: CGFloat, spacing: CGFloat) -> CGFloat {
+        guard columnCount > 0 else { return 0 }
+        return archiveDividerWidth
+            + CGFloat(columnCount) * columnWidth
+            + CGFloat(columnCount) * spacing
     }
 
     static func role(for column: KanbanColumn) -> KanbanLaneRole {
