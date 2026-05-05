@@ -228,6 +228,18 @@ enum KanbanBoardLayout {
         return parentAccentColor(for: parent)
     }
 
+    static func cardAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor? {
+        if !board.childCards(of: card.id).isEmpty {
+            return parentAccentColor(for: card)
+        }
+
+        if let parent = board.parentCard(for: card.id) {
+            return parentAccentColor(for: parent)
+        }
+
+        return card.color
+    }
+
     static func parentBadge(
         for card: KanbanCard,
         in column: KanbanColumn,
@@ -240,7 +252,7 @@ enum KanbanBoardLayout {
         return KanbanParentBadge(
             parentID: parent.id,
             title: parent.title,
-            accentColor: parentAccentColor(for: parent)
+            accentColor: cardAccentColor(for: parent, in: board) ?? parentAccentColor(for: parent)
         )
     }
 

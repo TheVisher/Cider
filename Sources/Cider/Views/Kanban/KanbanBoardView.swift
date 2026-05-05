@@ -588,7 +588,7 @@ struct KanbanBoardView: View {
             compact: compactCards,
             childSummary: childSummary,
             parentBadge: KanbanBoardLayout.parentBadge(for: card, in: column, board: board),
-            inheritedAccentColor: KanbanBoardLayout.inheritedParentAccentColor(for: card, in: board),
+            accentColor: KanbanBoardLayout.cardAccentColor(for: card, in: board),
             canCollapse: canCollapse,
             isCollapsed: isCollapsed
         )
@@ -636,13 +636,12 @@ struct KanbanBoardView: View {
         compact: Bool = false,
         childSummary: KanbanParentChildSummary? = nil,
         parentBadge: KanbanParentBadge? = nil,
-        inheritedAccentColor: KanbanCardColor? = nil,
+        accentColor: KanbanCardColor? = nil,
         canCollapse: Bool = false,
         isCollapsed: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
-            // Color accent bar
-            if let color = card.color ?? inheritedAccentColor {
+            if let color = accentColor {
                 RoundedRectangle(cornerRadius: KanbanDesign.accentBarRadius, style: .continuous)
                     .fill(kanbanColor(color))
                     .frame(height: KanbanDesign.accentBarHeight)

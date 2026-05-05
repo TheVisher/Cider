@@ -318,4 +318,26 @@ struct KanbanCardHierarchyTests {
         #expect(first == second)
         #expect(KanbanBoardLayout.parentBadge(for: testing.cards[0], in: testing, board: board)?.accentColor == first)
     }
+
+    @Test("nested parent uses its own group accent instead of ancestor accent")
+    func nestedParentUsesOwnGroupAccent() {
+        let backlog = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "grandparent", title: "Grandparent"),
+                KanbanCard(id: "parent", title: "Parent Plan", parentCardID: "grandparent"),
+                KanbanCard(id: "child", title: "Child Step", parentCardID: "parent"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [backlog])
+
+        let parentAccent = KanbanBoardLayout.cardAccentColor(for: backlog.cards[1], in: board)
+        let childAccent = KanbanBoardLayout.cardAccentColor(for: backlog.cards[2], in: board)
+        let ancestorAccent = KanbanBoardLayout.inheritedParentAccentColor(for: backlog.cards[1], in: board)
+
+        #expect(parentAccent != nil)
+        #expect(parentAccent == childAccent)
+        #expect(parentAccent != ancestorAccent)
+    }
 }
