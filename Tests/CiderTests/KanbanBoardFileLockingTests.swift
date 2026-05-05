@@ -3,6 +3,79 @@ import Testing
 @testable import Cider
 
 struct KanbanBoardFileLockingTests {
+    @Test("moving parent group to queued moves descendants together")
+    @MainActor
+    func movingParentGroupToQueuedMovesDescendantsTogether() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Hierarchy Move")
+        let queued = try #require(storage.addColumn(boardID: board.id, name: "Queued"))
+        let parent = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Parent plan"))
+        let childA = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Child A", parentCardID: parent.id))
+        let grandchild = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Grandchild", parentCardID: childA.id))
+        let childB = try #require(storage.addCard(boardID: board.id, columnID: "in_progress", title: "Child B", parentCardID: parent.id))
+
+        storage.moveCard(
+            boardID: board.id,
+            cardID: parent.id,
+            toColumnID: queued.id,
+            toIndex: 0,
+            includeDescendants: true
+        )
+
+        let refreshed = try #require(KanbanStorage().boards.first { $0.id == board.id })
+        let queuedColumn = try #require(refreshed.columns.first { $0.id == queued.id })
+
+        #expect(queuedColumn.cards.map(\.id) == [parent.id, childA.id, grandchild.id, childB.id])
+        #expect(queuedColumn.cards.first { $0.id == childA.id }?.parentCardID == parent.id)
+        #expect(queuedColumn.cards.first { $0.id == grandchild.id }?.parentCardID == childA.id)
+        #expect(queuedColumn.cards.first { $0.id == childB.id }?.parentCardID == parent.id)
+        #expect(refreshed.columns.first { $0.id == "backlog" }?.cards.isEmpty == true)
+        #expect(refreshed.columns.first { $0.id == "in_progress" }?.cards.isEmpty == true)
+    }
+
+    @Test("moving individual child keeps parent and leaves siblings in place")
+    @MainActor
+    func movingIndividualChildKeepsParentAndLeavesSiblingsInPlace() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Child Move")
+        let parent = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Parent plan"))
+        let childA = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Child A", parentCardID: parent.id))
+        let childB = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Child B", parentCardID: parent.id))
+
+        storage.moveCard(
+            boardID: board.id,
+            cardID: childA.id,
+            toColumnID: "in_progress",
+            toIndex: 0
+        )
+
+        let refreshed = try #require(KanbanStorage().boards.first { $0.id == board.id })
+        let backlog = try #require(refreshed.columns.first { $0.id == "backlog" })
+        let inProgress = try #require(refreshed.columns.first { $0.id == "in_progress" })
+
+        #expect(backlog.cards.map(\.id) == [parent.id, childB.id])
+        #expect(inProgress.cards.map(\.id) == [childA.id])
+        #expect(inProgress.cards.first?.parentCardID == parent.id)
+    }
+
     @Test("stale whole-card updates merge changed fields")
     @MainActor
     func staleWholeCardUpdatesMergeChangedFields() throws {

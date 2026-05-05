@@ -307,33 +307,43 @@ final class KanbanStorage: ObservableObject {
         return didUpdate
     }
 
-    func moveCard(boardID: String, cardID: String, toColumnID: String, toIndex: Int) {
+    func moveCard(
+        boardID: String,
+        cardID: String,
+        toColumnID: String,
+        toIndex: Int,
+        includeDescendants: Bool = false
+    ) {
         mutate(boardID: boardID) { board in
             // Validate destination column exists before removing from source
             guard board.columns.contains(where: { $0.id == toColumnID }) else { return }
 
-            // Find and remove card from current column
-            var card: KanbanCard?
+            guard let rootCard = board.card(id: cardID) else { return }
+            let cardsToMove = includeDescendants
+                ? [rootCard] + board.descendantCards(of: cardID)
+                : [rootCard]
+            let movingIDs = Set(cardsToMove.map(\.id))
+
             for colIdx in board.columns.indices {
-                if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
-                    card = board.columns[colIdx].cards.remove(at: cardIdx)
-                    break
-                }
+                board.columns[colIdx].cards.removeAll { movingIDs.contains($0.id) }
             }
-            guard var movedCard = card else { return }
 
             // Find destination column
             guard let destIdx = board.columns.firstIndex(where: { $0.id == toColumnID }) else { return }
 
-            // Auto-set completed date when moving to a done column
-            if board.columns[destIdx].isDoneColumn && movedCard.completed == nil {
-                movedCard.completed = Date()
-            } else if !board.columns[destIdx].isDoneColumn {
-                movedCard.completed = nil
+            let movedCards = cardsToMove.map { card in
+                var movedCard = card
+                // Auto-set completed date when moving to a done column
+                if board.columns[destIdx].isDoneColumn && movedCard.completed == nil {
+                    movedCard.completed = Date()
+                } else if !board.columns[destIdx].isDoneColumn {
+                    movedCard.completed = nil
+                }
+                return movedCard
             }
 
             let insertAt = min(toIndex, board.columns[destIdx].cards.count)
-            board.columns[destIdx].cards.insert(movedCard, at: insertAt)
+            board.columns[destIdx].cards.insert(contentsOf: movedCards, at: insertAt)
         }
     }
 

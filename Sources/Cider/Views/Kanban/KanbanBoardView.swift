@@ -406,7 +406,12 @@ struct KanbanBoardView: View {
                                         boardID: boardID,
                                         cardID: cardID,
                                         toColumnID: column.id,
-                                        toIndex: column.cards.count
+                                        toIndex: column.cards.count,
+                                        includeDescendants: shouldMoveDescendants(
+                                            cardID: cardID,
+                                            to: column,
+                                            board: board
+                                        )
                                     )
                                 }
                                 return true
@@ -429,7 +434,12 @@ struct KanbanBoardView: View {
                     boardID: boardID,
                     cardID: cardID,
                     toColumnID: column.id,
-                    toIndex: column.cards.count
+                    toIndex: column.cards.count,
+                    includeDescendants: shouldMoveDescendants(
+                        cardID: cardID,
+                        to: column,
+                        board: board
+                    )
                 )
             }
             return true
@@ -606,7 +616,12 @@ struct KanbanBoardView: View {
                         boardID: boardID,
                         cardID: cardID,
                         toColumnID: column.id,
-                        toIndex: toIndex
+                        toIndex: toIndex,
+                        includeDescendants: shouldMoveDescendants(
+                            cardID: cardID,
+                            to: column,
+                            board: board
+                        )
                     )
                 }
                 return true
@@ -629,6 +644,15 @@ struct KanbanBoardView: View {
         }
 
         return CiderColors.borderSubtle.opacity(0.95)
+    }
+
+    private func shouldMoveDescendants(cardID: String, to column: KanbanColumn, board: KanbanBoard) -> Bool {
+        isQueuedColumn(column) && !board.childCards(of: cardID).isEmpty
+    }
+
+    private func isQueuedColumn(_ column: KanbanColumn) -> Bool {
+        let normalized = "\(column.id) \(column.name)".lowercased()
+        return normalized.contains("queue")
     }
 
     private func cardView(
