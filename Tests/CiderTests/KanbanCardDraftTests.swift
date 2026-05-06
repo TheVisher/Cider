@@ -101,4 +101,22 @@ struct KanbanCardDraftTests {
         #expect(updated.parentCardID == "parent-card")
         #expect(updated.notes == "Edited child notes")
     }
+
+    @Test("draft preserves related card references separately from parent")
+    func draftPreservesRelatedCardReferencesSeparatelyFromParent() {
+        let card = KanbanCard(
+            id: "active-card",
+            title: "New tweak",
+            relatedCardIDs: ["old-card"],
+            parentCardID: "current-plan"
+        )
+
+        var draft = KanbanCardDraft(card: card)
+        draft.relatedCardIDs.append("historical-bug")
+
+        let updated = draft.updatedCard(from: card)
+
+        #expect(updated.parentCardID == "current-plan")
+        #expect(updated.relatedCardIDs == ["old-card", "historical-bug"])
+    }
 }

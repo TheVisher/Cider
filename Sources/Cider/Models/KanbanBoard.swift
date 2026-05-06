@@ -21,6 +21,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var agent: String?
     var tags: [String]
     var linkedEntities: [LibraryEntityRef]
+    var relatedCardIDs: [String]
     var parentCardID: String?
     var created: Date
     var completed: Date?
@@ -34,6 +35,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         agent: String? = nil,
         tags: [String] = [],
         linkedEntities: [LibraryEntityRef] = [],
+        relatedCardIDs: [String] = [],
         parentCardID: String? = nil,
         created: Date = Date(),
         completed: Date? = nil
@@ -46,6 +48,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.agent = agent
         self.tags = tags
         self.linkedEntities = linkedEntities
+        self.relatedCardIDs = relatedCardIDs
         self.parentCardID = parentCardID
         self.created = created
         self.completed = completed
@@ -53,7 +56,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, color, priority, agent, tags, linkedEntities, parentCardID, created, completed
+        case id, title, notes, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, created, completed
     }
 
     init(from decoder: Decoder) throws {
@@ -66,6 +69,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         tags = (try c.decodeIfPresent([String].self, forKey: .tags)) ?? []
         linkedEntities = (try c.decodeIfPresent([LibraryEntityRef].self, forKey: .linkedEntities)) ?? []
+        relatedCardIDs = (try c.decodeIfPresent([String].self, forKey: .relatedCardIDs)) ?? []
         parentCardID = try c.decodeIfPresent(String.self, forKey: .parentCardID)
         created = (try c.decodeIfPresent(KanbanDate.self, forKey: .created))?.date ?? Date()
         completed = try c.decodeIfPresent(KanbanDate.self, forKey: .completed)?.date
@@ -81,6 +85,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         try c.encodeIfPresent(agent, forKey: .agent)
         if !tags.isEmpty { try c.encode(tags, forKey: .tags) }
         if !linkedEntities.isEmpty { try c.encode(linkedEntities, forKey: .linkedEntities) }
+        if !relatedCardIDs.isEmpty { try c.encode(relatedCardIDs, forKey: .relatedCardIDs) }
         try c.encodeIfPresent(parentCardID, forKey: .parentCardID)
         try c.encode(KanbanDate(date: created), forKey: .created)
         try c.encodeIfPresent(completed.map { KanbanDate(date: $0) }, forKey: .completed)
@@ -218,6 +223,36 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
 
     func childCards(of parentID: String) -> [KanbanCard] {
         allCards.filter { $0.parentCardID == parentID }
+    }
+
+    func relatedCards(for cardID: String) -> [KanbanCard] {
+        guard let source = card(id: cardID) else { return [] }
+
+        var seen = Set([cardID])
+        return source.relatedCardIDs.compactMap { relatedID in
+            guard seen.insert(relatedID).inserted else { return nil }
+            return card(id: relatedID)
+        }
+    }
+
+    func relatedCardCandidates(
+        for cardID: String,
+        matching query: String,
+        excluding excludedCardIDs: Set<String> = []
+    ) -> [KanbanCard] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return [] }
+
+        let existingRelatedIDs = Set(card(id: cardID)?.relatedCardIDs ?? [])
+        let unavailableIDs = existingRelatedIDs
+            .union(excludedCardIDs)
+            .union([cardID])
+
+        return allCards.filter { candidate in
+            guard !unavailableIDs.contains(candidate.id) else { return false }
+            return candidate.id.localizedCaseInsensitiveContains(trimmedQuery)
+                || candidate.title.localizedCaseInsensitiveContains(trimmedQuery)
+        }
     }
 
     func descendantCards(of parentID: String) -> [KanbanCard] {

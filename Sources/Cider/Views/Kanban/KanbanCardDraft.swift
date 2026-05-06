@@ -8,6 +8,7 @@ struct KanbanCardDraft: Equatable {
     var agent: String
     var tagsText: String
     var linkedEntities: [LibraryEntityRef]
+    var relatedCardIDs: [String]
     var parentCardID: String?
 
     init(card: KanbanCard) {
@@ -18,6 +19,7 @@ struct KanbanCardDraft: Equatable {
         agent = card.agent ?? ""
         tagsText = card.tags.joined(separator: ", ")
         linkedEntities = card.linkedEntities
+        relatedCardIDs = card.relatedCardIDs
         parentCardID = card.parentCardID
     }
 
@@ -40,6 +42,7 @@ struct KanbanCardDraft: Equatable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         updated.linkedEntities = linkedEntities
+        updated.relatedCardIDs = relatedCardIDs
         updated.parentCardID = parentCardID
 
         return updated

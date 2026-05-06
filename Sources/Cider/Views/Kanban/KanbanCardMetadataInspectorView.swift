@@ -21,6 +21,7 @@ struct KanbanCardMetadataInspectorView: View {
     @State private var isDatesExpanded = true
     @State private var isAddingChild = false
     @State private var childTitle = ""
+    @State private var relatedCardQuery = ""
 
     @ObservedObject private var bookmarks = VaultBookmarkService.shared
     @ObservedObject private var notes = NotesStorage.shared
@@ -170,6 +171,12 @@ struct KanbanCardMetadataInspectorView: View {
                 symbol: "square.3.layers.3d",
                 title: "Type",
                 value: "Kanban Card"
+            ),
+            ItemMetadataRow(
+                id: "card-id",
+                symbol: "number",
+                title: "Card ID",
+                value: card.id
             )
         ]
 
@@ -408,20 +415,135 @@ struct KanbanCardMetadataInspectorView: View {
 
     private var kanbanLinkedSection: some View {
         ItemMetadataSectionView(title: "Linked", isExpanded: $isLinkedExpanded) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                addLinkMenu
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                relatedCardsView
 
-                if linkedRows.isEmpty {
-                    ItemMetadataEmptyText(text: "Link specs, docs, or related work.")
-                } else {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        ForEach(linkedRows) { row in
-                            linkedRow(row)
+                Divider()
+                    .opacity(0.35)
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    addLinkMenu
+
+                    if linkedRows.isEmpty {
+                        ItemMetadataEmptyText(text: "Link specs, docs, or related work.")
+                    } else {
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            ForEach(linkedRows) { row in
+                                linkedRow(row)
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    private var relatedCardsView: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Related Cards")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+
+            if relatedCardRows.isEmpty {
+                ItemMetadataEmptyText(text: "Reference old cards without making them children.")
+            } else {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    ForEach(relatedCardRows) { row in
+                        relatedCardRow(row)
+                    }
+                }
+            }
+
+            relatedCardSearchField
+        }
+    }
+
+    private var relatedCardSearchField: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            TextField("Search card title or ID", text: $relatedCardQuery)
+                .textFieldStyle(.plain)
+                .font(CiderFont.caption)
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceSubtle)
+                )
+
+            let query = relatedCardQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                if relatedCardCandidates.isEmpty {
+                    ItemMetadataEmptyText(text: "No matching cards.")
+                } else {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        ForEach(relatedCardCandidates) { candidate in
+                            hierarchyCardRow(
+                                title: candidate.title,
+                                subtitle: "\(candidate.id) · Add reference",
+                                systemImage: "plus.circle",
+                                action: { addRelatedCard(candidate.id) },
+                                trailing: { EmptyView() }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func relatedCardRow(_ row: RelatedKanbanCardRow) -> some View {
+        hierarchyCardRow(
+            title: row.title,
+            subtitle: row.subtitle,
+            systemImage: row.isMissing ? "questionmark.square.dashed" : "link",
+            action: {
+                if !row.isMissing {
+                    onOpenKanbanCard(row.id)
+                }
+            },
+            trailing: {
+                Button {
+                    removeRelatedCard(row.id)
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: DetailToolbarDesign.iconButtonSize, height: DetailToolbarDesign.iconButtonSize)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Remove reference")
+            }
+        )
+    }
+
+    private var relatedCardRows: [RelatedKanbanCardRow] {
+        var seen = Set([card.id])
+        return draft.relatedCardIDs.compactMap { relatedID in
+            guard seen.insert(relatedID).inserted else { return nil }
+            if let relatedCard = board.card(id: relatedID) {
+                return RelatedKanbanCardRow(
+                    id: relatedCard.id,
+                    title: relatedCard.title,
+                    subtitle: "\(relatedCard.id) · Reference card",
+                    isMissing: false
+                )
+            }
+            return RelatedKanbanCardRow(
+                id: relatedID,
+                title: relatedID,
+                subtitle: "Missing referenced card",
+                isMissing: true
+            )
+        }
+    }
+
+    private var relatedCardCandidates: [KanbanCard] {
+        let candidates = board.relatedCardCandidates(
+            for: card.id,
+            matching: relatedCardQuery,
+            excluding: Set(draft.relatedCardIDs)
+        )
+        return Array(candidates.prefix(6))
     }
 
     private var addLinkMenu: some View {
@@ -586,6 +708,22 @@ struct KanbanCardMetadataInspectorView: View {
         onSave()
     }
 
+    private func addRelatedCard(_ relatedCardID: String) {
+        guard relatedCardID != card.id,
+              !draft.relatedCardIDs.contains(relatedCardID) else {
+            return
+        }
+
+        draft.relatedCardIDs.append(relatedCardID)
+        relatedCardQuery = ""
+        onSave()
+    }
+
+    private func removeRelatedCard(_ relatedCardID: String) {
+        draft.relatedCardIDs.removeAll { $0 == relatedCardID }
+        onSave()
+    }
+
     private func metadataLine(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(label)
@@ -614,4 +752,11 @@ struct KanbanCardMetadataInspectorView: View {
                 )
         }
     }
+}
+
+private struct RelatedKanbanCardRow: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let isMissing: Bool
 }

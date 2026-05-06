@@ -77,6 +77,68 @@ struct KanbanCardHierarchyTests {
         #expect(board.lineageCards(for: "missing").isEmpty)
     }
 
+    @Test("board resolves related card references without affecting hierarchy")
+    func boardResolvesRelatedCardReferencesWithoutAffectingHierarchy() {
+        let board = KanbanBoard(
+            name: "References",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "parent", title: "Current Plan"),
+                        KanbanCard(
+                            id: "active",
+                            title: "Follow-up",
+                            relatedCardIDs: ["old-card", "missing", "active"],
+                            parentCardID: "parent"
+                        ),
+                        KanbanCard(id: "old-card", title: "Archived Implementation"),
+                    ]
+                ),
+            ]
+        )
+
+        #expect(board.relatedCards(for: "active").map(\.id) == ["old-card"])
+        #expect(board.parentCard(for: "active")?.id == "parent")
+        #expect(board.childCards(of: "parent").map(\.id) == ["active"])
+    }
+
+    @Test("related card candidates search by id and title and omit current references")
+    func relatedCardCandidatesSearchByIDAndTitle() {
+        let board = KanbanBoard(
+            name: "References",
+            columns: [
+                KanbanColumn(
+                    id: "active",
+                    name: "Active",
+                    cards: [
+                        KanbanCard(
+                            id: "current",
+                            title: "Current Follow-up",
+                            relatedCardIDs: ["done-card"]
+                        ),
+                        KanbanCard(id: "done-card", title: "Already Linked"),
+                        KanbanCard(id: "arch-123", title: "Archived Collapse Polish"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "archive",
+                    name: "Archive",
+                    cards: [
+                        KanbanCard(id: "bf3c18", title: "Kanban parent collapse and progress summary"),
+                    ]
+                ),
+            ]
+        )
+
+        #expect(board.relatedCardCandidates(for: "current", matching: "bf3").map(\.id) == ["bf3c18"])
+        #expect(board.relatedCardCandidates(for: "current", matching: "collapse").map(\.id) == ["arch-123", "bf3c18"])
+        #expect(board.relatedCardCandidates(for: "current", matching: "linked").isEmpty)
+        #expect(board.relatedCardCandidates(for: "current", matching: "current").isEmpty)
+        #expect(board.relatedCardCandidates(for: "current", matching: "").isEmpty)
+    }
+
     @Test("removing parent relationship from board clears only matching children")
     func clearingDeletedParentLeavesUnrelatedCardsAlone() {
         var board = KanbanBoard(
