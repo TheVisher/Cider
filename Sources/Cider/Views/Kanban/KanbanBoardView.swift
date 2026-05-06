@@ -603,6 +603,7 @@ struct KanbanBoardView: View {
             compact: compactCards,
             childSummary: childSummary,
             parentBadge: KanbanBoardLayout.parentBadge(for: card, in: column, board: board),
+            planIndicator: KanbanBoardLayout.planIndicator(for: card, in: board),
             accentColor: KanbanBoardLayout.cardAccentColor(for: card, in: board),
             canCollapse: canCollapse,
             isCollapsed: isCollapsed
@@ -665,6 +666,7 @@ struct KanbanBoardView: View {
         compact: Bool = false,
         childSummary: KanbanParentChildSummary? = nil,
         parentBadge: KanbanParentBadge? = nil,
+        planIndicator: KanbanPlanIndicator? = nil,
         accentColor: KanbanCardColor? = nil,
         canCollapse: Bool = false,
         isCollapsed: Bool = false
@@ -713,7 +715,13 @@ struct KanbanBoardView: View {
             }
 
             if let parentBadge {
-                parentBadgeView(parentBadge)
+                if let planIndicator {
+                    planIndicatorView(planIndicator)
+                } else {
+                    parentBadgeView(parentBadge)
+                }
+            } else if let planIndicator {
+                planIndicatorView(planIndicator)
             }
 
             if !compact {
@@ -798,6 +806,36 @@ struct KanbanBoardView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open parent card \(badge.title)")
+    }
+
+    private func planIndicatorView(_ indicator: KanbanPlanIndicator) -> some View {
+        Button {
+            onOpenCard(boardID, indicator.parentID)
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                if let accentColor = indicator.accentColor {
+                    Circle()
+                        .fill(kanbanColor(accentColor))
+                        .frame(width: 5, height: 5)
+                }
+
+                Text(indicator.compactText)
+                    .foregroundColor(CiderColors.tertiary)
+
+                Text(indicator.title)
+                    .foregroundColor(CiderColors.secondary)
+                    .lineLimit(1)
+            }
+            .font(CiderFont.micro)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(CiderColors.surfaceInput.opacity(0.85))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open plan \(indicator.title), \(indicator.compactText)")
     }
 
     private func cardDragPreview(_ card: KanbanCard) -> some View {

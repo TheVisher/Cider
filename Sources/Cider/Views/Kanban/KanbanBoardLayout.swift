@@ -73,6 +73,18 @@ struct KanbanParentBadge: Equatable {
     let accentColor: KanbanCardColor?
 }
 
+struct KanbanPlanIndicator: Equatable {
+    let parentID: String
+    let title: String
+    let stepNumber: Int
+    let stepCount: Int
+    let accentColor: KanbanCardColor?
+
+    var compactText: String {
+        "Step \(stepNumber)/\(stepCount)"
+    }
+}
+
 enum KanbanBoardLayout {
     static let archiveDividerWidth: CGFloat = 28
 
@@ -248,6 +260,21 @@ enum KanbanBoardLayout {
         return KanbanParentBadge(
             parentID: parent.id,
             title: parent.title,
+            accentColor: cardAccentColor(for: parent, in: board)
+        )
+    }
+
+    static func planIndicator(for card: KanbanCard, in board: KanbanBoard) -> KanbanPlanIndicator? {
+        guard let parent = board.parentCard(for: card.id) else { return nil }
+
+        let siblings = board.childCards(of: parent.id)
+        guard let stepIndex = siblings.firstIndex(where: { $0.id == card.id }) else { return nil }
+
+        return KanbanPlanIndicator(
+            parentID: parent.id,
+            title: parent.title,
+            stepNumber: stepIndex + 1,
+            stepCount: siblings.count,
             accentColor: cardAccentColor(for: parent, in: board)
         )
     }

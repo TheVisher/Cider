@@ -389,6 +389,39 @@ struct KanbanCardHierarchyTests {
         #expect(KanbanBoardLayout.parentBadge(for: testing.cards[0], in: testing, board: board)?.accentColor == first)
     }
 
+    @Test("child card exposes a quiet plan indicator with sibling order")
+    func childCardExposesPlanIndicatorWithSiblingOrder() {
+        let board = KanbanBoard(
+            name: "Hierarchy",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "parent", title: "Kanban hierarchy plan", color: .green),
+                        KanbanCard(id: "child-a", title: "First step", parentCardID: "parent"),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "testing",
+                    name: "Testing",
+                    cards: [
+                        KanbanCard(id: "child-b", title: "Second step", parentCardID: "parent"),
+                    ]
+                ),
+            ]
+        )
+
+        let indicator = KanbanBoardLayout.planIndicator(for: board.columns[1].cards[0], in: board)
+
+        #expect(indicator?.parentID == "parent")
+        #expect(indicator?.title == "Kanban hierarchy plan")
+        #expect(indicator?.stepNumber == 2)
+        #expect(indicator?.stepCount == 2)
+        #expect(indicator?.compactText == "Step 2/2")
+        #expect(indicator?.accentColor == .green)
+    }
+
     @Test("nested parent uses family root accent")
     func nestedParentUsesFamilyRootAccent() {
         let backlog = KanbanColumn(
