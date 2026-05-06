@@ -253,7 +253,36 @@ enum KanbanBoardLayout {
     }
 
     private static func familyAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor {
-        parentAccentColor(for: familyRoot(for: card, in: board))
+        if let ancestorColor = explicitAncestorColor(for: card, in: board) {
+            return ancestorColor
+        }
+
+        if let color = card.color {
+            return color
+        }
+
+        return parentAccentColor(for: familyRoot(for: card, in: board))
+    }
+
+    static func hierarchyConnectorAccentColor(for parent: KanbanCard, in board: KanbanBoard) -> KanbanCardColor? {
+        cardAccentColor(for: parent, in: board)
+    }
+
+    private static func explicitAncestorColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor? {
+        var inheritedColor: KanbanCardColor?
+        var visited = Set([card.id])
+        var nextParentID = card.parentCardID
+
+        while let parentID = nextParentID,
+              let parent = board.card(id: parentID),
+              visited.insert(parent.id).inserted {
+            if let color = parent.color {
+                inheritedColor = color
+            }
+            nextParentID = parent.parentCardID
+        }
+
+        return inheritedColor
     }
 
     private static func familyRoot(for card: KanbanCard, in board: KanbanBoard) -> KanbanCard {

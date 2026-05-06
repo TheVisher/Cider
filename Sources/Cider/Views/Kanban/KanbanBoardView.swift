@@ -547,7 +547,7 @@ struct KanbanBoardView: View {
         column: KanbanColumn,
         board: KanbanBoard
     ) -> some View {
-        let lineColor = hierarchyLineColor(for: group.parent.card)
+        let lineColor = hierarchyLineColor(for: group.parent.card, in: board)
         let children = group.children
 
         return VStack(spacing: Spacing.sm) {
@@ -638,8 +638,8 @@ struct KanbanBoardView: View {
         }
     }
 
-    private func hierarchyLineColor(for parent: KanbanCard) -> Color {
-        if let color = parent.color {
+    private func hierarchyLineColor(for parent: KanbanCard, in board: KanbanBoard) -> Color {
+        if let color = KanbanBoardLayout.hierarchyConnectorAccentColor(for: parent, in: board) {
             return kanbanColor(color).opacity(0.82)
         }
 
