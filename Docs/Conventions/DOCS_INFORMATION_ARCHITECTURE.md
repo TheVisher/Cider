@@ -53,13 +53,15 @@ Is it durable guidance or just work-in-progress?
 
 Docs are the bookshelf: durable foundation records for product vision, architecture, data models, UX principles, agent operating rules, routing doctrine, and big feature designs.
 
-Kanban is the workbench: active smaller tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, and handoff notes. A card can carry enough context for another agent to continue, but it is not the long-term source of truth for durable doctrine.
+Kanban is the workbench: active smaller tweaks, bugs, follow-up ideas, implementation tasks, testing tasks, code review findings, commit notes, and handoff history. A card can carry enough context for another agent to continue, but it is not the long-term source of truth for durable doctrine.
+
+Backlink rule: cards that affect a feature should link back to the relevant canonical feature docs folder or section, e.g. `Docs/Features/Kanban/`. This gives agents a stable place to find current product/architecture/data-model/testing context before acting.
 
 Promotion rule: when a Kanban item changes Cider's lasting behavior or principles, move the durable summary into the appropriate Product, Architecture, Feature, Vault, QA, or Conventions doc before treating the work as fully settled.
 
 Large implementation plans/specs may live under `Docs/superpowers/`, but active tracking should still live on a Kanban card. Link the card to the plan/spec, and promote only durable outcomes into Product, Architecture, Feature, Vault, QA, or Conventions docs.
 
-Use Kanban cards for task-local test evidence and handoff notes. Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done.
+Use Kanban cards for task-local test evidence and handoff notes. Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done. Future archived cards may be discoverable from their relevant feature area, but archived card history should not bloat the canonical docs.
 
 ### 1. Product shelf: `Docs/Product/`
 

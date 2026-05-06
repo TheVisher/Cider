@@ -46,6 +46,20 @@ Thanks for checking it out. This is early beta, which is a polite way of saying:
 
 ### Bluesky
 
+- 2026-05-05: Small capture positioning post
+  - URL: https://bsky.app/profile/ciderapp.bsky.social/post/3ml5642rgz226
+  - Copy:
+
+```text
+Cider is for the stuff that is too small for a full notes app but too important to trust to your brain.
+
+Bookmarks. Notes. Dates. Contacts. Ideas.
+
+Hit Option twice, capture it, move on with your life like a civilized person.
+
+https://cider.so
+```
+
 - 2026-04-26: First beta post
   - URL: https://bsky.app/profile/ciderapp.bsky.social/post/3mkgpivexd22r
   - Copy:

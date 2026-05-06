@@ -20,6 +20,7 @@ Cider should help Erik remember and act on things at the right time without turn
 - Recurring date cards should not be killed by completing one occurrence.
 - Reminder creation/update must be safe, inspectable, and reversible.
 - Dashboard and text briefings should be views over the same life context.
+- Todos and events may need direct action URLs, such as payment portals, appointment links, forms, or check-in pages. A direct URL is an action affordance on the item, not necessarily a bookmark/library item.
 
 ## Non-Goals
 

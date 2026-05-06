@@ -38,6 +38,22 @@ Fields:
 
 Done columns control completion semantics. Moving a card into a done column sets `completed`; moving it out clears `completed`.
 
+Project-board workflow columns should default to:
+
+```text
+Backlog -> Queued -> In Progress -> Testing -> Done
+```
+
+Column semantics:
+
+- `Backlog`: ideas, concepts, rough future work, and unscheduled possibilities.
+- `Queued`: selected/upcoming work that the user or an agent intends to drain soon.
+- `In Progress`: the one card or narrow set of cards actively being implemented.
+- `Testing`: implementation is complete and waiting for manual/agent verification.
+- `Done`: accepted work; moving here sets `completed`.
+
+Future project-board templates should include `Queued` so automated agents can read the queue, choose a safe order, move one card into `In Progress`, finish it, move it to `Testing`, and then return to `Queued`.
+
 ## KanbanCard
 
 Fields:
@@ -82,4 +98,3 @@ Both the main editor and metadata rail bind to this draft so a save cannot overw
 - Preserve indentation.
 - Prefer CLI commands or structured YAML parsing when available.
 - If manual edits are necessary, rewrite the whole board carefully instead of tiny indentation-sensitive patches.
-

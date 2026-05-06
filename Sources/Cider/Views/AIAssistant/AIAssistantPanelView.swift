@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os.log
 
 enum AIAssistantPresentationStyle {
     case floatingPanel
@@ -24,6 +25,7 @@ struct AIAssistantPanelView: View {
     @State private var showStreamingIndicator = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let hermesSyncTimer = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
+    private static let renderLogger = Logger(subsystem: "com.cider.app", category: "AIAssistantRender")
 
     var body: some View {
         ZStack {
@@ -696,6 +698,7 @@ struct AIAssistantPanelView: View {
                                     presentationStyle: presentationStyle,
                                     maxBubbleWidth: maxBubbleWidth(for: message, contentWidth: columnWidth)
                                 )
+                                .id(AIAssistantRenderInvalidation.messageKey(message))
                                 .id(message.id)
                             }
 
@@ -724,7 +727,7 @@ struct AIAssistantPanelView: View {
                                 .frame(height: composerHeight + Spacing.xl)
                                 .id("bottom")
                         }
-                        .id(renderInvalidationKey(for: width))
+                        .id(listLayoutKey(for: width))
                         .frame(width: columnWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, Spacing.lg)
@@ -752,17 +755,20 @@ struct AIAssistantPanelView: View {
                         .readHeight { setComposerHeight($0) }
                 }
                 .onChange(of: viewModel.isStreaming) { _, isStreaming in
+                    Self.renderLogger.debug("streaming changed isStreaming=\(isStreaming) messages=\(viewModel.messages.count) visible=\(visibleMessages.count)")
                     if isStreaming {
                         scrollToBottomBurst(proxy: proxy, animated: false)
                     }
                 }
                 .onChange(of: viewModel.messages.count) { _, _ in
+                    Self.renderLogger.debug("message count changed total=\(viewModel.messages.count) visible=\(visibleMessages.count) hidden=\(hiddenMessageCount)")
                     scrollToBottomBurst(proxy: proxy)
                 }
                 .onChange(of: viewModel.displayedStreamingText) { _, _ in
                     scrollToBottom(proxy: proxy, delay: 0.05)
                 }
                 .onChange(of: viewModel.scrollToBottomSignal) { _, _ in
+                    Self.renderLogger.debug("scroll-to-bottom signal total=\(viewModel.messages.count) visible=\(visibleMessages.count)")
                     scrollToBottomBurst(proxy: proxy, animated: false)
                 }
                 .onChange(of: showStreamingIndicator) { _, isVisible in
@@ -811,12 +817,10 @@ struct AIAssistantPanelView: View {
         return min(contentWidth * ratio, message.role == .user ? 560 : 680)
     }
 
-    private func renderInvalidationKey(for width: CGFloat) -> String {
-        AIAssistantRenderInvalidation.key(
+    private func listLayoutKey(for width: CGFloat) -> String {
+        AIAssistantRenderInvalidation.listLayoutKey(
             messages: visibleMessages,
-            width: width,
-            composerHeight: composerHeight,
-            streamingToken: viewModel.isStreaming ? viewModel.displayedStreamingText : nil
+            width: width
         )
     }
 
@@ -831,6 +835,7 @@ struct AIAssistantPanelView: View {
     private var loadEarlierButton: some View {
         Button {
             visibleMessageLimit += 12
+            Self.renderLogger.info("load earlier messages total=\(viewModel.messages.count) visibleLimit=\(visibleMessageLimit) hidden=\(hiddenMessageCount)")
         } label: {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "clock.arrow.circlepath")
@@ -884,6 +889,7 @@ struct AIAssistantPanelView: View {
         guard abs(composerHeight - height) > 0.5 else { return }
         DispatchQueue.main.async {
             guard abs(composerHeight - height) > 0.5 else { return }
+            Self.renderLogger.debug("composer height changed old=\(composerHeight) new=\(height)")
             composerHeight = height
         }
     }
@@ -1396,20 +1402,17 @@ struct AIAssistantPanelView: View {
 }
 
 enum AIAssistantRenderInvalidation {
-    static func key(
+    static func listLayoutKey(
         messages: [AIAssistantMessage],
-        width: CGFloat,
-        composerHeight: CGFloat,
-        streamingToken: String?
+        width: CGFloat
     ) -> String {
         let widthBucket = Int(width / 80)
-        let composerBucket = Int(composerHeight / 8)
-        let messageSignature = messages.map(messageSignature).joined(separator: "|")
-        let streamingSignature = streamingToken.map { String(stableDigest($0)) } ?? "idle"
-        return "\(widthBucket):\(composerBucket):\(messageSignature):\(streamingSignature)"
+        let firstVisibleID = messages.first?.id.uuidString ?? "empty"
+        let lastVisibleID = messages.last?.id.uuidString ?? "empty"
+        return "\(widthBucket):\(messages.count):\(firstVisibleID):\(lastVisibleID)"
     }
 
-    private static func messageSignature(_ message: AIAssistantMessage) -> String {
+    static func messageKey(_ message: AIAssistantMessage) -> String {
         [
             message.id.uuidString,
             message.role.rawValue,

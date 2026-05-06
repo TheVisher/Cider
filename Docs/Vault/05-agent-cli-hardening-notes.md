@@ -18,6 +18,27 @@ The target design is that an AI model can be fairly simple: it should call a hig
 
 ## Observed Edge Cases
 
+### 0. Fast URL capture can skip enrichment and routing verification
+
+Observed on 2026-05-04 with a Steam store URL for `Hello Sunshine`:
+
+- The agent correctly ran `duplicate-check` and `bookmark add`.
+- It reported success too early, while the item still had a host-only title and lived under `Inbox/Bookmarks`.
+- A later enrichment pass produced the real title, tags, thumbnail/colors, and then the item could be routed.
+- The miss was not that metadata was unavailable; it was that the agent failed to finish the documented capture loop before replying.
+
+Required agent behavior for bare URLs:
+
+1. duplicate check
+2. create/stage the bookmark
+3. enrich or wait for metadata
+4. re-read the item
+5. route only when confidence is high and based on current vault topology
+6. re-read final state
+7. report verified title, path, and caveats
+
+If routing doctrine and live vault topology disagree, do not guess. Leave the item in `Inbox/Bookmarks` or ask the user which folder should be canonical, then update routing rules after the decision.
+
 ### 1. Bare `Inbox` is not the same as `Inbox/Bookmarks`
 
 A bookmark saved or moved to bare `Inbox` can exist as a webloc at a path like:
@@ -87,7 +108,7 @@ Examples from a batch save:
 - `Exit 5 Korean BBQ in Renton — Seattle Foodie` → `Food/Restaurants/Renton`
 - `HeyGen HyperFrames Codex plugin announcement` → `Tech/AI`
 - `Laundry basket organizer product — JyL_encuentras` → `Life/Household Stuff`
-- `Cartel Pilots Wanted co-op smuggling game — Indie Game Joe` → `Hobbies/Gaming`
+- `Cartel Pilots Wanted co-op smuggling game — Indie Game Joe` → `Media/Games` if it is a game recommendation/store/watchlist item; `Hobbies/Gaming` if it is gameplay/hobby reference content
 - `3D printed chopstick hack — NK3DLab` → `Hobbies/3D Printing`
 - `Banana bread cinnamon rolls recipe — Annika Eats` → `Food/Recipes`
 
@@ -259,7 +280,7 @@ Suggested JSON response:
 - Saving a weak TikTok link with no useful metadata lands in `Inbox/Bookmarks`, not bare `Inbox`.
 - A TikTok recipe short link gets a useful title and routes to `Food/Recipes`.
 - A restaurant TikTok with city/address metadata routes to `Food/Restaurants/{City}`.
-- A game TikTok routes to `Hobbies/Gaming`.
+- A game recommendation/store/watchlist link routes to `Media/Games`; gameplay, tabletop/D&D, mod/use-reference content routes to `Hobbies/Gaming`.
 - A 3D-printing TikTok routes to `Hobbies/3D Printing`.
 - An X/Twitter post about an AI/dev tool routes to `Tech/AI` or `Tech/Dev Tools` based on content.
 - Duplicate detection catches exact short URLs and canonical provider URLs.

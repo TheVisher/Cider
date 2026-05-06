@@ -16,10 +16,11 @@
    → Is it a restaurant/food place?     → Food/Restaurants/{City}/
    → Is it a recipe?                     → Food/Recipes/
    → Is it a product/shopping link?      → Life/Shopping/
-   → Is it a game/gaming related?        → Hobbies/Gaming/
+   → Is it a movie/TV/watchlist item?    → Media/Movies/ or Media/TV Shows/
+   → Is it a game store/watchlist item?  → Media/Games/
+   → Is it media hobby/reference content? → Hobbies/{Topic}/
    → Is it a tech tool/tutorial?         → Tech/{Topic}/
    → Is it a travel destination?         → Life/Travel/ or Trip ideas/
-   → Is it a movie/TV/watchlist item?     → Media/Movies/ or Media/TV Shows/
    → Is it a wallpaper/design asset?     → Wallpapers/ or Personal/Wallpapers/
    → Can't tell?                         → Inbox/Bookmarks/
 
@@ -50,7 +51,8 @@ The agent uses these to decide quickly:
 | TikTok/Instagram + food hashtags | `Food/Restaurants/` |
 | TikTok/Instagram + product review | `Life/Shopping/` |
 | YouTube + tutorial/how-to | `Tech/` |
-| YouTube + gaming | `Hobbies/Gaming/` |
+| Steam/game store page, game demo/playtest, game wishlist item | `Media/Games/` |
+| YouTube/TikTok/Reddit + gameplay, gaming guide, D&D/tabletop/mapmaking, hobby reference | `Hobbies/Gaming/` |
 | Yelp, Google Maps, restaurant site | `Food/Restaurants/` |
 | GitHub, Stack Overflow, dev docs | `Tech/` or `Projects/` |
 | Amazon, product listing | `Life/Shopping/` |
@@ -68,12 +70,13 @@ Restaurants are common enough to deserve specific rules:
 
 ## Media / Watchlist Routing
 
-IMDb, Letterboxd, trailer posts, and explicit movie/TV recommendations should route to media folders when the item type is clear:
+IMDb, Letterboxd, Steam/game store pages, trailer posts, and explicit movie/TV/game recommendations should route to media folders when the item type is clear:
 
 1. Movies → `Media/Movies/{Title}.webloc`
 2. TV series / shows → `Media/TV Shows/{Title}.webloc`
-3. Ambiguous entertainment links where movie vs TV is unclear → `Inbox/Bookmarks/` until clarified
-4. Do not mix image/media-file storage with watchlist bookmarks: `Inbox/Images` and other file Inbox folders are for captured files; `Media/Movies` and `Media/TV Shows` are for watchlist/reference bookmarks.
+3. Games / Steam store pages / game demos or playtests → `Media/Games/{Title}.webloc`
+4. Ambiguous entertainment links where movie vs TV vs game is unclear → `Inbox/Bookmarks/` until clarified
+5. Do not mix image/media-file storage with watchlist bookmarks: `Inbox/Images` and other file Inbox folders are for captured files; `Media/Movies`, `Media/TV Shows`, and `Media/Games` are for watchlist/reference bookmarks.
 
 ## Person Routing
 
@@ -124,6 +127,10 @@ IMDb, Letterboxd, trailer posts, and explicit movie/TV recommendations should ro
 ### "Check out this WoW addon"
 → Is user building it? → `Projects/WoW Addons/`
 → Just saving for reference? → `Hobbies/Gaming/WoW/`
+
+### "This Steam game looks interesting"
+→ Enrich metadata
+→ `Media/Games/{Game Title}.webloc`
 
 ### "Save this wallpaper"
 → `Hobbies/Wallpapers/{descriptive-name}.jpg`

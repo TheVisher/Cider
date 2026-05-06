@@ -17,6 +17,8 @@ Docs and Kanban have different jobs:
 
 - Boards appear as Cider tabs.
 - A board contains named columns and compact cards.
+- Project-style workflow rows use `Backlog -> Queued -> In Progress -> Testing -> Done`.
+- `Queued` means selected/upcoming work: cards have been pulled out of idea backlog and are intended to be worked through soon.
 - Columns can be marked as done columns.
 - Moving a card into a done column sets `completed`.
 - Moving a card out of a non-done column clears `completed`.
@@ -39,10 +41,23 @@ Docs and Kanban have different jobs:
 - Metadata is secondary to the main job: read/write the brief and move work forward.
 - Agents should use Kanban for active coordination and docs for durable truth.
 
+## Agent Queue Workflow
+
+For project boards, `Queued` is the agent-readable work stack.
+
+Recommended loop:
+
+1. A user or agent moves selected work from `Backlog` into `Queued`.
+2. The agent reads all queued cards and decides the safest implementation order.
+3. The agent moves one card into `In Progress`.
+4. When implementation is complete, the agent writes notes/test evidence and moves the card to `Testing`.
+5. The agent returns to `Queued` for the next card.
+
+This keeps `Backlog` exploratory, `Queued` intentional, and `In Progress` honest.
+
 ## Non-Goals
 
 - Do not create a Markdown note for every Kanban card.
 - Do not use Kanban as the permanent product bible.
 - Do not let duplicate card history substitute for current source-of-truth docs.
 - Do not let multiple agents mutate board YAML at the same time.
-

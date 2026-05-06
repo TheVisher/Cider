@@ -87,6 +87,7 @@ Long-term personal interests and recreational domains.
 
 Examples:
 - `Hobbies/Gaming/WoW/` — guides, builds (not addon dev — that's Projects)
+- `Hobbies/Gaming/` — gameplay guides, tabletop/D&D references, mods/addons for use, gaming hobby context
 - `Hobbies/3D Printing/Prints/`
 - `Hobbies/3D Printing/Materials/`
 - `Hobbies/Wallpapers/`
@@ -106,7 +107,7 @@ Subfolders (required — no loose files):
 
 ### Media
 
-Saved content where the file itself is the primary object. Not notes about media — the actual media.
+Saved media files and watchlist/reference bookmarks where the media item itself is the primary object.
 
 Examples:
 - `Media/Screenshots/`
@@ -114,6 +115,9 @@ Examples:
 - `Media/PDFs/`
 - `Media/Videos/`
 - `Media/Downloads/`
+- `Media/Movies/` — movie watchlist/reference bookmarks
+- `Media/TV Shows/` — TV watchlist/reference bookmarks
+- `Media/Games/` — game store pages, Steam links, demos/playtests, game watchlist/reference bookmarks
 
 ## Disambiguation Guide
 
@@ -123,7 +127,8 @@ Examples:
 | A recipe you want to cook | `Food/Recipes/` | `Hobbies/` |
 | How to set up software | `Tech/` | `Projects/` |
 | Building an addon or app | `Projects/` | `Tech/` or `Hobbies/` |
-| Playing a game for fun | `Hobbies/Gaming/` | `Projects/` |
+| Game store/watchlist page, Steam game, demo, or playtest | `Media/Games/` | `Life/Shopping/` |
+| Gameplay guide, tabletop/D&D reference, mod/addon for use | `Hobbies/Gaming/` | `Projects/` |
 | A product you're researching | `Life/Shopping/` | `Tech/` |
 | A person's birthday or size | `People/` | `Life/` |
 | A trip you're planning | `Life/Travel/` | `Hobbies/` |

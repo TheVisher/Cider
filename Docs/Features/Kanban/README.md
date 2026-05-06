@@ -10,13 +10,17 @@ Kanban gives Cider a visual active-work surface. Boards track product ideas, bug
 
 Kanban cards are first-class Cider detail items. A compact card lives on the board, while the shared slide-out detail panel owns long-form notes/spec text, metadata, linked items, and Markdown export.
 
+Project-style boards use a workflow lane of `Backlog -> Queued -> In Progress -> Testing -> Done`. `Queued` is the selected work stack: the user or an agent promotes cards from backlog into queued, then agents can drain queued cards one at a time into active implementation and testing.
+
 ## Source-Of-Truth Rules
 
 - Board/card status lives in YAML board files under `/Users/minivish/CiderVault/.cider/boards/`.
-- Durable product, architecture, UX, data-model, QA, and agent-behavior decisions belong in docs.
-- A card may contain long notes and enough context for another agent to continue work.
+- Durable product, architecture, UX, data-model, QA, and agent-behavior decisions belong in this docs folder.
+- Kanban cards carry active work/history: bugs, ideas, implementation notes, review findings, test evidence, commit notes, and iteration context.
+- Kanban-related cards should backlink to `Docs/Features/Kanban/` so agents know where to find the durable context before acting.
 - Markdown export is explicit and one-way; exporting does not make the `.md` file canonical.
 - Important Kanban outcomes should be promoted into the relevant durable doc before the work is considered fully settled.
+- Future archived cards should remain discoverable from the related feature area, but archived card history should not bloat the canonical docs.
 
 ## Code Map
 
@@ -35,6 +39,6 @@ Kanban cards are first-class Cider detail items. A compact card lives on the boa
 - `Docs/Features/Kanban/ARCHITECTURE.md`
 - `Docs/Features/Kanban/DATA_MODEL.md`
 - `Docs/Features/Kanban/TESTING.md`
+- `Docs/Features/Kanban/DECISIONS.md`
 - `Docs/Conventions/DOCS_INFORMATION_ARCHITECTURE.md`
 - `Docs/superpowers/plans/2026-05-03-kanban-first-class-detail-panel.md`
-

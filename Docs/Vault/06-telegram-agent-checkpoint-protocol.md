@@ -94,8 +94,10 @@ Unless the user says otherwise:
 ## Current Known Routing Decisions
 
 - Restaurants route by city: `Food/Restaurants/{City}`.
-- Movies/watchlist bookmarks route to `Media/Movies`.
+- Movie/watchlist bookmarks route to `Media/Movies`.
 - TV show/watchlist bookmarks route to `Media/TV Shows`.
+- Game store/watchlist bookmarks, Steam links, demos, and playtests route to `Media/Games`.
+- Media item links belong in `Media/*`; hobby/reference content about a medium may belong in `Hobbies/*`.
 - Wallpapers route to `Wallpapers` or an existing wallpaper-specific folder, not speculative new folders.
 - Unclear social/short links should be saved conservatively, enriched/re-read, and moved only when metadata is clear enough.
 

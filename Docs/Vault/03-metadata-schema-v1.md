@@ -123,7 +123,7 @@ raw_input: "user texted this"  # what was received before classification
 ### What Tags Are NOT For
 
 - Identity: don't tag something `restaurant` — that's `kind: place, subkind: restaurant`
-- Folder replacement: don't tag `gaming` instead of filing in `Hobbies/Gaming/`
+- Folder replacement: don't tag something `gaming` instead of filing game store/watchlist items in `Media/Games` or gaming hobby/reference content in `Hobbies/Gaming/`
 - Hierarchy: tags are flat. No tag nesting.
 
 ### Tag Format

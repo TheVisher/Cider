@@ -17,6 +17,7 @@ Key fields:
 - `labelIDs`
 - `notes`
 - `linkedEntities`
+- `url` / direct action URL (proposed): optional website for completing this todo without creating a bookmark
 - `folderID`
 - `rules`
 - `createdAt`
@@ -45,6 +46,7 @@ Key fields:
 - `completedAt`
 - `labelIDs`
 - `linkedEntities`
+- `url` / direct action URL (proposed): optional website for the event/action without creating a bookmark
 - `folderID`
 - `rules`
 - `createdAt`

@@ -46,6 +46,8 @@ Kanban board YAML is shared state. During multi-agent work:
 - touched boards should be verified with `cider-cli board show <board> --json`, not only `board list`;
 - overlap with done/fixed cards is a review signal, not automatic closure proof.
 
+On project boards, agents should treat `Queued` as the selected work stack. A durable automation loop can safely work through queued cards by moving one item at a time into `In Progress`, writing implementation notes and test evidence, moving the card to `Testing`, and then returning to `Queued` for the next item. Parent cards may summarize the plan while child cards carry scoped implementation work.
+
 ## CLI
 
 Agents should prefer CLI commands when available:
@@ -57,4 +59,3 @@ Agents should prefer CLI commands when available:
 /Users/minivish/Cider/.build/arm64-apple-macosx/debug/cider-cli board update-card "Cider Roadmap" --card abc123 --notes "..."
 /Users/minivish/Cider/.build/arm64-apple-macosx/debug/cider-cli board move-card "Cider Roadmap" --card abc123 --to Done
 ```
-

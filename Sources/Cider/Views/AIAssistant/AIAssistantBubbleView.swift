@@ -28,7 +28,6 @@ struct AIAssistantBubbleView: View {
                             Text(message.content)
                                 .font(CiderFont.body)
                                 .foregroundColor(CiderColors.primary)
-                                .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
 
                             BouncingDotsView()
@@ -40,7 +39,6 @@ struct AIAssistantBubbleView: View {
                             Text(message.content)
                                 .font(CiderFont.body)
                                 .foregroundColor(CiderColors.primary)
-                                .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -244,7 +242,6 @@ struct MarkdownContentView: View {
         Text(content)
             .font(CiderFont.body)
             .foregroundColor(CiderColors.primary)
-            .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -264,7 +261,6 @@ struct MarkdownContentView: View {
             Text(code)
                 .font(CiderFont.labelMonospaced)
                 .foregroundColor(CiderColors.primary)
-                .textSelection(.enabled)
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
                 .frame(maxWidth: .infinity, alignment: .leading)

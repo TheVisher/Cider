@@ -11,6 +11,7 @@ Docs and Kanban have different jobs:
 - Promote important Kanban outcomes into docs when they become lasting product, architecture, UX, data-model, routing, QA, or agent-behavior decisions.
 - Large implementation plans/specs may live under `Docs/superpowers/`, but active tracking should still live on a Kanban card. Link the card to the plan/spec, and promote only durable outcomes into Product, Architecture, Feature, Vault, QA, or Conventions docs.
 - Do not create stray Markdown docs for every task. Use a full doc only when the work needs a durable standalone foundation record or large spec.
+- Prove the docs/Kanban split on `Docs/Features/Kanban/` first before doing broad docs migration. Kanban-related cards should backlink to `Docs/Features/Kanban/`; agents should read the linked feature docs before implementing or reviewing.
 
 For Cider development work, agents should use the boards in `~/CiderVault/.cider/boards/` as the shared source of truth:
 
@@ -18,16 +19,32 @@ For Cider development work, agents should use the boards in `~/CiderVault/.cider
 - Check the relevant board before starting substantial work.
 - If the work already has a card, move it to the active work column before implementing.
 - If the work does not have a card, add one with a concise title, useful notes/spec context, and `created: 'YYYY-MM-DD'`.
-- Move work through the board as reality changes: backlog/planned -> in_progress -> testing/ready to test -> done.
+- Move work through the board as reality changes: backlog/planned -> queued -> in_progress -> testing/ready to test -> done.
+- On project boards, use `Queued` as the selected work stack between `Backlog` and `In Progress`. Pull chosen cards or parent groups into `Queued`, then move one scoped card at a time into `In Progress`, finish it, move it to `Testing`, and return to `Queued` for the next item.
 - For bugs, use the bugs board and move fixed items to `fixed`.
 - Put implementation notes, test evidence, blockers, and follow-up context on the card instead of scattering one-off Markdown files unless a full spec/doc is genuinely needed.
+- When auditing old Roadmap/Bugs cards, move relevant Cider work into the dedicated project boards instead of deleting it; preserve old cards until their value is clear.
 - Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done.
 - When a Kanban card grows into multiple deliverables, create child cards linked to the parent instead of expanding one forever-card. Parent cards should summarize direction; child cards should carry scoped implementation notes, test evidence, commits, and status.
 - Keep card text useful for future handoff to Hermes, Codex, or another agent.
 
+## Bookmark Capture Workflow
+
+When the user sends a bare URL, do not stop after creating the bookmark. Use the full capture loop before reporting success:
+
+1. Run `duplicate-check <url> --json`.
+2. Save new bookmarks to a conservative staging path such as `Inbox/Bookmarks` unless the target folder is already obvious.
+3. Run `bookmark enrich <id>` or otherwise let Cider fetch metadata.
+4. Re-read with `bookmark get <id> --json`.
+5. Route based on the enriched title/content and current vault topology; if routing confidence is below about 90%, leave it in `Inbox/Bookmarks` and ask.
+6. Re-read again and report the verified final title, folder, relative path, and any caveat.
+
 Active board files:
 
-- `~/CiderVault/.cider/boards/a1b2c3.yaml` — Cider Roadmap
+- `~/CiderVault/.cider/boards/2afee0.yaml` — Cider (default dedicated Cider product/project board; move newly audited Cider work here instead of deleting old cards)
+- `~/CiderVault/.cider/boards/08c899.yaml` — Cider Web
+- `~/CiderVault/.cider/boards/2d3f69.yaml` — Cider iOS
+- `~/CiderVault/.cider/boards/a1b2c3.yaml` — Cider Roadmap (legacy/general roadmap; audit old cards and move relevant work into dedicated project boards)
 - `~/CiderVault/.cider/boards/d4e5f6.yaml` — Cider Bugs
 - `~/CiderVault/.cider/boards/p1l2m3.yaml` — Implementation Plans
 - `~/CiderVault/.cider/boards/e7f8a9.yaml` — Kanban Implementation
