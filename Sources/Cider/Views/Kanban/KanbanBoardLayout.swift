@@ -130,6 +130,22 @@ enum KanbanBoardLayout {
         var renderedIDs = Set<String>()
         var nodes: [KanbanColumnCardNode] = []
 
+        func appendNode(_ card: KanbanCard, depth: Int, sameColumnParentID: String?) {
+            guard !renderedIDs.contains(card.id) else { return }
+
+            nodes.append(KanbanColumnCardNode(
+                card: card,
+                depth: depth,
+                sameColumnParentID: sameColumnParentID,
+                visualIndex: nodes.count
+            ))
+            renderedIDs.insert(card.id)
+
+            for child in sameColumnChildren[card.id] ?? [] {
+                appendNode(child, depth: depth + 1, sameColumnParentID: card.id)
+            }
+        }
+
         for card in cards {
             guard !renderedIDs.contains(card.id) else { continue }
 
@@ -139,23 +155,7 @@ enum KanbanBoardLayout {
                 continue
             }
 
-            nodes.append(KanbanColumnCardNode(
-                card: card,
-                depth: 0,
-                sameColumnParentID: nil,
-                visualIndex: nodes.count
-            ))
-            renderedIDs.insert(card.id)
-
-            for child in sameColumnChildren[card.id] ?? [] where !renderedIDs.contains(child.id) {
-                nodes.append(KanbanColumnCardNode(
-                    card: child,
-                    depth: 1,
-                    sameColumnParentID: card.id,
-                    visualIndex: nodes.count
-                ))
-                renderedIDs.insert(child.id)
-            }
+            appendNode(card, depth: 0, sameColumnParentID: nil)
         }
 
         return nodes
@@ -177,7 +177,7 @@ enum KanbanBoardLayout {
             var nextIndex = index + 1
 
             while nextIndex < nodes.count,
-                  nodes[nextIndex].sameColumnParentID == parent.card.id {
+                  nodes[nextIndex].depth > parent.depth {
                 children.append(nodes[nextIndex])
                 nextIndex += 1
             }

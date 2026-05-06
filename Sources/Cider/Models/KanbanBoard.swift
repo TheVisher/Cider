@@ -194,6 +194,28 @@ struct KanbanBoard: Codable, Identifiable, Equatable, Sendable {
         return card(id: parentID)
     }
 
+    func ancestorCards(for cardID: String) -> [KanbanCard] {
+        guard let card = card(id: cardID) else { return [] }
+
+        var ancestors: [KanbanCard] = []
+        var visited = Set([card.id])
+        var nextParentID = card.parentCardID
+
+        while let parentID = nextParentID,
+              let parent = self.card(id: parentID),
+              visited.insert(parent.id).inserted {
+            ancestors.append(parent)
+            nextParentID = parent.parentCardID
+        }
+
+        return ancestors.reversed()
+    }
+
+    func lineageCards(for cardID: String) -> [KanbanCard] {
+        guard let card = card(id: cardID) else { return [] }
+        return ancestorCards(for: cardID) + [card]
+    }
+
     func childCards(of parentID: String) -> [KanbanCard] {
         allCards.filter { $0.parentCardID == parentID }
     }

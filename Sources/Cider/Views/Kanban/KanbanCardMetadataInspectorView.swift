@@ -191,6 +191,8 @@ struct KanbanCardMetadataInspectorView: View {
     private var kanbanHierarchySection: some View {
         ItemMetadataSectionView(title: "Hierarchy", isExpanded: $isHierarchyExpanded) {
             VStack(alignment: .leading, spacing: Spacing.md) {
+                lineageView
+
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Parent")
                         .font(CiderFont.caption)
@@ -265,6 +267,68 @@ struct KanbanCardMetadataInspectorView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var lineageView: some View {
+        let lineage = board.lineageCards(for: card.id)
+        if lineage.count > 1 {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Lineage")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Spacing.xxs) {
+                        ForEach(Array(lineage.enumerated()), id: \.element.id) { index, lineageCard in
+                            lineagePill(
+                                card: lineageCard,
+                                isCurrent: lineageCard.id == card.id
+                            )
+
+                            if index < lineage.count - 1 {
+                                Image(systemName: "chevron.right")
+                                    .font(CiderFont.micro)
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func lineagePill(card lineageCard: KanbanCard, isCurrent: Bool) -> some View {
+        let label = HStack(spacing: Spacing.xxs) {
+            if isCurrent {
+                Image(systemName: "smallcircle.filled.circle")
+                    .font(CiderFont.micro)
+            }
+
+            Text(lineageCard.title)
+                .lineLimit(1)
+        }
+        .font(CiderFont.micro)
+        .foregroundColor(isCurrent ? CiderColors.primary : CiderColors.secondary)
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous)
+                .fill(isCurrent ? CiderColors.surfaceInput : CiderColors.surfaceSubtle)
+        )
+
+        if isCurrent {
+            label
+        } else {
+            Button {
+                onOpenKanbanCard(lineageCard.id)
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
         }
     }
 

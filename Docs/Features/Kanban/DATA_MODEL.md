@@ -50,10 +50,13 @@ Fields:
 - `agent`
 - `tags`
 - `linkedEntities`
+- `parentCardID`
 - `created`
 - `completed`
 
 `notes` is the canonical long-form body for the card. It may contain product briefs, refactor notes, acceptance criteria, testing notes, and handoff context.
+
+`parentCardID` links scoped implementation cards back to a larger parent card. Child cards may also have children, so the model can represent follow-up bugs or sub-slices discovered while implementing a scoped card. The board should keep visual nesting readable, while the detail panel shows the full card lineage.
 
 ## Draft
 

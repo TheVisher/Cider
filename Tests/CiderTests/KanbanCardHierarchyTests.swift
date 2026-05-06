@@ -55,6 +55,28 @@ struct KanbanCardHierarchyTests {
         #expect(board.canAssignParent(cardID: "child", parentCardID: nil))
     }
 
+    @Test("board returns card lineage from root to selected card")
+    func boardReturnsCardLineageFromRootToSelectedCard() {
+        let board = KanbanBoard(
+            name: "Hierarchy",
+            columns: [
+                KanbanColumn(
+                    id: "backlog",
+                    name: "Backlog",
+                    cards: [
+                        KanbanCard(id: "root", title: "Root"),
+                        KanbanCard(id: "child", title: "Child", parentCardID: "root"),
+                        KanbanCard(id: "grandchild", title: "Grandchild", parentCardID: "child"),
+                    ]
+                ),
+            ]
+        )
+
+        #expect(board.ancestorCards(for: "grandchild").map(\.id) == ["root", "child"])
+        #expect(board.lineageCards(for: "grandchild").map(\.id) == ["root", "child", "grandchild"])
+        #expect(board.lineageCards(for: "missing").isEmpty)
+    }
+
     @Test("removing parent relationship from board clears only matching children")
     func clearingDeletedParentLeavesUnrelatedCardsAlone() {
         var board = KanbanBoard(
@@ -97,6 +119,29 @@ struct KanbanCardHierarchyTests {
         #expect(nodes.map(\.depth) == [0, 0, 1, 1])
         #expect(nodes.map(\.sameColumnParentID) == [nil, nil, "parent", "parent"])
         #expect(nodes.map(\.visualIndex) == [0, 1, 2, 3])
+    }
+
+    @Test("same-column grandchildren render under their parent group")
+    func sameColumnGrandchildrenRenderUnderParentGroup() {
+        let column = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent"),
+                KanbanCard(id: "child", title: "Child", parentCardID: "parent"),
+                KanbanCard(id: "grandchild", title: "Grandchild", parentCardID: "child"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [column])
+
+        let nodes = KanbanBoardLayout.cardNodes(for: column, in: board)
+        let groups = KanbanBoardLayout.cardGroups(for: column, in: board)
+
+        #expect(nodes.map(\.card.id) == ["parent", "child", "grandchild"])
+        #expect(nodes.map(\.depth) == [0, 1, 2])
+        #expect(nodes.map(\.sameColumnParentID) == [nil, "parent", "child"])
+        #expect(groups.map(\.parent.card.id) == ["parent"])
+        #expect(groups.first?.children.map(\.card.id) == ["child", "grandchild"])
     }
 
     @Test("cross-column children stay top-level in their own column")
@@ -199,6 +244,31 @@ struct KanbanCardHierarchyTests {
         #expect(groups.map(\.parent.card.id) == ["parent", "standalone"])
         #expect(groups.first?.children.isEmpty == true)
         #expect(groups.last?.parent.card.id == "standalone")
+    }
+
+    @Test("collapsed parent groups hide all same-column descendants")
+    func collapsedParentGroupsHideAllSameColumnDescendants() {
+        let column = KanbanColumn(
+            id: "backlog",
+            name: "Backlog",
+            cards: [
+                KanbanCard(id: "parent", title: "Parent"),
+                KanbanCard(id: "child", title: "Child", parentCardID: "parent"),
+                KanbanCard(id: "grandchild", title: "Grandchild", parentCardID: "child"),
+                KanbanCard(id: "standalone", title: "Standalone"),
+            ]
+        )
+        let board = KanbanBoard(name: "Hierarchy", columns: [column])
+
+        let groups = KanbanBoardLayout.cardGroups(
+            for: column,
+            in: board,
+            collapsedParentIDs: ["parent"]
+        )
+
+        #expect(groups.map(\.parent.card.id) == ["parent", "standalone"])
+        #expect(groups.first?.children.isEmpty == true)
+        #expect(groups.first?.sameColumnChildCount == 2)
     }
 
     @Test("parent child summary counts children across columns")

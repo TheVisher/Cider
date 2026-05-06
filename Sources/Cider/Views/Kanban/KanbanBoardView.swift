@@ -580,8 +580,13 @@ struct KanbanBoardView: View {
             )
 
             interactiveCard(node.card, column: column, board: board, toIndex: node.visualIndex)
+                .padding(.leading, nestedChildIndent(for: node))
         }
         .padding(.leading, KanbanDesign.childIndent)
+    }
+
+    private func nestedChildIndent(for node: KanbanColumnCardNode) -> CGFloat {
+        CGFloat(max(0, min(node.depth, 3) - 1)) * (KanbanDesign.childIndent * 0.72)
     }
 
     private func interactiveCard(
