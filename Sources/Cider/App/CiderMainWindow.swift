@@ -34,13 +34,13 @@ final class CiderMainWindow: NSWindow {
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleFrameDidChange),
+            selector: #selector(handleFrameDidMove),
             name: NSWindow.didMoveNotification,
             object: self
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleFrameDidChange),
+            selector: #selector(handleFrameDidResize),
             name: NSWindow.didResizeNotification,
             object: self
         )
@@ -250,8 +250,14 @@ final class CiderMainWindow: NSWindow {
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
     }
 
-    @objc private func handleFrameDidChange() {
+    @objc private func handleFrameDidMove() {
         persistCurrentFrame()
+        CiderLivePerformanceRecorder.shared.recordFrame(event: .move, windowSize: frame.size)
+    }
+
+    @objc private func handleFrameDidResize() {
+        persistCurrentFrame()
+        CiderLivePerformanceRecorder.shared.recordFrame(event: .resize, windowSize: frame.size)
     }
 }
 

@@ -38,8 +38,20 @@ extension CiderPanelView {
         .background(
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { contentAreaWidth = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, w in contentAreaWidth = w }
+                    .onAppear {
+                        contentAreaWidth = proxy.size.width
+                        CiderLivePerformanceRecorder.shared.recordFrame(
+                            event: .layoutWidth,
+                            windowSize: CGSize(width: proxy.size.width, height: proxy.size.height)
+                        )
+                    }
+                    .onChange(of: proxy.size.width) { _, w in
+                        contentAreaWidth = w
+                        CiderLivePerformanceRecorder.shared.recordFrame(
+                            event: .layoutWidth,
+                            windowSize: CGSize(width: w, height: proxy.size.height)
+                        )
+                    }
             }
         )
     }

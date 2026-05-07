@@ -137,8 +137,14 @@ struct CiderPanelView: View {
         .animation(reduceMotion ? .none : .snappy, value: isKanbanDetailSlideOut)
         .ciderCardEnvironment(textScale: textScale, hideFooters: hideCardFooters, detailsOnHover: showCardDetailsOnHover)
         .task { ensureDefaultTabs() }
-        .onAppear { installKeyboardMonitor() }
-        .onDisappear { removeKeyboardMonitor() }
+        .onAppear {
+            installKeyboardMonitor()
+            updateLivePerformanceContext()
+        }
+        .onDisappear {
+            CiderLivePerformanceRecorder.shared.flushSession(reason: "panel_disappear")
+            removeKeyboardMonitor()
+        }
         .onChange(of: sidebarSearchText) { _, newValue in
             searchDebounceTask?.cancel()
             if newValue.isEmpty {
@@ -161,6 +167,7 @@ struct CiderPanelView: View {
             sidebarSearchText = ""
             debouncedSearchText = ""
             closeAllDetails()
+            updateLivePerformanceContext()
         }
         .onChange(of: selectedFolderID) { _, newFolderID in
             selectedTagIDs.removeAll()
@@ -176,6 +183,7 @@ struct CiderPanelView: View {
             } else {
                 AIAssistantViewModel.shared.clearContext()
             }
+            updateLivePerformanceContext()
         }
         .onChange(of: tagsCollapsed) { _, newVal in
             var config = CiderConfig.load()
@@ -202,6 +210,9 @@ struct CiderPanelView: View {
                 config.homeCardSizeScale = newValue
                 config.save()
             }
+        }
+        .onChange(of: libraryViewModel.items.count) { _, _ in
+            updateLivePerformanceContext()
         }
         .onChange(of: subFoldersCollapsed) { _, newValue in
             var config = CiderConfig.load()
