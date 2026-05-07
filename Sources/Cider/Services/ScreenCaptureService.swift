@@ -167,7 +167,10 @@ private final class ScreenCaptureSelectionView: NSView {
         super.init(frame: frame)
         wantsLayer = true
     }
-    required init?(coder: NSCoder) { fatalError() }
+    @available(*, unavailable, message: "Use init(frame:onComplete:) for the programmatic capture overlay.")
+    required init?(coder: NSCoder) {
+        return nil
+    }
 
     override var acceptsFirstResponder: Bool { true }
 

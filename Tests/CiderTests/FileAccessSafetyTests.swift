@@ -49,6 +49,18 @@ final class FileAccessSafetyTests: XCTestCase {
         XCTAssertFalse(source.contains("try! NSRegularExpression"))
     }
 
+    func testScreenCaptureSelectionViewDoesNotCrashOnCoderInitializer() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repositoryRoot.appendingPathComponent("Sources/Cider/Services/ScreenCaptureService.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("fatalError()"))
+    }
+
     func testCiderVaultSchemeAllowsOnlyVaultImages() throws {
         let root = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
