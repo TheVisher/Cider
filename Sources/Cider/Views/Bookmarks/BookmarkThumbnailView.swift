@@ -482,7 +482,7 @@ final class CarouselScrollWheelNSView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
+    required init?(coder: NSCoder) { nil }
 
     override func scrollWheel(with event: NSEvent) {
         let isTrackpad = event.phase != [] || event.momentumPhase != []
@@ -585,7 +585,7 @@ final class AnimatedGIFWrapper: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
+    required init?(coder: NSCoder) { nil }
 
     func setImage(_ image: NSImage) {
         imageView.image = image
