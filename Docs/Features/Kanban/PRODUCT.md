@@ -36,6 +36,7 @@ Docs and Kanban have different jobs:
 - Parent/child card structure should create a visual roadmap: the user and agents can see what remains, what order to work in, and what history led to the current fix without reading a huge Markdown file.
 - Child cards may have children when a scoped slice reveals smaller bugs or follow-ups. The board should keep nested visuals shallow and readable; the detail panel should show the full lineage/breadcrumb.
 - Parent groups can be moved into `Queued` to stage a plan; individual child cards should then move one at a time through `In Progress`, `Testing`, and `Done`.
+- Split child/follow-up cards should be agent-ready work packets, not title-only placeholders. A useful split card states the problem, goal, MVP scope, deferred/non-goal scope, concrete acceptance criteria, parent/source card or docs backlink, tags, priority, and enough notes for another agent to continue without replaying the whole conversation.
 - Visual hierarchy matters for ADHD-friendly comprehension: cards should be bite-sized, grouped, linked, and collapsible where possible.
 - The slide-out detail panel should feel consistent with other Cider cards.
 - Metadata is secondary to the main job: read/write the brief and move work forward.

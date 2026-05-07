@@ -90,4 +90,33 @@ struct KanbanCardCodableTests {
 
         #expect(decoded.relatedCardIDs.isEmpty)
     }
+
+    @Test("card AI summary round trips through codable storage")
+    func cardAISummaryRoundTripsThroughCodableStorage() throws {
+        let card = KanbanCard(
+            id: "card-with-summary",
+            title: "Generated preview",
+            aiSummary: "A concise generated board preview."
+        )
+
+        let data = try JSONEncoder().encode(card)
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: data)
+
+        #expect(decoded.aiSummary == "A concise generated board preview.")
+    }
+
+    @Test("legacy cards without AI summary decode with nil summary")
+    func legacyCardsWithoutAISummaryDecodeWithNilSummary() throws {
+        let json = """
+        {
+          "id": "legacy-card",
+          "title": "Legacy Kanban Card",
+          "created": "2026-05-02"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(KanbanCard.self, from: Data(json.utf8))
+
+        #expect(decoded.aiSummary == nil)
+    }
 }

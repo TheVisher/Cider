@@ -239,8 +239,25 @@ final class KanbanStorage: ObservableObject {
     // MARK: - Card Operations
 
     @discardableResult
-    func addCard(boardID: String, columnID: String, title: String, parentCardID: String? = nil) -> KanbanCard? {
-        let card = KanbanCard(title: title, parentCardID: parentCardID)
+    func addCard(
+        boardID: String,
+        columnID: String,
+        title: String,
+        notes: String? = nil,
+        priority: KanbanPriority? = nil,
+        color: KanbanCardColor? = nil,
+        tags: [String] = [],
+        parentCardID: String? = nil
+    ) -> KanbanCard? {
+        let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let card = KanbanCard(
+            title: title,
+            notes: trimmedNotes?.isEmpty == false ? trimmedNotes : nil,
+            color: color,
+            priority: priority,
+            tags: tags,
+            parentCardID: parentCardID
+        )
         var didAdd = false
         mutate(boardID: boardID) { board in
             guard parentCardID == nil || board.card(id: parentCardID ?? "") != nil else { return }
@@ -248,21 +265,33 @@ final class KanbanStorage: ObservableObject {
             board.columns[colIdx].cards.append(card)
             didAdd = true
         }
+        if didAdd {
+            schedulePreviewSummaryRefresh(boardID: boardID, cardID: card.id)
+        }
         return didAdd ? card : nil
     }
 
     func updateCard(boardID: String, card: KanbanCard) {
         let baseline = boards.flatMap(\.allCards).first { $0.id == card.id }
+        let shouldRefreshSummary = baseline.map {
+            $0.title != card.title || $0.notes != card.notes
+        } ?? false
         mutate(boardID: boardID) { board in
             for colIdx in board.columns.indices {
                 if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == card.id }) {
                     let current = board.columns[colIdx].cards[cardIdx]
-                    let merged = mergeCardUpdate(card, baseline: baseline, into: current)
+                    var merged = mergeCardUpdate(card, baseline: baseline, into: current)
+                    if shouldRefreshSummary {
+                        merged.aiSummary = nil
+                    }
                     guard board.canAssignParent(cardID: merged.id, parentCardID: merged.parentCardID) else { return }
                     board.columns[colIdx].cards[cardIdx] = merged
                     return
                 }
             }
+        }
+        if shouldRefreshSummary {
+            schedulePreviewSummaryRefresh(boardID: boardID, cardID: card.id)
         }
     }
 
@@ -272,6 +301,7 @@ final class KanbanStorage: ObservableObject {
         var merged = current
         if incoming.title != baseline.title { merged.title = incoming.title }
         if incoming.notes != baseline.notes { merged.notes = incoming.notes }
+        if incoming.aiSummary != baseline.aiSummary { merged.aiSummary = incoming.aiSummary }
         if incoming.color != baseline.color { merged.color = incoming.color }
         if incoming.priority != baseline.priority { merged.priority = incoming.priority }
         if incoming.agent != baseline.agent { merged.agent = incoming.agent }
@@ -281,6 +311,30 @@ final class KanbanStorage: ObservableObject {
         if incoming.parentCardID != baseline.parentCardID { merged.parentCardID = incoming.parentCardID }
         if incoming.completed != baseline.completed { merged.completed = incoming.completed }
         return merged
+    }
+
+    private func schedulePreviewSummaryRefresh(boardID: String, cardID: String) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let detail = self.findCard(id: cardID),
+                  detail.board.id == boardID else { return }
+            guard detail.card.aiSummary == nil,
+                  let summary = await SummaryService.shared.summarizeKanbanCardPreview(
+                    title: detail.card.title,
+                    notes: detail.card.notes
+                  ) else { return }
+
+            self.mutate(boardID: boardID) { board in
+                for colIdx in board.columns.indices {
+                    if let cardIdx = board.columns[colIdx].cards.firstIndex(where: { $0.id == cardID }) {
+                        let current = board.columns[colIdx].cards[cardIdx]
+                        guard current.aiSummary == nil else { return }
+                        board.columns[colIdx].cards[cardIdx].aiSummary = summary
+                        return
+                    }
+                }
+            }
+        }
     }
 
     func deleteCard(boardID: String, cardID: String) {

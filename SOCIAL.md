@@ -46,6 +46,19 @@ Thanks for checking it out. This is early beta, which is a polite way of saying:
 
 ### Bluesky
 
+- 2026-05-06: Clipboard URL capture spotlight
+  - URL: https://bsky.app/profile/ciderapp.bsky.social/post/3ml7ppqgfuc2y
+  - Copy:
+
+```text
+Copy a URL, and Cider offers to save it.
+No “I’ll paste it somewhere later” lies required.
+
+Double-tap Option, hit Save, keep moving.
+
+https://cider.so
+```
+
 - 2026-05-05: Small capture positioning post
   - URL: https://bsky.app/profile/ciderapp.bsky.social/post/3ml5642rgz226
   - Copy:
@@ -130,6 +143,12 @@ For pre-beta and early beta, keep it light:
 - Discord: only meaningful updates, bug notes, and discussion prompts.
 - GitHub: releases, issues, and changelog-like updates.
 - Reddit: occasional thoughtful posts once ready, not drive-by self-promo.
+
+## Posting Mechanism
+
+For Bluesky automation runs, use the Codex in-app Browser plugin (`@Browser`, `browser-use@openai-bundled`) with the `iab` backend. The in-app browser is logged into `@ciderapp.bsky.social` and can publish directly.
+
+Do not try to use Dia, Safari, or another desktop browser first. If the Browser plugin is unavailable, record that blocker in this file and leave the queue item unposted.
 
 ## Weekly Social Checklist
 
@@ -274,7 +293,45 @@ Rotate through these so the feed does not become one long "please try my app" si
 - Tiny jokes about digital clutter.
 - Founder notes: why this exists, what problem it solves, what changed this week.
 
+## Feature Angles
+
+Use this as the social-safe feature inventory. Keep statuses honest and avoid implying anything is shipped unless it is in the public beta build.
+
+| Feature / use case | Status | Safe wording | Unsafe wording / overpromises to avoid | Why it’s interesting socially |
+| --- | --- | --- | --- | --- |
+| Instant capture panel (Option double-tap) | public beta | “Double-tap Option to pop Cider up anywhere, capture the thing, then disappear again.” | “Replaces your notes app.” “You’ll never forget anything again.” | Easy to demo. It’s a behavior change, not a giant workflow. |
+| Bookmarks that feel like “library cards” (title + thumbnail + metadata) | public beta | “Save a tab in one keystroke. Cider keeps the thumbnail and context so it’s not just a dead URL.” | “Perfect web archive.” “Reads every site flawlessly.” | Everyone has a graveyard of bookmarks; this shows a clear upgrade. |
+| Clipboard URL capture (Cider notices copied links) | public beta | “Copy a URL — Cider offers to save it.” | “Captures everything you copy (always).” | Small, delightful, and relatable: the ‘I’ll paste it later’ lie. |
+| Screen capture → OCR → routed capture | public beta | “Grab part of your screen, OCR it, and route it into a note / date / contact.” | “100% accurate OCR.” “Understands any screenshot perfectly.” | Feels like magic, but the demo is concrete. |
+| Local-first AI enrichment (auto-tags, OCR indexing, similar items, summaries) | public beta | “Optional local intelligence: auto-tags, OCR text, ‘find similar’, short summaries.” | “AI organizes your life automatically.” “Cloud brain.” | “AI, but not SaaS” is a strong differentiator if phrased carefully. |
+| AI assistant chat (Apple Intelligence or optional local model) | public beta | “Optional assistant that can search your vault and take actions. No API keys required.” | “Always-on agent.” “Knows everything about you.” “Works on any Mac.” | Clear contrast with cloud-key workflows; good for nerdy build notes. |
+| Folders + tags + saved views (tabs) | public beta | “Organize with folders and tags, plus tabs that remember your filters/layout.” | “Automatically perfect organization.” | Screenshots look good; it’s pragmatic and non-hypey. |
+| Search palette + Spotlight indexing | public beta | “Cmd+K in-app search, plus Spotlight indexing so your vault shows up in macOS search.” | “Search reads your mind.” | Mac-native credibility; easy ‘built for macOS’ proof. |
+| Todos, dates, reminders (with notifications) | public beta | “Todos and date cards, with reminders that can notify you.” | “Full calendar replacement.” “Full Reminders replacement.” | Turns capture into action; useful to show ‘not just bookmarks’. |
+| Kanban boards inside Cider (parent/child cards + queued workflow) | testing | “We’re testing a built-in Kanban surface so ‘work’ doesn’t live in 12 random docs.” | “Kanban is fully shipped.” “Project management suite.” | Great for ‘how I build the app while building the app’ posts. |
+| Dashboard as a second-brain feed (resurfacing + curation) | testing | “Exploring a calm dashboard that resurfaces your own context instead of being a generic feed.” | “Personalized news feed.” “Replaces your RSS/social feeds.” | Opinionated take on feeds; invites thoughtful feedback. |
+| Hermes / Main Brain (second-brain chat parity work) | testing | “Testing a Hermes-powered ‘Main Brain’ chat surface inside Cider. Not public beta yet.” | “Main Brain is available now.” “Talk to Cider from anywhere (for everyone).” | High curiosity, but needs strict wording to avoid overpromising availability. |
+| Cider Web companion | testing | “Cider Web exists, but it’s still in testing.” | “Web app is fully ready / stable.” | Good lightweight update for people who ask “is there a web version?”. |
+
 ## Post Backlog
+
+## Planned / Upcoming
+
+### Bluesky Planned Queue
+
+- Clipboard URL capture spotlight (created: '2026-05-06') - posted
+  - Status: posted (2026-05-06)
+  - URL: https://bsky.app/profile/ciderapp.bsky.social/post/3ml7ppqgfuc2y
+  - Copy:
+
+```text
+Copy a URL, and Cider offers to save it.
+No “I’ll paste it somewhere later” lies required.
+
+Double-tap Option, hit Save, keep moving.
+
+https://cider.so
+```
 
 ### Bluesky Drafts
 

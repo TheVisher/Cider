@@ -79,9 +79,11 @@ struct KanbanPlanIndicator: Equatable {
     let stepNumber: Int
     let stepCount: Int
     let accentColor: KanbanCardColor?
+    let isNextUp: Bool
 
     var compactText: String {
-        "Step \(stepNumber)/\(stepCount)"
+        let stepText = "Step \(stepNumber)/\(stepCount)"
+        return isNextUp ? "Next Up · \(stepText)" : stepText
     }
 }
 
@@ -269,14 +271,44 @@ enum KanbanBoardLayout {
 
         let siblings = board.childCards(of: parent.id)
         guard let stepIndex = siblings.firstIndex(where: { $0.id == card.id }) else { return nil }
+        let nextUpCardID = siblings.first { child in
+            !isDone(child, in: board)
+        }?.id
 
         return KanbanPlanIndicator(
             parentID: parent.id,
             title: parent.title,
             stepNumber: stepIndex + 1,
             stepCount: siblings.count,
-            accentColor: cardAccentColor(for: parent, in: board)
+            accentColor: cardAccentColor(for: parent, in: board),
+            isNextUp: nextUpCardID == card.id
         )
+    }
+
+    static func previewText(for card: KanbanCard) -> String? {
+        if let summary = trimmedNonEmpty(card.aiSummary) {
+            return summary
+        }
+
+        return trimmedNonEmpty(card.notes)
+    }
+
+    private static func trimmedNonEmpty(_ text: String?) -> String? {
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func isDone(_ card: KanbanCard, in board: KanbanBoard) -> Bool {
+        if card.completed != nil {
+            return true
+        }
+
+        guard let columnID = board.columnID(containing: card.id),
+              let column = board.columns.first(where: { $0.id == columnID }) else {
+            return false
+        }
+
+        return column.isDoneColumn
     }
 
     private static func familyAccentColor(for card: KanbanCard, in board: KanbanBoard) -> KanbanCardColor {

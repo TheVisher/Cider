@@ -107,6 +107,40 @@ struct KanbanBoardFileLockingTests {
         #expect(refreshed.priority == .high)
     }
 
+    @Test("add card persists normalized metadata and parent")
+    @MainActor
+    func addCardPersistsNormalizedMetadataAndParent() throws {
+        let vault = try Self.makeTemporaryVault()
+        defer {
+            StoragePaths.vaultOverride = nil
+            StoragePaths.invalidateCachedDirectory()
+            try? FileManager.default.removeItem(at: vault)
+        }
+        StoragePaths.vaultOverride = vault
+        StoragePaths.invalidateCachedDirectory()
+
+        let storage = KanbanStorage()
+        let board = storage.createBoard(name: "Quick Add Metadata")
+        let parent = try #require(storage.addCard(boardID: board.id, columnID: "backlog", title: "Parent plan"))
+        let child = try #require(storage.addCard(
+            boardID: board.id,
+            columnID: "backlog",
+            title: "Child card",
+            notes: "  Build the compact entry path.  ",
+            priority: .medium,
+            color: .purple,
+            tags: ["kanban", "quick-add"],
+            parentCardID: parent.id
+        ))
+
+        let refreshed = try #require(KanbanStorage().findCard(id: child.id)?.card)
+        #expect(refreshed.notes == "Build the compact entry path.")
+        #expect(refreshed.priority == .medium)
+        #expect(refreshed.color == .purple)
+        #expect(refreshed.tags == ["kanban", "quick-add"])
+        #expect(refreshed.parentCardID == parent.id)
+    }
+
     @Test("parallel CLI add-card operations preserve every card")
     func parallelCLIAddCardOperationsPreserveEveryCard() throws {
         let cli = try #require(Self.ciderCLIURL())

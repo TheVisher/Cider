@@ -139,4 +139,24 @@ struct KanbanBoardLayoutTests {
             archiveExpanded: false
         ))
     }
+
+    @Test("project board design tokens favor readable card scanning")
+    func projectBoardDesignTokensFavorReadableCardScanning() {
+        #expect(KanbanDesign.projectColumnWidth >= 368)
+        #expect(KanbanDesign.projectColumnHeight >= 1000)
+        #expect(KanbanDesign.columnWidth >= 320)
+    }
+
+    @Test("card preview design tokens separate header body and footer")
+    func cardPreviewDesignTokensSeparateHeaderBodyAndFooter() {
+        #expect(KanbanDesign.cardPreviewSectionSpacing >= Spacing.sm)
+        #expect(KanbanDesign.cardPreviewFooterTopSpacing >= Spacing.sm)
+        #expect(KanbanDesign.cardPreviewContextFooterSpacing >= Spacing.sm)
+    }
+
+    @Test("blue and purple Kanban accent tokens are visually separated")
+    func blueAndPurpleKanbanAccentTokensAreVisuallySeparated() {
+        #expect(KanbanDesign.kanbanBlueAccentHueDegrees < KanbanDesign.kanbanPurpleAccentHueDegrees)
+        #expect(KanbanDesign.kanbanPurpleAccentHueDegrees - KanbanDesign.kanbanBlueAccentHueDegrees >= 45)
+    }
 }

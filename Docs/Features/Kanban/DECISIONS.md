@@ -92,3 +92,27 @@ Behavior notes:
 - Future agent automation should read `Queued`, choose a safe order, move one card into `In Progress`, implement it, move it to `Testing`, then return to `Queued` for the next card.
 
 **Reason:** This gives Erik and agents a clean middle state between idea backlog and active implementation. It also creates the foundation for unattended or semi-automated agent work without letting `In Progress` become a dumping ground.
+
+## 2026-05-06 — Split cards must be agent-ready work packets
+
+**Decision:** Child and follow-up cards created while splitting larger work should include enough structure for another agent or future Erik to pick up the work without reopening the entire parent conversation.
+
+Required split-card checklist:
+
+- Problem: what is wrong, missing, or being improved.
+- Goal: what should become true.
+- MVP scope: the smallest useful implementation.
+- Non-goals or deferred scope: what should not keep the card open forever.
+- Acceptance criteria: concrete verification bullets.
+- Parent/source card or docs backlink.
+- Type/topic tags.
+- Priority.
+- Created date.
+
+Agent behavior notes:
+
+- Do not create title-only follow-up cards for active Cider development work.
+- Put implementation notes, failed attempts, final fix notes, and test evidence on the scoped card.
+- Create follow-up cards sequentially unless board file locking is active for the workflow; multiple agents should not race-write the same board YAML.
+
+**Reason:** The Kanban board is becoming an agent-native work surface. Thin cards save time at creation and lose it later; structured cards preserve handoff quality without turning every task into a standalone Markdown spec.

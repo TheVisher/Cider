@@ -9,6 +9,5 @@ script = ""
 name = "Run"
 icon = "run"
 command = '''
-swift build
-swift run
+./script/build_and_run.sh --verify
 '''

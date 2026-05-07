@@ -3,6 +3,7 @@ import Foundation
 struct KanbanCardDraft: Equatable {
     var title: String
     var notes: String
+    var aiSummary: String?
     var color: KanbanCardColor?
     var priority: KanbanPriority?
     var agent: String
@@ -14,6 +15,7 @@ struct KanbanCardDraft: Equatable {
     init(card: KanbanCard) {
         title = card.title
         notes = card.notes ?? ""
+        aiSummary = card.aiSummary
         color = card.color
         priority = card.priority
         agent = card.agent ?? ""
@@ -31,6 +33,7 @@ struct KanbanCardDraft: Equatable {
 
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.notes = trimmedNotes.isEmpty ? nil : notes
+        updated.aiSummary = aiSummary
 
         let trimmedAgent = agent.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.agent = trimmedAgent.isEmpty ? nil : trimmedAgent

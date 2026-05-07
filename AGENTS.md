@@ -26,6 +26,8 @@ For Cider development work, agents should use the boards in `~/CiderVault/.cider
 - When auditing old Roadmap/Bugs cards, move relevant Cider work into the dedicated project boards instead of deleting it; preserve old cards until their value is clear.
 - Use `Docs/QA/` for reusable audit procedures, release/regression plans, and historical reports that should remain useful after the card is done.
 - When a Kanban card grows into multiple deliverables, create child cards linked to the parent instead of expanding one forever-card. Parent cards should summarize direction; child cards should carry scoped implementation notes, test evidence, commits, and status.
+- When splitting a parent/done card into child or follow-up cards, make each new card agent-ready instead of title-only. Include: Problem, Goal, MVP scope, non-goals/deferred scope, acceptance criteria, parent/source card or docs backlink, tags, priority, and a `created: 'YYYY-MM-DD'` field.
+- Create follow-up cards sequentially unless you are using a workflow with board file locking; avoid parallel YAML writes to the same board.
 - Keep card text useful for future handoff to Hermes, Codex, or another agent.
 
 ## Bookmark Capture Workflow

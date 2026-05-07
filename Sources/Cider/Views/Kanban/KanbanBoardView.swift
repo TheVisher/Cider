@@ -10,6 +10,8 @@ struct KanbanBoardView: View {
     @State private var boardNameDraft = ""
     @State private var addingCardToColumn: String?
     @State private var newCardTitle = ""
+    @State private var quickAddColumnID: String?
+    @State private var quickAddDraft = KanbanQuickAddDraft()
     @State private var renamingColumnID: String?
     @State private var columnNameDraft = ""
     @State private var showDeleteConfirmation = false
@@ -18,6 +20,7 @@ struct KanbanBoardView: View {
     @State private var archiveExpanded = false
     @State private var archiveOpenGeneration = 0
     @State private var collapsedParentCardIDs: Set<String> = []
+    @State private var projectLaneScrollIndexByID: [String: Int] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var board: KanbanBoard? {
@@ -45,6 +48,7 @@ struct KanbanBoardView: View {
             }
             .onChange(of: boardID) { _, _ in
                 collapsedParentCardIDs.removeAll()
+                projectLaneScrollIndexByID.removeAll()
             }
         } else {
             emptyState
@@ -272,32 +276,48 @@ struct KanbanBoardView: View {
                     archiveColumns: archiveColumns,
                     availableWidth: geometry.size.width
                 )
+                let visibleColumnCount = projectLaneVisibleColumnCount(availableWidth: geometry.size.width)
+                let maxScrollIndex = max(lane.columns.count - visibleColumnCount, 0)
 
-                HStack(alignment: .top, spacing: Spacing.md) {
-                    ScrollView(.horizontal, showsIndicators: true) {
+                ScrollViewReader { scrollProxy in
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
                         HStack(alignment: .top, spacing: Spacing.md) {
-                            ForEach(lane.columns) { column in
-                                columnView(
-                                    column,
-                                    board: board,
-                                    width: KanbanDesign.projectColumnWidth,
-                                    height: KanbanDesign.projectColumnHeight
-                                )
+                            ScrollView(.horizontal, showsIndicators: true) {
+                                HStack(alignment: .top, spacing: Spacing.md) {
+                                    ForEach(lane.columns) { column in
+                                        columnView(
+                                            column,
+                                            board: board,
+                                            width: KanbanDesign.projectColumnWidth,
+                                            height: KanbanDesign.projectColumnHeight
+                                        )
+                                        .id(projectColumnScrollID(laneID: lane.id, columnID: column.id))
+                                    }
+                                }
+                                .padding(.bottom, Spacing.xs)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .defaultScrollAnchor(shouldPushArchive ? .trailing : .leading)
+                            .id(projectLaneScrollIdentity(for: lane, shouldPushArchive: shouldPushArchive))
+
+                            if !archiveColumns.isEmpty {
+                                projectArchiveReveal(columns: archiveColumns, board: board)
+                                    .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
                         }
-                        .padding(.bottom, Spacing.xs)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .defaultScrollAnchor(shouldPushArchive ? .trailing : .leading)
-                    .id(projectLaneScrollIdentity(for: lane, shouldPushArchive: shouldPushArchive))
 
-                    if !archiveColumns.isEmpty {
-                        projectArchiveReveal(columns: archiveColumns, board: board)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        if maxScrollIndex > 0 {
+                            projectLaneScrollControls(
+                                lane: lane,
+                                visibleColumnCount: visibleColumnCount,
+                                maxScrollIndex: maxScrollIndex,
+                                scrollProxy: scrollProxy
+                            )
+                        }
                     }
                 }
             }
-            .frame(height: KanbanDesign.projectColumnHeight + Spacing.xs)
+            .frame(height: KanbanDesign.projectColumnHeight + Spacing.xs + KanbanDesign.projectHorizontalScrollControlHeight)
             .animation(reduceMotion ? .none : .spring(response: 0.32, dampingFraction: 0.86), value: archiveExpanded)
         }
         .padding(Spacing.sm)
@@ -326,12 +346,104 @@ struct KanbanBoardView: View {
         )
     }
 
+    private func projectLaneVisibleColumnCount(availableWidth: CGFloat) -> Int {
+        let columnStride = KanbanDesign.projectColumnWidth + Spacing.md
+        return max(1, Int(floor((availableWidth + Spacing.md) / columnStride)))
+    }
+
     private func projectLaneScrollIdentity(for lane: KanbanBoardLane, shouldPushArchive: Bool) -> String {
         if archiveExpanded {
             return "\(lane.id)-archive-\(archiveOpenGeneration)-push-\(shouldPushArchive)"
         }
 
         return "\(lane.id)-active"
+    }
+
+    private func projectColumnScrollID(laneID: String, columnID: String) -> String {
+        "\(laneID)-column-\(columnID)"
+    }
+
+    private func projectLaneScrollIndex(for lane: KanbanBoardLane, maxScrollIndex: Int) -> Int {
+        min(max(projectLaneScrollIndexByID[lane.id] ?? 0, 0), maxScrollIndex)
+    }
+
+    private func scrollProjectLane(
+        _ lane: KanbanBoardLane,
+        to index: Int,
+        maxScrollIndex: Int,
+        scrollProxy: ScrollViewProxy
+    ) {
+        let nextIndex = min(max(index, 0), maxScrollIndex)
+        projectLaneScrollIndexByID[lane.id] = nextIndex
+
+        guard lane.columns.indices.contains(nextIndex) else { return }
+
+        let targetColumn = lane.columns[nextIndex]
+        withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.22)) {
+            scrollProxy.scrollTo(
+                projectColumnScrollID(laneID: lane.id, columnID: targetColumn.id),
+                anchor: .leading
+            )
+        }
+    }
+
+    private func projectLaneScrollControls(
+        lane: KanbanBoardLane,
+        visibleColumnCount: Int,
+        maxScrollIndex: Int,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
+        let currentIndex = projectLaneScrollIndex(for: lane, maxScrollIndex: maxScrollIndex)
+        let visibleRange = currentIndex..<(min(currentIndex + visibleColumnCount, lane.columns.count))
+
+        return HStack(spacing: Spacing.xs) {
+            Button {
+                scrollProjectLane(
+                    lane,
+                    to: currentIndex - 1,
+                    maxScrollIndex: maxScrollIndex,
+                    scrollProxy: scrollProxy
+                )
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(CiderFont.micro)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .disabled(currentIndex == 0)
+            .opacity(currentIndex == 0 ? 0.35 : 0.85)
+            .help("Scroll columns left")
+
+            HStack(spacing: Spacing.xxs) {
+                ForEach(lane.columns.indices, id: \.self) { index in
+                    Capsule(style: .continuous)
+                        .fill(visibleRange.contains(index) ? CiderColors.controlAccent.opacity(0.78) : CiderColors.borderSubtle.opacity(0.65))
+                        .frame(width: visibleRange.contains(index) ? 18 : 10, height: 3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityLabel("Horizontal column position")
+
+            Button {
+                scrollProjectLane(
+                    lane,
+                    to: currentIndex + 1,
+                    maxScrollIndex: maxScrollIndex,
+                    scrollProxy: scrollProxy
+                )
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(CiderFont.micro)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .disabled(currentIndex >= maxScrollIndex)
+            .opacity(currentIndex >= maxScrollIndex ? 0.35 : 0.85)
+            .help("Scroll columns right")
+        }
+        .foregroundColor(CiderColors.tertiary)
+        .padding(.horizontal, Spacing.xs)
+        .frame(height: KanbanDesign.projectHorizontalScrollControlHeight)
     }
 
     private func projectArchiveReveal(columns archiveColumns: [KanbanColumn], board: KanbanBoard) -> some View {
@@ -378,7 +490,7 @@ struct KanbanBoardView: View {
         height: CGFloat? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            columnHeader(column)
+            columnHeader(column, board: board)
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: Spacing.sm) {
@@ -446,7 +558,7 @@ struct KanbanBoardView: View {
         }
     }
 
-    private func columnHeader(_ column: KanbanColumn) -> some View {
+    private func columnHeader(_ column: KanbanColumn, board: KanbanBoard) -> some View {
         HStack(spacing: Spacing.xs) {
             if renamingColumnID == column.id {
                 TextField("Column name", text: $columnNameDraft)
@@ -480,6 +592,33 @@ struct KanbanBoardView: View {
                 )
 
             Spacer()
+
+            Button {
+                quickAddDraft = KanbanQuickAddDraft()
+                quickAddColumnID = column.id
+            } label: {
+                Image(systemName: "plus")
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Quick add card")
+            .popover(
+                isPresented: Binding(
+                    get: { quickAddColumnID == column.id },
+                    set: { isPresented in
+                        if !isPresented {
+                            quickAddColumnID = nil
+                            quickAddDraft = KanbanQuickAddDraft()
+                        }
+                    }
+                ),
+                arrowEdge: .bottom
+            ) {
+                quickAddPopover(column: column, board: board)
+            }
 
             Menu {
                 Button("Rename") {
@@ -671,96 +810,56 @@ struct KanbanBoardView: View {
         canCollapse: Bool = false,
         isCollapsed: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: compact ? Spacing.xxs : Spacing.xs) {
+        VStack(alignment: .leading, spacing: compact ? Spacing.xxs : 0) {
             if let color = accentColor {
                 RoundedRectangle(cornerRadius: KanbanDesign.accentBarRadius, style: .continuous)
                     .fill(kanbanColor(color))
                     .frame(height: KanbanDesign.accentBarHeight)
+                    .padding(.bottom, compact ? Spacing.xxs : Spacing.xs)
             }
 
-            HStack(spacing: Spacing.xs) {
-                if canCollapse {
-                    Button {
-                        toggleCollapse(cardID: card.id)
-                    } label: {
-                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                            .font(CiderFont.micro)
-                            .foregroundColor(CiderColors.tertiary)
-                            .frame(width: 12, height: 12)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(isCollapsed ? "Expand child cards" : "Collapse child cards")
-                    .accessibilityHint("Toggles visible child cards in this column.")
-                }
-
-                Text(card.title)
-                    .font(compact ? CiderFont.caption : CiderFont.label)
-                    .foregroundColor(CiderColors.primary)
-                    .lineLimit(compact ? 1 : 2)
-
-                if compact {
-                    Spacer()
-                    if let priority = card.priority {
-                        priorityBadge(priority)
-                    }
-                }
-            }
+            cardHeaderView(
+                card,
+                compact: compact,
+                canCollapse: canCollapse,
+                isCollapsed: isCollapsed
+            )
 
             if let childSummary {
                 Text(childSummary.compactText)
                     .font(CiderFont.micro)
                     .foregroundColor(CiderColors.tertiary)
                     .lineLimit(1)
+                    .padding(.top, compact ? Spacing.xxs : KanbanDesign.cardPreviewSectionSpacing)
             }
 
-            if let parentBadge {
-                if let planIndicator {
-                    planIndicatorView(planIndicator)
-                } else {
-                    parentBadgeView(parentBadge)
-                }
-            } else if let planIndicator {
-                planIndicatorView(planIndicator)
+            if compact, hasCardContext(parentBadge: parentBadge, planIndicator: planIndicator) {
+                cardContextView(parentBadge: parentBadge, planIndicator: planIndicator)
+                    .padding(.top, Spacing.xxs)
             }
 
             if !compact {
-                if let notes = card.notes, !notes.isEmpty {
-                    Text(notes)
+                if let previewText = KanbanBoardLayout.previewText(for: card) {
+                    Text(previewText)
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
-                        .lineLimit(3)
+                        .lineLimit(KanbanDesign.cardPreviewBodyLineLimit)
+                        .padding(.top, KanbanDesign.cardPreviewSectionSpacing)
                 }
 
-                HStack(spacing: Spacing.xs) {
-                    if let priority = card.priority {
-                        priorityBadge(priority)
-                    }
-                    if let agent = card.agent {
-                        HStack(spacing: Spacing.xxs) {
-                            Image(systemName: "cpu")
-                            Text(agent)
-                        }
-                        .font(CiderFont.micro)
-                        .foregroundColor(CiderColors.controlAccent)
-                    }
-                    if !card.tags.isEmpty {
-                        ForEach(card.tags.prefix(2), id: \.self) { tag in
-                            Text(tag)
-                                .font(CiderFont.micro)
-                                .foregroundColor(CiderColors.tertiary)
-                                .padding(.horizontal, Spacing.xxs)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(CiderColors.surfaceInput)
-                                )
-                        }
-                    }
-                    Spacer()
+                if hasCardContext(parentBadge: parentBadge, planIndicator: planIndicator) {
+                    cardContextView(parentBadge: parentBadge, planIndicator: planIndicator)
+                        .padding(.top, KanbanDesign.cardPreviewContextFooterSpacing)
+                }
+
+                if hasCardFooter(card) {
+                    cardFooterView(card)
+                        .padding(.top, KanbanDesign.cardPreviewFooterTopSpacing)
                 }
             }
         }
-        .padding(Spacing.sm)
+        .padding(.horizontal, compact ? Spacing.sm : Spacing.md)
+        .padding(.vertical, compact ? Spacing.sm : Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .fill(CiderColors.surfaceElevated)
@@ -775,6 +874,95 @@ struct KanbanBoardView: View {
                     storage.deleteCard(boardID: boardID, cardID: card.id)
                 }
             }
+        }
+    }
+
+    private func cardHeaderView(
+        _ card: KanbanCard,
+        compact: Bool,
+        canCollapse: Bool,
+        isCollapsed: Bool
+    ) -> some View {
+        HStack(alignment: .top, spacing: Spacing.xs) {
+            if canCollapse {
+                Button {
+                    toggleCollapse(cardID: card.id)
+                } label: {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary)
+                        .frame(width: 12, height: 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isCollapsed ? "Expand child cards" : "Collapse child cards")
+                .accessibilityHint("Toggles visible child cards in this column.")
+            }
+
+            Text(card.title)
+                .font(compact ? CiderFont.caption : CiderFont.label)
+                .foregroundColor(CiderColors.primary)
+                .lineLimit(compact ? 1 : 2)
+
+            if compact {
+                Spacer()
+                if let priority = card.priority {
+                    priorityBadge(priority)
+                }
+            }
+        }
+    }
+
+    private func hasCardFooter(_ card: KanbanCard) -> Bool {
+        card.priority != nil || card.agent != nil || !card.tags.isEmpty
+    }
+
+    private func hasCardContext(parentBadge: KanbanParentBadge?, planIndicator: KanbanPlanIndicator?) -> Bool {
+        parentBadge != nil || planIndicator != nil
+    }
+
+    @ViewBuilder
+    private func cardContextView(
+        parentBadge: KanbanParentBadge?,
+        planIndicator: KanbanPlanIndicator?
+    ) -> some View {
+        if let parentBadge {
+            if let planIndicator {
+                planIndicatorView(planIndicator)
+            } else {
+                parentBadgeView(parentBadge)
+            }
+        } else if let planIndicator {
+            planIndicatorView(planIndicator)
+        }
+    }
+
+    private func cardFooterView(_ card: KanbanCard) -> some View {
+        HStack(spacing: Spacing.xs) {
+            if let priority = card.priority {
+                priorityBadge(priority)
+            }
+            if let agent = card.agent {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "cpu")
+                    Text(agent)
+                }
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.controlAccent)
+            }
+            if !card.tags.isEmpty {
+                ForEach(card.tags.prefix(2), id: \.self) { tag in
+                    Text(tag)
+                        .font(CiderFont.micro)
+                        .foregroundColor(CiderColors.tertiary)
+                        .padding(.horizontal, Spacing.xxs)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(CiderColors.surfaceInput)
+                        )
+                }
+            }
+            Spacer()
         }
     }
 
@@ -820,7 +1008,7 @@ struct KanbanBoardView: View {
                 }
 
                 Text(indicator.compactText)
-                    .foregroundColor(CiderColors.tertiary)
+                    .foregroundColor(indicator.isNextUp ? CiderColors.controlAccent : CiderColors.tertiary)
 
                 Text(indicator.title)
                     .foregroundColor(CiderColors.secondary)
@@ -831,7 +1019,11 @@ struct KanbanBoardView: View {
             .padding(.vertical, 3)
             .background(
                 Capsule(style: .continuous)
-                    .fill(CiderColors.surfaceInput.opacity(0.85))
+                    .fill(indicator.isNextUp ? CiderColors.accentSubtle : CiderColors.surfaceInput.opacity(0.85))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(indicator.isNextUp ? CiderColors.controlAccent.opacity(0.28) : Color.clear, lineWidth: CiderBorder.hairlineStrokeWidth)
             )
         }
         .buttonStyle(.plain)
@@ -847,6 +1039,193 @@ struct KanbanBoardView: View {
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(CiderColors.surfaceElevated)
             )
+    }
+
+    // MARK: - Header Quick Add
+
+    private func quickAddPopover(column: KanbanColumn, board: KanbanBoard) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Add to \(column.name)")
+                .font(CiderFont.labelSemibold)
+                .foregroundColor(CiderColors.primary)
+
+            TextField("Title", text: $quickAddDraft.title)
+                .textFieldStyle(.plain)
+                .font(CiderFont.label)
+                .padding(Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .onSubmit {
+                    createQuickAddCard(columnID: column.id, openAfterCreate: false)
+                }
+
+            TextEditor(text: $quickAddDraft.notes)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.primary)
+                .scrollContentBackground(.hidden)
+                .frame(height: 76)
+                .padding(Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
+                )
+
+            HStack(spacing: Spacing.xs) {
+                quickAddPriorityMenu
+                quickAddColorMenu
+            }
+
+            TextField("Tags, comma separated", text: $quickAddDraft.tagsText)
+                .textFieldStyle(.plain)
+                .font(CiderFont.caption)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .fill(CiderColors.surfaceInput)
+                )
+
+            quickAddParentMenu(board: board)
+
+            HStack(spacing: Spacing.sm) {
+                Button("Create") {
+                    createQuickAddCard(columnID: column.id, openAfterCreate: false)
+                }
+                .buttonStyle(CiderAccentButtonStyle())
+                .disabled(!quickAddDraft.canCreate)
+
+                Button("Create & Open") {
+                    createQuickAddCard(columnID: column.id, openAfterCreate: true)
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(quickAddDraft.canCreate ? CiderColors.controlAccent : CiderColors.tertiary)
+                .disabled(!quickAddDraft.canCreate)
+                .keyboardShortcut(.return, modifiers: [.command])
+
+                Spacer()
+
+                Button("Cancel") {
+                    quickAddColumnID = nil
+                    quickAddDraft = KanbanQuickAddDraft()
+                }
+                .buttonStyle(.plain)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(Spacing.md)
+        .frame(width: 300)
+    }
+
+    private var quickAddPriorityMenu: some View {
+        Menu {
+            Button("None") { quickAddDraft.priority = nil }
+            Divider()
+            ForEach(KanbanPriority.allCases, id: \.self) { priority in
+                Button(priorityLabel(for: priority).0) {
+                    quickAddDraft.priority = priority
+                }
+            }
+        } label: {
+            quickAddMenuLabel(
+                title: quickAddDraft.priority.map { priorityLabel(for: $0).0 } ?? "Priority",
+                systemImage: "flag"
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var quickAddColorMenu: some View {
+        Menu {
+            Button("None") { quickAddDraft.color = nil }
+            Divider()
+            ForEach(KanbanCardColor.allCases, id: \.self) { color in
+                Button(color.rawValue.capitalized) {
+                    quickAddDraft.color = color
+                }
+            }
+        } label: {
+            quickAddMenuLabel(
+                title: quickAddDraft.color?.rawValue.capitalized ?? "Color",
+                systemImage: "circle.fill",
+                tint: quickAddDraft.color.map { kanbanColor($0) }
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func quickAddParentMenu(board: KanbanBoard) -> some View {
+        Menu {
+            Button("No parent") { quickAddDraft.parentCardID = nil }
+            Divider()
+            ForEach(board.allCards, id: \.id) { card in
+                Button {
+                    quickAddDraft.parentCardID = card.id
+                } label: {
+                    Text(card.title)
+                }
+            }
+        } label: {
+            let parentTitle = quickAddDraft.parentCardID.flatMap { parentID in
+                board.card(id: parentID)?.title
+            }
+            quickAddMenuLabel(
+                title: parentTitle ?? "No parent",
+                systemImage: "point.3.connected.trianglepath.dotted"
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func quickAddMenuLabel(title: String, systemImage: String, tint: Color? = nil) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            Image(systemName: systemImage)
+                .foregroundColor(tint ?? CiderColors.tertiary)
+            Text(title)
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .font(CiderFont.caption)
+        .foregroundColor(CiderColors.secondary)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.surfaceInput)
+        )
+    }
+
+    private func createQuickAddCard(columnID: String, openAfterCreate: Bool) {
+        guard quickAddDraft.canCreate else { return }
+
+        let created = storage.addCard(
+            boardID: boardID,
+            columnID: columnID,
+            title: quickAddDraft.trimmedTitle,
+            notes: quickAddDraft.trimmedNotes,
+            priority: quickAddDraft.priority,
+            color: quickAddDraft.color,
+            tags: quickAddDraft.tags,
+            parentCardID: quickAddDraft.parentCardID
+        )
+
+        let createdID = created?.id
+        quickAddColumnID = nil
+        quickAddDraft = KanbanQuickAddDraft()
+
+        if openAfterCreate, let createdID {
+            onOpenCard(boardID, createdID)
+        }
     }
 
     // MARK: - Add Card
@@ -923,23 +1302,37 @@ struct KanbanBoardView: View {
 
     private func kanbanColor(_ color: KanbanCardColor) -> Color {
         switch color {
-        case .blue: CiderColors.controlAccent
+        case .blue:
+            Color(
+                hue: KanbanDesign.kanbanBlueAccentHueDegrees / 360,
+                saturation: KanbanDesign.kanbanAccentSaturation,
+                brightness: KanbanDesign.kanbanAccentBrightness
+            )
         case .green: CiderColors.success
         case .orange: CiderColors.warning
         case .red: CiderColors.destructive
-        case .purple: CiderColors.controlAccent.opacity(0.7)
+        case .purple:
+            Color(
+                hue: KanbanDesign.kanbanPurpleAccentHueDegrees / 360,
+                saturation: KanbanDesign.kanbanAccentSaturation,
+                brightness: KanbanDesign.kanbanAccentBrightness
+            )
         }
     }
 
     private func priorityBadge(_ priority: KanbanPriority) -> some View {
-        let (text, color): (String, Color) = switch priority {
+        let (text, color) = priorityLabel(for: priority)
+        return Text(text)
+            .font(CiderFont.micro)
+            .foregroundColor(color)
+    }
+
+    private func priorityLabel(for priority: KanbanPriority) -> (String, Color) {
+        switch priority {
         case .high: ("High", CiderColors.destructive)
         case .medium: ("Med", CiderColors.warning)
         case .low: ("Low", CiderColors.tertiary)
         }
-        return Text(text)
-            .font(CiderFont.micro)
-            .foregroundColor(color)
     }
 
     // MARK: - Empty State

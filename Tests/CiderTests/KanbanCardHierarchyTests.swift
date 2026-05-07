@@ -484,6 +484,59 @@ struct KanbanCardHierarchyTests {
         #expect(indicator?.accentColor == .green)
     }
 
+    @Test("card preview text prefers AI summary and falls back to notes")
+    func cardPreviewTextPrefersAISummaryAndFallsBackToNotes() {
+        let summarized = KanbanCard(
+            id: "summarized",
+            title: "Summarized card",
+            notes: "Problem:\n- Raw notes should not be first.",
+            aiSummary: "Generated summary for board scanning."
+        )
+        let unsummarized = KanbanCard(
+            id: "unsummarized",
+            title: "Unsummarized card",
+            notes: "Problem:\n- Fallback notes remain useful."
+        )
+
+        #expect(KanbanBoardLayout.previewText(for: summarized) == "Generated summary for board scanning.")
+        #expect(KanbanBoardLayout.previewText(for: unsummarized) == "Problem:\n- Fallback notes remain useful.")
+    }
+
+    @Test("plan indicator marks the first active child as next up")
+    func planIndicatorMarksFirstActiveChildAsNextUp() {
+        let completed = Date(timeIntervalSince1970: 1_777_737_600)
+        let board = KanbanBoard(
+            name: "Next Up",
+            columns: [
+                KanbanColumn(
+                    id: "done",
+                    name: "Done",
+                    isDoneColumn: true,
+                    cards: [
+                        KanbanCard(id: "parent", title: "Plan", color: .green),
+                        KanbanCard(id: "step-1", title: "Done step", parentCardID: "parent", completed: completed),
+                    ]
+                ),
+                KanbanColumn(
+                    id: "queued",
+                    name: "Queued",
+                    cards: [
+                        KanbanCard(id: "step-2", title: "Next step", parentCardID: "parent"),
+                        KanbanCard(id: "step-3", title: "Later step", parentCardID: "parent"),
+                    ]
+                ),
+            ]
+        )
+
+        let nextIndicator = KanbanBoardLayout.planIndicator(for: board.columns[1].cards[0], in: board)
+        let laterIndicator = KanbanBoardLayout.planIndicator(for: board.columns[1].cards[1], in: board)
+
+        #expect(nextIndicator?.isNextUp == true)
+        #expect(nextIndicator?.compactText == "Next Up · Step 2/3")
+        #expect(laterIndicator?.isNextUp == false)
+        #expect(laterIndicator?.compactText == "Step 3/3")
+    }
+
     @Test("nested parent uses family root accent")
     func nestedParentUsesFamilyRootAccent() {
         let backlog = KanbanColumn(

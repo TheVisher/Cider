@@ -19,6 +19,14 @@ final class SummaryService {
         """)
     }
 
+    private func makeKanbanPreviewSession() -> LanguageModelSession {
+        LanguageModelSession(instructions: """
+        You are a concise Kanban card preview summarizer. Given a card title and notes, \
+        write a 1-2 sentence board-level summary that helps someone scan active work. \
+        Focus on the actual work, skip section labels, and return only the summary.
+        """)
+    }
+
     // MARK: - Summarize
 
     /// Summarize article text into 2 sentences.
@@ -35,6 +43,34 @@ final class SummaryService {
             return summary.isEmpty ? nil : summary
         } catch {
             logger.error("Summary failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Summarize a Kanban card for board scanning. The full notes remain the source of truth.
+    func summarizeKanbanCardPreview(title: String, notes: String?) async -> String? {
+        guard AIAvailability.isFoundationModelsAvailable else { return nil }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedTitle.isEmpty || !trimmedNotes.isEmpty else { return nil }
+
+        let prompt = """
+        Card title: \(trimmedTitle)
+
+        Card notes:
+        \(String(trimmedNotes.prefix(3500)))
+
+        Write a concise Kanban board preview summary in 1-2 short sentences. \
+        Focus on the actual work, not section labels like Problem, Goal, or Acceptance criteria. \
+        Return only the summary.
+        """
+
+        do {
+            let response = try await makeKanbanPreviewSession().respond(to: prompt)
+            let summary = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return summary.isEmpty ? nil : summary
+        } catch {
+            logger.error("Kanban summary failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

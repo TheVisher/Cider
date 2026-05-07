@@ -166,11 +166,27 @@ enum KanbanDesign {
     /// Height of the color accent bar on cards
     static let accentBarHeight: CGFloat = 3
     /// Width for standalone Kanban columns.
-    static let columnWidth: CGFloat = 260
-    /// Width for project-board columns, which need a little more scan room.
-    static let projectColumnWidth: CGFloat = 280
+    static let columnWidth: CGFloat = 320
+    /// Width for project-board columns, which need extra room for hierarchy and plan badges.
+    static let projectColumnWidth: CGFloat = 368
     /// Capped height for columns inside project-board swimlanes.
-    static let projectColumnHeight: CGFloat = 560
+    static let projectColumnHeight: CGFloat = 1000
+    /// Height reserved for explicit horizontal scroll controls in project-board swimlanes.
+    static let projectHorizontalScrollControlHeight: CGFloat = 28
+    /// Vertical spacing between title, body, and context sections inside expanded card previews.
+    static let cardPreviewSectionSpacing: CGFloat = 8
+    /// Spacing before parent/plan context when it sits near the footer in expanded previews.
+    static let cardPreviewContextFooterSpacing: CGFloat = 8
+    /// Extra vertical spacing before the metadata footer in expanded card previews.
+    static let cardPreviewFooterTopSpacing: CGFloat = 8
+    /// Maximum number of lines for generated/fallback preview text in expanded cards.
+    static let cardPreviewBodyLineLimit = 5
+    /// Blue Kanban accent hue, separated from the system accent and purple family.
+    static let kanbanBlueAccentHueDegrees: CGFloat = 204
+    /// Purple Kanban accent hue, far enough from blue to remain distinct in dark UI.
+    static let kanbanPurpleAccentHueDegrees: CGFloat = 278
+    static let kanbanAccentSaturation: CGFloat = 0.82
+    static let kanbanAccentBrightness: CGFloat = 0.92
     /// Indent applied to same-column child cards in hierarchy groups.
     static let childIndent: CGFloat = 18
     /// Width reserved for the child-card hierarchy connector.

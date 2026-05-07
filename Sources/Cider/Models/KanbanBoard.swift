@@ -16,6 +16,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
     var id: String
     var title: String
     var notes: String?
+    var aiSummary: String?
     var color: KanbanCardColor?
     var priority: KanbanPriority?
     var agent: String?
@@ -30,6 +31,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         id: String = KanbanID.generate(),
         title: String,
         notes: String? = nil,
+        aiSummary: String? = nil,
         color: KanbanCardColor? = nil,
         priority: KanbanPriority? = nil,
         agent: String? = nil,
@@ -43,6 +45,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         self.id = id
         self.title = title
         self.notes = notes
+        self.aiSummary = aiSummary
         self.color = color
         self.priority = priority
         self.agent = agent
@@ -56,7 +59,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
 
     // Custom Codable for date format and backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, created, completed
+        case id, title, notes, aiSummary, color, priority, agent, tags, linkedEntities, relatedCardIDs, parentCardID, created, completed
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +67,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         id = try c.decode(String.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        aiSummary = try c.decodeIfPresent(String.self, forKey: .aiSummary)
         color = try c.decodeIfPresent(KanbanCardColor.self, forKey: .color)
         priority = try c.decodeIfPresent(KanbanPriority.self, forKey: .priority)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
@@ -80,6 +84,7 @@ struct KanbanCard: Codable, Identifiable, Equatable, Sendable {
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
         try c.encodeIfPresent(notes, forKey: .notes)
+        try c.encodeIfPresent(aiSummary, forKey: .aiSummary)
         try c.encodeIfPresent(color, forKey: .color)
         try c.encodeIfPresent(priority, forKey: .priority)
         try c.encodeIfPresent(agent, forKey: .agent)
