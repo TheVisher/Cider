@@ -93,6 +93,13 @@ enum LazyMasonryColumnPlanner {
         let columnWidth: CGFloat
     }
 
+    /// Resize gestures can publish a new container width every pixel. Replanning the
+    /// whole masonry column assignment for each tiny width change is expensive and
+    /// visually unnecessary because card frames still receive the exact live column
+    /// width. Bucket only the planning key so we keep layout responsive while avoiding
+    /// hundreds of full column-plan recalculations during window drags.
+    static let planningColumnWidthBucket: CGFloat = 8
+
     struct PlanKey<ID: Hashable>: Equatable {
         let itemIDs: [ID]
         let layout: LayoutMetrics
@@ -173,7 +180,7 @@ enum LazyMasonryColumnPlanner {
         estimatedHeight: (Item) -> CGFloat,
         previousPlan: Plan<Item.ID>
     ) -> Plan<Item.ID> {
-        let key = PlanKey(itemIDs: items.map(\.id), layout: layout)
+        let key = PlanKey(itemIDs: items.map(\.id), layout: planningKeyLayout(for: layout))
         guard previousPlan.key != key else { return previousPlan }
 
         let columns = plan(
@@ -186,5 +193,12 @@ enum LazyMasonryColumnPlanner {
         }
 
         return Plan(key: key, columns: columns)
+    }
+
+    static func planningKeyLayout(for layout: LayoutMetrics) -> LayoutMetrics {
+        guard layout.columnWidth.isFinite, layout.columnWidth > 0 else { return layout }
+        let bucket = max(planningColumnWidthBucket, 1)
+        let bucketedWidth = (layout.columnWidth / bucket).rounded() * bucket
+        return LayoutMetrics(columnCount: layout.columnCount, columnWidth: bucketedWidth)
     }
 }
