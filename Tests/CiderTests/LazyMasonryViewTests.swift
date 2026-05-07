@@ -79,6 +79,24 @@ struct LazyMasonryViewTests {
         #expect(width == 760)
     }
 
+    @Test("lazy masonry buckets small width changes to avoid resize replanning churn")
+    func plannerBucketsSmallWidthChangesForLiveResize() {
+        let narrow = LazyMasonryColumnPlanner.LayoutMetrics(columnCount: 3, columnWidth: 240.1)
+        let slightlyWider = LazyMasonryColumnPlanner.LayoutMetrics(columnCount: 3, columnWidth: 243.9)
+        let muchWider = LazyMasonryColumnPlanner.LayoutMetrics(columnCount: 3, columnWidth: 249)
+
+        #expect(LazyMasonryColumnPlanner.planningKeyLayout(for: narrow) == LazyMasonryColumnPlanner.planningKeyLayout(for: slightlyWider))
+        #expect(LazyMasonryColumnPlanner.planningKeyLayout(for: narrow) != LazyMasonryColumnPlanner.planningKeyLayout(for: muchWider))
+    }
+
+    @Test("lazy masonry still replans when resizing changes column count")
+    func plannerReplansWhenColumnCountChangesDuringResize() {
+        let threeColumns = LazyMasonryColumnPlanner.LayoutMetrics(columnCount: 3, columnWidth: 248)
+        let fourColumns = LazyMasonryColumnPlanner.LayoutMetrics(columnCount: 4, columnWidth: 248)
+
+        #expect(LazyMasonryColumnPlanner.planningKeyLayout(for: threeColumns) != LazyMasonryColumnPlanner.planningKeyLayout(for: fourColumns))
+    }
+
     @Test("lazy masonry keeps a stable column plan while estimates change")
     func plannerKeepsStableColumnsForSameItemsAndLayout() {
         let items = [
