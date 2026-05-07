@@ -40,4 +40,21 @@ struct LazyMasonryPerformanceTests {
         print("MASONRY_RESIZE_PLAN widths=401 items=1000 recompute_count=\(recomputeCount) elapsed=\(elapsed)")
         #expect(recomputeCount <= 60)
     }
+
+    @Test("masonry render width avoids per-pixel relayout during live resize")
+    func masonryRenderWidthAvoidsPerPixelRelayoutDuringLiveResize() {
+        var distinctRenderWidths = Set<CGFloat>()
+
+        for width in stride(from: CGFloat(720), through: CGFloat(1_120), by: CGFloat(1)) {
+            let layout = LazyMasonryColumnPlanner.layout(
+                containerWidth: width,
+                minimumColumnWidth: 220,
+                itemSpacing: 16
+            )
+            distinctRenderWidths.insert(LazyMasonryColumnPlanner.renderingColumnWidth(for: layout))
+        }
+
+        print("MASONRY_RENDER_WIDTH widths=401 distinct_render_widths=\(distinctRenderWidths.count)")
+        #expect(distinctRenderWidths.count <= 60)
+    }
 }

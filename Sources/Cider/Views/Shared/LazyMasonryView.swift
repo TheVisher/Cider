@@ -21,13 +21,14 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
             minimumColumnWidth: minimumColumnWidth,
             itemSpacing: itemSpacing
         )
+        let renderingColumnWidth = LazyMasonryColumnPlanner.renderingColumnWidth(for: layout)
         let itemLookup = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         let resolvedPlan = LazyMasonryColumnPlanner.stablePlan(
             items: items,
             layout: layout,
             itemSpacing: itemSpacing,
             estimatedHeight: { item in
-                estimatedHeight(item, layout.columnWidth)
+                estimatedHeight(item, renderingColumnWidth)
             },
             previousPlan: plannedColumns
         )
@@ -56,11 +57,11 @@ struct LazyMasonryView<Item: Identifiable, Content: View>: View {
                 ForEach(Array(columns.enumerated()), id: \.offset) { _, columnItems in
                     LazyVStack(spacing: itemSpacing) {
                         ForEach(columnItems) { item in
-                            content(item, layout.columnWidth)
-                                .frame(width: layout.columnWidth, alignment: .topLeading)
+                            content(item, renderingColumnWidth)
+                                .frame(width: renderingColumnWidth, alignment: .topLeading)
                         }
                     }
-                    .frame(width: layout.columnWidth, alignment: .top)
+                    .frame(width: renderingColumnWidth, alignment: .top)
                 }
             }
         }
@@ -200,5 +201,11 @@ enum LazyMasonryColumnPlanner {
         let bucket = max(planningColumnWidthBucket, 1)
         let bucketedWidth = (layout.columnWidth / bucket).rounded() * bucket
         return LayoutMetrics(columnCount: layout.columnCount, columnWidth: bucketedWidth)
+    }
+
+    static func renderingColumnWidth(for layout: LayoutMetrics) -> CGFloat {
+        guard layout.columnWidth.isFinite, layout.columnWidth > 0 else { return layout.columnWidth }
+        let bucket = max(planningColumnWidthBucket, 1)
+        return max(1, (layout.columnWidth / bucket).rounded(.down) * bucket)
     }
 }
