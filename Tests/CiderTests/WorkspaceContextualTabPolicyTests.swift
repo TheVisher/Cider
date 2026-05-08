@@ -43,10 +43,13 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(result.map(\.id), ["saved-\(boardID.uuidString)"])
+        XCTAssertEqual(result.map(\.id), [
+            CiderTab.domainDashboard(.projects).id,
+            "saved-\(boardID.uuidString)"
+        ])
     }
 
-    func testBookmarkDomainFiltersBookmarkSavedViewsAndDoesNotFallBackToAllTabsWhenEmpty() {
+    func testBookmarkDomainPrependsDashboardTabAndFiltersBookmarkSavedViews() {
         let bookmarksID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
         let notesID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
         let tabs: [CiderTab] = [
@@ -77,8 +80,20 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
             savedViews: savedViews
         )
 
-        XCTAssertEqual(bookmarkTabs.map(\.id), ["saved-\(bookmarksID.uuidString)"])
-        XCTAssertEqual(mediaTabs.map(\.id), [])
+        XCTAssertEqual(bookmarkTabs.map(\.id), [
+            CiderTab.domainDashboard(.bookmarks).id,
+            "saved-\(bookmarksID.uuidString)"
+        ])
+        XCTAssertEqual(mediaTabs.map(\.id), [CiderTab.domainDashboard(.media).id])
+    }
+
+    func testDomainDashboardTabMetadataIsStableAndNamedForDomain() {
+        let tab = CiderTab.domainDashboard(.bookmarks)
+
+        XCTAssertEqual(tab.id, "domain-dashboard-bookmarks")
+        XCTAssertEqual(tab.displayName, "Bookmarks Dashboard")
+        XCTAssertEqual(tab.systemImage, "bookmark")
+        XCTAssertNil(tab.savedViewID)
     }
 
     func testBrowseDomainShowsAllNonAssistantTabsAsCatchAll() {
@@ -104,6 +119,7 @@ final class WorkspaceContextualTabPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(result.map(\.id), [
+            CiderTab.domainDashboard(.browse).id,
             "saved-\(dashboardID.uuidString)",
             "saved-\(libraryID.uuidString)",
             "saved-\(boardID.uuidString)"

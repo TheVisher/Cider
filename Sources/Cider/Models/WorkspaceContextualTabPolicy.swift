@@ -15,12 +15,14 @@ enum WorkspaceContextualTabPolicy {
 
         guard let domain else { return domainTabs }
         if domain == .aiAssistant { return allTabs.contains(.aiAssistant) ? [.aiAssistant] : [] }
-        if domain == .browse { return domainTabs }
+        if domain == .browse { return [CiderTab.domainDashboard(.browse)] + domainTabs }
 
         let savedViewByID = Dictionary(uniqueKeysWithValues: savedViews.map { ($0.id, $0) })
-        return domainTabs.filter { tab in
+        let matchingTabs = domainTabs.filter { tab in
             isCompatibilityTab(tab) || matches(tab, domain: domain, savedViewByID: savedViewByID)
         }
+        if domain == .mainDashboard { return matchingTabs }
+        return [CiderTab.domainDashboard(domain)] + matchingTabs
     }
 
     private static func isCompatibilityTab(_ tab: CiderTab) -> Bool {

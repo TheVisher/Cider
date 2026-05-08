@@ -119,29 +119,26 @@ struct CiderTabBar: View {
                         renamingTabID = savedViewID
                     }
                 }
-            }
-            Button("Close Tab") {
-                onCloseTab?(tab)
-            }
-            if tab.savedViewID != nil {
+                Button("Close Tab") {
+                    onCloseTab?(tab)
+                }
                 Divider()
                 Button("Delete Tab", role: .destructive) {
                     onDeleteTab?(tab)
                 }
+            } else if tab != .aiAssistant && !isDomainDashboard(tab) {
+                Button("Close Tab") {
+                    onCloseTab?(tab)
+                }
             }
         }
-        .onDrag {
-            CiderInternalDragState.markStarted()
-            draggingTabID = tab.id
-            return NSItemProvider(object: tab.id as NSString)
-        }
-        .onDrop(of: [.text], delegate: TabReorderDropDelegate(
-            tabID: tab.id,
-            tabIndex: index,
+        .conditionalDraggable(
+            tab: tab,
+            index: index,
             tabs: tabs,
             draggingTabID: $draggingTabID,
             onReorder: onReorderTab
-        ))
+        )
     }
 
     private func addTabButton(action: @escaping () -> Void) -> some View {
@@ -303,6 +300,11 @@ struct CiderTabBar: View {
         return tab.systemImage
     }
 
+    private func isDomainDashboard(_ tab: CiderTab) -> Bool {
+        if case .domainDashboard = tab { return true }
+        return false
+    }
+
     private func badgeCount(for tab: CiderTab) -> Int {
         switch tab {
         case .savedView(let id, _):
@@ -311,7 +313,39 @@ struct CiderTabBar: View {
             return dateCardStorage.dateCards.filter { $0.urgency() != nil }.count
         case .search: return 0
         case .tag: return 0
+        case .domainDashboard: return 0
         case .aiAssistant: return 0
+        }
+    }
+}
+
+// MARK: - Conditional Tab Dragging
+
+private extension View {
+    @ViewBuilder
+    func conditionalDraggable(
+        tab: CiderTab,
+        index: Int,
+        tabs: [CiderTab],
+        draggingTabID: Binding<String?>,
+        onReorder: ((Int, Int) -> Void)?
+    ) -> some View {
+        if tab.savedViewID != nil {
+            self
+                .onDrag {
+                    CiderInternalDragState.markStarted()
+                    draggingTabID.wrappedValue = tab.id
+                    return NSItemProvider(object: tab.id as NSString)
+                }
+                .onDrop(of: [.text], delegate: TabReorderDropDelegate(
+                    tabID: tab.id,
+                    tabIndex: index,
+                    tabs: tabs,
+                    draggingTabID: draggingTabID,
+                    onReorder: onReorder
+                ))
+        } else {
+            self
         }
     }
 }

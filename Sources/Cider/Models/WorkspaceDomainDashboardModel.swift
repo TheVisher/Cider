@@ -132,6 +132,8 @@ enum WorkspaceDomainDashboardProvider {
         savedViews: [SavedView]
     ) -> WorkspaceDomainDashboardItem? {
         switch tab {
+        case .domainDashboard:
+            return nil
         case .aiAssistant:
             return WorkspaceDomainDashboardItem(
                 id: tab.id,

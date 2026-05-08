@@ -91,7 +91,7 @@ extension CiderPanelView {
         if domain == .mainDashboard {
             normalizeSelectedTabForCurrentDomain()
         } else {
-            selectedTab = nil
+            selectedTab = .domainDashboard(domain)
         }
     }
 

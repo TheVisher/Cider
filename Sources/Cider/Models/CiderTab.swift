@@ -4,6 +4,7 @@ enum CiderTab: Identifiable, Hashable {
     case savedView(id: UUID, name: String)
     case search(id: UUID, query: String)
     case tag(id: UUID)
+    case domainDashboard(WorkspaceNavigationDomain)
     case aiAssistant
 
     static func == (lhs: CiderTab, rhs: CiderTab) -> Bool {
@@ -19,6 +20,7 @@ enum CiderTab: Identifiable, Hashable {
         case .savedView(let id, _): "saved-\(id.uuidString)"
         case .search(let id, _): "search-\(id.uuidString)"
         case .tag(let id): "tag-\(id.uuidString)"
+        case .domainDashboard(let domain): "domain-dashboard-\(domain.rawValue)"
         case .aiAssistant: "aiAssistant"
         }
     }
@@ -28,6 +30,7 @@ enum CiderTab: Identifiable, Hashable {
         case .savedView(_, let name): name
         case .search(_, let query): query.isEmpty ? "Search" : query
         case .tag: "Tags"
+        case .domainDashboard(let domain): "\(domain.title) Dashboard"
         case .aiAssistant: "AI Assistant"
         }
     }
@@ -37,6 +40,7 @@ enum CiderTab: Identifiable, Hashable {
         case .savedView: "square.grid.2x2"
         case .search: "magnifyingglass"
         case .tag: "tag"
+        case .domainDashboard(let domain): domain.systemImage
         case .aiAssistant: "sparkles"
         }
     }

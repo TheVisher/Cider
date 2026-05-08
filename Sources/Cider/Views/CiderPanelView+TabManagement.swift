@@ -40,6 +40,31 @@ extension CiderPanelView {
         }
     }
 
+    func openDomainDashboardTab(_ tab: CiderTab) {
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+
+        if case .savedView(let id, _) = tab {
+            savedViewStorage.addToTabOrder(id)
+        }
+
+        selectedTab = tab
+    }
+
+    func reorderVisibleTabs(from sourceIndex: Int, to destinationIndex: Int) {
+        let visibleTabs = contextualTabs
+        guard visibleTabs.indices.contains(sourceIndex),
+              visibleTabs.indices.contains(destinationIndex),
+              let sourceID = visibleTabs[sourceIndex].savedViewID,
+              let destinationID = visibleTabs[destinationIndex].savedViewID,
+              let globalSourceIndex = savedViewStorage.tabOrder.firstIndex(of: sourceID),
+              let globalDestinationIndex = savedViewStorage.tabOrder.firstIndex(of: destinationID) else {
+            return
+        }
+
+        savedViewStorage.moveTab(from: globalSourceIndex, to: globalDestinationIndex)
+    }
+
     func closeTab(_ tab: CiderTab) {
         let wasSelected = selectedTab == tab
 

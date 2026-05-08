@@ -27,7 +27,7 @@ extension CiderPanelView {
         }
 
         switch selectedTab {
-        case .aiAssistant:
+        case .aiAssistant, .domainDashboard:
             return CiderLivePerformanceContext(view: selectedTab.displayName, visibleItemCount: nil)
         case .search(_, let query):
             return CiderLivePerformanceContext(

@@ -124,6 +124,21 @@ extension CiderPanelView {
             )
         } else if let tab = selectedTab {
             switch tab {
+            case .domainDashboard(let domain):
+                WorkspaceDomainDashboardView(
+                    model: WorkspaceDomainDashboardProvider.model(
+                        for: domain,
+                        savedViews: savedViewStorage.savedViews,
+                        allTabs: allTabs
+                    ),
+                    onOpenTab: { tab in
+                        openDomainDashboardTab(tab)
+                    },
+                    onBrowseAll: {
+                        selectedNavigationDomain = .browse
+                        selectedTab = .domainDashboard(.browse)
+                    }
+                )
             case .aiAssistant:
                 AIAssistantPanelView(
                     viewModel: AIAssistantViewModel.shared,
@@ -293,11 +308,11 @@ extension CiderPanelView {
                         allTabs: allTabs
                     ),
                     onOpenTab: { tab in
-                        selectedTab = tab
+                        openDomainDashboardTab(tab)
                     },
                     onBrowseAll: {
                         selectedNavigationDomain = .browse
-                        selectedTab = nil
+                        selectedTab = .domainDashboard(.browse)
                     }
                 )
             } else {
