@@ -129,6 +129,8 @@ func agendaBriefingItemToDict(_ item: AgendaBriefingItem, formatter: ISO8601Date
     if let nextSurfaceDate = item.nextSurfaceDate { dict["nextSurfaceDate"] = formatter.string(from: nextSurfaceDate) }
     if let priority = item.priority { dict["priority"] = priority }
     if let actionURLString = item.actionURLString { dict["actionURL"] = actionURLString }
+    dict["reminderPolicy"] = item.reminderPolicy
+    if let suggestedAction = item.suggestedAction { dict["suggestedAction"] = suggestedAction }
     return dict
 }
 

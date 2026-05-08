@@ -90,5 +90,23 @@ final class AgendaBriefingServiceTests: XCTestCase {
         XCTAssertEqual(brief.items[0].reason, "due today")
         XCTAssertEqual(brief.items[0].priority, "high")
         XCTAssertEqual(brief.items[0].actionURLString, "rent.example.com")
+        XCTAssertEqual(brief.items[0].reminderPolicy, "todo lead window: 7 days")
+        XCTAssertEqual(brief.items[0].suggestedAction, "open action URL")
+    }
+
+    func testDateCardReminderPolicyIsIncluded() {
+        let now = date(2026, 5, 7)
+        let birthday = DateCard(
+            title: "Alex birthday",
+            startAt: date(2026, 5, 14),
+            recurrenceRule: DateCardRecurrenceRule(frequency: .yearly),
+            actionURLString: "messages://alex"
+        )
+
+        let brief = AgendaBriefingService.build(todos: [], dateCards: [birthday], now: now, calendar: calendar)
+
+        XCTAssertEqual(brief.items[0].reminderPolicy, "birthday lead window: 14 days")
+        XCTAssertEqual(brief.items[0].suggestedAction, "open action URL")
+        XCTAssertEqual(brief.items[0].nextSurfaceDate, now)
     }
 }

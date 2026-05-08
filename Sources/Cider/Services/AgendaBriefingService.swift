@@ -40,6 +40,8 @@ struct AgendaBriefingItem: Identifiable, Equatable {
     let nextSurfaceDate: Date?
     let priority: String?
     let actionURLString: String?
+    let reminderPolicy: String
+    let suggestedAction: String?
 }
 
 struct AgendaBriefingOptions: Equatable {
@@ -117,6 +119,8 @@ enum AgendaBriefingService {
             nextSurfaceDate = calendar.date(byAdding: .day, value: -options.todoLeadDays, to: calendar.startOfDay(for: dueAt))
         }
 
+        let reminderPolicy = "todo lead window: \(options.todoLeadDays) day\(options.todoLeadDays == 1 ? "" : "s")"
+
         return AgendaBriefingItem(
             id: todo.id,
             itemType: .todo,
@@ -128,7 +132,9 @@ enum AgendaBriefingService {
             dueAt: dueAt,
             nextSurfaceDate: nextSurfaceDate,
             priority: todo.priority?.rawValue,
-            actionURLString: todo.actionURLString
+            actionURLString: todo.actionURLString,
+            reminderPolicy: reminderPolicy,
+            suggestedAction: todo.actionURLString == nil ? nil : "open action URL"
         )
     }
 
@@ -155,11 +161,14 @@ enum AgendaBriefingService {
                 dueAt: effectiveDate,
                 nextSurfaceDate: nil,
                 priority: nil,
-                actionURLString: card.actionURLString
+                actionURLString: card.actionURLString,
+                reminderPolicy: "suppressed by completed same-cycle todo",
+                suggestedAction: nil
             )
         }
 
         let leadDays = leadDays(for: card, options: options)
+        let reminderPolicy = reminderPolicy(for: card, leadDays: leadDays, options: options)
         let days = daysBetween(now, effectiveDate, calendar: calendar)
         let status: AgendaBriefingItem.Status
         let bucket: AgendaBriefingItem.Bucket
@@ -204,7 +213,9 @@ enum AgendaBriefingService {
             dueAt: effectiveDate,
             nextSurfaceDate: nextSurfaceDate,
             priority: nil,
-            actionURLString: card.actionURLString
+            actionURLString: card.actionURLString,
+            reminderPolicy: reminderPolicy,
+            suggestedAction: card.actionURLString == nil ? nil : "open action URL"
         )
     }
 
@@ -220,6 +231,20 @@ enum AgendaBriefingService {
             return options.monthlyBillLeadDays
         }
         return options.dateCardLeadDays
+    }
+
+    private static func reminderPolicy(for card: DateCard, leadDays: Int, options: AgendaBriefingOptions) -> String {
+        if card.rules.contains(where: { $0.type == .surfaceDaysBeforeDate && $0.isEnabled }) {
+            return "explicit lead window: \(leadDays) day\(leadDays == 1 ? "" : "s")"
+        }
+        let title = normalizedTitle(card.title)
+        if title.contains("birthday") || title.contains("anniversary") {
+            return "birthday lead window: \(leadDays) day\(leadDays == 1 ? "" : "s")"
+        }
+        if card.recurrenceRule?.frequency == .monthly || title.contains("rent") || title.contains("bill") {
+            return "monthly bill lead window: \(leadDays) day\(leadDays == 1 ? "" : "s")"
+        }
+        return "date card lead window: \(leadDays) day\(leadDays == 1 ? "" : "s")"
     }
 
     private static func daysBetween(_ start: Date, _ end: Date, calendar: Calendar) -> Int {
