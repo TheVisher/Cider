@@ -94,6 +94,14 @@ struct HomeOverviewClosedTabSummary: Equatable, Identifiable {
     let updatedAt: Date
 }
 
+struct HomeTriageItem: Equatable, Identifiable {
+    let id: String
+    let item: LibraryItemV2
+    let reason: String
+    let suggestedAction: String
+    let confidenceLabel: String
+}
+
 struct HomeOverviewSnapshot: Equatable {
     let telemetry: [HomeTelemetryMetric]
     let dailyBrief: HomeDailyBrief
@@ -106,6 +114,7 @@ struct HomeOverviewSnapshot: Equatable {
     let todoItems: [TodoCard]
     let completedTodoItems: [TodoCard]
     let resurfacedItems: [LibraryItemV2]
+    let triageItems: [HomeTriageItem]
     let closedTabs: [HomeOverviewClosedTabSummary]
 }
 
@@ -117,6 +126,7 @@ enum HomeOverviewPanelID {
     case recentActivity
     case upcoming
     case todos
+    case triage
     case resurface
     case closedTabs
 }
@@ -142,6 +152,8 @@ struct HomeOverviewLayoutMetrics {
         case .upcoming:
             return HomeOverviewDesign.upcomingPanelFixedHeight
         case .todos:
+            return HomeOverviewDesign.resurfacePanelMinHeight
+        case .triage:
             return HomeOverviewDesign.resurfacePanelMinHeight
         case .resurface:
             let visibleCardCount = min(snapshot.resurfacedItems.count, 2)

@@ -85,7 +85,9 @@ struct HomeOverviewDashboardView: View {
 
             HStack(alignment: .top, spacing: HomeOverviewDesign.columnSpacing) {
                 recentActivityPanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
-                    .frame(width: tracks.captureTimelineWidth)
+                    .frame(width: tracks.recentWidth)
+                triagePanel(fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight)
+                    .frame(width: tracks.third)
                 closedTabsPanel(
                     fixedHeight: HomeOverviewDesign.fullLayoutBottomRowHeight,
                     columnCount: 1,
@@ -104,6 +106,7 @@ struct HomeOverviewDashboardView: View {
                 todoPanel()
                 recentActivityPanel()
             }
+            triagePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsCompactColumnCount)
         }
     }
@@ -114,6 +117,7 @@ struct HomeOverviewDashboardView: View {
             upcomingPanel()
             todoPanel()
             recentActivityPanel()
+            triagePanel()
             closedTabsPanel(columnCount: HomeOverviewDesign.closedTabsSingleColumnCount)
         }
     }
@@ -361,6 +365,66 @@ struct HomeOverviewDashboardView: View {
                     systemImage: "plus",
                     action: onCreateNew
                 )
+            }
+        }
+    }
+
+    private func triagePanel(fixedHeight: CGFloat? = nil) -> some View {
+        HomeOverviewPanel(
+            title: "Inbox Triage",
+            minHeight: layoutMetrics.requiredHeight(for: .triage),
+            fixedHeight: fixedHeight
+        ) {
+            if snapshot.triageItems.isEmpty {
+                HomeOverviewEmptyStateCard(
+                    title: "Inbox looks healthy.",
+                    subtitle: "No obvious unfiled or under-enriched captures need attention."
+                )
+            } else {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(snapshot.triageItems) { triageItem in
+                        Button {
+                            onOpenItem(triageItem.item)
+                        } label: {
+                            HStack(alignment: .top, spacing: Spacing.sm) {
+                                Image(systemName: triageItem.item.dashboardSymbol)
+                                    .font(CiderFont.captionSemibold)
+                                    .foregroundColor(triageItem.item.dashboardAccentColor)
+                                    .frame(width: 18)
+
+                                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                    Text(triageItem.item.title)
+                                        .font(CiderFont.labelMedium)
+                                        .foregroundColor(CiderColors.primary)
+                                        .lineLimit(1)
+
+                                    Text(triageItem.reason)
+                                        .font(CiderFont.caption)
+                                        .foregroundColor(CiderColors.tertiary)
+                                        .lineLimit(1)
+
+                                    HStack(spacing: Spacing.xs) {
+                                        Text(triageItem.suggestedAction)
+                                            .font(CiderFont.captionSemibold)
+                                            .foregroundColor(CiderColors.secondary)
+                                            .lineLimit(1)
+                                        Text(triageItem.confidenceLabel)
+                                            .font(CiderFont.caption)
+                                            .foregroundColor(CiderColors.quaternary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+
+                        if triageItem.id != snapshot.triageItems.last?.id {
+                            Divider()
+                                .background(CiderColors.separator)
+                        }
+                    }
+                }
             }
         }
     }

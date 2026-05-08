@@ -81,6 +81,7 @@ final class HomeOverviewLayoutMetricsTests: XCTestCase {
             todoItems: [],
             completedTodoItems: [],
             resurfacedItems: Array(repeating: makeItem(title: "Resurfaced"), count: resurfacedCount),
+            triageItems: [],
             closedTabs: Array(repeating: makeClosedTab(name: "Library"), count: closedTabCount)
         )
     }

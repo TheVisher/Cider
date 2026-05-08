@@ -161,6 +161,55 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         }
     }
 
+    func testDashboardBuildsTriageItemsWithReasonsAndActions() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let genericBookmark = Bookmark(
+            id: UUID(),
+            title: "example.com",
+            urlString: "https://example.com/article",
+            createdAt: now.addingTimeInterval(-300),
+            updatedAt: now.addingTimeInterval(-300),
+            folderID: nil,
+            enrichmentStatus: "none",
+            lastEnrichedAt: nil
+        )
+        let untitledNote = Note(
+            id: UUID(),
+            title: "Untitled 7",
+            createdAt: now.addingTimeInterval(-200),
+            modifiedAt: now.addingTimeInterval(-200),
+            relativePath: "Inbox/Notes/Untitled 7.md",
+            folderID: nil
+        )
+        let filedBookmark = Bookmark(
+            id: UUID(),
+            title: "Good title",
+            urlString: "https://example.com/good-title",
+            createdAt: now,
+            updatedAt: now,
+            folderID: UUID(),
+            enrichmentStatus: "complete",
+            lastEnrichedAt: now
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(genericBookmark), .note(untitledNote), .bookmark(filedBookmark)],
+            recentItems: [],
+            folders: [],
+            savedViews: [],
+            tabOrder: [],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.triageItems.map(\.item.id), ["bookmark-\(genericBookmark.id.uuidString)", "note-\(untitledNote.id.uuidString)"])
+        XCTAssertEqual(snapshot.triageItems[0].reason, "Generic host-only bookmark title")
+        XCTAssertEqual(snapshot.triageItems[0].suggestedAction, "Enrich and route")
+        XCTAssertEqual(snapshot.triageItems[0].confidenceLabel, "Needs approval")
+        XCTAssertEqual(snapshot.triageItems[1].reason, "Untitled inbox note")
+        XCTAssertEqual(snapshot.triageItems[1].suggestedAction, "Ask Erik")
+    }
+
     func testClosedTabsPreferRecentlyUpdatedViewsThatAreNotOpen() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let openView = SavedView(

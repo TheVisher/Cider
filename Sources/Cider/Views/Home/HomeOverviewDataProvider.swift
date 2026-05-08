@@ -116,6 +116,7 @@ enum HomeOverviewDataProvider {
             }
             .prefix(4)
             .map { $0 }
+        let triageItems = triageItems(from: items)
 
         let openTabIDs = Set(tabOrder)
         let closedTabs = savedViews
@@ -248,6 +249,7 @@ enum HomeOverviewDataProvider {
             todoItems: Array(todoQueueItems(from: items, now: now).prefix(6)),
             completedTodoItems: Array(completedTodoItems(from: items).prefix(4)),
             resurfacedItems: resurfacedItems,
+            triageItems: triageItems,
             closedTabs: closedTabs
         )
     }
@@ -320,6 +322,108 @@ enum HomeOverviewDataProvider {
                 break
             }
         }
+    }
+
+    private static func triageItems(from items: [LibraryItemV2]) -> [HomeTriageItem] {
+        items
+            .compactMap(triageItem(for:))
+            .sorted { lhs, rhs in
+                let lhsPriority = triageSortPriority(lhs)
+                let rhsPriority = triageSortPriority(rhs)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority < rhsPriority
+                }
+                if lhs.item.createdDate != rhs.item.createdDate {
+                    return lhs.item.createdDate > rhs.item.createdDate
+                }
+                return lhs.item.title.localizedCaseInsensitiveCompare(rhs.item.title) == .orderedAscending
+            }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private static func triageItem(for item: LibraryItemV2) -> HomeTriageItem? {
+        switch item {
+        case .bookmark(let bookmark):
+            if bookmarkNeedsEnrichment(bookmark) {
+                return HomeTriageItem(
+                    id: "triage-\(item.id)-enrichment",
+                    item: item,
+                    reason: bookmarkGenericTitleReason(bookmark) ?? "Bookmark needs enrichment",
+                    suggestedAction: "Enrich and route",
+                    confidenceLabel: "Needs approval"
+                )
+            }
+            if bookmark.folderID == nil {
+                return HomeTriageItem(
+                    id: "triage-\(item.id)-folder",
+                    item: item,
+                    reason: "Still in Inbox / unfiled",
+                    suggestedAction: "Route to folder",
+                    confidenceLabel: "Needs approval"
+                )
+            }
+        case .note(let note):
+            if note.folderID == nil || isInboxPath(note.relativePath) || isUntitled(note.title) {
+                return HomeTriageItem(
+                    id: "triage-\(item.id)-note",
+                    item: item,
+                    reason: isUntitled(note.title) ? "Untitled inbox note" : "Inbox note needs routing",
+                    suggestedAction: "Ask Erik",
+                    confidenceLabel: "Low confidence"
+                )
+            }
+        case .vaultFile(let file):
+            if file.folderID == nil || isInboxPath(file.relativePath) || file.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                return HomeTriageItem(
+                    id: "triage-\(item.id)-file",
+                    item: item,
+                    reason: "Unfiled vault file",
+                    suggestedAction: "Route to folder",
+                    confidenceLabel: "Needs approval"
+                )
+            }
+        case .dateCard, .contact, .todo:
+            return nil
+        }
+        return nil
+    }
+
+    private static func triageSortPriority(_ item: HomeTriageItem) -> Int {
+        switch item.suggestedAction {
+        case "Enrich and route": 0
+        case "Route to folder": 1
+        default: 2
+        }
+    }
+
+    private static func bookmarkNeedsEnrichment(_ bookmark: Bookmark) -> Bool {
+        if bookmark.enrichmentStatus != "complete" || bookmark.lastEnrichedAt == nil {
+            return true
+        }
+        return bookmarkGenericTitleReason(bookmark) != nil
+    }
+
+    private static func bookmarkGenericTitleReason(_ bookmark: Bookmark) -> String? {
+        let title = bookmark.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let host = bookmark.hostDisplay.lowercased()
+        guard !title.isEmpty else { return "Missing bookmark title" }
+        if title == host || title == host.replacingOccurrences(of: "www.", with: "") {
+            return "Generic host-only bookmark title"
+        }
+        if title == bookmark.urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            return "URL-only bookmark title"
+        }
+        return nil
+    }
+
+    private static func isInboxPath(_ path: String?) -> Bool {
+        guard let path else { return false }
+        return path.lowercased().hasPrefix("inbox/")
+    }
+
+    private static func isUntitled(_ title: String) -> Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("untitled")
     }
 
     private static func dailyBriefFocusItems(
