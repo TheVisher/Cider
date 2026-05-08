@@ -12,6 +12,16 @@ extension CiderPanelView {
 
     // MARK: - Sidebar Content
 
+    var workspaceSidebar: some View {
+        WorkspaceDomainSidebarView(
+            selectedDomain: $selectedNavigationDomain,
+            domains: WorkspaceNavigationDomain.allCases,
+            onSelectDomain: openNavigationDomain(_:)
+        ) {
+            folderSidebar
+        }
+    }
+
     var folderSidebar: some View {
         FolderSidebarView(
             folders: bookmarksViewModel.folders,
@@ -46,5 +56,29 @@ extension CiderPanelView {
                 openOrSelectTagTab()
             }
         )
+    }
+
+    func openNavigationDomain(_ domain: WorkspaceNavigationDomain) {
+        selectedFolderID = nil
+        selectedTagIDs.removeAll()
+        selectedItemIDs.removeAll()
+        focusedItemID = nil
+        selectionAnchorID = nil
+        closeAllDetails()
+
+        switch domain {
+        case .mainDashboard:
+            if let dashboard = savedViewStorage.savedViews.first(where: { $0.kind == .dashboard }) {
+                selectedTab = .savedView(id: dashboard.id, name: dashboard.name)
+            }
+        case .projects:
+            if selectedTab == nil {
+                selectedTab = allTabs.first
+            }
+        case .browse, .media, .bookmarks, .notes, .tasksEvents, .files, .people:
+            if selectedTab == nil {
+                selectedTab = allTabs.first
+            }
+        }
     }
 }

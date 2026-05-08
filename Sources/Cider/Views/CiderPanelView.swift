@@ -63,6 +63,7 @@ struct CiderPanelView: View {
     @State var newTodoEditorContext: TodoEditorContext?
     @State var contentAreaWidth: CGFloat = 800
     @State var isURLDropTargeted = false
+    @State var selectedNavigationDomain: WorkspaceNavigationDomain?
 
     @State var selectedTagIDs: Set<UUID> = []
     @State var tagsCollapsed: Bool = CiderConfig.load().tagsCollapsed
@@ -110,7 +111,7 @@ struct CiderPanelView: View {
             onCollapse: { minimizeSurface() },
             onMaximize: { maximizeSurface() }
         ) {
-            folderSidebar
+            workspaceSidebar
         } sidebarFooter: {
             sidebarFooterView
         } titleBar: {
