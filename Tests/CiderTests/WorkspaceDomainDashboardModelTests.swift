@@ -23,6 +23,37 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
         XCTAssertEqual(model.sections.first?.items.map(\.title), ["Cider Board"])
     }
 
+    func testProviderBuildsDomainDashboardFromSavedViewsEvenWhenTabsAreClosed() {
+        let bookmarkID = UUID(uuidString: "00000000-0000-0000-0000-00000000A001")!
+        let noteID = UUID(uuidString: "00000000-0000-0000-0000-00000000A002")!
+        let savedViews = [
+            SavedView(
+                id: bookmarkID,
+                name: "Bookmark Triage",
+                filterSpec: SavedViewFilterSpec(entityTypes: [.bookmark]),
+                kind: .library
+            ),
+            SavedView(
+                id: noteID,
+                name: "Notes Follow-up",
+                filterSpec: SavedViewFilterSpec(entityTypes: [.note]),
+                kind: .library
+            )
+        ]
+
+        let model = WorkspaceDomainDashboardProvider.model(
+            for: .bookmarks,
+            savedViews: savedViews,
+            allTabs: []
+        )
+
+        XCTAssertEqual(model.domain, .bookmarks)
+        XCTAssertEqual(model.primaryAction?.title, "Open Bookmark Triage")
+        XCTAssertEqual(model.primaryAction?.target, .savedView(id: bookmarkID, name: "Bookmark Triage"))
+        XCTAssertEqual(model.sections.map(\.title), ["Bookmark views"])
+        XCTAssertEqual(model.sections.first?.items.map(\.title), ["Bookmark Triage"])
+    }
+
     func testProviderBuildsEmptyDashboardWithoutBorrowingGlobalTabs() {
         let model = WorkspaceDomainDashboardProvider.model(
             for: .people,
