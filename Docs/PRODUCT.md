@@ -2,7 +2,7 @@
 
 Status: canonical core doc.
 
-Cider is a local-first Mac second brain: a fast capture surface, a personal vault, a visual command center, and a native place to talk to the user's main agent.
+Cider is a local-first Mac second brain and life command center: one place on the user's machine to capture and organize digital life, remember bills/events/reminders, control daily workflows, and talk to the user's main agent.
 
 ## Product Principles
 
@@ -11,7 +11,7 @@ Cider is a local-first Mac second brain: a fast capture surface, a personal vaul
 - Cider should help the user remember, resurface, connect, and act.
 - Cider is practical memory support, not vague productivity theater. It should notice gaps, resurface useful context, and reduce the cost of remembering.
 - Conservative routing beats clever misfiling. When confidence is low, keep the item visible in Inbox and ask.
-- Dashboard cards, reminders, and agent reports should explain why something matters, not just that something exists.
+- Dashboard cards, reminders, and agent reports should explain why something matters, not just that something exists. Cider should compute relevance once in a shared agenda/briefing layer, then let Dashboard, CLI JSON, Telegram, and agents render that same truth.
 - Kanban is the product's work surface for roadmap, QA, bugs, and implementation history.
 - Docs should stay lean and durable.
 - Agents should be useful, cautious, and report what they changed.

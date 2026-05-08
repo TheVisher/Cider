@@ -60,7 +60,7 @@ Key code: `Sources/Cider/Views/Contacts/`, `Sources/Cider/Services/ContactStorag
 
 ## Dashboard
 
-Dashboard/Home should become the user's command center: current work, vault pulse, reminders, resurfacing, docs health, inbox health, and agent summaries. It should be personal, explainable, and actionable. The quality bar is whether a card answers: why does this matter to me?
+Dashboard/Home should become the user's command center: current work, vault pulse, reminders, resurfacing, docs health, inbox health, and agent summaries. It should be personal, explainable, and actionable. The quality bar is whether a card answers: why does this matter to me? Dashboard should share the same Cider-computed agenda/briefing relevance model used by CLI JSON and agent reports, so Telegram/agent briefings can be compact projections of dashboard truth rather than separate heuristics.
 
 Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Sources/Cider/Services/Dashboard/`.
 

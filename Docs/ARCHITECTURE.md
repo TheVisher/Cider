@@ -34,7 +34,7 @@ Storage services should expose clear operations for their feature area and keep 
 
 Agent and AI services should route through narrow seams so runtime providers can change without rewriting UI workflows.
 
-`ItemLinkService` owns explicit related-item/backlink behavior. `DashboardStorage` owns local dashboard snapshot persistence. Feature views should consume these services instead of reconstructing relationships or snapshot logic themselves.
+`ItemLinkService` owns explicit related-item/backlink behavior. `DashboardStorage` owns local dashboard snapshot persistence. A shared agenda/briefing policy service should own relevance decisions for today's dashboard, reminders, and agent reports. Feature views, `cider-cli` JSON, and agent integrations should consume that service instead of reconstructing reminder/date relevance independently.
 
 ## Agent Boundary
 
