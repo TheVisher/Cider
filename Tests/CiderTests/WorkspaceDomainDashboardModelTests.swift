@@ -84,4 +84,74 @@ final class WorkspaceDomainDashboardModelTests: XCTestCase {
         XCTAssertEqual(model.title, "Browse")
         XCTAssertEqual(model.sections.first?.items.map(\.title), ["Main Dashboard", "Cider Board"])
     }
+
+    func testBookmarksDashboardAddsRecentTriageAndMetadataSections() {
+        let inboxID = UUID(uuidString: "00000000-0000-0000-0000-00000000F001")!
+        let inboxBookmarksID = UUID(uuidString: "00000000-0000-0000-0000-00000000F002")!
+        let projectFolderID = UUID(uuidString: "00000000-0000-0000-0000-00000000F003")!
+        let now = Date(timeIntervalSince1970: 1_800)
+        let savedViews = [
+            SavedView(
+                id: UUID(uuidString: "00000000-0000-0000-0000-00000000A001")!,
+                name: "Bookmarks",
+                filterSpec: SavedViewFilterSpec(entityTypes: [.bookmark]),
+                kind: .library
+            )
+        ]
+        let folders = [
+            Folder(id: inboxID, name: "Inbox"),
+            Folder(id: inboxBookmarksID, name: "Bookmarks", parentID: inboxID),
+            Folder(id: projectFolderID, name: "Projects")
+        ]
+        let bookmarks = [
+            Bookmark(
+                id: UUID(uuidString: "00000000-0000-0000-0000-00000000C001")!,
+                title: "Fresh Cider Link",
+                urlString: "https://cider.example/fresh",
+                createdAt: now,
+                updatedAt: now,
+                folderID: projectFolderID,
+                metadataUpdatedAt: now,
+                aiSummary: "A complete bookmark.",
+                enrichmentStatus: "complete",
+                lastEnrichedAt: now
+            ),
+            Bookmark(
+                id: UUID(uuidString: "00000000-0000-0000-0000-00000000C002")!,
+                title: "Inbox Link",
+                urlString: "https://triage.example/link",
+                createdAt: now.addingTimeInterval(-20),
+                updatedAt: now.addingTimeInterval(-20),
+                folderID: inboxBookmarksID,
+                relativePath: "Inbox/Bookmarks/Inbox Link.webloc"
+            ),
+            Bookmark(
+                id: UUID(uuidString: "00000000-0000-0000-0000-00000000C003")!,
+                title: "Missing Metadata",
+                urlString: "https://metadata.example/link",
+                createdAt: now.addingTimeInterval(-40),
+                updatedAt: now.addingTimeInterval(-5),
+                folderID: projectFolderID,
+                enrichmentStatus: "partial"
+            )
+        ]
+
+        let model = WorkspaceDomainDashboardProvider.model(
+            for: .bookmarks,
+            savedViews: savedViews,
+            allTabs: [],
+            bookmarks: bookmarks,
+            bookmarkFolders: folders
+        )
+
+        XCTAssertEqual(model.sections.map(\.title), [
+            "Bookmark views",
+            "Recent bookmarks",
+            "Needs triage",
+            "Needs metadata"
+        ])
+        XCTAssertEqual(model.sections.first(where: { $0.id == "bookmarks-recent" })?.items.first?.title, "Fresh Cider Link")
+        XCTAssertEqual(model.sections.first(where: { $0.id == "bookmarks-triage" })?.items.map(\.title), ["Inbox Link"])
+        XCTAssertEqual(model.sections.first(where: { $0.id == "bookmarks-metadata" })?.items.map(\.title), ["Missing Metadata", "Inbox Link"])
+    }
 }

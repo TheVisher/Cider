@@ -120,13 +120,16 @@ struct WorkspaceDomainDashboardView: View {
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Spacing.sm)], spacing: Spacing.sm) {
                 ForEach(section.items) { item in
-                    Button {
-                        open(item.target)
-                    } label: {
+                    if item.target != nil {
+                        Button {
+                            open(item.target)
+                        } label: {
+                            dashboardItemCard(item)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
                         dashboardItemCard(item)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(item.target == nil)
                 }
             }
         }

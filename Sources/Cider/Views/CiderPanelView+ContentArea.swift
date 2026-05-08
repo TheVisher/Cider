@@ -129,7 +129,9 @@ extension CiderPanelView {
                     model: WorkspaceDomainDashboardProvider.model(
                         for: domain,
                         savedViews: savedViewStorage.savedViews,
-                        allTabs: allTabs
+                        allTabs: allTabs,
+                        bookmarks: bookmarksViewModel.bookmarks,
+                        bookmarkFolders: bookmarksViewModel.folders
                     ),
                     onOpenTab: { tab in
                         openDomainDashboardTab(tab)
@@ -305,7 +307,9 @@ extension CiderPanelView {
                     model: WorkspaceDomainDashboardProvider.model(
                         for: domain,
                         savedViews: savedViewStorage.savedViews,
-                        allTabs: allTabs
+                        allTabs: allTabs,
+                        bookmarks: bookmarksViewModel.bookmarks,
+                        bookmarkFolders: bookmarksViewModel.folders
                     ),
                     onOpenTab: { tab in
                         openDomainDashboardTab(tab)
